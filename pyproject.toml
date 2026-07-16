@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wwise2013-wem"
+version = "0.1.0"
+description = "Bit-exact Wwise 2013.2 Vorbis WAV-to-WEM encoder"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "Wwise WEM Encoder Contributors"}]
+dependencies = []
+
+[project.scripts]
+wwise2013-wem = "wwise2013_wem.cli:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+wwise2013_wem = ["data/profiles/*.json", "data/profiles/*/*.json", "data/profiles/*/*/*.json", "data/profiles/*/*/*.bin", "data/profiles/*/*/*/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["golden: complete bit-exact fixture encoding"]

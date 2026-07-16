@@ -1,0 +1,77 @@
+{
+  "schema": "wwise2013-wem.profile-manifest.v1",
+  "name": "wwise2013-6ch-44100",
+  "key": {
+    "generation": "2013.2",
+    "channels": 6,
+    "sample_rate": 44100,
+    "channel_layout": "5.1",
+    "quality_setup_identity": "sha256:3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3"
+  },
+  "block_sizes": [
+    256,
+    2048
+  ],
+  "container_metadata": {
+    "wFormatTag": 65535,
+    "nChannels": 6,
+    "nSamplesPerSec": 44100,
+    "nAvgBytesPerSec": 34381,
+    "nBlockAlign": 0,
+    "wBitsPerSample": 0,
+    "cbSize": 48,
+    "wReserved0": 0,
+    "dwChannelMask": 63,
+    "dwTotalPCMFrames": 0,
+    "dwFirstAudioPacketOffset": 0,
+    "dwDataPayloadSize": 0,
+    "dwUnknown_0x24": 62521344,
+    "dwSeekTableSize": 0,
+    "dwVorbisDataOffset": 0,
+    "uMaxPacketSize": 0,
+    "uUnknown_0x32": 954,
+    "dwUnknown_0x34": 18180,
+    "dwUnknown_0x38": 18636,
+    "dwUnknown_0x3C": 3017712712,
+    "uBlocksize0Pow": 8,
+    "uBlocksize1Pow": 11
+  },
+  "resources": {
+    "vorbis.setup": {
+      "path": "vorbis/setup.bin",
+      "sha256": "3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3"
+    },
+    "vorbis.codebooks.t97": {
+      "path": "vorbis/codebooks/t97.json",
+      "sha256": "b2b38d146f01c591db0d831f9c3c9ab7d39ed3c3c5ca16bdb199d252de4a2b7d"
+    },
+    "vorbis.codebooks.t219": {
+      "path": "vorbis/codebooks/t219.json",
+      "sha256": "615fb7ddf4f3f03a7007c70163d863aa52e7eeff7072a9989267c8ff44fecbee"
+    },
+    "transform.mdct": {
+      "path": "transform/mdct.json",
+      "sha256": "58c20937b94bc279adffa321921b794ac1df16f9937579925c3db1e997f3544a"
+    },
+    "analysis.transient": {
+      "path": "analysis/transient.json",
+      "sha256": "8c85729a116d6699e15ad84e894867b949ce036082cea8081af2095a8711f0b7"
+    },
+    "psychoacoustics.short-profiles": {
+      "path": "psychoacoustics/short-profiles.json",
+      "sha256": "7121625912e2653366cb4962ffd266796cc8c10c191fe6ce5354530c9911468a"
+    },
+    "psychoacoustics.short-seed": {
+      "path": "psychoacoustics/short-seed.json",
+      "sha256": "599cd57810927b85958daaa2c154cc3fe1f00410351fb8ec7b5a8eee5aea29ed"
+    },
+    "psychoacoustics.long-base": {
+      "path": "psychoacoustics/long-base.json",
+      "sha256": "e46df5608a7e56ec60426f4f64aa855bd8e5b4204cdfe138162e4ec25274ab88"
+    },
+    "psychoacoustics.long-modes": {
+      "path": "psychoacoustics/long-modes.json",
+      "sha256": "e8b27bfdc79cbde5bc5832bb7eae954bafcb3a91d92ce259ce0a1f9c1f1cdfbd"
+    }
+  }
+}
