@@ -3,13 +3,13 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from wwise2013_wem.profiles.bundle import load_profile_bundle
-from wwise2013_wem.profiles.psychoacoustics.long_tables import (
+from wwise_wem.profiles.bundle import load_profile_bundle
+from wwise_wem.profiles.psychoacoustics.long_tables import (
     load_long_psy_tables,
     table_sha256,
 )
-from wwise2013_wem.profiles.psychoacoustics.long_variants import load_long_variant
-from wwise2013_wem.profiles.resources import ResourceRef
+from wwise_wem.profiles.psychoacoustics.long_variants import load_long_variant
+from wwise_wem.profiles.resources import ResourceRef
 
 
 class LongDspResourceTests(unittest.TestCase):

@@ -1,4 +1,4 @@
-"""Bit-exact Wwise 2013.2 Vorbis WEM encoder."""
+"""Bit-exact Wwise Vorbis WEM encoder."""
 
 from __future__ import annotations
 

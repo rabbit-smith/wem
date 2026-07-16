@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import unittest
 
-import wwise2013_wem.vorbis.packet_decoder as parser_module
-from wwise2013_wem.vorbis.bitio import BitReader
-from wwise2013_wem.vorbis.bitio import OggPack
-from wwise2013_wem.vorbis.packet_decoder import (
+import wwise_wem.vorbis.packet_decoder as parser_module
+from wwise_wem.vorbis.bitio import BitReader
+from wwise_wem.vorbis.bitio import OggPack
+from wwise_wem.vorbis.packet_decoder import (
     decode_floor1_body,
     extract_packets,
     parse_audio_header,

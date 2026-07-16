@@ -6,8 +6,8 @@ import unittest
 from collections.abc import Iterable
 from dataclasses import FrozenInstanceError, fields, replace
 
-from wwise2013_wem.scheduling.model import FramePlan
-from wwise2013_wem.analysis.preprocessing.windowing import WindowedFrame, iter_pcm_windows
+from wwise_wem.scheduling.model import FramePlan
+from wwise_wem.analysis.preprocessing.windowing import WindowedFrame, iter_pcm_windows
 
 
 def _sample(frame: int) -> float:

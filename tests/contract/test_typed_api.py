@@ -10,9 +10,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import wwise2013_wem
-from wwise2013_wem import EncodeResult, EncodeStats, PcmBuffer, encode_wav
-from wwise2013_wem.profiles.registry import load_wem_profile
+import wwise_wem
+from wwise_wem import EncodeResult, EncodeStats, PcmBuffer, encode_wav
+from wwise_wem.profiles.registry import load_wem_profile
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -33,12 +33,12 @@ class TypedApiTests(unittest.TestCase):
         profile = load_wem_profile("wwise2013-6ch-44100")
         expected = EncodeResult(b"RIFF", EncodeStats.from_legacy_dict(LEGACY_STATS))
         with (
-            patch("wwise2013_wem.adapters.wav.read_pcm16", return_value=pcm) as read,
+            patch("wwise_wem.adapters.wav.read_pcm16", return_value=pcm) as read,
             patch(
-                "wwise2013_wem.profiles.registry.load_wem_profile",
+                "wwise_wem.profiles.registry.load_wem_profile",
                 return_value=profile,
             ) as resolve,
-            patch("wwise2013_wem.application.encoder.Encoder") as encoder_type,
+            patch("wwise_wem.application.encoder.Encoder") as encoder_type,
         ):
             encoder_type.return_value.encode_pcm.return_value = expected
             result = encode_wav(
@@ -57,16 +57,16 @@ import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
-from wwise2013_wem import EncodeResult, EncodeStats, PcmBuffer, encode_wav
-from wwise2013_wem.profiles.registry import load_wem_profile
+from wwise_wem import EncodeResult, EncodeStats, PcmBuffer, encode_wav
+from wwise_wem.profiles.registry import load_wem_profile
 pcm = PcmBuffer(44100, ((0.0,),) * 6)
 stats = EncodeStats(1, 6, 1, 1, 0, 4, 'profile:test')
-with patch('wwise2013_wem.adapters.wav.read_pcm16', return_value=pcm), \
-     patch('wwise2013_wem.profiles.registry.load_wem_profile', return_value=load_wem_profile('wwise2013-6ch-44100')), \
-     patch('wwise2013_wem.application.encoder.Encoder') as encoder:
+with patch('wwise_wem.adapters.wav.read_pcm16', return_value=pcm), \
+     patch('wwise_wem.profiles.registry.load_wem_profile', return_value=load_wem_profile('wwise2013-6ch-44100')), \
+     patch('wwise_wem.application.encoder.Encoder') as encoder:
     encoder.return_value.encode_pcm.return_value = EncodeResult(b'RIFF', stats)
     encode_wav(Path('input.wav'), profile='wwise2013-6ch-44100')
-print(json.dumps('wwise2013_wem.application.compat' in sys.modules))
+print(json.dumps('wwise_wem.application.compat' in sys.modules))
 """
         env = dict(os.environ)
         env["PYTHONPATH"] = str(ROOT / "src")
@@ -82,14 +82,14 @@ print(json.dumps('wwise2013_wem.application.compat' in sys.modules))
 
     def test_legacy_root_exports_remain_callable_and_tuple_shaped(self):
         with patch(
-            "wwise2013_wem.application.compat.encode_wav_to_wem",
+            "wwise_wem.application.compat.encode_wav_to_wem",
             return_value=(b"RIFF", LEGACY_STATS),
         ):
-            legacy_encode = wwise2013_wem.encode_wav_to_wem
+            legacy_encode = wwise_wem.encode_wav_to_wem
             data, stats = legacy_encode(Path("input.wav"))
         self.assertEqual(data, b"RIFF")
         self.assertEqual(stats, LEGACY_STATS)
-        self.assertTrue(callable(wwise2013_wem.read_pcm16_wav))
+        self.assertTrue(callable(wwise_wem.read_pcm16_wav))
 
     def test_package_root_exports_models_and_profile_api(self):
         for name in (
@@ -107,23 +107,23 @@ print(json.dumps('wwise2013_wem.application.compat' in sys.modules))
             "resolve_wem_profile",
             "encode_wav",
         ):
-            self.assertIn(name, wwise2013_wem.__all__)
-            self.assertTrue(hasattr(wwise2013_wem, name), name)
+            self.assertIn(name, wwise_wem.__all__)
+            self.assertTrue(hasattr(wwise_wem, name), name)
 
     def test_fresh_package_import_does_not_load_heavy_codec_modules(self):
         code = """
 import json
 import sys
-import wwise2013_wem
+import wwise_wem
 names = [
-    'wwise2013_wem.application.compat',
-    'wwise2013_wem.application.encoder',
-    'wwise2013_wem.adapters.wav',
-    'wwise2013_wem.analysis.dsp.transform',
-    'wwise2013_wem.analysis.psychoacoustics.pipeline',
-    'wwise2013_wem.vorbis.floor',
-    'wwise2013_wem.vorbis.residue',
-    'wwise2013_wem.analysis.session',
+    'wwise_wem.application.compat',
+    'wwise_wem.application.encoder',
+    'wwise_wem.adapters.wav',
+    'wwise_wem.analysis.dsp.transform',
+    'wwise_wem.analysis.psychoacoustics.pipeline',
+    'wwise_wem.vorbis.floor',
+    'wwise_wem.vorbis.residue',
+    'wwise_wem.analysis.session',
 ]
 print(json.dumps([name for name in names if name in sys.modules]))
 """

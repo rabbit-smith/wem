@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from wwise2013_wem.vorbis.floor import (
+from wwise_wem.vorbis.floor import (
     FLOOR1_RANGES,
     floor1_curve_from_posts,
     floor1_neighbor_tables,
@@ -14,7 +14,7 @@ from wwise2013_wem.vorbis.floor import (
     postlist_from_floor,
     render_point,
 )
-from wwise2013_wem.vorbis.floor_fit import (
+from wwise_wem.vorbis.floor_fit import (
     FLOOR1_WWISE_FIT_PARAMS,
     _DB_QUANT_SCALE,
     _inspect_error,
@@ -24,10 +24,10 @@ from wwise2013_wem.vorbis.floor_fit import (
     floor1_fit_wwise,
     floor1_quantize_posts,
 )
-from wwise2013_wem.vorbis.setup import parse_setup
-from wwise2013_wem.container.fmt import parse_vorbis_fmt
-from wwise2013_wem.container.packets import extract_packets
-from wwise2013_wem.container.riff import parse_chunks
+from wwise_wem.vorbis.setup import parse_setup
+from wwise_wem.container.fmt import parse_vorbis_fmt
+from wwise_wem.container.packets import extract_packets
+from wwise_wem.container.riff import parse_chunks
 
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"

@@ -1,5 +1,5 @@
 {
-  "schema": "wwise2013-wem.profile-manifest.v1",
+  "schema": "wwise-wem.profile-manifest.v1",
   "name": "wwise2013-6ch-44100",
   "key": {
     "generation": "2013.2",

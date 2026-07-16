@@ -5,9 +5,9 @@ from tests.analysis_resource_support import installed_analysis_resources
 import unittest
 from unittest.mock import patch
 
-from wwise2013_wem.scheduling.model import FramePlan
-from wwise2013_wem.analysis.preprocessing.windowing import WindowedFrame
-from wwise2013_wem.analysis.session import (
+from wwise_wem.scheduling.model import FramePlan
+from wwise_wem.analysis.preprocessing.windowing import WindowedFrame
+from wwise_wem.analysis.session import (
     AnalysisSession,
 )
 

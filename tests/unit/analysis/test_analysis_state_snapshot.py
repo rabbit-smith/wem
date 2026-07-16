@@ -8,9 +8,9 @@ import struct
 import unittest
 from collections.abc import Iterable
 
-from wwise2013_wem.scheduling.planner import plan_mode_sequence
-from wwise2013_wem.analysis.preprocessing.windowing import WindowedFrame
-from wwise2013_wem.analysis.session import AnalysisSession
+from wwise_wem.scheduling.planner import plan_mode_sequence
+from wwise_wem.analysis.preprocessing.windowing import WindowedFrame
+from wwise_wem.analysis.session import AnalysisSession
 
 
 def _stream() -> AnalysisSession:

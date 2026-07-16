@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from wwise2013_wem.container import RiffChunk, WemFmt, WemParts
-from wwise2013_wem.container.riff import build_riff
+from wwise_wem.container import RiffChunk, WemFmt, WemParts
+from wwise_wem.container.riff import build_riff
 
 
 class ContainerModelTests(unittest.TestCase):

@@ -2,7 +2,7 @@ import hashlib
 import unittest
 from pathlib import Path
 
-from wwise2013_wem import encode_wav_to_wem
+from wwise_wem import encode_wav_to_wem
 
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"

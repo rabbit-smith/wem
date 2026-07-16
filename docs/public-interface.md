@@ -10,7 +10,7 @@ targets.
 Import supported names from the package root:
 
 ```python
-from wwise2013_wem import (
+from wwise_wem import (
     ContainerMetadata,
     Encoder,
     EncoderProfile,
@@ -111,13 +111,13 @@ transform state remain outside the public contract.
 The previous tuple API remains available:
 
 ```python
-from wwise2013_wem import encode_wav_to_wem, read_pcm16_wav
+from wwise_wem import encode_wav_to_wem, read_pcm16_wav
 
 encoded, stats = encode_wav_to_wem(wav_path, template=None, profile=None)
 ```
 
 `stats` is the legacy dictionary form of `EncodeStats`. `Encoder` and these
-compatibility functions are loaded lazily. Importing `wwise2013_wem` alone
+compatibility functions are loaded lazily. Importing `wwise_wem` alone
 does not import `application.encoder`, transform, floor, residue or
 analysis-session implementation modules.
 
@@ -179,8 +179,8 @@ reference WEM.
 The command remains a single encode command in 0.x:
 
 ```text
-python -m wwise2013_wem INPUT.wav --output OUTPUT.wem [OPTIONS]
-wwise2013-wem INPUT.wav --output OUTPUT.wem [OPTIONS]
+python -m wwise_wem INPUT.wav --output OUTPUT.wem [OPTIONS]
+wwise-wem INPUT.wav --output OUTPUT.wem [OPTIONS]
 ```
 
 Supported options are:

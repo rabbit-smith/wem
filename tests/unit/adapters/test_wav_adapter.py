@@ -5,8 +5,8 @@ import unittest
 import wave
 from pathlib import Path
 
-from wwise2013_wem.model import PcmBuffer
-from wwise2013_wem.adapters.wav import read_pcm16, read_wav_geometry
+from wwise_wem.model import PcmBuffer
+from wwise_wem.adapters.wav import read_pcm16, read_wav_geometry
 
 
 class WavAdapterTests(unittest.TestCase):

@@ -13,15 +13,15 @@ import struct
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-from wwise2013_wem.vorbis.packet_encoder import pack_analysis_frame
-from wwise2013_wem.profiles.assembly import assemble_encoder_profile_resources
-from wwise2013_wem.profiles.bundle import load_profile_bundle
-from wwise2013_wem.application.compat import read_pcm16_wav
-from wwise2013_wem.analysis.session import AnalysisSession
-from wwise2013_wem.profiles.registry import load_wem_profile, resolve_wem_profile
+from wwise_wem.vorbis.packet_encoder import pack_analysis_frame
+from wwise_wem.profiles.assembly import assemble_encoder_profile_resources
+from wwise_wem.profiles.bundle import load_profile_bundle
+from wwise_wem.application.compat import read_pcm16_wav
+from wwise_wem.analysis.session import AnalysisSession
+from wwise_wem.profiles.registry import load_wem_profile, resolve_wem_profile
 
 
-SCHEMA = "wwise2013-wem.frame-contract.v1"
+SCHEMA = "wwise-wem.frame-contract.v1"
 FRAME_FIELDS = (
     "mode",
     "transition",

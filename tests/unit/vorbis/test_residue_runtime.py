@@ -4,10 +4,10 @@ from __future__ import annotations
 import math
 import unittest
 
-from wwise2013_wem.vorbis.bitio import BitReader
-from wwise2013_wem.vorbis.codebook import Codebook, codebook_from_static
-from wwise2013_wem.vorbis.bitio import OggPack
-from wwise2013_wem.vorbis.residue import (
+from wwise_wem.vorbis.bitio import BitReader
+from wwise_wem.vorbis.codebook import Codebook, codebook_from_static
+from wwise_wem.vorbis.bitio import OggPack
+from wwise_wem.vorbis.residue import (
     classify_partition,
     consume_residue,
     mdct_to_residue,
@@ -16,7 +16,7 @@ from wwise2013_wem.vorbis.residue import (
     partitions_to_read,
     quantize_residue_value,
 )
-from wwise2013_wem.vorbis.codebook import StaticCodebook
+from wwise_wem.vorbis.codebook import StaticCodebook
 
 
 class ClassifierAndQuantizerTests(unittest.TestCase):

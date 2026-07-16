@@ -10,7 +10,7 @@ from typing import Iterator
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PACKAGE = ROOT / "src" / "wwise2013_wem"
+PACKAGE = ROOT / "src" / "wwise_wem"
 TEXT_SUFFIXES = {".py", ".json"}
 
 # These expressions target provenance markers, not ordinary hexadecimal data.

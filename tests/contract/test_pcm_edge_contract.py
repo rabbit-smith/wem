@@ -9,9 +9,9 @@ import unittest
 import wave
 from pathlib import Path
 
-from wwise2013_wem.container.wem import load_wem_parts_bytes
-from wwise2013_wem.application.compat import encode_wav_to_wem, read_pcm16_wav
-from wwise2013_wem.model import PcmBuffer
+from wwise_wem.container.wem import load_wem_parts_bytes
+from wwise_wem.application.compat import encode_wav_to_wem, read_pcm16_wav
+from wwise_wem.model import PcmBuffer
 
 
 CHANNELS = 6

@@ -3,9 +3,9 @@ from __future__ import annotations
 import unittest
 from dataclasses import FrozenInstanceError
 
-from wwise2013_wem.analysis.model import PsyFrame, SpectrumFrame
-from wwise2013_wem.scheduling.model import FramePlan
-from wwise2013_wem.analysis.preprocessing.windowing import WindowedFrame
+from wwise_wem.analysis.model import PsyFrame, SpectrumFrame
+from wwise_wem.scheduling.model import FramePlan
+from wwise_wem.analysis.preprocessing.windowing import WindowedFrame
 
 
 class FrameModelTests(unittest.TestCase):

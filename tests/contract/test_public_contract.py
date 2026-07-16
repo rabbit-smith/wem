@@ -14,7 +14,7 @@ import unittest
 import wave
 from pathlib import Path
 
-from wwise2013_wem import (
+from wwise_wem import (
     ProfileKey,
     WwiseVorbisProfile,
     encode_wav_to_wem,
@@ -74,12 +74,12 @@ class PublicEncodeContractTests(unittest.TestCase):
         self.assertEqual(self.automatic_stats, self.explicit_stats)
 
     def test_encoder_is_a_lazy_canonical_root_export(self):
-        import wwise2013_wem
-        from wwise2013_wem.application.encoder import Encoder as CanonicalEncoder
+        import wwise_wem
+        from wwise_wem.application.encoder import Encoder as CanonicalEncoder
 
-        self.assertIn("Encoder", wwise2013_wem.__all__)
-        self.assertIn("Encoder", dir(wwise2013_wem))
-        self.assertIs(wwise2013_wem.Encoder, CanonicalEncoder)
+        self.assertIn("Encoder", wwise_wem.__all__)
+        self.assertIn("Encoder", dir(wwise_wem))
+        self.assertIs(wwise_wem.Encoder, CanonicalEncoder)
 
     def test_packet_counts_are_internally_consistent(self):
         self.assertEqual(
@@ -118,7 +118,7 @@ class PublicEncodeContractTests(unittest.TestCase):
 class PublicCliContractTests(unittest.TestCase):
     def run_cli(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [sys.executable, "-m", "wwise2013_wem", *arguments],
+            [sys.executable, "-m", "wwise_wem", *arguments],
             cwd=ROOT,
             capture_output=True,
             text=True,
@@ -161,15 +161,15 @@ class PublicImportBoundaryTests(unittest.TestCase):
         code = """
 import json
 import sys
-import wwise2013_wem
+import wwise_wem
 names = [
-    'wwise2013_wem.application.encoder',
-    'wwise2013_wem.application.compat',
-    'wwise2013_wem.analysis.dsp.transform',
-    'wwise2013_wem.analysis.psychoacoustics.pipeline',
-    'wwise2013_wem.vorbis.floor',
-    'wwise2013_wem.vorbis.residue',
-    'wwise2013_wem.analysis.session',
+    'wwise_wem.application.encoder',
+    'wwise_wem.application.compat',
+    'wwise_wem.analysis.dsp.transform',
+    'wwise_wem.analysis.psychoacoustics.pipeline',
+    'wwise_wem.vorbis.floor',
+    'wwise_wem.vorbis.residue',
+    'wwise_wem.analysis.session',
 ]
 print(json.dumps([name for name in names if name in sys.modules]))
 """

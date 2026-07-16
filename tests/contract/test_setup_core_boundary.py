@@ -9,11 +9,11 @@ import sys
 import unittest
 from pathlib import Path
 
-from wwise2013_wem.vorbis.setup import pack_setup, parse_setup
+from wwise_wem.vorbis.setup import pack_setup, parse_setup
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PACKAGE = ROOT / "src" / "wwise2013_wem"
+PACKAGE = ROOT / "src" / "wwise_wem"
 
 
 def _minimal_setup() -> dict:
@@ -84,11 +84,11 @@ import os
 import sys
 import types
 
-package = types.ModuleType("wwise2013_wem")
+package = types.ModuleType("wwise_wem")
 package.__path__ = [os.environ["WWISE_PACKAGE_DIR"]]
-package.__package__ = "wwise2013_wem"
-sys.modules["wwise2013_wem"] = package
-setup = importlib.import_module("wwise2013_wem.vorbis.setup")
+package.__package__ = "wwise_wem"
+sys.modules["wwise_wem"] = package
+setup = importlib.import_module("wwise_wem.vorbis.setup")
 info = {
     "channels": 1,
     "nbooks": 1, "book_ids": [0],
@@ -109,9 +109,9 @@ info = {
 packet = setup.pack_setup(info)
 parsed = setup.parse_setup(packet, channels=1)
 banned = [name for name in (
-    "wwise2013_wem.profiles.book_ids",
-    "wwise2013_wem.profiles.resources",
-    "wwise2013_wem.profiles.codebooks",
+    "wwise_wem.profiles.book_ids",
+    "wwise_wem.profiles.resources",
+    "wwise_wem.profiles.codebooks",
 ) if name in sys.modules]
 print(json.dumps({
     "banned": banned,

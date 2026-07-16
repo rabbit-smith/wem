@@ -7,12 +7,12 @@ import wave
 from pathlib import Path
 from unittest.mock import patch
 
-from wwise2013_wem.application.compat import (
+from wwise_wem.application.compat import (
     encode_wav_to_wem,
     read_pcm16_wav,
     read_wav_geometry,
 )
-from wwise2013_wem.application.models import EncodeResult, EncodeStats
+from wwise_wem.application.models import EncodeResult, EncodeStats
 
 
 def _result() -> EncodeResult:
@@ -56,7 +56,7 @@ class LegacyFacadeTests(unittest.TestCase):
 
     def test_encode_wav_to_wem_only_adapts_typed_result(self) -> None:
         typed = _result()
-        with patch("wwise2013_wem.api.encode_wav", return_value=typed) as encode:
+        with patch("wwise_wem.api.encode_wav", return_value=typed) as encode:
             legacy = encode_wav_to_wem(
                 Path("input.wav"),
                 Path("template.wem"),
@@ -71,7 +71,7 @@ class LegacyFacadeTests(unittest.TestCase):
 
     def test_geometry_is_a_thin_delegate(self) -> None:
         with patch(
-            "wwise2013_wem.adapters.wav.read_wav_geometry",
+            "wwise_wem.adapters.wav.read_wav_geometry",
             return_value=(6, 44100),
         ) as geometry:
             self.assertEqual(read_wav_geometry(Path("input.wav")), (6, 44100))

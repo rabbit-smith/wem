@@ -6,13 +6,13 @@ import unittest
 from dataclasses import replace
 from unittest.mock import patch
 
-from wwise2013_wem.application.compat import encode_wav_to_wem
-from wwise2013_wem.application.encoder import Encoder
-from wwise2013_wem.application.models import EncodeResult, EncodeStats
-from wwise2013_wem.model import PcmBuffer
-from wwise2013_wem.analysis.preprocessing.detector_input import iter_detector_quanta
-from wwise2013_wem.analysis.session import AnalysisSession
-from wwise2013_wem.profiles.registry import load_wem_profile
+from wwise_wem.application.compat import encode_wav_to_wem
+from wwise_wem.application.encoder import Encoder
+from wwise_wem.application.models import EncodeResult, EncodeStats
+from wwise_wem.model import PcmBuffer
+from wwise_wem.analysis.preprocessing.detector_input import iter_detector_quanta
+from wwise_wem.analysis.session import AnalysisSession
+from wwise_wem.profiles.registry import load_wem_profile
 
 
 class ProfileRuntimeFlowTests(unittest.TestCase):
@@ -34,12 +34,12 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
                 )
 
         with (
-            patch("wwise2013_wem.adapters.wav.read_pcm16", return_value=pcm),
+            patch("wwise_wem.adapters.wav.read_pcm16", return_value=pcm),
             patch(
-                "wwise2013_wem.profiles.registry.load_wem_profile",
+                "wwise_wem.profiles.registry.load_wem_profile",
                 return_value=selected,
             ) as load,
-            patch("wwise2013_wem.application.encoder.Encoder", FakeEncoder),
+            patch("wwise_wem.application.encoder.Encoder", FakeEncoder),
         ):
             encoded, stats = encode_wav_to_wem("input.wav", profile="test-profile")
 
@@ -52,13 +52,13 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
         profile = load_wem_profile("wwise2013-6ch-44100")
         with (
             patch(
-                "wwise2013_wem.application.encoder.load_profile_bundle",
+                "wwise_wem.application.encoder.load_profile_bundle",
                 side_effect=ValueError("runtime manifest checksum differs"),
             ),
             patch(
-                "wwise2013_wem.application.encoder.assemble_encoder_profile_resources"
+                "wwise_wem.application.encoder.assemble_encoder_profile_resources"
             ) as assemble,
-            patch("wwise2013_wem.application.encoder.AnalysisSession") as session,
+            patch("wwise_wem.application.encoder.AnalysisSession") as session,
         ):
             with self.assertRaisesRegex(ValueError, "runtime manifest checksum"):
                 Encoder(profile)
@@ -75,7 +75,7 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
             ),
         )
         with patch(
-            "wwise2013_wem.application.encoder.assemble_encoder_profile_resources"
+            "wwise_wem.application.encoder.assemble_encoder_profile_resources"
         ) as assemble:
             with self.assertRaisesRegex(ValueError, "differs from installed profile"):
                 Encoder(profile)
@@ -84,7 +84,7 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
     def test_detector_quanta_forwards_explicit_blocksizes(self):
         streams = ((0.0,) * 128,)
         with patch(
-            "wwise2013_wem.analysis.preprocessing.detector_input.detector_pcm_streams",
+            "wwise_wem.analysis.preprocessing.detector_input.detector_pcm_streams",
             return_value=streams,
         ) as detector:
             rows = tuple(
@@ -110,7 +110,7 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
         )
         pcm = [[0.0] * 4096]
         with patch(
-            "wwise2013_wem.analysis.session.iter_detector_quanta", return_value=()
+            "wwise_wem.analysis.session.iter_detector_quanta", return_value=()
         ) as detector:
             modes = stream.select_modes(pcm)
         self.assertTrue(modes)
@@ -135,10 +135,10 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
         profile = replace(base, block_sizes=(128, 1024), container_metadata=metadata)
         with (
             patch(
-                "wwise2013_wem.application.encoder.load_profile_bundle"
+                "wwise_wem.application.encoder.load_profile_bundle"
             ) as load_bundle,
             patch(
-                "wwise2013_wem.application.encoder.assemble_encoder_profile_resources"
+                "wwise_wem.application.encoder.assemble_encoder_profile_resources"
             ) as assemble,
         ):
             with self.assertRaisesRegex(ValueError, "supports 256/2048"):

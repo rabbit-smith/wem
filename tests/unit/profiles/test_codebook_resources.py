@@ -6,17 +6,17 @@ import unittest
 from unittest.mock import patch
 
 from tests.codebook_resource_support import installed_codebook_tables
-from wwise2013_wem.vorbis.bitio import BitReader
-from wwise2013_wem.profiles.book_ids import (
+from wwise_wem.vorbis.bitio import BitReader
+from wwise_wem.profiles.book_ids import (
     T219_COUNT,
     T97_COUNT,
     load_book_table,
     resolve_book_id,
 )
-from wwise2013_wem.profiles.codebooks import load_codebook
-from wwise2013_wem.profiles.bundle import load_profile_bundle
-from wwise2013_wem.vorbis.bitio import OggPack
-from wwise2013_wem.profiles.resources import ResourceRef
+from wwise_wem.profiles.codebooks import load_codebook
+from wwise_wem.profiles.bundle import load_profile_bundle
+from wwise_wem.vorbis.bitio import OggPack
+from wwise_wem.profiles.resources import ResourceRef
 
 
 class CodebookResourceTests(unittest.TestCase):
@@ -62,7 +62,7 @@ class CodebookResourceTests(unittest.TestCase):
             "outside", resolve_book_id(T97_COUNT + T219_COUNT, self.tables)["error"]
         )
         with self.assertRaises(FileNotFoundError):
-            load_book_table("unknown", ResourceRef("wwise2013_wem", "x", "0" * 64))
+            load_book_table("unknown", ResourceRef("wwise_wem", "x", "0" * 64))
 
     def test_inline_resolved_book_remains_filesystem_independent(self):
         book = load_codebook(

@@ -6,11 +6,11 @@ import json
 import unittest
 from pathlib import Path
 
-import wwise2013_wem
+import wwise_wem
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PACKAGE = ROOT / "src" / "wwise2013_wem"
+PACKAGE = ROOT / "src" / "wwise_wem"
 ALLOWLIST = Path(__file__).with_name("distribution_allowlist.json")
 
 
@@ -19,15 +19,15 @@ def _contract() -> dict[str, object]:
 
 
 def _wheel_name(path: Path) -> str:
-    return "wwise2013_wem/" + path.relative_to(PACKAGE).as_posix()
+    return "wwise_wem/" + path.relative_to(PACKAGE).as_posix()
 
 
 class DistributionContractTests(unittest.TestCase):
     def test_root_all_is_the_exact_supported_surface(self) -> None:
         expected = tuple(_contract()["root_exports"])
-        self.assertEqual(tuple(wwise2013_wem.__all__), expected)
+        self.assertEqual(tuple(wwise_wem.__all__), expected)
         self.assertEqual(
-            tuple(name for name in expected if name not in dir(wwise2013_wem)),
+            tuple(name for name in expected if name not in dir(wwise_wem)),
             (),
         )
 
@@ -35,7 +35,7 @@ class DistributionContractTests(unittest.TestCase):
         contract = _contract()
         self.assertEqual(
             contract["schema"],
-            "wwise2013-wem.distribution-allowlist.v1",
+            "wwise-wem.distribution-allowlist.v1",
         )
         modules = sorted(_wheel_name(path) for path in PACKAGE.rglob("*.py"))
         resources = sorted(

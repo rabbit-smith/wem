@@ -4,10 +4,10 @@ import hashlib
 import struct
 import unittest
 
-import wwise2013_wem.analysis.dsp.transform as transform
-import wwise2013_wem.analysis.transient.detector as transient
+import wwise_wem.analysis.dsp.transform as transform
+import wwise_wem.analysis.transient.detector as transient
 from tests.analysis_resource_support import installed_analysis_resources
-from wwise2013_wem.analysis.transient.detector import (
+from wwise_wem.analysis.transient.detector import (
     TransientDetector,
     WwisePsyHistory,
     wwise_psy_mask,

@@ -4,14 +4,14 @@ import hashlib
 import unittest
 from dataclasses import FrozenInstanceError
 
-from wwise2013_wem.application.models import EncodeResult, EncodeStats
-from wwise2013_wem.model import (
+from wwise_wem.application.models import EncodeResult, EncodeStats
+from wwise_wem.model import (
     ContainerMetadata,
     PacketResult,
     PcmBuffer,
     SetupConfig,
 )
-from wwise2013_wem.profiles.registry import WWISE2013_6CH_44100
+from wwise_wem.profiles.registry import WWISE2013_6CH_44100
 
 
 class PcmBufferTests(unittest.TestCase):

@@ -1,7 +1,7 @@
 import hashlib
 import unittest
 
-from wwise2013_wem import PROFILES, ProfileKey, resolve_wem_profile
+from wwise_wem import PROFILES, ProfileKey, resolve_wem_profile
 
 
 class ProfileTests(unittest.TestCase):

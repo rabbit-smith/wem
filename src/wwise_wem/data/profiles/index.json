@@ -1,10 +1,10 @@
 {
-  "schema": "wwise2013-wem.profile-index.v1",
+  "schema": "wwise-wem.profile-index.v1",
   "default": "wwise2013-6ch-44100",
   "profiles": {
     "wwise2013-6ch-44100": {
       "manifest": "wwise2013-6ch-44100/manifest.json",
-      "sha256": "27eab7a46378500799219fdae72709927636e78064aa55f29a99c88dab3e9ce1"
+      "sha256": "ac536665f03ab02e6f9aa1dc024893c50c85b84fd58392de10180c62e9cf4e59"
     }
   }
 }

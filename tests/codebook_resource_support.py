@@ -5,8 +5,8 @@ from __future__ import annotations
 from functools import lru_cache
 from types import MappingProxyType
 
-from wwise2013_wem.profiles.book_ids import load_book_table
-from wwise2013_wem.profiles.bundle import load_profile_bundle
+from wwise_wem.profiles.book_ids import load_book_table
+from wwise_wem.profiles.bundle import load_profile_bundle
 
 
 @lru_cache(maxsize=1)

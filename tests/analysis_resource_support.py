@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from wwise2013_wem.analysis.config import AnalysisProfileResources
-from wwise2013_wem.profiles.assembly import assemble_analysis_resources
-from wwise2013_wem.profiles.bundle import load_profile_bundle
+from wwise_wem.analysis.config import AnalysisProfileResources
+from wwise_wem.profiles.assembly import assemble_analysis_resources
+from wwise_wem.profiles.bundle import load_profile_bundle
 
 
 @lru_cache(maxsize=1)

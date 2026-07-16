@@ -5,7 +5,7 @@ from __future__ import annotations
 import struct
 import unittest
 
-from wwise2013_wem.container.packets import (
+from wwise_wem.container.packets import (
     build_packet_stream,
     extract_packets,
     recompute_vorbis_fmt_sizes,

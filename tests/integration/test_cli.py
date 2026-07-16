@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from wwise2013_wem.application.models import EncodeResult, EncodeStats
+from wwise_wem.application.models import EncodeResult, EncodeStats
 
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
@@ -36,7 +36,7 @@ class CliTests(unittest.TestCase):
             [
                 sys.executable,
                 "-m",
-                "wwise2013_wem",
+                "wwise_wem",
                 str(FIXTURES / "input.wav"),
                 "--channels",
                 "2",
@@ -55,7 +55,7 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "nested" / "output.wem"
             argv = [
-                "wwise2013-wem",
+                "wwise-wem",
                 "input.wav",
                 "--profile",
                 "wwise2013-6ch-44100",
@@ -71,13 +71,13 @@ class CliTests(unittest.TestCase):
             with (
                 patch("sys.argv", argv),
                 patch(
-                    "wwise2013_wem.cli.read_wav_geometry",
+                    "wwise_wem.cli.read_wav_geometry",
                     return_value=(6, 44100),
                 ),
-                patch("wwise2013_wem.cli.encode_wav", return_value=result) as encode,
+                patch("wwise_wem.cli.encode_wav", return_value=result) as encode,
                 patch("builtins.print") as printed,
             ):
-                from wwise2013_wem.cli import main
+                from wwise_wem.cli import main
 
                 main()
 
@@ -99,7 +99,7 @@ class CliTests(unittest.TestCase):
                 patch(
                     "sys.argv",
                     [
-                        "wwise2013-wem",
+                        "wwise-wem",
                         "input.wav",
                         "--output",
                         str(output),
@@ -108,12 +108,12 @@ class CliTests(unittest.TestCase):
                     ],
                 ),
                 patch(
-                    "wwise2013_wem.cli.read_wav_geometry",
+                    "wwise_wem.cli.read_wav_geometry",
                     return_value=(6, 44100),
                 ),
-                patch("wwise2013_wem.cli.encode_wav", return_value=_result()),
+                patch("wwise_wem.cli.encode_wav", return_value=_result()),
             ):
-                from wwise2013_wem.cli import main
+                from wwise_wem.cli import main
 
                 with self.assertRaisesRegex(AssertionError, "SHA-256 differs"):
                     main()
@@ -122,7 +122,7 @@ class CliTests(unittest.TestCase):
     def test_console_script_points_to_canonical_cli(self) -> None:
         pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         self.assertIn(
-            'wwise2013-wem = "wwise2013_wem.cli:main"',
+            'wwise-wem = "wwise_wem.cli:main"',
             pyproject,
         )
 

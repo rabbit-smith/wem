@@ -13,10 +13,10 @@ from ..model import ContainerMetadata
 from .resources import ResourceRef, normalize_resource_path, resource_traversable
 
 
-PACKAGE = "wwise2013_wem"
+PACKAGE = "wwise_wem"
 DEFAULT_INDEX = "data/profiles/index.json"
-INDEX_SCHEMA = "wwise2013-wem.profile-index.v1"
-BUNDLE_SCHEMA = "wwise2013-wem.profile-manifest.v1"
+INDEX_SCHEMA = "wwise-wem.profile-index.v1"
+BUNDLE_SCHEMA = "wwise-wem.profile-manifest.v1"
 MANIFEST_SCHEMA = BUNDLE_SCHEMA
 WWISE_GENERATION = "2013.2"
 WWISE2013_6CH_44100_SETUP_IDENTITY = (

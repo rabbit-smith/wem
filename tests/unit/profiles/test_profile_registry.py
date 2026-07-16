@@ -3,11 +3,11 @@ from __future__ import annotations
 import dataclasses
 import unittest
 
-from wwise2013_wem.model import ContainerMetadata
-from wwise2013_wem.profiles.bundle import ProfileKey, load_profile_bundle
-from wwise2013_wem.profiles.resources import ResourceRef
-from wwise2013_wem.profiles.model import EncoderProfile, WwiseVorbisProfile
-from wwise2013_wem.profiles.registry import (
+from wwise_wem.model import ContainerMetadata
+from wwise_wem.profiles.bundle import ProfileKey, load_profile_bundle
+from wwise_wem.profiles.resources import ResourceRef
+from wwise_wem.profiles.model import EncoderProfile, WwiseVorbisProfile
+from wwise_wem.profiles.registry import (
     PROFILES,
     PROFILE_REGISTRY,
     ProfileRegistry,
@@ -50,7 +50,7 @@ class ProfileRegistryTests(unittest.TestCase):
         self.assertEqual(profile.key, ProfileKey(6, 44100))
         self.assertEqual(profile.block_sizes, (256, 2048))
         manifest = profile.runtime_manifest()
-        self.assertEqual(manifest["schema"], "wwise2013-wem.profile-manifest.v1")
+        self.assertEqual(manifest["schema"], "wwise-wem.profile-manifest.v1")
         self.assertEqual(
             manifest["resources"]["vorbis.codebooks.t97"]["path"],
             "vorbis/codebooks/t97.json",

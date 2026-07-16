@@ -26,7 +26,7 @@ def _verify_wheel_contents(wheel: Path, contract: dict[str, object]) -> None:
         actual = sorted(
             name
             for name in archive.namelist()
-            if name.startswith("wwise2013_wem/")
+            if name.startswith("wwise_wem/")
         )
         content_markers = tuple(
             str(value).encode("ascii").lower()
@@ -87,7 +87,7 @@ def main() -> None:
             ],
             check=True,
         )
-        wheel = next(wheels.glob("wwise2013_wem-*.whl"))
+        wheel = next(wheels.glob("wwise_wem-*.whl"))
         _verify_wheel_contents(wheel, contract)
         subprocess.run(
             [
@@ -104,14 +104,14 @@ def main() -> None:
             check=True,
         )
         smoke = (
-            "import wwise2013_wem; "
-            f"assert wwise2013_wem.__all__=={contract['root_exports']!r}; "
-            "from wwise2013_wem import resolve_wem_profile; "
-            "from wwise2013_wem.profiles.bundle import load_profile_bundle; "
-            "from wwise2013_wem.profiles.book_ids import load_book_table; "
-            "from wwise2013_wem.profiles.transient import load_transient_tables; "
-            "from wwise2013_wem.profiles.psychoacoustics.long_tables import load_long_psy_tables; "
-            "from wwise2013_wem.profiles.psychoacoustics.short_tables import load_short_psy_profiles; "
+            "import wwise_wem; "
+            f"assert wwise_wem.__all__=={contract['root_exports']!r}; "
+            "from wwise_wem import resolve_wem_profile; "
+            "from wwise_wem.profiles.bundle import load_profile_bundle; "
+            "from wwise_wem.profiles.book_ids import load_book_table; "
+            "from wwise_wem.profiles.transient import load_transient_tables; "
+            "from wwise_wem.profiles.psychoacoustics.long_tables import load_long_psy_tables; "
+            "from wwise_wem.profiles.psychoacoustics.short_tables import load_short_psy_profiles; "
             "p=resolve_wem_profile(6,44100); "
             "b=load_profile_bundle(); b.verify_all(); "
             "assert b.runtime_manifest.resource('vorbis.setup')==b.setup; "

@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 import unittest
 
-from wwise2013_wem.vorbis.bitio import BitReader, OggPack
+from wwise_wem.vorbis.bitio import BitReader, OggPack
 
 
 def _reference_pack(writes: list[tuple[int, int]]) -> bytes:

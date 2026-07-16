@@ -9,13 +9,13 @@ import sys
 import unittest
 from pathlib import Path
 
-import wwise2013_wem.vorbis.codebook as core
-from wwise2013_wem.vorbis.bitio import BitReader, OggPack
-from wwise2013_wem.vorbis.codebook import StaticCodebook
+import wwise_wem.vorbis.codebook as core
+from wwise_wem.vorbis.bitio import BitReader, OggPack
+from wwise_wem.vorbis.codebook import StaticCodebook
 
 
 ROOT = Path(__file__).resolve().parents[3]
-PACKAGE = ROOT / "src" / "wwise2013_wem"
+PACKAGE = ROOT / "src" / "wwise_wem"
 
 
 class CodebookCoreTests(unittest.TestCase):
@@ -72,16 +72,16 @@ import os
 import sys
 import types
 
-package = types.ModuleType("wwise2013_wem")
+package = types.ModuleType("wwise_wem")
 package.__path__ = [os.environ["WWISE_PACKAGE_DIR"]]
-package.__package__ = "wwise2013_wem"
-sys.modules["wwise2013_wem"] = package
-core = importlib.import_module("wwise2013_wem.vorbis.codebook")
+package.__package__ = "wwise_wem"
+sys.modules["wwise_wem"] = package
+core = importlib.import_module("wwise_wem.vorbis.codebook")
 result = core.make_codewords([1, 1])
 banned = [name for name in (
-    "wwise2013_wem.profiles.book_ids",
-    "wwise2013_wem.profiles.resources",
-    "wwise2013_wem.profiles.codebooks",
+    "wwise_wem.profiles.book_ids",
+    "wwise_wem.profiles.resources",
+    "wwise_wem.profiles.codebooks",
 ) if name in sys.modules]
 print(json.dumps({"result": result, "banned": banned}))
 '''

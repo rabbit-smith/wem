@@ -5,11 +5,11 @@ from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from wwise2013_wem.application.encoder import Encoder, _ContainerPlan
-from wwise2013_wem.application.models import EncodeResult, EncodeStats
-from wwise2013_wem.model import PcmBuffer
-from wwise2013_wem.profiles.model import EncoderProfile
-from wwise2013_wem.profiles.registry import load_wem_profile
+from wwise_wem.application.encoder import Encoder, _ContainerPlan
+from wwise_wem.application.models import EncodeResult, EncodeStats
+from wwise_wem.model import PcmBuffer
+from wwise_wem.profiles.model import EncoderProfile
+from wwise_wem.profiles.registry import load_wem_profile
 
 
 PROFILE_NAME = "wwise2013-6ch-44100"
@@ -58,7 +58,7 @@ class EncoderCoreTests(unittest.TestCase):
         return (
             patch.object(EncoderProfile, "setup_packet", return_value=b"setup"),
             patch(
-                "wwise2013_wem.application.encoder.assemble_encoder_profile_resources",
+                "wwise_wem.application.encoder.assemble_encoder_profile_resources",
                 return_value=resources,
             ),
         )
@@ -79,12 +79,12 @@ class EncoderCoreTests(unittest.TestCase):
         patches = self._patch_constructor()
         with (
             patches[0], patches[1],
-            patch("wwise2013_wem.application.encoder.AnalysisSession", FakeSession),
+            patch("wwise_wem.application.encoder.AnalysisSession", FakeSession),
             patch(
-                "wwise2013_wem.application.encoder.pack_analysis_frame",
+                "wwise_wem.application.encoder.pack_analysis_frame",
                 side_effect=_pack_analysis,
             ) as pack,
-            patch("wwise2013_wem.application.encoder.build_vorbis_wem", return_value=b"WEM!") as build,
+            patch("wwise_wem.application.encoder.build_vorbis_wem", return_value=b"WEM!") as build,
         ):
             result = Encoder(self.profile).encode_pcm(_pcm())
 
@@ -138,12 +138,12 @@ class EncoderCoreTests(unittest.TestCase):
         patches = self._patch_constructor()
         with (
             patches[0], patches[1],
-            patch("wwise2013_wem.application.encoder.AnalysisSession", FakeSession),
+            patch("wwise_wem.application.encoder.AnalysisSession", FakeSession),
             patch(
-                "wwise2013_wem.application.encoder.pack_analysis_frame",
+                "wwise_wem.application.encoder.pack_analysis_frame",
                 side_effect=_pack_analysis,
             ),
-            patch("wwise2013_wem.application.encoder.build_vorbis_wem", return_value=b"WEM!"),
+            patch("wwise_wem.application.encoder.build_vorbis_wem", return_value=b"WEM!"),
         ):
             encoder = Encoder(self.profile)
             first = encoder.encode_pcm(_pcm())
@@ -157,7 +157,7 @@ class EncoderCoreTests(unittest.TestCase):
         patches = self._patch_constructor()
         with (
             patches[0], patches[1],
-            patch("wwise2013_wem.application.encoder.AnalysisSession", FakeSession),
+            patch("wwise_wem.application.encoder.AnalysisSession", FakeSession),
         ):
             encoder = Encoder(self.profile)
             with self.assertRaisesRegex(TypeError, "PcmBuffer"):
@@ -190,12 +190,12 @@ class EncoderCoreTests(unittest.TestCase):
         patches = self._patch_constructor()
         with (
             patches[0], patches[1],
-            patch("wwise2013_wem.application.encoder.AnalysisSession", FakeSession),
+            patch("wwise_wem.application.encoder.AnalysisSession", FakeSession),
             patch(
-                "wwise2013_wem.application.encoder.pack_analysis_frame",
+                "wwise_wem.application.encoder.pack_analysis_frame",
                 side_effect=_pack_analysis,
             ),
-            patch("wwise2013_wem.application.encoder.build_vorbis_wem", return_value=b"WEM!") as build,
+            patch("wwise_wem.application.encoder.build_vorbis_wem", return_value=b"WEM!") as build,
         ):
             result = Encoder(self.profile, _container=plan).encode_pcm(_pcm())
 
@@ -215,7 +215,7 @@ class EncoderCoreTests(unittest.TestCase):
             ),
         )
         with patch(
-            "wwise2013_wem.application.encoder.assemble_encoder_profile_resources"
+            "wwise_wem.application.encoder.assemble_encoder_profile_resources"
         ) as assemble:
             with self.assertRaisesRegex(ValueError, "differs from installed profile"):
                 Encoder(profile)

@@ -5,16 +5,16 @@ import unittest
 from collections import Counter
 from pathlib import Path
 
-from wwise2013_wem.analysis.preprocessing.detector_input import iter_detector_quanta
-from wwise2013_wem.scheduling.model import FramePlan
-from wwise2013_wem.scheduling.planner import (
+from wwise_wem.analysis.preprocessing.detector_input import iter_detector_quanta
+from wwise_wem.scheduling.model import FramePlan
+from wwise_wem.scheduling.planner import (
     append_samples,
     emit_block,
     initial_state,
     required_samples,
 )
-from wwise2013_wem.scheduling.selector import ModeSelector
-from wwise2013_wem.analysis.preprocessing.windowing import iter_pcm_windows
+from wwise_wem.scheduling.selector import ModeSelector
+from wwise_wem.analysis.preprocessing.windowing import iter_pcm_windows
 
 
 FRAME_CONTRACT = (
@@ -28,7 +28,7 @@ FRAME_CONTRACT = (
 def _checked_audio_modes(contract_path: Path) -> list[int]:
     """Read the checked per-frame scheduler contract."""
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
-    if contract.get("schema") != "wwise2013-wem.frame-contract.v1":
+    if contract.get("schema") != "wwise-wem.frame-contract.v1":
         raise AssertionError("scheduler frame-contract schema differs")
     frames = contract["frames"]
     if len(frames) != contract["audio_packets"]:

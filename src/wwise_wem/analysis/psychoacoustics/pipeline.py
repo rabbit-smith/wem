@@ -237,7 +237,7 @@ def analyze_short_frame(
 
     Inputs are the six scheduler-windowed 256-sample PCM views.  The caller
     supplies the selector's short variant and following audio mode; the
-    :class:`~wwise2013_wem.analysis.psychoacoustics.short.ShortPsyAnalyzer` derives and advances the
+    :class:`~wwise_wem.analysis.psychoacoustics.short.ShortPsyAnalyzer` derives and advances the
     previous-transition/run/tail recurrence once for the whole channel group.
     The transform and psychoacoustic stages use the same typed frame data as the long path.
     """

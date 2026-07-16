@@ -5,7 +5,7 @@ This document defines the package boundaries for the encoder. The package root i
 ## Package layout
 
 ```text
-wwise2013_wem/
+wwise_wem/
 ├── __init__.py, __main__.py, api.py, cli.py
 ├── application/       # use-case orchestration and compatibility adapters
 ├── adapters/          # external PCM/WAV inputs

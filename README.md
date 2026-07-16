@@ -1,7 +1,8 @@
-# Wwise 2013 WEM encoder
+# Wwise WEM encoder
 
-Standalone Python implementation of the Wwise 2013.2 Vorbis encoder. Runtime
-code uses PCM plus immutable packaged profile tables.
+Standalone Python implementation of Wwise Vorbis WAV-to-WEM encoding. Runtime
+code uses PCM plus immutable packaged profile tables. The first exact profile
+targets Wwise 2013.2; further generations can be added as additional profiles.
 
 ## Supported exact profile
 
@@ -19,14 +20,14 @@ python3 -m venv .venv
 . .venv/bin/activate
 pip install -e .
 
-wwise2013-wem input.wav --output output.wem
+wwise-wem input.wav --output output.wem
 ```
 
 Automatic selection reads the WAV geometry. The same selection can be made
 explicitly:
 
 ```bash
-wwise2013-wem input.wav \
+wwise-wem input.wav \
   --wwise-version 2013 \
   --channels 6 \
   --sample-rate 44100 \
@@ -37,14 +38,14 @@ wwise2013-wem input.wav \
 The template metadata compatibility path remains available:
 
 ```bash
-wwise2013-wem input.wav --template reference.wem --output output.wem
+wwise-wem input.wav --template reference.wem --output output.wem
 ```
 
 ## Python API
 
 ```python
 from pathlib import Path
-from wwise2013_wem import encode_wav
+from wwise_wem import encode_wav
 
 result = encode_wav(Path("input.wav"))
 Path("output.wem").write_bytes(result.data)
@@ -77,8 +78,8 @@ explicit selection, CLI output, and whole-file golden identity.
 
 ## Project boundary
 
-- `src/wwise2013_wem/`: encoder, packet/container implementation and profile registry.
-- `src/wwise2013_wem/data/`: immutable setup, psychoacoustic and codebook tables.
+- `src/wwise_wem/`: encoder, packet/container implementation and profile registry.
+- `src/wwise_wem/data/`: immutable setup, psychoacoustic and codebook tables.
 - `tests/fixtures/`: one PCM input and its bit-exact acceptance WEM.
 - `tests/data/frame-contract/`: checked per-frame hashes for the exact profile.
 

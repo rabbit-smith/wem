@@ -3,21 +3,21 @@ import json
 import unittest
 from pathlib import Path
 
-import wwise2013_wem
+import wwise_wem
 
-from wwise2013_wem.analysis.dsp.transform import make_mdct_look
-from wwise2013_wem.profiles.transient import load_transient_tables
-from wwise2013_wem.profiles.psychoacoustics.long_tables import load_long_psy_tables
-from wwise2013_wem.profiles.psychoacoustics.long_variants import load_long_variant
-from wwise2013_wem.profiles.psychoacoustics.short_tables import load_short_psy_profiles
-from wwise2013_wem.profiles.bundle import load_profile_bundle
-from wwise2013_wem.profiles.transform import load_mdct_looks
+from wwise_wem.analysis.dsp.transform import make_mdct_look
+from wwise_wem.profiles.transient import load_transient_tables
+from wwise_wem.profiles.psychoacoustics.long_tables import load_long_psy_tables
+from wwise_wem.profiles.psychoacoustics.long_variants import load_long_variant
+from wwise_wem.profiles.psychoacoustics.short_tables import load_short_psy_profiles
+from wwise_wem.profiles.bundle import load_profile_bundle
+from wwise_wem.profiles.transform import load_mdct_looks
 
 
 class PackagedTableTests(unittest.TestCase):
     def test_runtime_manifest_hashes(self):
         profile = (
-            Path(wwise2013_wem.__file__).parent
+            Path(wwise_wem.__file__).parent
             / "data" / "profiles" / "wwise2013-6ch-44100"
         )
         manifest = json.loads((profile / "manifest.json").read_text())

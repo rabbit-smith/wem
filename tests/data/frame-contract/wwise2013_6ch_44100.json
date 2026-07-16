@@ -1,5 +1,5 @@
 {
-  "schema": "wwise2013-wem.frame-contract.v1",
+  "schema": "wwise-wem.frame-contract.v1",
   "profile": "wwise2013-6ch-44100",
   "channels": 6,
   "sample_rate": 44100,

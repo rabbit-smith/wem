@@ -9,9 +9,9 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from wwise2013_wem.profiles.bundle import load_profile_bundle
-from wwise2013_wem.profiles.resources import ResourceRef, normalize_resource_path
-from wwise2013_wem.profiles.registry import load_wem_profile
+from wwise_wem.profiles.bundle import load_profile_bundle
+from wwise_wem.profiles.resources import ResourceRef, normalize_resource_path
+from wwise_wem.profiles.registry import load_wem_profile
 
 
 def _sha(payload: bytes) -> str:
@@ -22,7 +22,7 @@ def _zip_package(path: Path, package: str, mutate=None) -> None:
     setup = b"minimal setup packet"
     installed = load_wem_profile("wwise2013-6ch-44100")
     manifest = {
-        "schema": "wwise2013-wem.profile-manifest.v1",
+        "schema": "wwise-wem.profile-manifest.v1",
         "name": "zip-profile",
         "key": {
             "generation": "2013.2", "channels": 6, "sample_rate": 44100,
@@ -38,7 +38,7 @@ def _zip_package(path: Path, package: str, mutate=None) -> None:
         mutate(manifest)
     manifest_raw = (json.dumps(manifest, sort_keys=True) + "\n").encode()
     index = {
-        "schema": "wwise2013-wem.profile-index.v1",
+        "schema": "wwise-wem.profile-index.v1",
         "default": "zip-profile",
         "profiles": {
             "zip-profile": {
@@ -71,9 +71,9 @@ class ProfileBundleTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     normalize_resource_path(path)
         with self.assertRaisesRegex(ValueError, "SHA-256"):
-            ResourceRef("wwise2013_wem", "data/profiles/index.json", "bad")
+            ResourceRef("wwise_wem", "data/profiles/index.json", "bad")
         with self.assertRaisesRegex(ValueError, "SHA-256 differs"):
-            ResourceRef("wwise2013_wem", "data/profiles/index.json", "0" * 64).read_bytes()
+            ResourceRef("wwise_wem", "data/profiles/index.json", "0" * 64).read_bytes()
 
     def test_bundle_loads_through_index_from_zip_resources(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

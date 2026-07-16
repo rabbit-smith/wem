@@ -7,12 +7,12 @@ import unittest
 from dataclasses import fields
 from pathlib import Path
 
-from wwise2013_wem.scheduling.model import FramePlan
-from wwise2013_wem.analysis.preprocessing.windowing import WindowedFrame
+from wwise_wem.scheduling.model import FramePlan
+from wwise_wem.analysis.preprocessing.windowing import WindowedFrame
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PACKAGE = ROOT / "src" / "wwise2013_wem"
+PACKAGE = ROOT / "src" / "wwise_wem"
 PUBLIC_CLI_MODULES = {"__main__", "cli"}
 BANNED_RUNTIME_MODULES = {"_capture_log", "residue_trace"}
 BANNED_MODULE_NAME_MARKERS = ("capture", "fixture", "research")
@@ -60,10 +60,10 @@ def _qualified_import_from(
         qualified = ".".join([*base, *module_parts])
     else:
         module = node.module or ""
-        if module == "wwise2013_wem":
+        if module == "wwise_wem":
             qualified = ""
-        elif module.startswith("wwise2013_wem."):
-            qualified = module[len("wwise2013_wem.") :]
+        elif module.startswith("wwise_wem."):
+            qualified = module[len("wwise_wem.") :]
         else:
             return set()
 
@@ -81,9 +81,9 @@ def _qualified_import_from(
 
 def _qualified_plain_imports(node: ast.Import, known: set[str]) -> set[str]:
     targets: set[str] = set()
-    prefix = "wwise2013_wem."
+    prefix = "wwise_wem."
     for alias in node.names:
-        if alias.name == "wwise2013_wem":
+        if alias.name == "wwise_wem":
             targets.add("__init__")
         elif alias.name.startswith(prefix):
             candidate = alias.name[len(prefix) :]
