@@ -74,6 +74,11 @@ jobs:
         run: python scripts/native_smoke.py
       - name: "wheel gate (single wheel: facade + native; clean-venv encode)"
         run: python scripts/wheel_smoke.py
+        # Clean-venv isolation is the point: an inherited PYTHONPATH would
+        # make the reference tree importable inside the "installed wheel"
+        # venv and break (or silently weaken) the structure check.
+        env:
+          PYTHONPATH: ""
       - name: differential parity PR gate (golden + 10 cases, < 1 minute)
         run: python scripts/fuzz_diff_parity.py --pr
 
