@@ -9,7 +9,7 @@ import sys
 import tempfile
 import unittest
 import wave
-from pathlib import PurePosixPath
+from pathlib import Path
 
 from wwise_wem_reference.analysis.config import FrozenMathTables, make_wwise_psy_look
 from wwise_wem_reference._tmath import math_bits
@@ -17,7 +17,7 @@ from wwise_wem_reference.profiles.assembly import assemble_encoder_profile_resou
 from wwise_wem.profiles.bundle import load_profile_bundle
 from wwise_wem_reference.profiles.frozen import load_frozen_tables
 
-ROOT = PurePosixPath(os.path.dirname(__file__)).parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 ENUMERABLE_SITES = (
     "config.ln",
     "spectrum.cos",
