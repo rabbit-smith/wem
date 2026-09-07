@@ -4,6 +4,14 @@ description = "WEM encoder end-to-end orchestration (the only layer that compose
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = ["parallel"]
+# Forward wem-analysis's per-channel rayon partitioning to the top level so a
+# native build gets it by default while a threadless target (wasm32-
+# unknown-unknown) can drop it via `default-features = false`. See
+# wem-analysis for the safety argument and the scalar fallback path.
+parallel = ["wem-analysis/parallel"]
+
 [dependencies]
 sha2 = { workspace = true }
 wem-scheduling = { workspace = true }
