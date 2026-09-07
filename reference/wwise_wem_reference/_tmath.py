@@ -41,11 +41,6 @@ class _SiteRecorder:
         self.calls = 0
 
 
-def call_counts() -> dict[str, int]:
-    """Per-site wrapper call counts since import (untracked sites are unwrapped)."""
-    return {name: recorder.calls for name, recorder in _recorders.items()}
-
-
 _recorders: dict[str, _SiteRecorder] = {name: _SiteRecorder() for name in _SITE_NAMES}
 
 RECORDED_SITES: tuple[str, ...] = _SITE_NAMES if _RECORD_DIR else ()

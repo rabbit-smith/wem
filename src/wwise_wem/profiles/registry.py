@@ -129,15 +129,12 @@ class ProfileRegistry:
 
 
 _WWISE2013_6CH_44100_BUNDLE = load_profile_bundle(verify_all=False)
-WWISE2013_6CH_44100_SETUP_SHA256 = _WWISE2013_6CH_44100_BUNDLE.setup.sha256
-WWISE2013_RUNTIME_MANIFEST_SHA256 = (
-    _WWISE2013_6CH_44100_BUNDLE.runtime_manifest.ref.sha256
-)
+
 WWISE2013_6CH_44100 = EncoderProfile(
     name=_WWISE2013_6CH_44100_BUNDLE.name,
     key=_WWISE2013_6CH_44100_BUNDLE.key,
     setup_path=_WWISE2013_6CH_44100_BUNDLE.setup,
-    setup_sha256=WWISE2013_6CH_44100_SETUP_SHA256,
+    setup_sha256=_WWISE2013_6CH_44100_BUNDLE.setup.sha256,
     block_sizes=_WWISE2013_6CH_44100_BUNDLE.block_sizes,
     container_metadata=_WWISE2013_6CH_44100_BUNDLE.container_metadata,
 )
