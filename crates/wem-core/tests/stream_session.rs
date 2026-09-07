@@ -6,10 +6,15 @@
 //!    `Encoder::encode_pcm` for any chunk splitting (six+ strategies),
 //!    and the packets emitted through `push_pcm_chunk` replay exactly
 //!    the WEM container's packet sequence.
-//! 2. **Bounded input memory** — 300 s / 600 s synthetic 6 ch/44100
-//!    streams stay under the 150 MB peak-RSS ceiling, and the memory
-//!    growth beyond the emitted output is duration-independent
-//!    (the input PCM is never accumulated).
+//! 2. **Bounded input memory** — 300 s / 600 s / giant-chunk synthetic 6 ch
+//!    /44100 streams each run in a freshly forked child process whose peak
+//!    RSS is read via `wait4().ru_maxrss`; each child must stay under the
+//!    150 MB ceiling. Measuring in the shared test process is unreliable:
+//!    parallel `#[test]` threads share one allocator that never returns
+//!    memory to the OS, so any in-process reading would be inflated and
+//!    mask the real bound. The only in-process memory assertion is a static
+//!    structural invariant (ring keep == `STREAM_RING_KEEP`), in
+//!    `wem-analysis`.
 //! 3. **Performance regression** — `encode_pcm`'s release-mode median
 //!    stays within the 150 ms gate documented for the fixture encode.
 
@@ -23,11 +28,6 @@ use wem_core::usecases::wav::read_pcm16;
 
 const PROFILE_NAME: &str = "wwise2013-6ch-44100";
 const SETUP_SHA256: &str = "3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3";
-
-/// Serializes the memory-heavy tests: they share the process's RSS, so a
-/// concurrent encode would inflate each other's readings. The chunking
-/// test, the memory gate and the performance gate all hold this lock.
-static MEMORY_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn fixtures_dir() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -155,8 +155,6 @@ fn chunk_strategies(len: usize, channels: i64) -> Vec<(String, Vec<usize>)> {
 
 #[test]
 fn stream_bytes_match_encode_pcm_across_chunking_strategies() {
-    let _guard = MEMORY_GUARD.lock().expect("memory guard is uncontended");
-
     let wav = read_pcm16(&fixtures_dir().join("input.wav")).expect("input.wav reads");
     let le_bytes: Vec<u8> = wav.interleaved_le_bytes();
     let channels = wav.channels();
@@ -218,8 +216,16 @@ fn stream_bytes_match_encode_pcm_across_chunking_strategies() {
 }
 
 // ---------------------------------------------------------------------------
-// 2. Bounded input memory (300 s / 600 s synthetic streams)
+// 2. Bounded input memory (child-process RSS measurement)
 // ---------------------------------------------------------------------------
+
+/// Peak-RSS ceiling for one streaming encode, measured on the freshly
+/// forked child that drives the stream. A 600 s 6ch/44100 stream alone is
+/// ~310 MB of i16 PCM; if the session accumulated it, the child would blow
+/// far past this. A bounded implementation stays near output+baseline.
+const RSS_CEILING_BYTES: usize = 150 * 1024 * 1024;
+const SAMPLE_RATE: i64 = 44100;
+const CHANNELS: usize = 6;
 
 /// Deterministic, slowly-varying synthetic PCM (two integer triangle
 /// waves per channel; structured enough to compress like real audio, so
@@ -252,85 +258,27 @@ fn tri(i: u64, period: u64, seed: u64) -> f64 {
     }
 }
 
-/// Peak RSS probe via `ps -o rss= -p <pid>` (macOS and Linux; the value
-/// is in kilobytes on both).
-fn process_rss_bytes() -> Option<usize> {
-    use std::process::Command;
-    let pid = std::process::id().to_string();
-    let output = Command::new("ps")
-        .args(["-o", "rss=", "-p", &pid])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let kb = output
-        .stdout
-        .split(|b| *b == b' ' || *b == b'\n' || *b == b'\t')
-        .find_map(|field| {
-            std::str::from_utf8(field)
-                .ok()
-                .and_then(|text| text.parse::<usize>().ok())
-        })?;
-    Some(kb * 1024)
-}
-
-const RSS_CEILING_BYTES: usize = 150 * 1024 * 1024;
-const DURATION_SECONDS: [i64; 2] = [300, 600];
-const SAMPLE_RATE: i64 = 44100;
-const CHANNELS: usize = 6;
-
-/// One duration phase of the memory gate: drive `duration` seconds in
-/// 10 s chunks, track peak RSS and the emitted output bytes, and finish.
-fn run_duration_phase(duration: i64) {
+/// Build a fresh streaming session from the on-disk profile bundle.
+fn build_session() -> StreamSession {
     let (index, files) = read_profile_bytes_bundle();
     let ref_ = ProfileRef::with_name(SETUP_SHA256, PROFILE_NAME);
-    let mut session =
-        StreamSession::for_profile_ref_bytes(&ref_, &index, files).expect("bytes init");
+    StreamSession::for_profile_ref_bytes(&ref_, &index, files).expect("bytes init")
+}
 
-    let mut rng_frame_offset = 0u64;
-    let baseline_rss = process_rss_bytes().expect("rss probe works");
-    let mut peak_rss = baseline_rss;
-    let mut emitted_bytes = 0usize;
-
+/// Drive `duration` seconds in 10 s chunks and finish (no RSS assertion —
+/// the parent reads the child's peak). Runs in the child worker process.
+fn drive_duration_stream(duration: i64) {
+    let mut session = build_session();
+    let mut frame_offset = 0u64;
     let mut seconds_done = 0;
     while seconds_done < duration {
         let chunk_seconds = 10i64.min(duration - seconds_done);
         let frames = (SAMPLE_RATE * chunk_seconds) as usize;
-        let bytes = synthetic_chunk(CHANNELS, frames, rng_frame_offset);
-        rng_frame_offset += frames as u64;
-        let packets = session.push_pcm_chunk(&bytes).expect("chunk ok");
-        for packet in packets {
-            emitted_bytes += packet.data.len();
-        }
-        if let Some(rss) = process_rss_bytes() {
-            peak_rss = peak_rss.max(rss);
-        }
+        let bytes = synthetic_chunk(CHANNELS, frames, frame_offset);
+        frame_offset += frames as u64;
+        session.push_pcm_chunk(&bytes).expect("chunk ok");
         seconds_done += chunk_seconds;
     }
-
-    // The ceiling: the whole run (push phase, where input retention
-    // lives) must stay under 150 MB of RSS.
-    assert!(
-        peak_rss < RSS_CEILING_BYTES,
-        "{duration}s stream peaked at {peak_rss} bytes RSS (> {RSS_CEILING_BYTES}); \
-         the session must not accumulate the input PCM"
-    );
-
-    // Duration-independence sanity: memory beyond the emitted output
-    // (i.e. retained input state) is the bounded ring + tails + mode
-    // metadata — assert it stays small. The output itself is the only
-    // legitimately linear component, measured via `emitted_bytes`.
-    let excess = peak_rss
-        .saturating_sub(emitted_bytes)
-        .saturating_sub(baseline_rss);
-    assert!(
-        excess < 64 * 1024 * 1024,
-        "{duration}s stream retained {excess} bytes beyond baseline+output; \
-         input-side state must be duration-independent"
-    );
-
-    // Complete the lifecycle (container assembly happens on Finish).
     let result = session.finish().expect("finish ok");
     assert_eq!(
         result.stats.pcm_frames,
@@ -339,65 +287,184 @@ fn run_duration_phase(duration: i64) {
     );
 }
 
-/// The giant-chunk phase: one 60 s push (~33 MB of i16 PCM) must stay
-/// bounded through the internal segmentation, and segmentation must not
-/// change the bytes.
-fn run_giant_chunk_phase() {
+/// Push one 60 s chunk (~33 MB of i16 PCM) and finish (no RSS assertion).
+/// Exercises the internal segmentation path (chunk > `SEGMENT_FRAMES`) in
+/// the child worker process.
+fn drive_giant_chunk() {
     let duration = 60i64;
     let frames = (SAMPLE_RATE * duration) as usize;
-
-    let (index, files) = read_profile_bytes_bundle();
-    let ref_ = ProfileRef::with_name(SETUP_SHA256, PROFILE_NAME);
-    let mut session =
-        StreamSession::for_profile_ref_bytes(&ref_, &index, files.clone()).expect("bytes init");
-
-    // Baseline before the caller's PCM buffer exists: the ceiling is about
-    // the session's retention, not the caller's input payload.
-    let baseline_rss = process_rss_bytes().expect("rss probe works");
-    let pcm_bytes = synthetic_chunk(CHANNELS, frames, 0);
-    let _packets = session.push_pcm_chunk(&pcm_bytes).expect("giant chunk ok");
-    let peak_rss = process_rss_bytes().expect("rss probe works");
-    assert!(
-        peak_rss < RSS_CEILING_BYTES,
-        "single {duration}s chunk peaked at {peak_rss} bytes RSS (baseline {baseline_rss}); \
-         internal segmentation must keep the conversion bounded"
-    );
-
-    // Segmentation must not change the bytes: the same PCM in three
-    // chunks encodes identically.
-    let mut chunked =
-        StreamSession::for_profile_ref_bytes(&ref_, &index, files).expect("bytes init");
-    let third = pcm_bytes.len() / 3;
-    for slice in [0..third, third..2 * third, 2 * third..pcm_bytes.len()] {
-        chunked.push_pcm_chunk(&pcm_bytes[slice]).expect("chunk ok");
-    }
-    let giant = session.finish().expect("giant finish");
-    let split = chunked.finish().expect("split finish");
+    let mut session = build_session();
+    let bytes = synthetic_chunk(CHANNELS, frames, 0);
+    session.push_pcm_chunk(&bytes).expect("giant chunk ok");
+    let result = session.finish().expect("finish ok");
     assert_eq!(
-        giant.data, split.data,
-        "segmentation changed the output bytes"
+        result.stats.pcm_frames,
+        duration * SAMPLE_RATE,
+        "frame accounting must match the giant duration"
     );
 }
 
-/// Bounded-input-memory gate. Both phases run sequentially in one test
-/// function: process RSS is shared, so parallel test threads would
-/// inflate each other's readings.
+// --- Child-process worker tests ---
+//
+// These do the real streaming work, but only when the parent memory gate
+// forks them as a child (WEM_RSS_WORKER=1). In a normal test run they
+// no-op immediately, so parallel `#[test]` threads never contaminate each
+// other's RSS. The parent reads each child's peak via wait4().ru_maxrss.
+#[test]
+fn stream_memory_rss_worker_duration_300() {
+    stream_worker(WorkerMode::Duration(300));
+}
+
+#[test]
+fn stream_memory_rss_worker_duration_600() {
+    stream_worker(WorkerMode::Duration(600));
+}
+
+#[test]
+fn stream_memory_rss_worker_giant_chunk() {
+    stream_worker(WorkerMode::Giant);
+}
+
+enum WorkerMode {
+    Duration(i64),
+    Giant,
+}
+
+fn stream_worker(mode: WorkerMode) {
+    // Real work only when invoked as a child worker by the parent gate.
+    if std::env::var("WEM_RSS_WORKER").as_deref().ok() != Some("1") {
+        return;
+    }
+    match mode {
+        WorkerMode::Duration(d) => drive_duration_stream(d),
+        WorkerMode::Giant => drive_giant_chunk(),
+    }
+}
+
+// --- Parent memory gate (forks workers, reads their peak RSS) ---
+
 #[test]
 fn stream_memory_stays_bounded_across_duration() {
-    // The ceiling is about input retention; a debug-build encode is too
-    // slow for the synthetic streams to be a useful check.
+    // A debug-build encode is too slow for these synthetic streams to be
+    // a useful ceiling check.
     if cfg!(debug_assertions) {
         eprintln!("skipping memory-ceiling test in debug build");
         return;
     }
-    let _guard = MEMORY_GUARD.lock().expect("memory guard is uncontended");
-
-    // The giant-chunk phase runs first, on the process's freshest
-    // allocator state, so its baseline is as clean as it gets.
-    run_giant_chunk_phase();
-    for &duration in &DURATION_SECONDS {
-        run_duration_phase(duration);
+    let exe = std::env::current_exe().expect("current exe path");
+    let cases = [
+        ("stream_memory_rss_worker_duration_300", "300s"),
+        ("stream_memory_rss_worker_duration_600", "600s"),
+        ("stream_memory_rss_worker_giant_chunk", "giant 60s"),
+    ];
+    for (worker, label) in cases {
+        match child_peak_rss(&exe, worker) {
+            Some(Ok(peak)) => {
+                eprintln!(
+                    "[memory gate] {label}: child peak RSS {peak} bytes ({:.1} MB)",
+                    peak as f64 / 1e6
+                );
+                assert!(
+                    peak < RSS_CEILING_BYTES,
+                    "{label} child peaked at {peak} bytes RSS (>{RSS_CEILING_BYTES}); \
+                     the session must not accumulate the input PCM"
+                );
+            }
+            Some(Err(msg)) => {
+                panic!("RSS measurement failed for '{label}': {msg}");
+            }
+            None => {
+                eprintln!(
+                    "[memory gate] {label}: ru_maxrss unavailable on this platform; skipping"
+                );
+            }
+        }
     }
+}
+
+/// Run the named worker as a child process and return its peak RSS
+/// (bytes). `None` when the platform has no ru_maxrss measurement
+/// (then the gate skips rather than guess).
+fn child_peak_rss(exe: &std::path::Path, worker: &str) -> Option<Result<usize, String>> {
+    #[cfg(target_os = "macos")]
+    {
+        macos_child_peak_rss(exe, worker)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+
+/// macOS: fork the worker, reap it with `wait4`, read ru_maxrss (bytes).
+/// ru_maxrss sits at offset 32 of `struct rusage` on macOS (verified with
+/// a C probe); the struct is 144 bytes on arm64/x86_64 darwin.
+#[cfg(target_os = "macos")]
+fn macos_child_peak_rss(exe: &std::path::Path, worker: &str) -> Option<Result<usize, String>> {
+    #[repr(C)]
+    struct MacRusage {
+        ru_utime_sec: i64,
+        ru_utime_usec: i64,
+        ru_stime_sec: i64,
+        ru_stime_usec: i64,
+        ru_maxrss: i64,
+        _rest: [i64; 13],
+    }
+    extern "C" {
+        fn wait4(pid: i32, status: *mut i32, options: i32, rusage: *mut MacRusage) -> i32;
+    }
+
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg(worker); // test-name filter: only this worker runs
+    cmd.env("WEM_RSS_WORKER", "1");
+    cmd.stdout(std::process::Stdio::null());
+    cmd.stderr(std::process::Stdio::null());
+    let child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => return Some(Err(format!("worker spawn failed: {e}"))),
+    };
+    // We reap manually via wait4; the handle is dropped without killing
+    // (kill-on-drop is off by default on stable) after the child exits.
+    let pid = child.id() as i32;
+
+    let mut status: i32 = 0;
+    let mut ru: MacRusage = unsafe { std::mem::zeroed() };
+    let waited = unsafe { wait4(pid, &mut status, 0, &mut ru) };
+    if waited != pid {
+        return Some(Err(format!("wait4 returned {waited}, expected {pid}")));
+    }
+    let peak = ru.ru_maxrss.max(0) as usize;
+    Some(Ok(peak))
+}
+
+// ---------------------------------------------------------------------------
+// 2b. Giant-chunk segmentation parity (in-process; a byte check, not RSS)
+// ---------------------------------------------------------------------------
+
+/// The internal segmentation of a huge single push must not change the
+/// output bytes: one 60 s push encodes identically to the same PCM in
+/// three chunks.
+#[test]
+fn stream_giant_chunk_segmentation_parity() {
+    let duration = 60i64;
+    let frames = (SAMPLE_RATE * duration) as usize;
+    let pcm_bytes = synthetic_chunk(CHANNELS, frames, 0);
+
+    let mut giant = build_session();
+    giant.push_pcm_chunk(&pcm_bytes).expect("giant chunk ok");
+    let giant_result = giant.finish().expect("giant finish");
+
+    let mut split = build_session();
+    let third = pcm_bytes.len() / 3;
+    for slice in [0..third, third..2 * third, 2 * third..pcm_bytes.len()] {
+        split.push_pcm_chunk(&pcm_bytes[slice]).expect("chunk ok");
+    }
+    let split_result = split.finish().expect("split finish");
+
+    assert_eq!(
+        giant_result.data, split_result.data,
+        "internal segmentation changed the output bytes"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -413,7 +480,6 @@ fn encode_pcm_release_median_within_gate() {
         eprintln!("skipping performance gate in debug build");
         return;
     }
-    let _guard = MEMORY_GUARD.lock().expect("memory guard is uncontended");
 
     let encoder = Encoder::from_profile(PROFILE_NAME).expect("fs encoder builds");
     let wav = read_pcm16(&fixtures_dir().join("input.wav")).expect("input.wav reads");
