@@ -92,6 +92,18 @@ Adding any file under `src/wwise_wem/` or packaged data requires:
 | gRPC IDL | [`proto/AGENTS.md`](proto/AGENTS.md) |
 | Tooling scripts | [`scripts/AGENTS.md`](scripts/AGENTS.md) |
 
+## Integration topology (normative)
+
+- In-process consumers (Python today; Node/Go libraries later) bind the Rust
+  kernel **directly** (PyO3-style FFI or native libraries). Never route a
+  same-process call through gRPC or any serialization hop.
+- `proto/wwise/v1` is the canonical structural contract: type names, streaming
+  lifecycle, packet framing, and error codes in every binding mirror it, even
+  where no RPC transport exists.
+- gRPC (`wem-server`) serves only out-of-process boundaries: non-linking
+  languages, remote services, and clients that cannot embed the kernel. Browsers
+  use the wasm build of the same core, not RPC.
+
 ## Governing documents
 
 `docs/architecture.md` (layers), `docs/domain-model.md` (vocabulary — use these
