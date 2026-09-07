@@ -370,6 +370,18 @@ pub enum AnalysisError {
     ShortKernelWords { got: i64 },
     /// "short analysis cannot apply a long transition code"
     ShortAnalysisCannotApplyLongTransition { transition: i64 },
+    /// "stream feeder push channels differ from the profile"
+    StreamFeederChannelsMismatch {
+        want: i64,
+        got: i64,
+    },
+    /// "stream feeder source is shorter than the LPC boundary batch"
+    StreamFeederSourceShort { frames: i64 },
+    /// "stream frame window references samples not yet retained"
+    StreamFeederWindowNotReady {
+        want_from: i64,
+        want_to: i64,
+    },
 }
 
 

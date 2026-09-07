@@ -19,9 +19,13 @@ pub mod dsp {
 }
 
 /// LPC-padded detector input and window materialization
-/// (Python: `analysis/preprocessing/`).
+/// (Python: `analysis/preprocessing/`). The streaming module is the
+/// Rust-only incremental feeder for the wwise.v1 stream session; it
+/// shares the batch kernel (LPC, windowing, sample views) and owns no
+/// separate numerics.
 pub mod preprocessing {
     pub mod detector_input;
+    pub mod streaming;
     pub mod windowing;
 }
 
