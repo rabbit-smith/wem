@@ -36,6 +36,10 @@ Any refactor is valid only while every gate above still passes unchanged.
   `_f32` locations are normative; Rust must round at the same statements).
   Summation and butterfly ordering are part of the contract — never reorder.
 - Bit patterns travel as integers or little-endian bytes, never via decimal strings.
+- Portability floor: the kernel must stay compilable for `wasm32-unknown-unknown`
+  in a scalar configuration — parallel acceleration (e.g. rayon) lives behind a
+  default-on, off-able feature, and profile bytes must be consumable via an
+  I/O-free entry (`from_resources`), not only the filesystem loader.
 - Generated contract assets must be byte-stable across regeneration (run twice,
   diff empty) with `sort_keys` JSON and explicit endianness in file names.
 
