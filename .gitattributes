@@ -1,0 +1,19 @@
+# This repository verifies byte digests across machines (profile SHA-256
+# chain, golden WEM, stage-golden hashes). Text files must therefore check
+# out with identical bytes on every platform: checkout line endings are
+# pinned to LF regardless of a machine's core.autocrlf (Windows runners
+# otherwise rewrite JSON to CRLF and every checksum verification fails).
+* text=auto eol=lf
+
+# Binary payloads and checked hashes: never touch bytes.
+*.bin binary
+*.wav binary
+*.wem binary
+*.so binary
+*.pyd binary
+*.dylib binary
+*.a binary
+*.abi3.so binary
+*.whl binary
+
+# Golden/contract assets are already covered by *.bin/*.wem/*.wav above.
