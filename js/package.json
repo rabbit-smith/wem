@@ -1,0 +1,39 @@
+{
+  "name": "wwise-wem-wasm",
+  "version": "0.1.0",
+  "description": "Browser encoding for the WEM encoder kernel: wasm-bindgen shell (crates/wem-wasm) + typed JS wrapper. One-shot and streaming PCM->WEM, profile bytes in, WEM bytes out.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src",
+    "pkg",
+    "pkg-node",
+    "README.md"
+  ],
+  "scripts": {
+    "build:web": "wasm-pack build ../crates/wem-wasm --target web --release --out-dir pkg",
+    "build:node": "wasm-pack build ../crates/wem-wasm --target nodejs --release --out-dir pkg-node",
+    "build": "npm run build:web && npm run build:node",
+    "test": "node test-node.mjs"
+  },
+  "keywords": [
+    "wem",
+    "wwise",
+    "the target title",
+    "wasm",
+    "audio",
+    "encoder"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.18"
+  }
+}

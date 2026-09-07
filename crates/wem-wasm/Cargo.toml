@@ -1,0 +1,20 @@
+[package]
+name = "wem-wasm"
+description = "wasm-bindgen shell over the WEM encoder kernel (browser/web encoding)."
+version.workspace = true
+edition.workspace = true
+
+# cdylib: the crate type wasm-bindgen / wasm-pack emit from; there is no
+# native use for this shell (the C ABI and PyO3 shells cover native).
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# The kernel, threadless: the native `parallel` (rayon) feature is dropped
+# so wasm32-unknown-unknown builds the pure-scalar analysis path (see the
+# workspace comments and wem-analysis). Zero kernel changes for this shell.
+# Direct path dependency (like wem-python): a workspace dependency would not
+# let this crate disable wem-core's default features (cargo warning).
+wem-core = { path = "../wem-core", default-features = false }
+wasm-bindgen = { workspace = true }
+js-sys = { workspace = true }

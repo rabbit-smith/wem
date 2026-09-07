@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WEM encoder — browser demo</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    h1 { font-size: 1.4rem; }
+    #drop {
+      border: 2px dashed #888; border-radius: 12px; padding: 2.5rem 1rem;
+      text-align: center; cursor: pointer; transition: all 0.15s;
+    }
+    #drop.over { border-color: #4a9eff; background: rgba(74, 158, 255, 0.12); }
+    #drop small { color: #888; }
+    .bar { height: 10px; background: #8883; border-radius: 5px; overflow: hidden; margin: 1rem 0 0.25rem; }
+    .bar > div { height: 100%; width: 0%; background: #4a9eff; transition: width 0.1s; }
+    pre { background: #8882; padding: 0.75rem; border-radius: 8px; overflow-x: auto; font-size: 0.8rem; white-space: pre-wrap; word-break: break-all; }
+    button { padding: 0.5rem 1.25rem; border-radius: 8px; border: none; background: #4a9eff; color: #fff; font-size: 0.95rem; cursor: pointer; }
+    button[disabled] { opacity: 0.5; cursor: not-allowed; }
+    .note { font-size: 0.85rem; color: #888; }
+  </style>
+</head>
+<body>
+  <h1>WEM encoder — browser demo</h1>
+  <p>
+    Drop a <code>.wav</code> (signed-16 PCM) below: it is parsed and encoded to
+    <code>WEM</code> <strong>in the browser</strong> (WebAssembly, wasm-bindgen shell
+    over the Rust kernel), then offered for download.
+  </p>
+
+  <div id="drop">
+    Drop a <code>.wav</code> here, or click to choose
+    <small>(profile data is fetched from the repo's <code>src/wwise_wem/data/profiles</code>; override with <code>?profileBase=…</code>)</small>
+    <input type="file" id="file" accept=".wav,audio/wav,audio/x-wav" hidden />
+  </div>
+
+  <div class="bar"><div id="progress"></div></div>
+  <p id="status">loading wasm + profile…</p>
+
+  <div id="result" style="display:none">
+    <p>
+      <a id="dl" download="output.wem"><button id="dlbtn">Download .wem</button></a>
+      <button id="again">Encode another</button>
+    </p>
+    <pre id="summary"></pre>
+  </div>
+
+  <p class="note">
+    Memory: the kernel's streaming session keeps only a bounded input ring + the
+    emitted packets (output ≈ 8–12% of input PCM size). The limiting factor is the
+    WAV you decode — a 4-minute 6ch/44.1kHz WAV is ≈ 127&nbsp;MB; large files are
+    best streamed chunk-by-chunk (see README). Encoding runs on this tab's main
+    thread; move it into a Web Worker for long files.
+  </p>
+
+  <script type="module" src="./demo.mjs"></script>
+</body>
+</html>

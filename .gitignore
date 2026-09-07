@@ -14,8 +14,11 @@ htmlcov/
 .understand-anything/
 .workflow/
 /crates/target/
+js/node_modules/
 *.so
 *.dylib
 *.pyd
 *.whl
 native-wheel/
+js/pkg/.gitignore
+js/pkg-node/.gitignore

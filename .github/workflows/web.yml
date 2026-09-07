@@ -1,0 +1,35 @@
+name: web
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  web:
+    # Browser encoding shell: proves the wasm build compiles for
+    # wasm32-unknown-unknown and that the Node-side parity gate passes —
+    # fixture PCM through the wasm package must reproduce the kernel
+    # golden sha256, one-shot and across chunkings.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: wasm-pack/wasm-pack-action@v0.4.0
+      - name: wasm32 check (threadless kernel + wasm shell)
+        run: cd crates && cargo check -p wem-wasm --target wasm32-unknown-unknown
+      - name: clippy gate (wasm target)
+        run: cd crates && cargo clippy -p wem-wasm --target wasm32-unknown-unknown -- -D warnings
+      - name: unit tests (native; error-code table)
+        run: cd crates && cargo test -p wem-wasm
+      - name: build nodejs target (for the parity gate)
+        run: cd crates && wasm-pack build wem-wasm --target nodejs --release --out-dir ../js/pkg-node
+      - name: build web target (npm/browser artifact)
+        run: cd crates && wasm-pack build wem-wasm --target web --release --out-dir ../js/pkg
+      - name: node parity gate (golden sha256 + chunking consistency + error codes)
+        run: node js/test-node.mjs
