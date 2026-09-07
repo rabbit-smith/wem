@@ -1,0 +1,39 @@
+[package]
+name = "wem-python"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "PyO3 abi3 native binding for the wem-core WEM encoder kernel"
+
+[lib]
+name = "_wwise_wem_native"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Dependency isolation (crates/AGENTS.md): pyo3 lives in this crate only —
+# the binding shell, never in the kernel crates.
+# Rationale for the feature selection:
+#   abi3-py310        -> CPython 3.10 limited API: one wheel covering
+#                       3.10 through 3.14+, no libpython at run time.
+#   auto-initialize   -> embeds the interpreter in test/binary targets so
+#                       `cargo test -p wem-python` can run under a real GIL.
+#   extension-module  -> NOT a default: it must stay OFF for `cargo test`
+#                       (the test binary then links libpython itself). It is
+#                       enabled by maturin automatically when building the
+#                       .so, where the cdylib must borrow interpreter
+#                       symbols from the host instead of linking libpython.
+pyo3 = { version = "0.25.1", features = ["abi3-py310", "auto-initialize"] }
+# The kernel is consumed through its public surface only (zero drift):
+# wem-core for Encoder / StreamSession / error classes. Profile loading uses
+# the kernel's own entry points (WEM_DATA_DIR / repo-layout DataDir).
+wem-core = { path = "../wem-core" }
+
+[dev-dependencies]
+# Kernel container reader, used by tests to derive expected packet
+# sequences from the reference WEM fixture (no extra runtime dep).
+wem-container = { path = "../wem-container" }
+
+[features]
+# Toggled by maturin at wheel/build time (documented maturin convention):
+# turns on pyo3's extension-module mode for the cdylib artifact only.
+extension-module = ["pyo3/extension-module"]

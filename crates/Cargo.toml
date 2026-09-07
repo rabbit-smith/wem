@@ -17,6 +17,7 @@ members = [
     "wem-vorbis",
     "wem-container",
     "wem-core",
+    "wem-python",
 ]
 
 [workspace.package]

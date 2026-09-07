@@ -1,0 +1,21 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "wwise-wem-native"
+version = "0.1.0"
+description = "Native (abi3) extension binding for the wem-core WEM encoder kernel"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.maturin]
+# Must match the [lib] name in Cargo.toml: the module importable from
+# Python is `_wwise_wem_native`.
+module-name = "_wwise_wem_native"
+
+# Build/install commands (the `extension-module` feature must be active so
+# the .so borrows host-interpreter symbols instead of linking libpython;
+# it is intentionally NOT a default because `cargo test` needs the opposite):
+#   maturin develop -F extension-module   (into the active venv)
+#   maturin build   -F extension-module   (abi3 wheel, cp310-abi3)
