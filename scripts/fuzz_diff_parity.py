@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Random PCM differential parity: reference oracle vs native kernel.
 
-The executable definition of dual-engine correctness at scale: every
+The executable definition of oracle-vs-kernel parity at scale: every
 stream is encoded once by the pure-Python reference oracle (one-shot) and
 once by the native kernel (streaming lifecycle with a randomized
 frame-aligned chunk split), and the two containers must be byte-identical.
@@ -239,10 +239,10 @@ def main() -> int:
         return 2
 
     try:
-        import wwise_wem._native as native
+        import wwise_wem._core as native
     except ImportError as error:
         print(
-            "fuzz_diff_parity: the native extension wwise_wem._native is "
+            "fuzz_diff_parity: the native extension wwise_wem._core is "
             "required (pip install -e . or install a maturin wheel)",
             file=sys.stderr,
         )

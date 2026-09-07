@@ -119,10 +119,15 @@ class EncodeResultTests(unittest.TestCase):
             "long_packets": 1,
             "bytes": 4,
             "metadata_source": "profile:wwise2013-6ch-44100",
-            "engine": "python",
         }
         stats = EncodeStats.from_legacy_dict(legacy_stats)
         self.assertEqual(stats.to_legacy_dict(), legacy_stats)
+        # Older dictionaries carried a provenance entry; it is tolerated on
+        # read and dropped on write (the execution path is single).
+        legacy_with_tag = dict(legacy_stats)
+        legacy_with_tag["engine"] = "native"
+        self.assertEqual(EncodeStats.from_legacy_dict(legacy_with_tag), stats)
+        self.assertNotIn("engine", EncodeStats.from_legacy_dict(legacy_with_tag).to_legacy_dict())
         result = EncodeResult(b"WEM!", stats)
         self.assertEqual(result.stats, stats)
         self.assertEqual(result.sha256, hashlib.sha256(b"WEM!").hexdigest())

@@ -22,11 +22,11 @@ SKIP_DIRS = {".git", ".venv", "venv"}
 CARGO_TARGET = ROOT / "crates" / "target"
 
 
-def _is_native_artifact(path: Path) -> bool:
+def _is_extension_artifact(path: Path) -> bool:
     # Dev-tree extension artifacts: maturin develop drops
-    # `wwise_wem/_native.abi3.so` next to the sources.
+    # `wwise_wem/_core.abi3.so` next to the sources.
     return path.name.endswith(".abi3.so") or (
-        path.name.startswith("_native")
+        path.name.startswith("_core")
         and path.suffix in {".so", ".dylib", ".pyd"}
     )
 
@@ -49,7 +49,7 @@ def main() -> None:
         elif path.is_file() and (
             path.name in FILES
             or path.suffix in {".pyc", ".pyo"}
-            or _is_native_artifact(path)
+            or _is_extension_artifact(path)
         ):
             path.unlink(missing_ok=True)
     print(

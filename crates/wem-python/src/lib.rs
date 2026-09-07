@@ -1,7 +1,7 @@
 //! PyO3 (abi3) native extension for the wem-core WEM encoder kernel.
 //!
-//! Exposes the module `wwise_wem._native` (imported in-package; the
-//! repository-root maturin wheel installs it as `wwise_wem/_native.abi3.so`) — a thin, zero-drift shell over
+//! Exposes the module `wwise_wem._core` (imported in-package; the
+//! repository-root maturin wheel installs it as `wwise_wem/_core.abi3.so`) — a thin, zero-drift shell over
 //! the kernel:
 //!
 //! * [`Encoder`] — one-shot PCM-to-WEM encode (`wem_core::encoder::Encoder`)
@@ -35,7 +35,7 @@ use wem_core::stream::{ProfileRef, StreamPacket, StreamSession as WemStreamSessi
 // ---------------------------------------------------------------------------
 
 pyo3::create_exception!(
-    wwise_wem._native,
+    wwise_wem._core,
     WemEncoderError,
     PyException,
     "Terminal wem-core encoder failure (wwise.v1 EncoderError)."
@@ -203,7 +203,7 @@ fn pcm_from_memoryview(sample_rate: i64, arg: &Bound<'_, PyAny>) -> PyResult<Pcm
 
 /// One-shot PCM-to-WEM encoder over one installed profile
 /// (Python facade: `wwise_wem.application.encoder.Encoder`).
-#[pyclass(name = "Encoder", module = "wwise_wem._native")]
+#[pyclass(name = "Encoder", module = "wwise_wem._core")]
 struct PyEncoder {
     inner: WemEncoder,
 }
@@ -253,7 +253,7 @@ impl PyEncoder {
 
 /// Immutable encode result (field set follows `wem_core::EncodeStats`
 /// plus the container bytes; `bytes_out` names the stats `bytes`).
-#[pyclass(name = "EncodeResult", module = "wwise_wem._native")]
+#[pyclass(name = "EncodeResult", module = "wwise_wem._core")]
 #[derive(Clone)]
 struct PyEncodeResult {
     inner: WemEncodeResult,
@@ -318,7 +318,7 @@ impl PyEncodeResult {
 /// the first packet ever emitted is the setup packet (seq 0), then audio
 /// packets in encoding order. Frames whose decision window is not yet
 /// determined are withheld by the kernel and finalized at `finish`.
-#[pyclass(name = "StreamSession", module = "wwise_wem._native")]
+#[pyclass(name = "StreamSession", module = "wwise_wem._core")]
 struct PyStreamSession {
     inner: WemStreamSession,
     next_seq: u32,
@@ -400,7 +400,7 @@ impl PyStreamSession {
 // ---------------------------------------------------------------------------
 
 /// One emitted packet in reply-stream order (v1 `Packet`).
-#[pyclass(name = "Packet", module = "wwise_wem._native")]
+#[pyclass(name = "Packet", module = "wwise_wem._core")]
 #[derive(Clone)]
 struct PyPacket {
     #[pyo3(get)]
@@ -410,7 +410,7 @@ struct PyPacket {
 }
 
 /// Terminal container summary (v1 `WemComplete`).
-#[pyclass(name = "WemComplete", module = "wwise_wem._native")]
+#[pyclass(name = "WemComplete", module = "wwise_wem._core")]
 #[derive(Clone)]
 struct PyWemComplete {
     /// The assembled WEM container bytes.
@@ -429,7 +429,7 @@ struct PyWemComplete {
 // ---------------------------------------------------------------------------
 
 #[pymodule]
-fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
     m.add("WemEncoderError", WemEncoderError::type_object(py))?;
     m.add_class::<PyEncoder>()?;
@@ -467,7 +467,7 @@ mod tests {
 
     /// Import the module under test (0.25 test pattern: wrap_pymodule).
     fn import_module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
-        Ok(pyo3::wrap_pymodule!(_native)(py).into_bound(py))
+        Ok(pyo3::wrap_pymodule!(_core)(py).into_bound(py))
     }
 
     /// The fixture WAV as interleaved little-endian i16 PCM bytes.

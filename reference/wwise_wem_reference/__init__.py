@@ -2,14 +2,18 @@
 
 This development-tree package is the bit-exact oracle: every module here is
 implementation code that the distributed facade (``wwise_wem``) used to carry
-inline, and its output bytes are the project's source of truth.  The facade's
-native-first engine switch (``wwise_wem._engine``) delegates to this package
-only when the resolved engine is the pure-Python implementation; the native
-kernel never touches it.
+inline, and its output bytes are the project's source of truth.
+
+It is a **test-time asset, not a runtime engine.** The distributed facade
+has a single execution path — the native kernel extension
+(``wwise_wem._core``) — and never imports this package.  Only test suites
+and capture tooling import it directly (``wwise_wem_reference``), comparing
+its bytes against the kernel and against the golden fixtures; parity is a
+pinned contract, enforced by the tests, not by a runtime switch.
 
 The package is not part of the distribution allowlist and is not shipped in
-the wheel: installed copies of the facade must run on the native kernel, while
-the development tree (``PYTHONPATH=src:reference``) keeps the oracle importable
-for the frame/stage contracts, the golden tests, and the dual-engine parity
-suite.
+the wheel: installed copies of the facade run on the native kernel, while
+the development tree (``PYTHONPATH=src:reference``) keeps the oracle
+importable for the frame/stage contracts, the golden tests, and the
+parity suites.
 """

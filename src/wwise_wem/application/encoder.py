@@ -1,13 +1,13 @@
 """Deep PCM-to-WEM encoder orchestration.
 
-The :class:`Encoder` is a native-first facade: byte-producing calls run on
-the Rust kernel (``wwise_wem._native``) when the resolved engine is native
-(see ``wwise_wem._engine`` and ``WWISE_WEM_ENGINE``), and otherwise on the
-pure-Python reference implementation in the development-tree
-``wwise_wem_reference`` package, which stays the reference oracle.  That
-package is not part of the wheel, so an installed facade without the native
-extension reports a clear ``ImportError`` instead of running a half-built
-path.
+The :class:`Encoder` is a thin facade over the Rust kernel: every
+byte-producing call runs on the in-package native extension
+``wwise_wem._core`` (the abi3 binding built from ``crates/wem-python``,
+shipped inside the wheel by the maturin backend).  There is no engine
+selection, no fallback, and no second path: the extension is a required
+runtime asset, and a missing one surfaces as the ordinary
+:class:`ImportError` that the Python import machinery raises for
+``wwise_wem._core``.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import importlib.util
 from pathlib import Path
 from typing import Any
 
-from .. import _engine, _reference
+import wwise_wem._core as _core
 from ..profiles.bundle import load_profile_bundle
 from ..profiles.model import EncoderProfile
 from ..model import PcmBuffer
@@ -44,16 +44,17 @@ class Encoder:
             )
 
         self.profile = profile
-        self._native_backend: Any = None
+        self._core_backend: Any = None
 
     def encode_pcm(self, pcm: PcmBuffer) -> EncodeResult:
-        """Encode one independent PCM buffer into a complete Wwise WEM.
+        """Encode one independent PCM buffer into a complete WEM.
 
-        Engine dispatch (see ``wwise_wem._engine``): the native kernel is
-        used when the resolved engine is native and the PCM values sit in
-        the signed-16 sample domain, raising ``ValueError`` otherwise under
-        an explicit ``native`` pin while ``auto`` routes such buffers to the
-        pure-Python reference implementation.
+        The call runs on the native kernel (``wwise_wem._core``).  The
+        kernel consumes integer signed-16 samples; the public float domain
+        is ``value / 32768.0`` as produced by the adapters, so every sample
+        must be exactly that of an integer in the signed-16 range.  Out-of-
+        domain input is rejected with a plain :class:`ValueError` here,
+        before the kernel is reached.
         """
         if not isinstance(pcm, PcmBuffer):
             raise TypeError("pcm must be PcmBuffer")
@@ -67,17 +68,8 @@ class Encoder:
         if pcm.frame_count < 4096:
             raise ValueError("PCM input must contain at least 4096 frames")
 
-        engine = _engine.active_engine()
-        if engine == "native":
-            try:
-                rows = self._int16_rows(pcm)
-            except ValueError:
-                if _engine.requested_engine() != "auto":
-                    # An explicit native pin never downgrades silently.
-                    raise
-                return self._encode_pcm_python(pcm)
-            return self._encode_pcm_native(pcm, rows)
-        return self._encode_pcm_python(pcm)
+        rows = self._int16_rows(pcm)
+        return self._encode_pcm_core(pcm, rows)
 
     def _int16_rows(self, pcm: PcmBuffer) -> list[list[int]]:
         """Convert in-domain float PCM rows into kernel signed-16 rows.
@@ -85,8 +77,8 @@ class Encoder:
         The kernel consumes integer signed-16 samples; the public float
         domain is ``value / 32768.0`` as produced by ``read_pcm16_wav`` /
         ``read_pcm16``. Every sample must be exactly that of an integer in
-        the signed-16 range; anything else is rejected the same way the
-        reference path rejects input errors (``ValueError``).
+        the signed-16 range; anything else is rejected with a plain
+        :class:`ValueError`.
         """
         rows: list[list[int]] = []
         for channel, row in enumerate(pcm.channels):
@@ -118,19 +110,16 @@ class Encoder:
         candidate = Path(origin).resolve().parent / "data" / "profiles"
         return str(candidate) if candidate.is_dir() else None
 
-    def _encode_pcm_native(self, pcm: PcmBuffer, rows: list[list[int]]) -> EncodeResult:
+    def _encode_pcm_core(self, pcm: PcmBuffer, rows: list[list[int]]) -> EncodeResult:
         """Run one encode on the native kernel and fill the Python DTOs."""
-        module = _engine.native_module()
-        if module is None:
-            raise RuntimeError("native engine resolved without an importable module")
-        if self._native_backend is None:
-            self._native_backend = module.Encoder(
+        if self._core_backend is None:
+            self._core_backend = _core.Encoder(
                 self.profile.name,
                 self._profile_data_dir(),
             )
         try:
-            result = self._native_backend.encode_pcm(pcm.sample_rate, rows)
-        except module.WemEncoderError as error:
+            result = self._core_backend.encode_pcm(pcm.sample_rate, rows)
+        except _core.WemEncoderError as error:
             # The public contract surfaces input/configuration errors as
             # ValueError; kernel rejections reach the user only after all
             # Python-side validation passed, so the mapping preserves the
@@ -144,19 +133,8 @@ class Encoder:
             long_packets=int(result.long_packets),
             bytes=int(result.bytes_out),
             metadata_source=f"profile:{self.profile.name}",
-            engine="native",
         )
         return EncodeResult(bytes(result.data), stats)
-
-    def _encode_pcm_python(self, pcm: PcmBuffer) -> EncodeResult:
-        """Pure-Python reference encode path (oracle behavior)."""
-        python_engine = _reference.reference_module("python_engine")
-        container = python_engine.ContainerPlan.from_profile(self.profile)
-        return python_engine.encode_pcm_python(
-            profile=self.profile,
-            container=container,
-            pcm=pcm,
-        )
 
 
 __all__ = ["Encoder"]

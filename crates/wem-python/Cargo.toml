@@ -6,12 +6,12 @@ authors.workspace = true
 description = "PyO3 abi3 native binding for the wem-core WEM encoder kernel"
 
 [lib]
-# The module is imported as `wwise_wem._native` — the private extension
+# The module is imported as `wwise_wem._core` — the private extension
 # module of the `wwise_wem` package, not a top-level module. The repo-root
 # pyproject.toml drives the single-wheel build via maturin
-# (`module-name = "wwise_wem._native"`), which renames this cdylib to
-# `_native.abi3.so` and installs it inside the package directory.
-name = "_native"
+# (`module-name = "wwise_wem._core"`), which renames this cdylib to
+# `_core.abi3.so` and installs it inside the package directory.
+name = "_core"
 # cdylib for the extension artifact; rlib so `cargo test -p wem-python`
 # links the module into its test harness (pyo3 auto-initialize).
 crate-type = ["cdylib", "rlib"]

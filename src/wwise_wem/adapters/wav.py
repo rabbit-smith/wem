@@ -107,9 +107,9 @@ def read_pcm_wav(path: Path) -> PcmBuffer:
     24-bit and float32 files are converted at this adapter boundary by the
     deterministic rules in :mod:`wwise_wem.adapters.sample_conversion`:
     by the time the :class:`PcmBuffer` exists, every sample is an exact
-    ``value / 32768.0`` in-domain float, so both engines see only the
-    signed-16 domain.  Converted inputs are deterministic and dual-engine
-    consistent; they are not promised bit-exact against Wwise imports.
+    ``value / 32768.0`` in-domain float, so the encoder sees only the
+    signed-16 domain.  Converted inputs are deterministic; they are not
+    promised bit-exact against Wwise imports.
     """
     format_tag, channels, sample_rate, sampwidth, data = _probe_wav(path)
     if format_tag == 1 and sampwidth == 2:

@@ -1,11 +1,13 @@
-"""Reference (oracle) encode pipeline delegated to by the facade.
+"""Reference (oracle) encode pipeline, a test-time asset.
 
-The facade (``wwise_wem.application.encoder``) resolves the engine through
-``wwise_wem._engine`` and, when the pure-Python implementation is active,
-calls :func:`encode_pcm_python` here.  This module owns the reference-tree
-imports of the analysis session, Vorbis packet encoder, and container builder;
-tests and capture tooling patch these module-level names to observe the real
-pipeline without modifying it on disk.
+This module owns the reference-tree imports of the analysis session, Vorbis
+packet encoder, and container builder; tests and capture tooling import it
+directly (e.g. ``wwise_wem_reference.python_engine.encode_pcm_python``) and
+patch its module-level names to observe the real pipeline without modifying
+it on disk.  It is not a runtime engine: the distributed facade runs on the
+native kernel (``wwise_wem._core``) only, and nothing in ``src/`` imports
+this package.  Byte-identical parity between this oracle and the kernel is
+pinned by the test suites, not by a runtime switch.
 """
 
 from __future__ import annotations
@@ -78,7 +80,6 @@ def encode_pcm_python(
         long_packets=modes.count(1),
         bytes=len(encoded),
         metadata_source=container.metadata_source,
-        engine="python",
     )
     return EncodeResult(encoded, stats)
 

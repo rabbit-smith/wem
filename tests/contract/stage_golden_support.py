@@ -13,31 +13,31 @@ a byte-exact reference for the Rust kernel port:
   as u16le words (``0xffff`` marks an unused channel), residue integers as
   i32le words, and packet bytes verbatim.
 
-Capture uses the production path only: observing wrappers installed at
-runtime on ``Encoder.encode_pcm``, ``AnalysisSession.analyze_window``, and
-the reference engine module's own references to ``pack_analysis_frame``
-and ``build_vorbis_wem`` record the values the real pipeline computes, then
-are removed.  No production module is modified on disk.  The facade engine
-is pinned to the pure-Python reference implementation for the capture, so
-the oracle pipeline is what gets observed regardless of whether the native
-kernel happens to be importable in the environment.
+Capture uses the reference oracle pipeline only: observing wrappers
+installed at runtime on ``AnalysisSession.analyze_window`` and on the
+reference engine module's own references to ``pack_analysis_frame``
+and ``build_vorbis_wem`` record the values the oracle computes, then
+are removed.  No production module is modified on disk.  The oracle is
+imported directly (``wwise_wem_reference.python_engine``) as a test
+asset — it is not an engine of the facade; the facade's single execution
+path is the native kernel (``wwise_wem._core``), which this capture does
+not touch.
 """
 from __future__ import annotations
 
 import hashlib
 import json
-import os
 import struct
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-import wwise_wem._engine as _facade_engine
 import wwise_wem_reference.python_engine as reference_engine_module
 from wwise_wem_reference.analysis.session import AnalysisSession
-from wwise_wem import encode_wav
-from wwise_wem.application.encoder import Encoder
+from wwise_wem_reference.container.model import ContainerPlan
 from wwise_wem_reference.container.wem import load_wem_parts_bytes
+from wwise_wem.adapters.wav import read_pcm16
+from wwise_wem.profiles.registry import load_wem_profile, resolve_wem_profile
 
 
 SCHEMA = "wwise-wem.stage-golden.v1"
@@ -68,7 +68,14 @@ FRAME_FIELDS = (
     "following",
     "window_center",
     "bins",
-    *tuple(f"{name}_sha256" for name in FLOAT_STAGES),
+    "window_sha256",
+    "coefficients_sha256",
+    "raw_mdct_sha256",
+    "fft_sha256",
+    "remap_sha256",
+    "seed_sha256",
+    "post_sha256",
+    "side_sha256",
     "floor_posts_sha256",
     "residue_q_after_sha256",
     "packet_size",
@@ -185,7 +192,7 @@ def transition_frame_indices(modes) -> tuple[int, ...]:
 
 
 class _StageCapture:
-    """Observe one production encode and keep only what the assets need."""
+    """Observe one oracle encode and keep only what the assets need."""
 
     def __init__(self) -> None:
         self.pcm_geometry: dict[str, int] | None = None
@@ -202,8 +209,8 @@ class _StageCapture:
 
     # -- observing wrappers -------------------------------------------------
 
-    def on_encode_pcm(self, encoder: Encoder, pcm) -> None:
-        self.profile_name = encoder.profile.name
+    def record_encode_inputs(self, profile, pcm) -> None:
+        self.profile_name = profile.name
         self.pcm_geometry = {
             "sample_rate": pcm.sample_rate,
             "channels": pcm.channel_count,
@@ -313,18 +320,12 @@ class _StageCapture:
 
 @contextmanager
 def stage_capture() -> Iterator[_StageCapture]:
-    """Run the production encoder with observing wrappers installed."""
+    """Run the reference oracle encode with observing wrappers installed."""
     capture = _StageCapture()
-    encoder_class = Encoder
     session_class = AnalysisSession
-    original_encode = encoder_class.encode_pcm
     original_analyze = session_class.analyze_window
     original_pack = reference_engine_module.pack_analysis_frame
     original_build = reference_engine_module.build_vorbis_wem
-
-    def wrapped_encode_pcm(self, pcm):
-        capture.on_encode_pcm(self, pcm)
-        return original_encode(self, pcm)
 
     def wrapped_analyze_window(self, window, *, short_variant=None):
         result = original_analyze(self, window, short_variant=short_variant)
@@ -360,14 +361,12 @@ def stage_capture() -> Iterator[_StageCapture]:
         capture.on_build_vorbis_wem(packets, seek_table, wem_bytes)
         return wem_bytes
 
-    encoder_class.encode_pcm = wrapped_encode_pcm
     session_class.analyze_window = wrapped_analyze_window
     reference_engine_module.pack_analysis_frame = wrapped_pack_analysis_frame
     reference_engine_module.build_vorbis_wem = wrapped_build_vorbis_wem
     try:
         yield capture
     finally:
-        encoder_class.encode_pcm = original_encode
         session_class.analyze_window = original_analyze
         reference_engine_module.pack_analysis_frame = original_pack
         reference_engine_module.build_vorbis_wem = original_build
@@ -376,18 +375,22 @@ def stage_capture() -> Iterator[_StageCapture]:
 def build_stage_golden(
     wav: Path, *, profile: str | None = None
 ) -> tuple[dict[str, Any], dict[str, bytes]]:
-    """Run the real encoder and return (stage index, raw dump blobs)."""
+    """Run the reference oracle and return (stage index, raw dump blobs)."""
     wav = Path(wav)
-    previous_engine = os.environ.get(_facade_engine.ENGINE_ENV_VAR)
-    os.environ[_facade_engine.ENGINE_ENV_VAR] = "python"
-    try:
-        with stage_capture() as capture:
-            result = encode_wav(wav, profile=profile)
-    finally:
-        if previous_engine is None:
-            os.environ.pop(_facade_engine.ENGINE_ENV_VAR, None)
-        else:
-            os.environ[_facade_engine.ENGINE_ENV_VAR] = previous_engine
+    pcm = read_pcm16(wav)
+    profile_obj = (
+        load_wem_profile(profile)
+        if profile is not None
+        else resolve_wem_profile(pcm.channel_count, pcm.sample_rate)
+    )
+
+    with stage_capture() as capture:
+        capture.record_encode_inputs(profile_obj, pcm)
+        result = reference_engine_module.encode_pcm_python(
+            profile=profile_obj,
+            container=ContainerPlan.from_profile(profile_obj),
+            pcm=pcm,
+        )
 
     frames = capture.frame_rows
     if len(frames) != result.stats.audio_packets:

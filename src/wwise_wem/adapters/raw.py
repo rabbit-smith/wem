@@ -5,7 +5,7 @@ this module validates it and returns a :class:`PcmBuffer` in the signed-16
 encoder domain.  24-bit samples are two's-complement little-endian;
 32-bit payloads are IEEE-754 float32.  Conversion uses only the pure
 helpers from :mod:`wwise_wem.adapters.sample_conversion`, so converted
-inputs land exactly on the in-domain floats both engines expect.
+inputs land exactly on the in-domain floats the encoder expects.
 
 Validation mirrors the existing :class:`PcmBuffer` rejection semantics:
 geometry arguments are explicit ``TypeError`` / ``ValueError`` at the

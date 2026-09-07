@@ -44,10 +44,10 @@ def encode_pcm_wav(
     16-bit input behaves exactly like :func:`encode_wav`.  24-bit and
     float32 input is converted into the signed-16 encoder domain at the
     adapter boundary using deterministic, documented rules (see
-    ``wwise_wem.adapters.sample_conversion``); both engines then see only
+    ``wwise_wem.adapters.sample_conversion``); the encoder then sees only
     in-domain samples.  The WEM bytes for converted inputs are
-    deterministic and dual-engine consistent, but are not promised to be
-    bit-exact against Wwise's own import path.
+    deterministic, but are not promised to be bit-exact against Wwise's
+    own import path.
     """
     from .application.encoder import Encoder
     from .adapters.wav import read_pcm_wav

@@ -1,9 +1,9 @@
 """Deterministic sample conversion into the signed-16 encoder domain.
 
 These helpers are the single place where non-16-bit PCM samples are mapped
-into the signed-16 domain consumed by both engines.  Every function is
+into the signed-16 domain consumed by the encoder.  Every function is
 pure: identical input bits produce identical output bits on every
-platform and engine, and no hidden state is read or written.
+platform, and no hidden state is read or written.
 
 Arithmetic rules (normative):
 
@@ -28,7 +28,7 @@ Conversion rules (per sample, all values two's-complement LE sources):
 * int16 -> legacy float domain: ``value / 32768.0`` (the historical
   ``read_pcm16_wav`` normalization, unchanged).
 
-Inputs arriving through these rules are in-domain for both engines;
+Inputs arriving through these rules are in-domain for the encoder;
 their WEM bytes are deterministic, but the project does not promise
 bit-exact agreement with Wwise imports for converted inputs.
 """

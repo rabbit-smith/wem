@@ -26,7 +26,6 @@ class EncodeStats:
     long_packets: int
     bytes: int
     metadata_source: str
-    engine: str = "python"
 
     def __post_init__(self) -> None:
         _require_int(self.pcm_frames, "pcm_frames")
@@ -39,8 +38,6 @@ class EncodeStats:
             raise ValueError("short/long packet counts must equal audio_packets")
         if not isinstance(self.metadata_source, str) or not self.metadata_source:
             raise ValueError("metadata_source must be a non-empty string")
-        if not isinstance(self.engine, str) or not self.engine:
-            raise ValueError("engine must be a non-empty string")
 
     @classmethod
     def from_legacy_dict(cls, values: Mapping[str, int | str]) -> "EncodeStats":
@@ -52,7 +49,6 @@ class EncodeStats:
             long_packets=int(values["long_packets"]),
             bytes=int(values["bytes"]),
             metadata_source=str(values["metadata_source"]),
-            engine=str(values.get("engine", "python")),
         )
 
     def to_legacy_dict(self) -> dict[str, int | str]:
@@ -64,7 +60,6 @@ class EncodeStats:
             "long_packets": self.long_packets,
             "bytes": self.bytes,
             "metadata_source": self.metadata_source,
-            "engine": self.engine,
         }
 
     from_legacy = from_legacy_dict

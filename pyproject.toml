@@ -27,7 +27,7 @@ wwise-wem = "wwise_wem.cli:main"
 [tool.maturin]
 python-source = "src"
 manifest-path = "crates/wem-python/Cargo.toml"
-module-name = "wwise_wem._native"
+module-name = "wwise_wem._core"
 # extension-module: the .so borrows host-interpreter symbols (no libpython
 # in the wheel); see crates/wem-python/Cargo.toml for the full rationale.
 features = ["extension-module"]

@@ -23,7 +23,6 @@ class GoldenEncoderTests(unittest.TestCase):
         self.assertEqual(stats.long_packets, 128)
         self.assertEqual(stats.bytes, 108771)
         self.assertEqual(stats.metadata_source, "profile:wwise2013-6ch-44100")
-        self.assertIn(stats.engine, {"native", "python"})
 
 
 if __name__ == "__main__":

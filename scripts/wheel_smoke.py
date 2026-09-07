@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Build the single wheel and verify the distribution end-to-end.
 
-The wheel ships the native-first facade and its abi3 kernel together
-(``wwise_wem._native``, built from ``crates/wem-python`` by the maturin
+The wheel ships the native facade and its abi3 kernel together
+(``wwise_wem._core``, built from ``crates/wem-python`` by the maturin
 build backend); the reference implementation tree is a development-tree
 artifact and must be absent from the package.  This script verifies:
 
@@ -13,8 +13,8 @@ artifact and must be absent from the package.  This script verifies:
   the profile metadata path (bundle, setup packet) fully functional, both
   from the installed wheel and a zip-import target;
 - in a clean venv (no development tree on the path), the installed facade
-  encodes the golden input byte-exactly through the native kernel and the
-  reference package is not importable there.
+  encodes the golden input byte-exactly through the embedded kernel and
+  the reference package is not importable there.
 
 Building the wheel requires a Rust toolchain (the maturin backend invokes
 cargo); a missing one fails this smoke with an install hint.
@@ -41,7 +41,7 @@ def _distribution_contract() -> dict[str, object]:
     return json.loads(ALLOWLIST.read_text(encoding="utf-8"))
 
 
-def _expected_native_artifacts(contract: dict[str, object]) -> list[str]:
+def _expected_extension_artifacts(contract: dict[str, object]) -> list[str]:
     """Platform artifact names for the allowlisted native extensions."""
     extension = ".pyd" if os.name == "nt" else ".so"
     return [
@@ -53,7 +53,7 @@ def _expected_native_artifacts(contract: dict[str, object]) -> list[str]:
 def _verify_wheel_contents(wheel: Path, contract: dict[str, object]) -> None:
     expected = sorted(
         [*contract["modules"], *contract["resources"], *
-         _expected_native_artifacts(contract)]
+         _expected_extension_artifacts(contract)]
     )
     with zipfile.ZipFile(wheel) as archive:
         actual = sorted(
@@ -90,10 +90,10 @@ def _verify_wheel_contents(wheel: Path, contract: dict[str, object]) -> None:
         raise RuntimeError(f"forbidden wheel paths: {violations}")
     if content_violations:
         raise RuntimeError(f"forbidden wheel content: {content_violations}")
-    native = _expected_native_artifacts(contract)
-    if not any(name in actual for name in native):
+    extension_artifacts = _expected_extension_artifacts(contract)
+    if not any(name in actual for name in extension_artifacts):
         raise RuntimeError(
-            f"wheel does not carry the native extension {native}; "
+            f"wheel does not carry the native extension {extension_artifacts}; "
             "the single wheel must embed its engine"
         )
 
@@ -119,13 +119,14 @@ def _facade_metadata_smoke(contract: dict[str, object]) -> str:
     )
 
 
-def _clean_venv_native_smoke() -> str:
+def _clean_venv_core_smoke() -> str:
     """Installed facade must encode byte-exactly through the embedded kernel."""
     return (
         "import hashlib\n"
         "import sys\n"
-        "from wwise_wem import encode_wav, _engine\n"
-        "assert _engine.active_engine() == 'native', _engine.active_engine()\n"
+        "from wwise_wem import encode_wav\n"
+        "import wwise_wem._core as core\n"
+        "assert hasattr(core, 'Encoder'), core\n"
         "result = encode_wav(sys.argv[1])\n"
         "ref = hashlib.sha256(open(sys.argv[2], 'rb').read()).hexdigest()\n"
         "assert result.sha256 == ref, (result.sha256, ref)\n"
@@ -231,7 +232,7 @@ def main() -> None:
             [
                 str(venv_python),
                 "-c",
-                _clean_venv_native_smoke(),
+                _clean_venv_core_smoke(),
                 str(GOLDEN_INPUT),
                 str(GOLDEN_REFERENCE),
             ],

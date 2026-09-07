@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""P3-1 smoke test for the PyO3 abi3 binding `wwise_wem._native`.
+"""P3-1 smoke test for the PyO3 abi3 binding `wwise_wem._core`.
 
-Proves, from the Python side:
+The in-package extension is the facade's single execution path; this
+smoke proves, from the Python side:
   1. the streaming path (StreamSession: start -> 5 uneven chunks -> finish)
      reproduces tests/fixtures/reference.wem byte-for-byte;
   2. the one-shot path (Encoder.encode_pcm, list-of-lists and memoryview
@@ -60,7 +61,7 @@ def sha256_hex(data: bytes) -> str:
 
 
 def main() -> int:
-    import wwise_wem._native as native
+    import wwise_wem._core as native
 
     print(f"module: {native.__file__}")
 

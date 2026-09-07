@@ -83,29 +83,26 @@ class DistributionContractTests(unittest.TestCase):
         self.assertEqual(content_violations, [])
 
     def test_native_extension_contract_stays_synced_across_surfaces(self) -> None:
-        """The in-package extension must agree across four surfaces.
+        """The in-package extension must agree across its name surfaces.
 
-        The wheel ships the abi3 extension as `wwise_wem/_native.abi3.so`
-        (or `.pyd`); a drift between the allowlist, the facade's engine
-        detection, the Cargo lib name, and the root maturin module-name
-        would silently break either the import or the wheel layout, so the
-        four spellings are pinned here in one place.
+        The wheel ships the abi3 extension as `wwise_wem/_core.abi3.so`
+        (or `.pyd`).  Drift between the allowlist, the Cargo lib name,
+        and the maturin module-name settings would silently break either
+        the import or the wheel layout, so the spellings are pinned here
+        in one place.  The module name is an install-time fact owned by
+        these files only: the facade imports `wwise_wem._core` directly
+        and keeps no second copy of the name.
         """
         contract = _contract()
         native = contract["native_extensions"]
-        self.assertEqual(native, ["wwise_wem._native"])
-
-        # Facade engine detection (import-time contract).
-        from wwise_wem import _engine
-
-        self.assertEqual(_engine.NATIVE_MODULE_NAME, native[0])
+        self.assertEqual(native, ["wwise_wem._core"])
 
         # Cargo lib name: the cdylib the wheel renames into place.
         cargo = (ROOT / "crates" / "wem-python" / "Cargo.toml").read_text(
             encoding="utf-8"
         )
         lib_name = _section_value(cargo, "lib", "name")
-        self.assertEqual(lib_name, "_native")
+        self.assertEqual(lib_name, "_core")
         self.assertIn("cdylib", _section_value(cargo, "lib", "crate-type"))
 
         # Root pyproject: the maturin module-name that places the .so.
@@ -114,6 +111,15 @@ class DistributionContractTests(unittest.TestCase):
         self.assertIn('build-backend = "maturin"', pyproject)
         module_name = _section_value(pyproject, "tool.maturin", "module-name")
         self.assertEqual(module_name, native[0])
+
+        # Binding-crate pyproject: documents the same module placement.
+        binding_pyproject = (
+            ROOT / "crates" / "wem-python" / "pyproject.toml"
+        ).read_text(encoding="utf-8")
+        binding_name = _section_value(
+            binding_pyproject, "tool.maturin", "module-name"
+        )
+        self.assertEqual(binding_name, native[0])
 
 
 def _section_value(text: str, section: str, key: str) -> str:

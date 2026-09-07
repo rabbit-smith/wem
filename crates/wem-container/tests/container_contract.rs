@@ -6,8 +6,9 @@
 //! fields, extra chunks) is captured from the reference-oracle encode path
 //! via a subprocess: the stage-golden dumps only carry 28 representative
 //! audio packets, so the full 206-packet stream is fetched on demand. The
-//! capture pins `WWISE_WEM_ENGINE=python`, drives the typed public entry
-//! (`encode_wav`), and observes the arguments of the reference-tree
+//! capture drives the reference oracle directly (a test asset, not an
+//! engine: the facade's single execution path is the native kernel and is
+//! never on this path), observes the arguments of the reference-tree
 //! `build_vorbis_wem` (`wwise_wem_reference.python_engine`). All
 //! assertions are against the committed index.json hashes.
 
@@ -56,15 +57,16 @@ fn load_index() -> Value {
 /// arguments (packets / seek table / fmt fields / extra chunks) as JSON.
 /// Mirrors tests/contract/stage_golden_support.py's observing wrapper.
 const CAPTURE_SCRIPT: &str = r#"
-import base64, json, os, sys
+import base64, json, sys
 from pathlib import Path
 repo = Path(sys.argv[1])
 sys.path.insert(0, str(repo / "src"))
 sys.path.insert(0, str(repo / "reference"))
-os.environ["WWISE_WEM_ENGINE"] = "python"
 
 import wwise_wem_reference.python_engine as python_engine
-from wwise_wem import encode_wav
+from wwise_wem_reference.container.model import ContainerPlan
+from wwise_wem.adapters.wav import read_pcm16
+from wwise_wem.profiles.registry import resolve_wem_profile
 
 captured = {}
 original_build = python_engine.build_vorbis_wem
@@ -83,7 +85,13 @@ def capture_build(fmt_fields, packets, **kw):
 
 python_engine.build_vorbis_wem = capture_build
 try:
-    encode_wav(repo / "tests/fixtures/input.wav", profile=None)
+    pcm = read_pcm16(repo / "tests/fixtures/input.wav")
+    profile = resolve_wem_profile(pcm.channel_count, pcm.sample_rate)
+    python_engine.encode_pcm_python(
+        profile=profile,
+        container=ContainerPlan.from_profile(profile),
+        pcm=pcm,
+    )
 finally:
     python_engine.build_vorbis_wem = original_build
 

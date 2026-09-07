@@ -1,56 +1,42 @@
-"""Extended input forms: dual-engine consistency and short-input semantics.
+"""Extended input forms: single-path consistency and short-input semantics.
 
 New-format inputs (24-bit PCM, 32-bit float32 WAV, raw PCM) are converted at
 the adapter boundary into the signed-16 domain.  These tests lock two
 properties:
 
 * converted inputs land on exactly the in-domain floats of the equivalent
-  signed-16 stream, so both engines see format-agnostic values;
-* encoding is deterministic and byte-identical across both engines, and
-  short inputs (< 4096 frames) keep the explicit rejection (INPUT_TOO_SHORT
-  semantics) on every entry point.
+  signed-16 stream, so the encoder consumes format-agnostic values;
+* the facade path (the native kernel, ``wwise_wem._core``) and the direct
+  ``wwise_wem_reference`` import (the test-time reference oracle, a pure
+  test asset and not an engine) produce byte-identical WEM output for them,
+  and encoding is deterministic.
+
+Single-path environment: the native extension ``wwise_wem._core`` is a
+required runtime asset; this suite deliberately does not design skip cases
+for native-absent environments.  Short inputs (< 4096 frames) keep the
+explicit rejection (INPUT_TOO_SHORT semantics) on every entry point.
 """
 
 from __future__ import annotations
 
-import os
 import struct
 import unittest
 import wave
-from contextlib import contextmanager
 from pathlib import Path
 
 import wwise_wem as W
-from wwise_wem import _engine
+from wwise_wem import _core as core_mod
 from wwise_wem.adapters.raw import read_raw_pcm
 from wwise_wem.adapters.wav import read_pcm_wav
-
-try:
-    from wwise_wem import _native as native_mod  # in-package extension
-except ImportError:
-    try:
-        import _wwise_wem_native as native_mod  # legacy top-level name
-    except ImportError:
-        native_mod = None
+from wwise_wem.application.models import EncodeResult
+from wwise_wem_reference import python_engine
+from wwise_wem_reference.container.model import ContainerPlan
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "tests" / "fixtures"
 INPUT = FIXTURES / "input.wav"
 REFERENCE = FIXTURES / "reference.wem"
 PROFILE_NAME = "wwise2013-6ch-44100"
-
-
-@contextmanager
-def _pinned_engine(name: str):
-    previous = os.environ.get(_engine.ENGINE_ENV_VAR)
-    os.environ[_engine.ENGINE_ENV_VAR] = name
-    try:
-        yield
-    finally:
-        if previous is None:
-            os.environ.pop(_engine.ENGINE_ENV_VAR, None)
-        else:
-            os.environ[_engine.ENGINE_ENV_VAR] = previous
 
 
 def _synthetic_int16(frames: int, channels: int = 6) -> list[int]:
@@ -67,15 +53,11 @@ def _int16_bytes(values: list[int]) -> bytes:
 
 
 def _int24_bytes(values: list[int]) -> bytes:
-    return b"".join(
-        (v << 8).to_bytes(3, "little", signed=True) for v in values
-    )
+    return b"".join((v << 8).to_bytes(3, "little", signed=True) for v in values)
 
 
 def _float32_bytes(values: list[int]) -> bytes:
-    return struct.pack(
-        f"<{len(values)}f", *[v / 32768.0 for v in values]
-    )
+    return struct.pack(f"<{len(values)}f", *[v / 32768.0 for v in values])
 
 
 def _write_int16_wav(path: Path, values: list[int], channels: int, rate: int) -> None:
@@ -112,7 +94,7 @@ def _write_float32_wav(path: Path, values: list[int], channels: int, rate: int) 
 
 
 class ExtendedInputDomainTests(unittest.TestCase):
-    """Pure-Python invariants: conversion lands in-domain, deterministically."""
+    """Conversion lands in-domain; encoding is deterministic on the facade."""
 
     def test_converted_inputs_match_the_int16_domain(self):
         values = _synthetic_int16(5000)
@@ -147,9 +129,8 @@ class ExtendedInputDomainTests(unittest.TestCase):
             self.assertEqual(pcm24, pcm32)
 
     def test_encode_pcm_wav_int16_matches_encode_wav(self):
-        with _pinned_engine("python"):
-            legacy = W.encode_wav(INPUT)
-            extended = W.encode_pcm_wav(INPUT)
+        legacy = W.encode_wav(INPUT)
+        extended = W.encode_pcm_wav(INPUT)
         self.assertEqual(legacy.data, extended.data)
         self.assertEqual(legacy.sha256, extended.sha256)
 
@@ -164,21 +145,20 @@ class ExtendedInputDomainTests(unittest.TestCase):
             _write_int24_wav(wav24, values, 6, 44100)
             _write_float32_wav(wav32, values, 6, 44100)
 
-            with _pinned_engine("python"):
-                first = W.encode_pcm_wav(wav24)
-                again = W.encode_pcm_wav(wav32)
-                raw24 = W.encode_raw_pcm(
-                    _int24_bytes(values),
-                    sample_rate=44100,
-                    channels=6,
-                    bits_per_sample=24,
-                )
-                raw32 = W.encode_raw_pcm(
-                    _float32_bytes(values),
-                    sample_rate=44100,
-                    channels=6,
-                    bits_per_sample=32,
-                )
+            first = W.encode_pcm_wav(wav24)
+            again = W.encode_pcm_wav(wav32)
+            raw24 = W.encode_raw_pcm(
+                _int24_bytes(values),
+                sample_rate=44100,
+                channels=6,
+                bits_per_sample=24,
+            )
+            raw32 = W.encode_raw_pcm(
+                _float32_bytes(values),
+                sample_rate=44100,
+                channels=6,
+                bits_per_sample=32,
+            )
             # Same samples through four entry forms: one byte stream.
             self.assertEqual(first.data, again.data)
             self.assertEqual(first.data, raw24.data)
@@ -197,28 +177,22 @@ class ExtendedInputDomainTests(unittest.TestCase):
             _write_float32_wav(wav32, values, 6, 44100)
 
             cases = (
-                (lambda: W.encode_pcm_wav(wav24), None),
-                (lambda: W.encode_pcm_wav(wav32), None),
-                (
-                    lambda: W.encode_raw_pcm(
-                        _int24_bytes(values),
-                        sample_rate=44100,
-                        channels=6,
-                        bits_per_sample=24,
-                    ),
-                    None,
+                lambda: W.encode_pcm_wav(wav24),
+                lambda: W.encode_pcm_wav(wav32),
+                lambda: W.encode_raw_pcm(
+                    _int24_bytes(values),
+                    sample_rate=44100,
+                    channels=6,
+                    bits_per_sample=24,
                 ),
-                (
-                    lambda: W.encode_raw_pcm(
-                        _int16_bytes(values),
-                        sample_rate=44100,
-                        channels=6,
-                        bits_per_sample=16,
-                    ),
-                    None,
+                lambda: W.encode_raw_pcm(
+                    _int16_bytes(values),
+                    sample_rate=44100,
+                    channels=6,
+                    bits_per_sample=16,
                 ),
             )
-            for index, (action, _) in enumerate(cases):
+            for index, action in enumerate(cases):
                 with self.subTest(form=index):
                     with self.assertRaisesRegex(
                         ValueError, "at least 4096 frames"
@@ -236,44 +210,52 @@ class ExtendedInputDomainTests(unittest.TestCase):
             )
 
 
-@unittest.skipIf(
-    native_mod is None,
-    "native extension (wwise_wem._native or legacy _wwise_wem_native) is not "
-    "importable; build or install it to run dual-engine checks",
-)
-class ExtendedInputDualEngineTests(unittest.TestCase):
-    """New-format inputs are byte-identical across both engines."""
+class ExtendedInputConsistencyTests(unittest.TestCase):
+    """Facade (native kernel) vs the direct reference import: byte identity.
 
-    def test_golden_input_via_extended_entry_matches_reference(self):
-        golden = REFERENCE.read_bytes()
-        with _pinned_engine("python"):
-            facade_python = W.encode_pcm_wav(INPUT, profile=PROFILE_NAME)
-        with _pinned_engine("native"):
-            facade_native = W.encode_pcm_wav(INPUT, profile=PROFILE_NAME)
-        direct_native = native_mod.Encoder(PROFILE_NAME).encode_pcm(
-            44100,
-            [[int(s * 32768.0) for s in row]
-             for row in read_pcm_wav(INPUT).channels],
+    ``wwise_wem_reference`` is imported directly as a test-time oracle; it
+    is a pure test asset, not a runtime engine.  The facade runs its single
+    execution path — the native kernel — unconditionally.  Both must
+    produce identical WEM bytes.
+    """
+
+    def _oracle_encode(self, pcm) -> EncodeResult:
+        profile = W.load_wem_profile(PROFILE_NAME)
+        return python_engine.encode_pcm_python(
+            profile=profile,
+            container=ContainerPlan.from_profile(profile),
+            pcm=pcm,
         )
-        self.assertEqual(facade_python.data, golden)
-        self.assertEqual(facade_native.data, golden)
-        self.assertEqual(bytes(direct_native.data), golden)
-        self.assertEqual(facade_python.data, facade_native.data)
 
-    def test_converted_inputs_are_byte_identical_across_engines(self):
+    def test_golden_input_via_extended_entry_matches_reference_and_oracle(self):
+        pcm = read_pcm_wav(INPUT)
+        golden = REFERENCE.read_bytes()
+
+        facade = W.encode_pcm_wav(INPUT, profile=PROFILE_NAME)
+        oracle = self._oracle_encode(pcm)
+        direct_core = core_mod.Encoder(PROFILE_NAME).encode_pcm(
+            44100,
+            [[int(sample * 32768.0) for sample in row] for row in pcm.channels],
+        )
+        self.assertEqual(facade.data, golden)
+        self.assertEqual(bytes(oracle.data), golden)
+        self.assertEqual(bytes(direct_core.data), golden)
+        self.assertEqual(facade.data, oracle.data)
+        self.assertEqual(facade.sha256, direct_core.sha256())
+
+    def test_converted_inputs_are_byte_identical_between_facade_and_oracle(self):
         import tempfile
 
         values = _synthetic_int16(4096)
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
-            forms = []
             wav24 = base / "a24.wav"
             wav32 = base / "a32f.wav"
             _write_int24_wav(wav24, values, 6, 44100)
             _write_float32_wav(wav32, values, 6, 44100)
-            forms.append(("wav-24", lambda: W.encode_pcm_wav(wav24)))
-            forms.append(("wav-32f", lambda: W.encode_pcm_wav(wav32)))
-            forms.append(
+            forms = [
+                ("wav-24", lambda: W.encode_pcm_wav(wav24)),
+                ("wav-32f", lambda: W.encode_pcm_wav(wav32)),
                 (
                     "raw-24",
                     lambda: W.encode_raw_pcm(
@@ -282,9 +264,7 @@ class ExtendedInputDualEngineTests(unittest.TestCase):
                         channels=6,
                         bits_per_sample=24,
                     ),
-                )
-            )
-            forms.append(
+                ),
                 (
                     "raw-32f",
                     lambda: W.encode_raw_pcm(
@@ -293,9 +273,7 @@ class ExtendedInputDualEngineTests(unittest.TestCase):
                         channels=6,
                         bits_per_sample=32,
                     ),
-                )
-            )
-            forms.append(
+                ),
                 (
                     "raw-16",
                     lambda: W.encode_raw_pcm(
@@ -304,30 +282,27 @@ class ExtendedInputDualEngineTests(unittest.TestCase):
                         channels=6,
                         bits_per_sample=16,
                     ),
-                )
+                ),
+            ]
+            # The oracle encodes the one in-domain PCM every form converts
+            # to; all facade results must equal it byte-for-byte.
+            pcm = read_raw_pcm(
+                _int16_bytes(values),
+                sample_rate=44100,
+                channels=6,
+                bits_per_sample=16,
             )
+            oracle_result = self._oracle_encode(pcm)
             for label, action in forms:
                 with self.subTest(form=label):
-                    with _pinned_engine("python"):
-                        python_result = action()
-                    with _pinned_engine("native"):
-                        native_result = action()
+                    facade_result = action()
+                    self.assertEqual(facade_result.data, oracle_result.data, label)
+                    self.assertGreater(len(facade_result.data), 0)
                     self.assertEqual(
-                        python_result.data, native_result.data, label
+                        facade_result.stats.to_legacy_dict(),
+                        oracle_result.stats.to_legacy_dict(),
+                        label,
                     )
-                    self.assertEqual(python_result.sha256, native_result.sha256)
-                    self.assertGreater(len(python_result.data), 0)
-                    python_stats = {
-                        key: value
-                        for key, value in python_result.stats.to_legacy_dict().items()
-                        if key != "engine"
-                    }
-                    native_stats = {
-                        key: value
-                        for key, value in native_result.stats.to_legacy_dict().items()
-                        if key != "engine"
-                    }
-                    self.assertEqual(python_stats, native_stats, label)
 
 
 if __name__ == "__main__":

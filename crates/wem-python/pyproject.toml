@@ -16,10 +16,10 @@ requires-python = ">=3.10"
 dependencies = []
 
 [tool.maturin]
-# In-package module: the extension is imported as `wwise_wem._native`
-# (installed as `wwise_wem/_native.abi3.so` by the root pyproject's
+# In-package module: the extension is imported as `wwise_wem._core`
+# (installed as `wwise_wem/_core.abi3.so` by the root pyproject's
 # module-name setting).
-module-name = "wwise_wem._native"
+module-name = "wwise_wem._core"
 
 # Build/install commands (the `extension-module` feature must be active so
 # the .so borrows host-interpreter symbols instead of linking libpython;
