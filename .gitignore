@@ -13,3 +13,8 @@ htmlcov/
 .ruff_cache/
 .understand-anything/
 .workflow/
+/crates/target/
+*.so
+*.dylib
+*.pyd
+*.whl
