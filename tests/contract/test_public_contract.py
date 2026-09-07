@@ -17,7 +17,7 @@ from pathlib import Path
 from wwise_wem import (
     ProfileKey,
     WwiseVorbisProfile,
-    encode_wav_to_wem,
+    encode_wav,
     load_wem_profile,
     resolve_wem_profile,
 )
@@ -26,7 +26,6 @@ from wwise_wem import (
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 INPUT = FIXTURES / "input.wav"
-REFERENCE = FIXTURES / "reference.wem"
 PROFILE = "wwise2013-6ch-44100"
 
 
@@ -58,20 +57,20 @@ class PublicEncodeContractTests(unittest.TestCase):
         with wave.open(str(cls.short_input), "wb") as target:
             target.setparams(params)
             target.writeframes(pcm)
-        cls.automatic_bytes, cls.automatic_stats = encode_wav_to_wem(
-            cls.short_input
-        )
-        cls.explicit_bytes, cls.explicit_stats = encode_wav_to_wem(
-            cls.short_input, profile=PROFILE
-        )
+        cls.automatic_result = encode_wav(cls.short_input)
+        cls.explicit_result = encode_wav(cls.short_input, profile=PROFILE)
 
     @classmethod
     def tearDownClass(cls):
         cls.directory.cleanup()
 
     def test_automatic_and_explicit_encoding_are_identical(self):
-        self.assertEqual(self.automatic_bytes, self.explicit_bytes)
-        self.assertEqual(self.automatic_stats, self.explicit_stats)
+        self.assertEqual(
+            self.automatic_result.data, self.explicit_result.data
+        )
+        self.assertEqual(
+            self.automatic_result.stats, self.explicit_result.stats
+        )
 
     def test_encoder_is_a_lazy_canonical_root_export(self):
         import wwise_wem
@@ -82,15 +81,11 @@ class PublicEncodeContractTests(unittest.TestCase):
         self.assertIs(wwise_wem.Encoder, CanonicalEncoder)
 
     def test_packet_counts_are_internally_consistent(self):
+        stats = self.automatic_result.stats
         self.assertEqual(
-            self.automatic_stats["short_packets"]
-            + self.automatic_stats["long_packets"],
-            self.automatic_stats["audio_packets"],
+            stats.short_packets + stats.long_packets,
+            stats.audio_packets,
         )
-
-    def test_template_and_profile_cannot_be_combined(self):
-        with self.assertRaisesRegex(ValueError, "either an encoder template or profile"):
-            encode_wav_to_wem(INPUT, REFERENCE, profile=PROFILE)
 
     def test_unsupported_wav_geometry_is_an_error(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -101,7 +96,7 @@ class PublicEncodeContractTests(unittest.TestCase):
                 target.setframerate(48000)
                 target.writeframes(b"\0" * (4096 * 2 * 2))
             with self.assertRaisesRegex(ValueError, "no Wwise 2013.2 profile"):
-                encode_wav_to_wem(path)
+                encode_wav(path)
 
     def test_non_s16_pcm_wav_is_an_error(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -112,7 +107,7 @@ class PublicEncodeContractTests(unittest.TestCase):
                 target.setframerate(44100)
                 target.writeframes(b"\x80" * (32 * 6))
             with self.assertRaisesRegex(ValueError, "signed-16 PCM WAV"):
-                encode_wav_to_wem(path)
+                encode_wav(path)
 
 
 class PublicCliContractTests(unittest.TestCase):
@@ -129,7 +124,6 @@ class PublicCliContractTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("usage:", result.stdout)
         for option in (
-            "--template",
             "--profile",
             "--wwise-version",
             "--channels",

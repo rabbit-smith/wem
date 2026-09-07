@@ -9,9 +9,9 @@ of truth; the native kernel is verified against it, never the reverse.
   `tests/contract/distribution_allowlist.json`. The development tree drives
   every test target with `PYTHONPATH=src:reference` (see Makefile).
 - **Imported lazily by the facade.** `wwise_wem._reference` resolves modules
-  from here only when a byte-producing call needs the pure-Python engine
-  (or template container parsing); a facade without this tree reports a
-  clear `ImportError` instead of running a half-built path.
+  from here only when a byte-producing call needs the pure-Python engine;
+  a facade without this tree reports a clear `ImportError` instead of
+  running a half-built path.
 - **Two-way naming.** Implementation domains here import facade DTOs and
   profile-metadata types (`wwise_wem.model`, `wwise_wem.profiles.*`) by
   absolute name; everything else resolves by in-package relative imports.

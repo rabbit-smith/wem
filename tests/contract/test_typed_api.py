@@ -47,7 +47,7 @@ class TypedApiTests(unittest.TestCase):
 
         read.assert_called_once_with(Path("input.wav"))
         resolve.assert_called_once_with("wwise2013-6ch-44100")
-        encoder_type.assert_called_once_with(profile, _container=None)
+        encoder_type.assert_called_once_with(profile)
         encoder_type.return_value.encode_pcm.assert_called_once_with(pcm)
         self.assertIs(result, expected)
 
@@ -80,15 +80,10 @@ print(json.dumps('wwise_wem.application.compat' in sys.modules))
         )
         self.assertFalse(json.loads(completed.stdout))
 
-    def test_legacy_root_exports_remain_callable_and_tuple_shaped(self):
-        with patch(
-            "wwise_wem.application.compat.encode_wav_to_wem",
-            return_value=(b"RIFF", LEGACY_STATS),
-        ):
-            legacy_encode = wwise_wem.encode_wav_to_wem
-            data, stats = legacy_encode(Path("input.wav"))
-        self.assertEqual(data, b"RIFF")
-        self.assertEqual(stats, LEGACY_STATS)
+    def test_read_pcm16_wav_is_a_lazy_root_export(self):
+        from wwise_wem.application.compat import read_pcm16_wav as canonical
+
+        self.assertIs(wwise_wem.read_pcm16_wav, canonical)
         self.assertTrue(callable(wwise_wem.read_pcm16_wav))
 
     def test_package_root_exports_models_and_profile_api(self):

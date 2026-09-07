@@ -6,7 +6,7 @@ import unittest
 from dataclasses import replace
 from unittest.mock import patch
 
-from wwise_wem.application.compat import encode_wav_to_wem
+from wwise_wem import encode_wav
 from wwise_wem.application.encoder import Encoder
 from wwise_wem.application.models import EncodeResult, EncodeStats
 from wwise_wem.model import PcmBuffer
@@ -22,9 +22,8 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
         captured = []
 
         class FakeEncoder:
-            def __init__(self, profile, *, _container=None):
+            def __init__(self, profile):
                 captured.append(profile)
-                self.container = _container
 
             def encode_pcm(self, value):
                 self.pcm = value
@@ -41,12 +40,12 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
             ) as load,
             patch("wwise_wem.application.encoder.Encoder", FakeEncoder),
         ):
-            encoded, stats = encode_wav_to_wem("input.wav", profile="test-profile")
+            result = encode_wav("input.wav", profile="test-profile")
 
         load.assert_called_once_with("test-profile")
         self.assertEqual(captured, [selected])
-        self.assertEqual(encoded, b"wem")
-        self.assertEqual(stats["metadata_source"], f"profile:{selected.name}")
+        self.assertEqual(result.data, b"wem")
+        self.assertEqual(result.stats.metadata_source, f"profile:{selected.name}")
 
     def test_manifest_failure_precedes_setup_and_analysis(self):
         profile = load_wem_profile("wwise2013-6ch-44100")

@@ -83,7 +83,7 @@ class CliTests(unittest.TestCase):
 
             self.assertEqual(output.read_bytes(), result.data)
         encode.assert_called_once_with(
-            Path("input.wav"), None, profile="wwise2013-6ch-44100"
+            Path("input.wav"), profile="wwise2013-6ch-44100"
         )
         printed.assert_called_once()
         label, values = printed.call_args.args

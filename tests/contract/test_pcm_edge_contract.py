@@ -9,8 +9,9 @@ import unittest
 import wave
 from pathlib import Path
 
+from wwise_wem import encode_wav
 from wwise_wem_reference.container.wem import load_wem_parts_bytes
-from wwise_wem.application.compat import encode_wav_to_wem, read_pcm16_wav
+from wwise_wem.application.compat import read_pcm16_wav
 from wwise_wem.model import PcmBuffer
 
 
@@ -66,11 +67,11 @@ class PcmLengthEncodeContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls._directory = tempfile.TemporaryDirectory()
-        cls.results: dict[int, tuple[bytes, dict[str, int | str]]] = {}
+        cls.results: dict[int, object] = {}
         for frame_count in cls.EXPECTED:
             path = Path(cls._directory.name) / f"edge-{frame_count}.wav"
             _write_pcm16(path, frame_count)
-            cls.results[frame_count] = encode_wav_to_wem(path)
+            cls.results[frame_count] = encode_wav(path)
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -79,16 +80,17 @@ class PcmLengthEncodeContractTests(unittest.TestCase):
     def test_frame_boundaries_lock_modes_packet_counts_bytes_and_sha(self) -> None:
         for frame_count, expected in self.EXPECTED.items():
             with self.subTest(frame_count=frame_count):
-                encoded, stats = self.results[frame_count]
-                self.assertEqual(stats["pcm_frames"], frame_count)
-                self.assertEqual(stats["channels"], CHANNELS)
-                self.assertEqual(stats["metadata_source"], "profile:wwise2013-6ch-44100")
+                result = self.results[frame_count]
+                stats = result.stats
+                self.assertEqual(stats.pcm_frames, frame_count)
+                self.assertEqual(stats.channels, CHANNELS)
+                self.assertEqual(stats.metadata_source, "profile:wwise2013-6ch-44100")
                 for field in ("audio_packets", "short_packets", "long_packets", "bytes"):
-                    self.assertEqual(stats[field], expected[field])
-                self.assertEqual(len(encoded), expected["bytes"])
-                self.assertEqual(hashlib.sha256(encoded).hexdigest(), expected["sha256"])
+                    self.assertEqual(getattr(stats, field), expected[field])
+                self.assertEqual(len(result.data), expected["bytes"])
+                self.assertEqual(hashlib.sha256(result.data).hexdigest(), expected["sha256"])
 
-                audio_packets = load_wem_parts_bytes(encoded)["packets"][1:]
+                audio_packets = load_wem_parts_bytes(result.data)["packets"][1:]
                 modes = tuple(packet[0] & 1 for packet in audio_packets)
                 self.assertEqual(len(modes), expected["audio_packets"])
                 self.assertEqual(modes, (0,) * expected["short_packets"] + (1,))

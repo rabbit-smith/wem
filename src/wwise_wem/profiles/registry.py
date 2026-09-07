@@ -96,30 +96,6 @@ class ProfileRegistry:
         mapping = self._by_name if isinstance(identity, str) else self._by_key
         return mapping.get(identity, default)  # type: ignore[arg-type, return-value]
 
-    def resolve_setup(
-        self,
-        channels: int,
-        sample_rate: int,
-        setup_sha256: str,
-    ) -> EncoderProfile:
-        """Resolve a complete profile identity carried by a template setup."""
-        geometry = (int(channels), int(sample_rate))
-        matches = self._by_geometry.get(geometry, ())
-        selected = [
-            profile
-            for profile in matches
-            if profile.setup_sha256 == str(setup_sha256).lower()
-        ]
-        if len(selected) == 1:
-            return selected[0]
-        installed = ", ".join(
-            f"{profile.name}({profile.setup_sha256})" for profile in matches
-        ) or "none"
-        raise ValueError(
-            f"template setup SHA-256 {setup_sha256} has no installed profile "
-            f"for {geometry[0]}ch/{geometry[1]}Hz; installed: {installed}"
-        )
-
     def list(self) -> tuple[EncoderProfile, ...]:
         return tuple(self._by_name[name] for name in sorted(self._by_name))
 

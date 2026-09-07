@@ -105,13 +105,11 @@ class Encoder:
     def encode_pcm(self, pcm: PcmBuffer) -> EncodeResult:
         """Encode one independent PCM buffer into a complete Wwise WEM.
 
-        Engine dispatch (see ``wwise_wem._engine``): template containers
-        always use the pure-Python reference implementation (the native
-        one-shot API is profile-container only); profile containers use the
-        native kernel when the resolved engine is native and the PCM values
-        sit in the signed-16 sample domain, raising ``ValueError`` otherwise
-        under an explicit ``native`` pin while ``auto`` routes such buffers
-        to the pure-Python reference implementation.
+        Engine dispatch (see ``wwise_wem._engine``): the native kernel is
+        used when the resolved engine is native and the PCM values sit in
+        the signed-16 sample domain, raising ``ValueError`` otherwise under
+        an explicit ``native`` pin while ``auto`` routes such buffers to the
+        pure-Python reference implementation.
         """
         if not isinstance(pcm, PcmBuffer):
             raise TypeError("pcm must be PcmBuffer")

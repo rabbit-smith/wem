@@ -116,4 +116,4 @@ Structural changes must preserve:
 - the golden WEM byte stream and SHA-256;
 - installed-wheel and ZIP-import resource verification.
 
-Migration history is tracked in [`refactor-plan.md`](refactor-plan.md). Domain terminology is defined in [`domain-model.md`](domain-model.md).
+Domain terminology is defined in [`domain-model.md`](domain-model.md); migration history lives in the git log.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Legacy compatibility façade for WAV-to-WEM encoding."""
+"""Compatibility helpers for the historical PCM input domain."""
 
 from __future__ import annotations
 
@@ -28,23 +28,3 @@ def read_pcm16_wav(path: Path) -> tuple[int, int, list[list[float]]]:
         for channel in range(channels)
     ]
     return sample_rate, frames, pcm
-
-
-def read_wav_geometry(path: Path) -> tuple[int, int]:
-    """Compatibility import for the typed WAV header adapter."""
-    from ..adapters.wav import read_wav_geometry as _read_wav_geometry
-
-    return _read_wav_geometry(path)
-
-
-def encode_wav_to_wem(
-    wav: Path,
-    template: Path | None = None,
-    *,
-    profile: str | None = None,
-) -> tuple[bytes, dict[str, int | str]]:
-    """Adapt the typed public result to the historical tuple shape."""
-    from ..api import encode_wav
-
-    return encode_wav(wav, template, profile=profile).to_legacy_tuple()
-

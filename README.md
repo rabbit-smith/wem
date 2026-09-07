@@ -38,12 +38,6 @@ wwise-wem input.wav \
   --output output.wem
 ```
 
-The template metadata compatibility path remains available:
-
-```bash
-wwise-wem input.wav --template reference.wem --output output.wem
-```
-
 ### Engine availability
 
 The facade is native-first: when the native kernel (`_wwise_wem_native`,
@@ -69,8 +63,9 @@ print(result.stats.audio_packets, result.stats.bytes)
 ```
 
 For PCM already loaded in memory, construct `Encoder(profile)` and call
-`encode_pcm(PcmBuffer)`. Inputs need at least 4096 PCM frames. The
-`encode_wav_to_wem` tuple API remains as a compatibility adapter.
+`encode_pcm(PcmBuffer)`. Inputs need at least 4096 PCM frames.
+`read_pcm16_wav(path)` remains as a compatibility helper that reads a WAV
+into the historical `(rate, frames, channel_rows)` float domain.
 
 ## Acceptance result
 

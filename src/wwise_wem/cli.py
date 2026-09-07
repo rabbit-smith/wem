@@ -15,9 +15,7 @@ def main() -> None:
         description="Encode signed-16 PCM WAV to a Wwise 2013.2 Vorbis WEM."
     )
     parser.add_argument("wav", type=Path)
-    source = parser.add_mutually_exclusive_group()
-    source.add_argument("--template", type=Path)
-    source.add_argument("--profile", choices=sorted(PROFILES))
+    parser.add_argument("--profile", choices=sorted(PROFILES))
     parser.add_argument("--wwise-version", choices=("2013",), default="2013")
     parser.add_argument("--channels", type=int, help="assert input channel count")
     parser.add_argument("--sample-rate", type=int, help="assert input sample rate")
@@ -31,7 +29,7 @@ def main() -> None:
     if args.sample_rate is not None and args.sample_rate != wav_rate:
         parser.error(f"--sample-rate={args.sample_rate} differs from WAV ({wav_rate})")
 
-    result = encode_wav(args.wav, args.template, profile=args.profile)
+    result = encode_wav(args.wav, profile=args.profile)
     digest = result.sha256
     if args.expect_sha256 and digest.lower() != args.expect_sha256.lower():
         raise AssertionError(f"WEM SHA-256 differs: {digest} != {args.expect_sha256}")

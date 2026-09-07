@@ -24,6 +24,7 @@ from wwise_wem import (
     WwiseVorbisProfile,
     encode_wav,
     load_wem_profile,
+    read_pcm16_wav,
     resolve_wem_profile,
 )
 ```
@@ -48,25 +49,21 @@ mutable analysis state into the encoder.
 
 The typed direction for new integrations is `Encoder.encode_pcm()` for
 in-memory samples and `encode_wav()` for file input. Both return
-`EncodeResult`; the tuple-returning functions below remain compatibility
-adapters.
+`EncodeResult`.
 
 ### Encode a WAV
 
 ```python
 result = encode_wav(
     wav_path,
-    template=None,
     profile=None,
 )
 ```
 
 - `wav_path` is a `pathlib.Path` to an uncompressed signed-16 PCM WAV.
-- With neither `template` nor `profile`, the encoder resolves a profile from
-  the WAV channel count and sample rate.
+- With no `profile`, the encoder resolves a profile from the WAV channel
+  count and sample rate.
 - `profile="wwise2013-6ch-44100"` selects the current profile explicitly.
-- `template=path` enables the compatibility metadata adapter described below.
-- `template` and `profile` are mutually exclusive.
 - The return value is an immutable `EncodeResult`.
 
 `result.data` contains the completed WEM bytes, `result.stats` is an
@@ -111,18 +108,12 @@ transform state remain outside the public contract.
 
 ### Legacy Python compatibility
 
-The previous tuple API remains available:
-
-```python
-from wwise_wem import encode_wav_to_wem, read_pcm16_wav
-
-encoded, stats = encode_wav_to_wem(wav_path, template=None, profile=None)
-```
-
-`stats` is the legacy dictionary form of `EncodeStats`. `Encoder` and these
-compatibility functions are loaded lazily. Importing `wwise_wem` alone
-does not import `application.encoder`, transform, floor, residue or
-analysis-session implementation modules.
+`read_pcm16_wav(path)` remains available as a compatibility helper that
+returns the historical ``(rate, frames, channel_rows)`` tuple in the
+``value / 32768.0`` float domain. It is a read-only input adapter, not an
+encoder entry point. `Encoder` and this helper are loaded lazily. Importing
+`wwise_wem` alone does not import `application.encoder`, transform, floor,
+residue or analysis-session implementation modules.
 
 ### Resolve profiles
 
@@ -151,32 +142,6 @@ count and sample rate; callers can then resolve with a complete `ProfileKey`.
 The representation of fmt metadata, table paths, registries and packaged
 resources is an implementation detail.
 
-## Template compatibility contract
-
-A template is a container-metadata adapter, not an encoder profile. It may
-provide the RIFF byte order, Wwise Vorbis `fmt` values, seek-table bytes and
-extra chunks that precede `data`. Per-file size, offset, packet-maximum and PCM
-frame fields are recomputed for the newly encoded stream.
-
-The template setup packet is used to identify and validate an installed exact
-profile. The encoder first resolves the template's channel-count/sample-rate
-geometry, then requires the setup packet to match that profile byte-for-byte
-and by SHA-256. Supplying a WEM with the right geometry but a changed or unknown
-setup packet does not create a new profile and does not select approximate
-tables. Once validated, analysis, mode selection, floor and residue generation
-use the installed profile implementation; existing audio packets in the
-template are not encoder input.
-
-Consequently, the compatibility path accepts the current reference WEM because
-its 6-channel/44.1-kHz setup is the installed
-`wwise2013-6ch-44100` setup. `result.stats.metadata_source` (or
-`stats["metadata_source"]` through the legacy API) retains the `template:PATH`
-label so callers can distinguish which metadata path they selected.
-
-Automatic and named built-in profile selection are template-free. They read
-the packaged profile setup resource and constants, and do not open or inspect a
-reference WEM.
-
 ## Supported CLI
 
 The command remains a single encode command in 0.x:
@@ -192,16 +157,14 @@ Supported options are:
 |---|---|
 | `--output PATH` | Required destination WEM. |
 | `--profile wwise2013-6ch-44100` | Explicit built-in profile. |
-| `--template PATH` | Compatibility metadata/setup source. |
 | `--wwise-version 2013` | Assert the supported Wwise generation. |
 | `--channels N` | Assert the WAV channel count before encoding. |
 | `--sample-rate HZ` | Assert the WAV sample rate before encoding. |
 | `--expect-sha256 HASH` | Fail if the completed WEM digest differs. |
 | `--help` | Print usage and the supported options. |
 
-`--template` and `--profile` are mutually exclusive. If both are omitted,
-profile selection is automatic. A failed header assertion does not create
-the output file.
+If `--profile` is omitted, profile selection is automatic. A failed header
+assertion does not create the output file.
 
 ## Errors
 
@@ -211,12 +174,7 @@ including:
 - unknown profile name;
 - unsupported channel-count/sample-rate geometry;
 - a WAV that is not uncompressed signed-16 PCM;
-- simultaneous template and profile selection;
-- a template that is not a Wwise Vorbis WEM with a setup packet;
-- WAV geometry that differs from selected template/profile metadata;
-- template geometry for which no exact profile is installed;
-- a template setup packet whose bytes or SHA-256 differ from the installed
-  profile setup for that geometry;
+- WAV geometry that differs from the selected profile metadata;
 - a packaged built-in setup resource whose checksum differs from its profile
   declaration.
 
@@ -271,12 +229,6 @@ Engine-specific input rules:
   `WWISE_WEM_ENGINE=native`, an out-of-domain sample raises `ValueError`.
   With `auto`, such a buffer is routed to the pure-Python implementation
   instead.
-- The compatibility template path (`template=PATH` / `--template`) always
-  uses the pure-Python reference implementation: it carries template-provided
-  RIFF container metadata (byte order, fmt values, seek-table bytes, extra
-  chunks) that the native one-shot API does not accept. It also requires the
-  development-tree reference package; a wheel-only installation without the
-  native kernel reports a clear `ImportError` for template input.
 
 `load_wem_profile`, `resolve_wem_profile`, and `ProfileRegistry` are
 metadata-only paths and always run in pure Python; they never touch the

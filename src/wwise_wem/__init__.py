@@ -24,7 +24,7 @@ from .profiles import (
 )
 
 
-_LEGACY_EXPORTS = {"encode_wav_to_wem", "read_pcm16_wav"}
+_LEGACY_EXPORTS = {"read_pcm16_wav"}
 _LAZY_EXPORTS = {*_LEGACY_EXPORTS, "Encoder"}
 
 
@@ -60,7 +60,6 @@ __all__ = [
     "SetupConfig",
     "WwiseVorbisProfile",
     "encode_wav",
-    "encode_wav_to_wem",
     "load_wem_profile",
     "read_pcm16_wav",
     "resolve_wem_profile",

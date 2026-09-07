@@ -92,12 +92,6 @@ class ProfileRegistryTests(unittest.TestCase):
         self.assertIs(PROFILE_REGISTRY.get(ProfileKey(6, 44100)), profile)
         with self.assertRaises(TypeError):
             PROFILES["other"] = profile  # type: ignore[index]
-        self.assertIs(
-            PROFILE_REGISTRY.resolve_setup(6, 44100, profile.setup_sha256),
-            profile,
-        )
-        with self.assertRaisesRegex(ValueError, "setup SHA-256.*6ch/44100Hz"):
-            PROFILE_REGISTRY.resolve_setup(6, 44100, "0" * 64)
 
     def test_registry_copies_input_and_rejects_duplicate_identity(self) -> None:
         profile = load_wem_profile("wwise2013-6ch-44100")

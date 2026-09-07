@@ -2,8 +2,8 @@
 
 The wheel ships only this facade; the pure-Python reference implementation
 (``wwise_wem_reference``) lives in the development tree.  Every facade path
-that needs reference code (the pure-Python encode pipeline, template
-container parsing) resolves it through :func:`reference_module` so an
+that needs reference code (the pure-Python encode pipeline) resolves it
+through :func:`reference_module` so an
 installed facade without the reference tree fails with one clear
 ``ImportError`` instead of a half-built run.
 """

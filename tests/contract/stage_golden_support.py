@@ -35,7 +35,7 @@ from typing import Any, Iterator
 import wwise_wem._engine as _facade_engine
 import wwise_wem_reference.python_engine as reference_engine_module
 from wwise_wem_reference.analysis.session import AnalysisSession
-from wwise_wem.application.compat import encode_wav_to_wem
+from wwise_wem import encode_wav
 from wwise_wem.application.encoder import Encoder
 from wwise_wem_reference.container.wem import load_wem_parts_bytes
 
@@ -382,7 +382,7 @@ def build_stage_golden(
     os.environ[_facade_engine.ENGINE_ENV_VAR] = "python"
     try:
         with stage_capture() as capture:
-            wem_bytes, stats = encode_wav_to_wem(wav, profile=profile)
+            result = encode_wav(wav, profile=profile)
     finally:
         if previous_engine is None:
             os.environ.pop(_facade_engine.ENGINE_ENV_VAR, None)
@@ -390,7 +390,7 @@ def build_stage_golden(
             os.environ[_facade_engine.ENGINE_ENV_VAR] = previous_engine
 
     frames = capture.frame_rows
-    if len(frames) != stats["audio_packets"]:
+    if len(frames) != result.stats.audio_packets:
         raise RuntimeError("stage capture missed analysis frames")
     for field in (
         "pcm_geometry",
