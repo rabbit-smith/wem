@@ -41,6 +41,11 @@ capture tests import. Native-kernel tests skip (with an install hint) when
   oracle — treat as source of truth, not cache.
 - `data/stage-golden/transcendental/`: per-site (input bits, output bits)
   records of the live domain; regenerate via `scripts/record_tmath.py`.
+- `data/perf-baseline.json`: the release-build fixture-encode performance
+  baseline (median encode-stage ms, cap 150ms, regression factor 1.25)
+  consumed by `scripts/perf_gate.py`; the values are a versioned contract —
+  update only with an explicit decision (`python3 scripts/perf_gate.py
+  --record`), never as incident response to a red gate.
 - Asset budgets: stage-golden total ≤ 20 MB. Growth requires trimming the
   representative-frame rule deliberately (document the rule change here), not
   by silently adding full-stream dumps.

@@ -29,13 +29,23 @@ or CI gates. They must be boring, idempotent, and offline.
   the container byte-identically to `tests/fixtures/reference.wem`, with
   the unknown-digest path returning the enumerated PROFILE_NOT_FOUND error;
   v1 semantics are otherwise pinned by the wem-server integration tests.
-- `wheel_smoke.py` verifies the facade-only wheel inventory against the
-  distribution allowlist, the installed and zip-import resource paths, the
-  clear `ImportError` without the native kernel and without the reference
-  tree, and — when the native kernel is importable in the runner — a
-  byte-exact native encode from the installed wheel; when packaging changes
-  (new data, native artifacts), update it in the same commit — its expected
-  sets are contracts, not constants.
+- `wheel_smoke.py` verifies the single-wheel distribution end-to-end:
+  the facade + native extension inventory against the distribution
+  allowlist, the zip-import and installed metadata paths, and a clean-venv
+  byte-exact encode through the embedded kernel (builds the wheel, so it
+  needs a Rust toolchain); when packaging changes (new data, native
+  artifacts), update it in the same commit — its expected sets are
+  contracts, not constants.
+- `fuzz_diff_parity.py` is the deterministic oracle-vs-native differential
+  gate: a fixed seed set of random PCM streams (random lengths, random
+  frame-aligned chunk splits) must encode byte-identically through the
+  pure-Python oracle and the native streaming kernel; `--pr` is the small
+  PR-budget run, `--full` the nightly-sized run. Seeds are part of the
+  contract; never randomize them at run time.
+- `perf_gate.py` is the fixture performance gate on the release build:
+  the encode-stage median must stay under the 150ms cap and within 25% of
+  the recorded baseline (`tests/data/perf-baseline.json`); re-recording the
+  baseline is a deliberate decision, not an incident response.
 - Naming: verb-first (`record_`, `generate_`, `emit_`, `verify_`); one script,
   one artifact family; shared helpers belong in `tests/*_support.py` when the
   consumer is a contract.

@@ -12,11 +12,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: python -m pip install -e ".[dev]"
+      # Type/lint tooling only. The package itself is NOT installed: its
+      # build backend is maturin, and pip-installing it would pull a Rust
+      # toolchain into a Python-only job.
+      - run: python -m pip install "ruff>=0.6" "mypy>=1.11"
       - run: ruff check src reference tests scripts
       - run: mypy src reference
 
   regression:
+    # Pure-Python regression matrix: facade + reference oracle, no native
+    # extension and no wheel build. Native-dependent tests self-skip with
+    # install hints (the documented skip semantics); the wheel and native
+    # gates run in the `native` job.
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
@@ -27,14 +34,43 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install -e ".[dev]"
-        env:
-          PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/reference
-      - name: full suite
+      # dev extras without the package itself (the package imports from
+      # PYTHONPATH; pip-installing it would invoke the maturin Rust build)
+      - run: python -m pip install "grpcio>=1.60" "grpcio-tools>=1.60"
+      - name: full suite (pure Python; native tests skip)
         run: python -m unittest discover -s tests -v
         env:
           PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/reference
-      - run: python scripts/wheel_smoke.py
+
+  native:
+    # Single-wheel distribution gate, ubuntu-only by deliberate choice:
+    # the abi3 wheel is platform-independent across Python versions, and
+    # a three-platform native matrix would triple the Rust build cost for
+    # marginal coverage. Wheel inventory, clean-venv byte-exact encode,
+    # and the full public API suite run on the native kernel here.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: editable install (maturin builds the embedded kernel)
+        run: python -m pip install -e ".[dev]"
+      - name: full suite on the native kernel
+        run: python -m unittest discover -s tests -v
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/reference
+      - name: native binding smoke (streaming + one-shot, byte-exact)
+        run: python scripts/native_smoke.py
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/reference
+      - name: "wheel gate (single wheel: facade + native; clean-venv encode)"
+        run: python scripts/wheel_smoke.py
+      - name: differential parity PR gate (golden + 10 cases, < 1 minute)
+        run: python scripts/fuzz_diff_parity.py --pr
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/reference
 
   server-interop:
     runs-on: ubuntu-latest
@@ -44,7 +80,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: python -m pip install -e ".[dev]"
+      # gRPC client tooling only; the script resolves the package paths
+      # itself via PYTHONPATH.
+      - run: python -m pip install "grpcio>=1.60" "grpcio-tools>=1.60"
       - run: cd crates && cargo build --release -p wem-server
       - name: wwise.v1 interop smoke (Python client vs Rust wem-server)
         run: python scripts/interop_grpc_smoke.py --server-bin crates/target/release/wem-server
