@@ -16,9 +16,10 @@ from types import ModuleType
 _REFERENCE_MISSING_ERROR = (
     "the pure-Python reference implementation (wwise_wem_reference) is not "
     "importable in this environment; this copy of the package ships only "
-    "the facade, so encoding requires the native kernel _wwise_wem_native "
-    "(build it with `cd crates/wem-python && maturin develop`, or install a "
-    "distribution that ships the native extension)"
+    "the facade, so encoding requires the native kernel wwise_wem._native "
+    "(install a distribution that ships the native extension, e.g. "
+    "`pip install .` built with the maturin backend, or run from a "
+    "development tree with the extension built via maturin)"
 )
 
 

@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
-"""Build the wheel and verify the distribution facade outside the repo.
+"""Build the single wheel and verify the distribution end-to-end.
 
-The wheel ships only the native-first facade, its DTOs, and the profile
-data; the reference implementation tree is a development-tree artifact and
-must be absent from the package.  This script verifies, from installed and
-zip-import targets:
+The wheel ships the native-first facade and its abi3 kernel together
+(``wwise_wem._native``, built from ``crates/wem-python`` by the maturin
+build backend); the reference implementation tree is a development-tree
+artifact and must be absent from the package.  This script verifies:
 
-- the wheel inventory matches the distribution allowlist exactly;
+- the wheel inventory matches the distribution allowlist exactly
+  (modules + resources + native extension artifact);
+- the wheel carries no reference-tree or forbidden paths/content;
 - the package root imports, exports its exact supported surface, and keeps
-  the profile metadata path (bundle, setup packet) fully functional;
-- without the native kernel and without the reference tree, an encode call
-  fails with a clear ImportError instead of running a half-built path;
-- when the native kernel is importable in the runner environment, the
-  installed facade encodes the golden input byte-exactly through it.
+  the profile metadata path (bundle, setup packet) fully functional, both
+  from the installed wheel and a zip-import target;
+- in a clean venv (no development tree on the path), the installed facade
+  encodes the golden input byte-exactly through the native kernel and the
+  reference package is not importable there.
+
+Building the wheel requires a Rust toolchain (the maturin backend invokes
+cargo); a missing one fails this smoke with an install hint.
 """
 from __future__ import annotations
 
@@ -28,17 +33,28 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWLIST = ROOT / "tests" / "contract" / "distribution_allowlist.json"
-GOLDEN_SHA256 = (
-    "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247"
-)
+GOLDEN_INPUT = ROOT / "tests" / "fixtures" / "input.wav"
+GOLDEN_REFERENCE = ROOT / "tests" / "fixtures" / "reference.wem"
 
 
 def _distribution_contract() -> dict[str, object]:
     return json.loads(ALLOWLIST.read_text(encoding="utf-8"))
 
 
+def _expected_native_artifacts(contract: dict[str, object]) -> list[str]:
+    """Platform artifact names for the allowlisted native extensions."""
+    extension = ".pyd" if os.name == "nt" else ".so"
+    return [
+        f"{module.replace('.', '/')}.abi3{extension}"
+        for module in contract["native_extensions"]
+    ]
+
+
 def _verify_wheel_contents(wheel: Path, contract: dict[str, object]) -> None:
-    expected = sorted([*contract["modules"], *contract["resources"]])
+    expected = sorted(
+        [*contract["modules"], *contract["resources"], *
+         _expected_native_artifacts(contract)]
+    )
     with zipfile.ZipFile(wheel) as archive:
         actual = sorted(
             name
@@ -55,6 +71,8 @@ def _verify_wheel_contents(wheel: Path, contract: dict[str, object]) -> None:
             if name.endswith((".py", ".json"))
             and any(marker in archive.read(name).lower() for marker in content_markers)
         ]
+    if any(name.startswith("wwise_wem_reference") for name in actual):
+        raise RuntimeError("reference tree leaked into the wheel")
     if actual != expected:
         missing = sorted(set(expected) - set(actual))
         unexpected = sorted(set(actual) - set(expected))
@@ -72,6 +90,12 @@ def _verify_wheel_contents(wheel: Path, contract: dict[str, object]) -> None:
         raise RuntimeError(f"forbidden wheel paths: {violations}")
     if content_violations:
         raise RuntimeError(f"forbidden wheel content: {content_violations}")
+    native = _expected_native_artifacts(contract)
+    if not any(name in actual for name in native):
+        raise RuntimeError(
+            f"wheel does not carry the native extension {native}; "
+            "the single wheel must embed its engine"
+        )
 
 
 def _facade_metadata_smoke(contract: dict[str, object]) -> str:
@@ -95,47 +119,22 @@ def _facade_metadata_smoke(contract: dict[str, object]) -> str:
     )
 
 
-def _no_kernel_no_reference_smoke() -> str:
-    return """
-import sys
-
-class _Blocker:
-    def find_spec(self, name, path=None, target=None):
-        if name.startswith("_wwise_wem_native"):
-            raise ImportError("native kernel blocked for this smoke")
-        return None
-
-sys.meta_path.insert(0, _Blocker())
-import wwise_wem
-try:
-    import wwise_wem_reference
-    raise SystemExit("reference tree leaked into the distribution")
-except ImportError:
-    pass
-from wwise_wem import Encoder, load_wem_profile
-from wwise_wem.model import PcmBuffer
-profile = load_wem_profile("wwise2013-6ch-44100")
-pcm = PcmBuffer(44100, tuple(tuple(0.0 for _ in range(4096)) for _ in range(6)))
-try:
-    Encoder(profile).encode_pcm(pcm)
-    raise SystemExit("expected ImportError without kernel or reference tree")
-except ImportError as error:
-    message = str(error)
-    assert "_wwise_wem_native" in message, message
-    print("import-error-ok")
-"""
-
-
-def _native_facade_smoke() -> str:
+def _clean_venv_native_smoke() -> str:
+    """Installed facade must encode byte-exactly through the embedded kernel."""
     return (
-        "import hashlib; "
-        "import sys; "
-        "import _wwise_wem_native; "
-        "from wwise_wem import encode_wav; "
-        "result=encode_wav(sys.argv[1]); "
-        f"assert result.sha256=={GOLDEN_SHA256!r}, result.sha256; "
-        "assert result.stats.engine=='native'; "
-        "print('native-encode-ok')"
+        "import hashlib\n"
+        "import sys\n"
+        "from wwise_wem import encode_wav, _engine\n"
+        "assert _engine.active_engine() == 'native', _engine.active_engine()\n"
+        "result = encode_wav(sys.argv[1])\n"
+        "ref = hashlib.sha256(open(sys.argv[2], 'rb').read()).hexdigest()\n"
+        "assert result.sha256 == ref, (result.sha256, ref)\n"
+        "try:\n"
+        "    import wwise_wem_reference\n"
+        "except ImportError:\n"
+        "    print('native-encode-ok')\n"
+        "else:\n"
+        "    raise SystemExit('reference tree importable from clean install')\n"
     )
 
 
@@ -144,115 +143,115 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="wwise2013-wheel-") as directory:
         work = Path(directory)
         wheels = work / "wheels"
-        installed = work / "installed"
         source = work / "source"
         wheels.mkdir()
-        installed.mkdir()
+        # A stale development-tree .so must not ride into the wheel.
         shutil.copytree(
             ROOT,
             source,
             ignore=shutil.ignore_patterns(
-                ".git", "build", "dist", "*.egg-info", "__pycache__", "*.pyc"
+                ".git", ".venv", "venv", "build", "dist", "crates/target",
+                "*.egg-info", "__pycache__", "*.pyc", "*.so",
+                "*.dylib", "*.pyd", "*.whl",
             ),
         )
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "wheel",
-                str(source),
-                "--no-deps",
-                "--no-cache-dir",
-                "--wheel-dir",
-                str(wheels),
-            ],
-            check=True,
-        )
+        try:
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "wheel",
+                    str(source),
+                    "--no-deps",
+                    "--no-cache-dir",
+                    "--wheel-dir",
+                    str(wheels),
+                ],
+                check=True,
+            )
+        except subprocess.CalledProcessError as error:
+            raise RuntimeError(
+                "wheel build failed; the maturin backend needs a Rust "
+                "toolchain (cargo) on PATH; see AGENTS.md for the layout"
+            ) from error
         wheel = next(wheels.glob("wwise_wem-*.whl"))
         _verify_wheel_contents(wheel, contract)
+
+        # --- zip-import metadata path (pure Python subset) ---------------
+        environment = dict(os.environ)
+        environment["PYTHONPATH"] = str(wheel)
+        result = subprocess.run(
+            [sys.executable, "-c", _facade_metadata_smoke(contract)],
+            cwd=work,
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode:
+            raise RuntimeError(
+                f"zip facade metadata smoke failed:\n{result.stderr}"
+            )
+
+        # --- clean-venv end-to-end path (facade + embedded kernel) -------
+        venv = work / "venv"
+        subprocess.run(
+            [sys.executable, "-m", "venv", str(venv)],
+            check=True,
+        )
+        venv_python = (
+            venv / "Scripts" / "python.exe"
+            if os.name == "nt"
+            else venv / "bin" / "python"
+        )
         subprocess.run(
             [
-                sys.executable,
+                str(venv_python),
                 "-m",
                 "pip",
                 "install",
                 "--quiet",
                 "--no-deps",
-                "--target",
-                str(installed),
                 str(wheel),
             ],
             check=True,
         )
-
-        outputs: list[str] = []
-        for label, python_path in (("installed", installed), ("zip", wheel)):
-            environment = dict(os.environ)
-            environment["PYTHONPATH"] = str(python_path)
-
-            result = subprocess.run(
-                [sys.executable, "-c", _facade_metadata_smoke(contract)],
-                cwd=work,
-                env=environment,
-                capture_output=True,
-                text=True,
+        result = subprocess.run(
+            [str(venv_python), "-c", _facade_metadata_smoke(contract)],
+            cwd=work,
+            env=os.environ.copy(),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode:
+            raise RuntimeError(
+                f"installed facade metadata smoke failed:\n{result.stderr}"
             )
-            if result.returncode:
-                raise RuntimeError(
-                    f"{label} facade metadata smoke failed:\n{result.stderr}"
-                )
-            outputs.append(f"{label}=metadata:{result.stdout.strip()}")
-
-            result = subprocess.run(
-                [sys.executable, "-c", _no_kernel_no_reference_smoke()],
-                cwd=work,
-                env=environment,
-                capture_output=True,
-                text=True,
+        result = subprocess.run(
+            [
+                str(venv_python),
+                "-c",
+                _clean_venv_native_smoke(),
+                str(GOLDEN_INPUT),
+                str(GOLDEN_REFERENCE),
+            ],
+            cwd=work,
+            env=os.environ.copy(),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode or "native-encode-ok" not in result.stdout:
+            raise RuntimeError(
+                f"clean-venv native encode smoke failed "
+                f"(rc={result.returncode}):\n{result.stdout}{result.stderr}"
             )
-            if result.returncode or "import-error-ok" not in result.stdout:
-                raise RuntimeError(
-                    f"{label} no-kernel encode smoke failed "
-                    f"(rc={result.returncode}):\n{result.stdout}{result.stderr}"
-                )
-            outputs.append(f"{label}=no-kernel:import-error-ok")
-
-        if _native_available():
-            environment = dict(os.environ)
-            environment["PYTHONPATH"] = str(installed)
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-c",
-                    _native_facade_smoke(),
-                    str(ROOT / "tests" / "fixtures" / "input.wav"),
-                ],
-                cwd=work,
-                env=environment,
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode or "native-encode-ok" not in result.stdout:
-                raise RuntimeError(
-                    "installed native facade smoke failed "
-                    f"(rc={result.returncode}):\n{result.stdout}{result.stderr}"
-                )
-            outputs.append("installed=native:native-encode-ok")
-        else:
-            outputs.append("installed=native:skipped(no kernel)")
-
-        print("wheel smoke OK", *outputs)
-
-
-def _native_available() -> bool:
-    result = subprocess.run(
-        [sys.executable, "-c", "import _wwise_wem_native"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0
+        print(
+            "wheel smoke OK",
+            f"wheel={wheel.name}",
+            "zip=metadata-ok",
+            "installed=metadata:ok",
+            "clean-venv=native-encode-ok",
+        )
 
 
 if __name__ == "__main__":

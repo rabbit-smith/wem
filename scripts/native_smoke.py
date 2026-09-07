@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""P3-1 smoke test for the PyO3 abi3 binding `_wwise_wem_native`.
+"""P3-1 smoke test for the PyO3 abi3 binding `wwise_wem._native`.
 
 Proves, from the Python side:
   1. the streaming path (StreamSession: start -> 5 uneven chunks -> finish)
@@ -60,7 +60,7 @@ def sha256_hex(data: bytes) -> str:
 
 
 def main() -> int:
-    import _wwise_wem_native as native
+    import wwise_wem._native as native
 
     print(f"module: {native.__file__}")
 

@@ -12,7 +12,7 @@ than any description; when code and contract disagree, the contract wins.
 | contract | in `make test-fast` (test_* files) + `make frame-contract`, `make stage-contract` | pipeline invariants |
 | golden | `make golden` | whole-file byte identity (the digest) |
 | proto | `make proto-contract proto-smoke PY=…` | IDL structure + streaming byte identity |
-| wheel | `make wheel-smoke` | installed + zip-import resource integrity |
+| wheel | `make wheel-smoke` | single-wheel (facade + native extension) inventory, clean-venv byte-exact encode |
 
 Modules without `test_` prefix (e.g. `frame_pipeline_contract.py`,
 `stage_pipeline_contract.py`) are intentionally not discovered; they run only
@@ -26,7 +26,7 @@ All test targets run with `PYTHONPATH=src:reference` (the Makefile sets it):
 `src` provides the distribution facade, `reference/` provides the pure-Python
 reference implementation that the oracle pipeline, dual-engine parity, and
 capture tests import. Native-kernel tests skip (with an install hint) when
-`_wwise_wem_native` is not importable; every other test must pass without it.
+`wwise_wem._native` is not importable; every other test must pass without it.
 
 ## Versioned asset rules (`tests/data/`, `tests/fixtures/`)
 

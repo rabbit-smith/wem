@@ -23,8 +23,10 @@ CARGO_TARGET = ROOT / "crates" / "target"
 
 
 def _is_native_artifact(path: Path) -> bool:
+    # Dev-tree extension artifacts: maturin develop drops
+    # `wwise_wem/_native.abi3.so` next to the sources.
     return path.name.endswith(".abi3.so") or (
-        path.name.startswith("_wwise_wem_native")
+        path.name.startswith("_native")
         and path.suffix in {".so", ".dylib", ".pyd"}
     )
 

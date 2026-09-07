@@ -22,9 +22,13 @@ from wwise_wem import (
     ProfileRegistry,
     SetupConfig,
     WwiseVorbisProfile,
+    encode_pcm_wav,
+    encode_raw_pcm,
     encode_wav,
     load_wem_profile,
     read_pcm16_wav,
+    read_pcm_wav,
+    read_raw_pcm,
     resolve_wem_profile,
 )
 ```
@@ -85,6 +89,71 @@ EncodeStats(
 ```
 
 `audio_packets` excludes the setup packet.
+
+### Encode extended PCM inputs
+
+Two additional encoder entries accept PCM beyond the signed-16 golden path.
+Both convert at the adapter boundary, so both engines consume only in-domain
+samples:
+
+```python
+result = encode_pcm_wav(
+    wav_path,
+    profile=None,
+)
+
+result = encode_raw_pcm(
+    data,
+    sample_rate=44100,
+    channels=6,
+    bits_per_sample=24,
+    profile=None,
+)
+```
+
+- `encode_pcm_wav` reads a RIFF/WAVE file in one of the supported formats:
+  format tag 1 (PCM) with 16-bit or 24-bit samples, or format tag 3 (IEEE
+  float) with 32-bit samples. 16-bit files behave exactly like
+  `encode_wav`. The geometry is read from the file; the profile resolution
+  rules are the same.
+- `encode_raw_pcm` reads an unframed little-endian PCM byte string with the
+  full geometry supplied explicitly: `bits_per_sample` is 16 (signed), 24
+  (signed), or 32 (IEEE-754 float32).
+- `read_pcm_wav(path)` and `read_raw_pcm(data, sample_rate=..., channels=..., bits_per_sample=...)`
+  return the same `PcmBuffer` values without encoding, for use with
+  `Encoder.encode_pcm()`. Both are lazy root exports.
+
+Conversion rules (deterministic; pure integer/fixed-point arithmetic with
+explicit saturation, no transcendental calls):
+
+| Source format | Rule |
+|---|---|
+| 16-bit PCM | No conversion; the historical `value / 32768.0` domain is used as-is. |
+| 24-bit signed PCM | Round-to-nearest, ties away from zero: `s >= 0` maps to `(s + 128) >> 8`, `s < 0` to `-((-s + 128) >> 8)`; then saturate to `[-32768, 32767]`. The upper band `s >= 8388480` rounds to 32768 and saturates to 32767; `-8388608` maps exactly to `-32768`. |
+| 32-bit IEEE float | Reject non-finite values (NaN, +/-Inf) with `ValueError`; scale by `* 32768.0`; round-to-nearest, ties away from zero; then saturate to `[-32768, 32767]`. `1.0` saturates to 32767; `-1.0` maps exactly to `-32768`. |
+
+Rejection conditions (all at the adapter boundary, before any encode
+state is created):
+
+| Entry point | Condition | Error |
+|---|---|---|
+| `encode_pcm_wav` / `read_pcm_wav` | Not a RIFF/WAVE container, missing or malformed `fmt`/`data` chunk | `ValueError` |
+| | Bits per sample not a whole byte count, non-positive geometry | `ValueError` |
+| | Format outside the three supported tags/widths | `ValueError` |
+| | Data not aligned to whole frames, or zero frames | `ValueError` |
+| | Non-finite 32-bit float sample | `ValueError` |
+| `encode_raw_pcm` / `read_raw_pcm` | `data` not bytes-like | `TypeError` |
+| | `sample_rate` / `channels` not a positive integer | `TypeError` / `ValueError` |
+| | `bits_per_sample` not one of 16, 24, 32 | `ValueError` |
+| | Byte length not a multiple of `channels * bytes_per_sample` | `ValueError` |
+| | Zero frames, or non-finite 32-bit float sample | `ValueError` |
+| both | Profile geometry mismatch, or fewer than 4096 frames | `ValueError` (encoder rules) |
+
+Converted inputs (24-bit, float32) are deterministic and dual-engine
+consistent: encoding the same bytes always produces the same WEM, and both
+engines produce identical bytes for them. They are **not** promised to be
+bit-exact against Wwise's own import of the same audio: the project's
+bit-exact guarantee covers the signed-16 path only.
 
 ### Typed value models
 
@@ -172,7 +241,12 @@ including:
 
 - unknown profile name;
 - unsupported channel-count/sample-rate geometry;
-- a WAV that is not uncompressed signed-16 PCM;
+- a WAV that is not uncompressed signed-16 PCM (this applies to
+  `encode_wav`, which stays signed-16 only; `encode_pcm_wav` documents its
+  own supported-format rejection above);
+- an unsupported WAV format tag/width (extended entries), non-finite float
+  samples, misaligned or empty raw PCM payloads, malformed raw-PCM geometry
+  (see the rejection table above);
 - WAV geometry that differs from the selected profile metadata;
 - a packaged built-in setup resource whose checksum differs from its profile
   declaration.
@@ -194,22 +268,44 @@ produce identical results:
 These are compatibility gates for refactoring, not general promises that all
 inputs have the same size or packet counts.
 
+The bit-exact guarantee is scoped to signed-16 PCM input. Extended input
+forms (24-bit PCM, 32-bit IEEE-float PCM, and raw PCM in any of the three
+supported depths) are mapped into the signed-16 domain by the documented
+adapter conversion rules above before encoding; those conversions are
+deterministic and engine-consistent, but the project does not promise that
+the resulting WEM bytes match Wwise's own import path for the same audio.
+
+## Open questions
+
+### Reference padding behaviour unverified
+
+Inputs shorter than 4096 frames are rejected explicitly (`ValueError`,
+equivalent to the `INPUT_TOO_SHORT` contract error) on every entry point,
+including the extended entries. How the Wwise reference implementation pads
+such inputs is unverified; no padding behaviour is implemented until an
+official Wwise reference sample for a short input is available. Until then,
+the explicit rejection is the only supported behaviour for short inputs.
+
 ## Engine selection (native kernel / pure-Python reference fallback)
 
 The facade is engine-aware. Byte-producing calls (`Encoder.encode_pcm()`,
-`encode_wav()`, and the CLI) prefer the native kernel
-(`_wwise_wem_native`, built from `crates/wem-python`) when it is importable
-and otherwise run the pure-Python reference implementation. Both engines
-produce byte-identical output; the reference implementation remains the
-reference oracle.
+`encode_wav()`, and the CLI) prefer the native kernel (the in-package
+extension `wwise_wem._native`, built from `crates/wem-python` by the
+maturin build backend) when it is importable and otherwise run the
+pure-Python reference implementation. Both engines produce byte-identical
+output; the reference implementation remains the reference oracle.
 
-The pure-Python reference implementation ships only with the development
-source tree (the `reference/wwise_wem_reference` package, importable when
-`reference/` is on `PYTHONPATH`); it is not part of the distributed wheel.
-An installed copy of the facade without the native kernel raises a clear
-`ImportError` from byte-producing calls explaining how to build or install
-the native kernel, instead of running a partial pipeline. The engine that
-produced a result is reported on `EncodeStats.engine`.
+The wheel is a single distribution: the maturin backend embeds the abi3
+extension (`wwise_wem/_native.abi3.so`, or `.pyd`) inside the package, so a
+plain `pip install` of a wheel built from this repository already ships the
+native engine. The pure-Python reference implementation ships only with the
+development source tree (the `reference/wwise_wem_reference` package,
+importable when `reference/` is on `PYTHONPATH`); it is not part of the
+distributed wheel. An installed copy of the facade without the native
+extension raises a clear `ImportError` from byte-producing calls explaining
+how to install a distribution that carries it, instead of running a partial
+pipeline. The engine that produced a result is reported on
+`EncodeStats.engine`.
 
 The `WWISE_WEM_ENGINE` environment variable pins the choice:
 

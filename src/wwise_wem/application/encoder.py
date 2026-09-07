@@ -1,12 +1,13 @@
 """Deep PCM-to-WEM encoder orchestration.
 
 The :class:`Encoder` is a native-first facade: byte-producing calls run on
-the Rust kernel (``_wwise_wem_native``) when the resolved engine is native
+the Rust kernel (``wwise_wem._native``) when the resolved engine is native
 (see ``wwise_wem._engine`` and ``WWISE_WEM_ENGINE``), and otherwise on the
 pure-Python reference implementation in the development-tree
 ``wwise_wem_reference`` package, which stays the reference oracle.  That
 package is not part of the wheel, so an installed facade without the native
-kernel reports a clear ``ImportError`` instead of running a half-built path.
+extension reports a clear ``ImportError`` instead of running a half-built
+path.
 """
 
 from __future__ import annotations

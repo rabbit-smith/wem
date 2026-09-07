@@ -20,11 +20,20 @@ python3 -m venv .venv
 . .venv/bin/activate
 pip install -e .
 
-# native kernel (preferred engine when importable)
-cd crates/wem-python && maturin develop -F extension-module && cd ../..
-
 wwise-wem input.wav --output output.wem
 ```
+
+The build backend is maturin: an editable install (or any `pip install .`)
+builds the abi3 kernel from `crates/wem-python` and embeds it in the
+package as `wwise_wem._native`, so the native engine is available directly.
+That step needs a Rust toolchain on PATH. From a prebuilt wheel (or, when
+published, from the index) no Rust is needed at all: the single wheel ships
+facade and kernel together.
+
+If you only need the pure-Python reference engine in the development tree,
+skip the native build and keep the repository layout on the path (for
+example `PYTHONPATH=src:reference`, as the Makefile uses), with
+`WWISE_WEM_ENGINE=python` or the auto fallback.
 
 Automatic selection reads the WAV geometry. The same selection can be made
 explicitly:
@@ -40,16 +49,18 @@ wwise-wem input.wav \
 
 ### Engine availability
 
-The facade is native-first: when the native kernel (`_wwise_wem_native`,
+The facade is native-first: when the native kernel (`wwise_wem._native`,
 built from `crates/wem-python`) is importable it encodes; otherwise the
 facade delegates to the pure-Python reference implementation in the
-development tree (`reference/wwise_wem_reference`). Until the maturin
-distribution chain ships the native extension inside the wheel, a plain
-`pip install` of the distributed wheel has no engine at all and byte-producing
-calls raise a clear `ImportError` pointing at the native build. For
-development-tree encoding without the native kernel, keep the repository
-layout on the path (for example `PYTHONPATH=src:reference`, as the Makefile
-uses).
+development tree (`reference/wwise_wem_reference`). A plain `pip install`
+of a wheel built from this repository already carries the native extension
+(the maturin backend embeds it in the wheel), so byte-producing calls work
+out of the box. The pure-Python reference engine ships only with the
+development source tree (`reference/wwise_wem_reference`, importable when
+`reference/` is on `PYTHONPATH`); an installed facade without the native
+extension raises a clear `ImportError` from byte-producing calls instead of
+running a partial pipeline. The engine that produced a result is reported on
+`EncodeStats.engine`.
 
 ## Python API
 

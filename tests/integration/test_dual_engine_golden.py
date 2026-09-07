@@ -28,9 +28,9 @@ from wwise_wem_reference import python_engine
 from wwise_wem_reference.container.model import ContainerPlan
 
 try:
-    import _wwise_wem_native
+    import wwise_wem._native as native_mod
 except ImportError:
-    _wwise_wem_native = None
+    native_mod = None
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -85,9 +85,11 @@ def _synthetic_pcm(frames: int) -> PcmBuffer:
 
 
 @unittest.skipIf(
-    _wwise_wem_native is None,
-    "native extension _wwise_wem_native is not installed; "
-    "build it with: cd crates/wem-python && maturin develop -F extension-module",
+    native_mod is None,
+    "native extension wwise_wem._native is not importable; "
+    "install a wheel built from the repository root "
+    "(pip install . with the maturin backend), or build it in the "
+    "development tree: maturin develop -F extension-module",
 )
 class DualEngineGoldenTests(unittest.TestCase):
     def test_reference_input_matches_golden_on_every_engine_path(self):
@@ -109,7 +111,7 @@ class DualEngineGoldenTests(unittest.TestCase):
             container=ContainerPlan.from_profile(profile),
             pcm=pcm,
         )
-        direct_native = _wwise_wem_native.Encoder(PROFILE_NAME).encode_pcm(
+        direct_native = native_mod.Encoder(PROFILE_NAME).encode_pcm(
             pcm.sample_rate, _rows_from_pcm(pcm)
         )
 

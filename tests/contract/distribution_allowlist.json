@@ -53,6 +53,9 @@
     "wwise_wem/data/profiles/wwise2013-6ch-44100/vorbis/codebooks/t97.json",
     "wwise_wem/data/profiles/wwise2013-6ch-44100/vorbis/setup.bin"
   ],
+  "native_extensions": [
+    "wwise_wem._native"
+  ],
   "forbidden_path_markers": [
     "capture",
     "fixture",

@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.7"]
+build-backend = "maturin"
 
 [project]
 name = "wwise-wem"
@@ -17,14 +17,22 @@ dev = ["ruff>=0.6", "mypy>=1.11", "grpcio>=1.60", "grpcio-tools>=1.60"]
 [project.scripts]
 wwise-wem = "wwise_wem.cli:main"
 
-[tool.setuptools]
-include-package-data = true
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.setuptools.package-data]
-wwise_wem = ["data/profiles/*.json", "data/profiles/*/*.json", "data/profiles/*/*/*.json", "data/profiles/*/*/*.bin", "data/profiles/*/*/*/*.json"]
+# Single-wheel distribution: `pip install .` (or `pip wheel .`) builds the
+# abi3 extension from the wem-python binding crate and ships it inside the
+# `wwise_wem` package next to the pure-Python facade, so one wheel carries
+# both the facade and its native engine. Pure-Python sources and profile
+# data are picked up from `python-source`; the Rust workspace root stays
+# `crates/Cargo.toml` (maturin points at the child manifest, no second
+# workspace).
+[tool.maturin]
+python-source = "src"
+manifest-path = "crates/wem-python/Cargo.toml"
+module-name = "wwise_wem._native"
+# extension-module: the .so borrows host-interpreter symbols (no libpython
+# in the wheel); see crates/wem-python/Cargo.toml for the full rationale.
+features = ["extension-module"]
+# Development guide must not ship inside the distribution.
+exclude = ["src/wwise_wem/AGENTS.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

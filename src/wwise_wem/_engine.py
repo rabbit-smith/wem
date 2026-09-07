@@ -1,7 +1,8 @@
 """Engine selection between the native kernel and the reference implementation.
 
 The public encode facade prefers the Rust kernel (module
-``_wwise_wem_native``, built from ``crates/wem-python``) when it is
+``wwise_wem._native``, the in-package extension built from
+``crates/wem-python`` via the repository-root maturin backend) when it is
 importable, and falls back to the pure-Python reference implementation in
 the development-tree ``wwise_wem_reference`` package otherwise.  Both
 engines are contractually byte-identical; the reference implementation
@@ -29,7 +30,7 @@ from types import ModuleType
 ENGINE_ENV_VAR = "WWISE_WEM_ENGINE"
 
 #: Native extension module name produced by ``crates/wem-python``.
-NATIVE_MODULE_NAME = "_wwise_wem_native"
+NATIVE_MODULE_NAME = "wwise_wem._native"
 
 _AUTO = "auto"
 _NATIVE = "native"
@@ -79,9 +80,10 @@ def active_engine() -> str:
         if native_module() is None:
             raise ImportError(
                 f"{ENGINE_ENV_VAR}=native requires the native extension "
-                f"{NATIVE_MODULE_NAME!r}, which is not importable; build it "
-                f"with `cd crates/wem-python && maturin develop` (or unset "
-                f"{ENGINE_ENV_VAR})"
+                f"{NATIVE_MODULE_NAME!r}, which is not importable; install a "
+                f"distribution that ships it (pip install . with the maturin "
+                f"backend, or `maturin develop` in the development tree) or "
+                f"unset {ENGINE_ENV_VAR}"
             )
         return _NATIVE
     if requested == _PYTHON:

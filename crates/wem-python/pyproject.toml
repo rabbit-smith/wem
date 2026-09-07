@@ -1,3 +1,9 @@
+# NOTE: the repository-root pyproject.toml is the canonical distribution
+# configuration (maturin backend, single wheel: facade + native extension).
+# This file documents the binding crate's own build inputs; a wheel built
+# from this manifest alone would ship the extension without the facade
+# package and is NOT the distribution path.
+
 [build-system]
 requires = ["maturin>=1.5,<2.0"]
 build-backend = "maturin"
@@ -10,9 +16,10 @@ requires-python = ">=3.10"
 dependencies = []
 
 [tool.maturin]
-# Must match the [lib] name in Cargo.toml: the module importable from
-# Python is `_wwise_wem_native`.
-module-name = "_wwise_wem_native"
+# In-package module: the extension is imported as `wwise_wem._native`
+# (installed as `wwise_wem/_native.abi3.so` by the root pyproject's
+# module-name setting).
+module-name = "wwise_wem._native"
 
 # Build/install commands (the `extension-module` feature must be active so
 # the .so borrows host-interpreter symbols instead of linking libpython;
