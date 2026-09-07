@@ -1,6 +1,6 @@
-.PHONY: test test-fast frame-contract golden lint build wheel-smoke check clean
+.PHONY: test test-fast frame-contract stage-contract golden lint build wheel-smoke check clean
 
-test: test-fast frame-contract golden
+test: test-fast frame-contract stage-contract golden
 
 test-fast:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest discover -s tests/unit -t . -v
@@ -9,6 +9,9 @@ test-fast:
 
 frame-contract:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.contract.frame_pipeline_contract -v
+
+stage-contract:
+	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.contract.stage_pipeline_contract -v
 
 golden:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.golden.test_golden -v
