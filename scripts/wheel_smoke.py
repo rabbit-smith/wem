@@ -50,14 +50,37 @@ def _expected_extension_artifacts(contract: dict[str, object]) -> list[str]:
     ]
 
 
+_WHEEL_EXTENSION_SUFFIXES = (".so", ".pyd", ".dylib")
+
+
+def _canonical_wheel_entry(name: str) -> str:
+    """Map a native extension file to its logical allowlist identity.
+
+    maturin names abi3 extensions ``_core.abi3.so`` on POSIX but ``_core.pyd``
+    on Windows (the abi3 tag lives in the wheel filename, not the artifact).
+    Inventory comparison must not depend on that platform spelling.
+    """
+    for suffix in _WHEEL_EXTENSION_SUFFIXES:
+        if name.endswith(suffix):
+            stem = name[: -len(suffix)]
+            if stem.endswith(".abi3"):
+                stem = stem[: -len(".abi3")]
+            return stem + ".ext"
+    return name
+
+
 def _verify_wheel_contents(wheel: Path, contract: dict[str, object]) -> None:
     expected = sorted(
-        [*contract["modules"], *contract["resources"], *
-         _expected_extension_artifacts(contract)]
+        _canonical_wheel_entry(name)
+        for name in [
+            *contract["modules"],
+            *contract["resources"],
+            *_expected_extension_artifacts(contract),
+        ]
     )
     with zipfile.ZipFile(wheel) as archive:
         actual = sorted(
-            name
+            _canonical_wheel_entry(name)
             for name in archive.namelist()
             if name.startswith("wwise_wem/")
         )
@@ -90,10 +113,12 @@ def _verify_wheel_contents(wheel: Path, contract: dict[str, object]) -> None:
         raise RuntimeError(f"forbidden wheel paths: {violations}")
     if content_violations:
         raise RuntimeError(f"forbidden wheel content: {content_violations}")
-    extension_artifacts = _expected_extension_artifacts(contract)
-    if not any(name in actual for name in extension_artifacts):
+    extension_artifacts = {
+        _canonical_wheel_entry(name) for name in _expected_extension_artifacts(contract)
+    }
+    if not extension_artifacts & set(actual):
         raise RuntimeError(
-            f"wheel does not carry the native extension {extension_artifacts}; "
+            f"wheel does not carry the native extension {sorted(extension_artifacts)}; "
             "the single wheel must embed its engine"
         )
 
