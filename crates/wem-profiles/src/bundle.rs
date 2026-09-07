@@ -1,13 +1,15 @@
 //! Validated, path-safe encoder profile bundles
 //! (Python: `profiles/bundle.py`).
 
+use std::collections::BTreeMap;
+
 use serde_json::Value;
 
 use crate::data::DataDir;
 use crate::error::ProfileError;
 use crate::key::ProfileKey;
 use crate::model::ContainerMetadata;
-use crate::resources::{normalize_resource_path, ResourceRef};
+use crate::resources::{normalize_resource_path, ResourceBackend, ResourceRef};
 
 /// Profile index schema (Python `INDEX_SCHEMA`).
 pub const INDEX_SCHEMA: &str = "wwise-wem.profile-index.v1";
@@ -72,8 +74,10 @@ impl RuntimeResourceManifest {
                 .ok_or_else(|| ProfileError::ResourceShaMissing { name: name.clone() })?;
             // The optional `schema` entry is carried by the payload but not
             // validated, exactly like the Python loader.
-            let ref_ = ResourceRef::new(
-                ref_.data().clone(),
+            // Child refs inherit the parent ref's byte source (filesystem or
+            // in-memory) so both entry points validate identically.
+            let ref_ = ResourceRef::with_backend(
+                ref_.backend().clone(),
                 &full_path.display().to_string(),
                 sha256,
             )
@@ -391,13 +395,61 @@ pub fn load_profile_bundle(
     profile: Option<&str>,
     verify_all: bool,
 ) -> Result<ProfileBundle, ProfileError> {
-    let index_path = data.index_path();
-    let raw = std::fs::read(&index_path).map_err(|_| ProfileError::MissingResource {
+    let raw = std::fs::read(data.index_path()).map_err(|_| ProfileError::MissingResource {
         path: "index.json".to_string(),
     })?;
-    let index: Value = serde_json::from_slice(&raw).map_err(|_| ProfileError::InvalidJson {
-        path: "index.json".to_string(),
-    })?;
+    load_profile_bundle_with(&raw, ResourceBackend::Fs(data.clone()), profile, verify_all)
+}
+
+/// Load a profile bundle entirely from in-memory bytes — no filesystem.
+///
+/// The threadless (e.g. wasm32-unknown-unknown) entry point that mirrors
+/// [`load_profile_bundle`]:
+///
+/// * `index` is the raw bytes of one profile-index document (the same
+///   `index.json` the filesystem entry reads).
+/// * `files` maps every profiles-dir-relative POSIX resource path (the
+///   manifest document plus each logical resource, e.g.
+///   `wwise2013-6ch-44100/vorbis/setup.bin`) to its bytes, exactly as the
+///   index/manifest entries name them. Duplicate paths: last wins.
+/// * `profile` selects an index entry; `None` uses the index `default`.
+/// * `verify_all` runs SHA-256 verification over every logical resource.
+///
+/// Both entry points funnel through the same core ([`load_profile_bundle_with`]),
+/// so schema checks, SHA-256 identity checks, and path-safety rejections
+/// apply identically — rejection conditions cannot drift between the two.
+pub fn load_profile_bundle_from_bytes(
+    index: &[u8],
+    files: impl IntoIterator<Item = (String, Vec<u8>)>,
+    profile: Option<&str>,
+    verify_all: bool,
+) -> Result<ProfileBundle, ProfileError> {
+    let mut map = BTreeMap::new();
+    for (path, bytes) in files {
+        map.insert(path, bytes);
+    }
+    load_profile_bundle_with(
+        index,
+        ResourceBackend::Bytes { files: map },
+        profile,
+        verify_all,
+    )
+}
+
+/// Shared index -> manifest -> bundle core; both entry points funnel here.
+///
+/// * `profile` selects an index entry; `None` uses the index `default`.
+/// * `verify_all` runs SHA-256 verification over every logical resource.
+fn load_profile_bundle_with(
+    index_bytes: &[u8],
+    backend: ResourceBackend,
+    profile: Option<&str>,
+    verify_all: bool,
+) -> Result<ProfileBundle, ProfileError> {
+    let index: Value =
+        serde_json::from_slice(index_bytes).map_err(|_| ProfileError::InvalidJson {
+            path: "index.json".to_string(),
+        })?;
     let index = match index {
         Value::Object(map) => map,
         _ => {
@@ -446,7 +498,7 @@ pub fn load_profile_bundle(
     let sha256 = strict_string(index_entry.get("sha256").unwrap_or(&Value::Null))
         .ok_or(ProfileError::IndexProfileShaMissing)?;
 
-    let manifest_ref = ResourceRef::new(data.clone(), manifest_relative, sha256)?;
+    let manifest_ref = ResourceRef::with_backend(backend, manifest_relative, sha256)?;
     let payload_raw = manifest_ref.read_bytes()?;
     let payload: Value =
         serde_json::from_slice(&payload_raw).map_err(|_| ProfileError::InvalidJson {

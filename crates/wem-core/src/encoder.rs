@@ -19,7 +19,7 @@ use wem_container::riff::Endian;
 use wem_container::wem::build_vorbis_wem;
 use wem_profiles::assembly::assemble_encoder_profile_resources;
 use wem_profiles::assembly::EncoderProfileResources;
-use wem_profiles::bundle::load_profile_bundle;
+use wem_profiles::bundle::{load_profile_bundle, load_profile_bundle_from_bytes, ProfileBundle};
 use wem_profiles::data::DataDir;
 use wem_profiles::error::ProfileError;
 use wem_profiles::model::ContainerMetadata;
@@ -303,6 +303,37 @@ impl Encoder {
         profile: &EncoderProfile,
         container: Option<ContainerPlan>,
     ) -> Result<Self, EncoderError> {
+        let data = DataDir::from_env()?;
+        let bundle = load_profile_bundle(&data, Some(profile.name()), false)?;
+        Self::from_profile_and_bundle(profile, container, &bundle)
+    }
+
+    /// Construct the encoder from an in-memory profile bundle — no
+    /// filesystem access (the threadless / wasm32-unknown-unknown entry).
+    ///
+    /// `index` and `files` carry the profile bytes exactly as documented on
+    /// [`wem_profiles::load_profile_bundle_from_bytes`]; the index `default`
+    /// profile is selected and every logical resource is SHA-256 verified on
+    /// load. The output bytes are identical to the filesystem path for the
+    /// same profile (see the `bytes_parity` integration test).
+    pub fn from_profile_bytes(
+        index: &[u8],
+        files: impl IntoIterator<Item = (String, Vec<u8>)>,
+    ) -> Result<Self, EncoderError> {
+        let bundle = load_profile_bundle_from_bytes(index, files, None, true)
+            .map_err(|error| EncoderError::Internal(InternalError::Profile(error)))?;
+        let profile = bundle.to_encoder_profile()?;
+        Self::from_profile_and_bundle(&profile, None, &bundle)
+    }
+
+    /// Shared construction from one profile identity + one verified bundle;
+    /// both the filesystem and the in-memory entries funnel through here so
+    /// the cross-checks cannot drift between them.
+    pub(crate) fn from_profile_and_bundle(
+        profile: &EncoderProfile,
+        container: Option<ContainerPlan>,
+        bundle: &ProfileBundle,
+    ) -> Result<Self, EncoderError> {
         if profile.block_sizes() != [256, 2048] {
             return Err(EncoderError::StateError {
                 message: "selected profile block geometry is unsupported; \
@@ -324,8 +355,6 @@ impl Encoder {
             });
         }
 
-        let data = DataDir::from_env()?;
-        let bundle = load_profile_bundle(&data, Some(profile.name()), false)?;
         if bundle.key() != profile.key() {
             return Err(EncoderError::StateError {
                 message: "selected profile differs from installed profile bundle".into(),
@@ -341,7 +370,7 @@ impl Encoder {
             });
         }
         let setup_packet = profile.setup_packet()?;
-        let resources = assemble_encoder_profile_resources(&bundle, Some(&setup_packet))?;
+        let resources = assemble_encoder_profile_resources(bundle, Some(&setup_packet))?;
 
         Ok(Self {
             profile: profile.clone(),

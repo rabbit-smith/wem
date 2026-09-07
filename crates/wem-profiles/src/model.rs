@@ -6,7 +6,7 @@ use serde_json::{Map, Value};
 use crate::bundle::{load_profile_bundle, RuntimeResourceManifest};
 use crate::error::ProfileError;
 use crate::key::ProfileKey;
-use crate::resources::ResourceRef;
+use crate::resources::{ResourceBackend, ResourceRef};
 
 /// Typed representation of the fixed 66-byte Wwise Vorbis fmt fields
 /// (Python `ContainerMetadata`).
@@ -338,8 +338,18 @@ impl EncoderProfile {
 
     /// The installed profile manifest for this profile identity
     /// (Python `runtime_manifest()`).
+    ///
+    /// Defined for filesystem-backed profiles only; a profile assembled
+    /// from an in-memory bytes bundle has no installed tree to view.
     pub fn runtime_manifest(&self) -> Result<ProfileManifestView, ProfileError> {
-        let bundle = load_profile_bundle(&self.setup_path.data().clone(), Some(&self.name), false)?;
+        let bundle = match self.setup_path.backend() {
+            ResourceBackend::Fs(data) => load_profile_bundle(data, Some(&self.name), false),
+            ResourceBackend::Bytes { .. } => {
+                return Err(ProfileError::InstalledBundleMismatch {
+                    profile: self.name.clone(),
+                })
+            }
+        }?;
         if bundle.key() != &self.key {
             return Err(ProfileError::InstalledBundleMismatch {
                 profile: self.name.clone(),

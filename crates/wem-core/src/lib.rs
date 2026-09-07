@@ -7,12 +7,14 @@
 //!
 //! Public surface:
 //! * [`encoder::Encoder`] — one-shot PCM-to-WEM encode
-//!   (Python `application/encoder.py`)
+//!   (Python `application/encoder.py`); the filesystem entry is
+//!   `from_profile`, the threadless (bytes) entry is `from_profile_bytes`
 //! * [`encoder::Pcm16`] / [`encoder::EncodeResult`] — typed I/O models
 //! * [`pack::pack_analysis_frame`] — frame-level floor-fit + packet
 //!   assembly (Python `pack_analysis_frame`, relocated here)
 //! * [`stream::StreamSession`] — the wwise.v1 streaming lifecycle
-//!   (Init -> chunk* -> Finish), shared by the future gRPC and PyO3 shells
+//!   (Init -> chunk* -> Finish), shared by the future gRPC, PyO3 and
+//!   wasm-bindgen shells
 //! * [`usecases::wav`] — minimal signed-16 PCM WAV reader
 
 pub mod encoder;

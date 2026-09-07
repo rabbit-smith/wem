@@ -125,6 +125,47 @@ impl StreamSession {
         Ok(session)
     }
 
+    /// Open the session on one profile carried entirely as bytes (v1 `Init`
+    /// from a bytes bundle; the threadless / wasm32-unknown-unknown entry).
+    ///
+    /// `index` / `files` are the profile bytes as documented on
+    /// [`Encoder::from_profile_bytes`]; every logical resource is SHA-256
+    /// verified on load. The reference is then asserted against the
+    /// selected profile with the same v1 semantics as [`init_profile`](Self::init_profile):
+    ///
+    /// - `PROFILE_NOT_FOUND` when the bundle's setup SHA-256 does not match
+    ///   `ref_.setup_sha256`.
+    /// - `STATE_ERROR` on a soft `name` cross-check failure.
+    pub fn for_profile_ref_bytes(
+        ref_: &ProfileRef,
+        index: &[u8],
+        files: impl IntoIterator<Item = (String, Vec<u8>)>,
+    ) -> Result<Self, EncoderError> {
+        let encoder = Encoder::from_profile_bytes(index, files)?;
+        let profile = encoder.profile();
+        if profile.setup_sha256() != ref_.setup_sha256.to_lowercase() {
+            return Err(EncoderError::ProfileNotFound {
+                requested: ref_.setup_sha256.clone(),
+            });
+        }
+        if let Some(name) = &ref_.name {
+            if name != profile.name() {
+                return Err(EncoderError::StateError {
+                    message: format!(
+                        "profile name mismatch: setup_sha256 resolves to \n                         '{}', not '{name}'",
+                        profile.name()
+                    ),
+                });
+            }
+        }
+        Ok(Self {
+            initialized: true,
+            finished: false,
+            encoder: Some(encoder),
+            pcm: Vec::new(),
+        })
+    }
+
     /// Push one chunk of little-endian signed-16 interleaved PCM bytes
     /// (v1 `PcmChunk`, `PCM_SAMPLE_LAYOUT_SIGNED_16_INTERLEAVED`).
     ///

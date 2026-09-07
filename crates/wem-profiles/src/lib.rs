@@ -8,7 +8,10 @@
 //! Entry points:
 //! * [`DataDir`] — where the profile tree lives (WEM_DATA_DIR / repo layout)
 //! * [`load_profile_bundle`] — index -> manifest -> verified resources
+//! * [`load_profile_bundle_from_bytes`] — the same assembly from in-memory
+//!   bytes (threadless targets; no filesystem, shared validation)
 //! * [`ResourceRef`] — checksum-addressed resource identity
+//! * [`ResourceBackend`] — filesystem or in-memory byte source
 //! * [`load_wem_profile`] / [`resolve_wem_profile`] — exact identity lookup
 //! * typed table loaders: [`load_mdct_looks`], [`load_transient_tables`],
 //!   [`load_frozen_tables`], [`load_book_table`], and the
@@ -35,7 +38,8 @@ pub use assembly::{
 };
 pub use book_ids::{BookTable, BookTables, T219_COUNT, T97_COUNT};
 pub use bundle::{
-    load_profile_bundle, ProfileBundle, RuntimeResourceManifest, BUNDLE_SCHEMA, INDEX_SCHEMA,
+    load_profile_bundle, load_profile_bundle_from_bytes, ProfileBundle, RuntimeResourceManifest,
+    BUNDLE_SCHEMA, INDEX_SCHEMA,
 };
 pub use codebooks::{load_codebook, load_setup_codebooks, resolve_book_id, ResolvedBook};
 pub use data::DataDir;
@@ -44,7 +48,7 @@ pub use frozen::load_frozen_tables;
 pub use key::{ProfileKey, WWISE2013_6CH_44100_SETUP_IDENTITY, WWISE_GENERATION};
 pub use model::{ContainerMetadata, EncoderProfile, ProfileManifestView};
 pub use registry::{installed_registry, load_wem_profile, resolve_wem_profile, ProfileRegistry};
-pub use resources::{normalize_resource_path, ResourceRef};
+pub use resources::{normalize_resource_path, ResourceBackend, ResourceRef};
 pub use transform::load_mdct_looks;
 pub use transient::load_transient_tables;
 
