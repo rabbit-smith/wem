@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .api import encode_wav
+from .api import encode_pcm_wav, encode_raw_pcm, encode_wav
 from .application.models import EncodeResult, EncodeStats
 from .model import (
     ContainerMetadata,
@@ -25,7 +25,8 @@ from .profiles import (
 
 
 _LEGACY_EXPORTS = {"read_pcm16_wav"}
-_LAZY_EXPORTS = {*_LEGACY_EXPORTS, "Encoder"}
+_ADAPTER_EXPORTS = {"read_pcm_wav", "read_raw_pcm"}
+_LAZY_EXPORTS = {*_LEGACY_EXPORTS, "Encoder", *_ADAPTER_EXPORTS}
 
 
 def __getattr__(name: str) -> Any:
@@ -38,6 +39,14 @@ def __getattr__(name: str) -> Any:
         from .application import compat
 
         return getattr(compat, name)
+    if name in _ADAPTER_EXPORTS:
+        if name == "read_pcm_wav":
+            from .adapters import wav as wav_adapter
+
+            return getattr(wav_adapter, name)
+        from .adapters import raw as raw_adapter
+
+        return getattr(raw_adapter, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -59,8 +68,12 @@ __all__ = [
     "ProfileRegistry",
     "SetupConfig",
     "WwiseVorbisProfile",
+    "encode_pcm_wav",
+    "encode_raw_pcm",
     "encode_wav",
     "load_wem_profile",
     "read_pcm16_wav",
+    "read_pcm_wav",
+    "read_raw_pcm",
     "resolve_wem_profile",
 ]
