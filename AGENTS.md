@@ -87,6 +87,7 @@ Adding any file under `src/wwise_wem/` or packaged data requires:
 | Area | Guide |
 |---|---|
 | Rust kernel | [`crates/AGENTS.md`](crates/AGENTS.md) |
+| C ABI core surface | [`include/wem.h`](include/wem.h) (contract) + `crates/wem-capi` (implementation) |
 | Distribution facade | [`src/wwise_wem/AGENTS.md`](src/wwise_wem/AGENTS.md) |
 | Python reference implementation | [`reference/AGENTS.md`](reference/AGENTS.md) |
 | Contracts & assets | [`tests/AGENTS.md`](tests/AGENTS.md) |
@@ -94,19 +95,23 @@ Adding any file under `src/wwise_wem/` or packaged data requires:
 
 ## Integration topology (normative)
 
-- The Rust kernel is the sole integration point. Every language binding
-  (Python today via PyO3; the C ABI core surface and other shells next)
-  binds it **directly** — never route a same-process call through an RPC
-  or serialization hop, and never keep a second integration surface in
-  parallel with it.
-- The streaming lifecycle (exactly one `Init` — profile selection by hard
-  setup-digest identity plus a soft name cross-check — then `chunk`s, then
-  one `Finish`), the reply framing (seq 0 = setup packet, then audio
-  packets), and the error codes are pinned in the kernel itself
-  (`wem-core`'s `StreamSession` and `EncoderError`); every binding
-  mirrors them without inventing variants.
-- Streaming chunk boundaries must not affect output bytes; any client-side
-  framing rule added later needs a parity case proving that.
+- The Rust kernel is the sole integration point; its **C ABI core
+  surface** (`crates/wem-capi`, contracted by `include/wem.h`) is the
+  canonical interface. The lifecycle (Init -> chunk* -> Finish), the
+  reply framing (seq 0 = setup packet, then audio packets), and the
+  error codes are pinned in `include/wem.h` and implemented 1:1 by
+  `wem-capi`; every language binding conforms to that contract.
+- Every binding is a **parallel shell** over the kernel, never a
+  parallel implementation: PyO3 today (in-package `wwise_wem._core`),
+  Go via cgo (`examples/go-cgo` is the reference shell), a wasm build
+  next. Shells map the contract 1:1 and own no numerics; a new language
+  integrates by writing a shim over the C ABI — never by changing the
+  kernel for it.
+- Same-process consumers bind the kernel **directly**: never route a
+  call through RPC or a serialization hop, and never keep a second
+  integration surface in parallel with the C ABI.
+- Streaming chunk boundaries must not affect output bytes; any
+  client-side framing rule added later needs a parity case proving that.
 - Browsers use the wasm build of the same core, not a remote service.
 
 ## Governing documents

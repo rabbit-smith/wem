@@ -11,6 +11,7 @@ than any description; when code and contract disagree, the contract wins.
 | integration | in `make test-fast` | CLI/API/adapter end paths |
 | contract | in `make test-fast` (test_* files) + `make frame-contract`, `make stage-contract` | pipeline invariants |
 | golden | `make golden` | whole-file byte identity (the digest) |
+| capi | `cargo test -p wem-capi` | C ABI surface: golden byte identity via the FFI, error-code mapping, lifecycle violations |
 | wheel | `make wheel-smoke` | single-wheel (facade + native extension) inventory, clean-venv byte-exact encode |
 
 Modules without `test_` prefix (e.g. `frame_pipeline_contract.py`,

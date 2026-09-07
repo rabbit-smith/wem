@@ -22,13 +22,6 @@ or CI gates. They must be boring, idempotent, and offline.
 - Scripts must pass `make lint` (ruff covers `scripts/`), use `#!/usr/bin/env
   python3`, type hints, and `SystemExit` codes; failures print the offending
   artifact path, never a stack-trace shrug.
-- Real-server interop smoke (`interop_grpc_smoke.py`) pins the wwise.v1
-  contract end-to-end: a Python gRPC client streams
-  `tests/fixtures/input.wav` through the real Rust `wem-server` on an
-  ephemeral port (READY-line handshake, no fixed delays) and must rebuild
-  the container byte-identically to `tests/fixtures/reference.wem`, with
-  the unknown-digest path returning the enumerated PROFILE_NOT_FOUND error;
-  v1 semantics are otherwise pinned by the wem-server integration tests.
 - `wheel_smoke.py` verifies the single-wheel distribution end-to-end:
   the facade + native extension inventory against the distribution
   allowlist, the zip-import and installed metadata paths, and a clean-venv
