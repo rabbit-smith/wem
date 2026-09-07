@@ -157,8 +157,8 @@ jobs:
           ADDR="${READY_LINE#READY }"
           echo "wem-server ready at $ADDR"
           cd examples/grpc-go
-          go run . -addr "$ADDR" -wav ../../tests/fixtures/input.wav -out /tmp/go-ref-out.wem
-          GOT=$(sha256sum /tmp/go-ref-out.wem | awk '{print $1}')
+          go run . -addr "$ADDR" -wav ../../tests/fixtures/input.wav -out "${RUNNER_TEMP}/go-ref-out.wem"
+          GOT=$(sha256sum "${RUNNER_TEMP}/go-ref-out.wem" | awk '{print $1}')
           if [ "$GOT" != "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247" ]; then
             echo "golden sha256 mismatch: got $GOT"; exit 1
           fi

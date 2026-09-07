@@ -7,7 +7,11 @@ import json
 import re
 from dataclasses import dataclass
 from importlib import resources
-from importlib.resources.abc import Traversable
+
+try:  # Python >= 3.11
+    from importlib.resources.abc import Traversable
+except ModuleNotFoundError:  # Python 3.10 (deprecated location)
+    from importlib.abc import Traversable  # type: ignore[attr-defined]
 from pathlib import PurePosixPath
 from typing import Any
 
