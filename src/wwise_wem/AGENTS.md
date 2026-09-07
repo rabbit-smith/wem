@@ -1,9 +1,9 @@
 # src/wwise_wem/ — distribution facade
 
-This package is the thin distribution facade: root API shell, engine
-switch, CLI, WAV adapters, DTOs, and the installed-profile metadata path.
-The bit-exact implementation domains live in the development-tree reference
-package (`reference/wwise_wem_reference`, see `reference/AGENTS.md`); its
+This package is the thin distribution facade: root API shell, CLI, WAV
+adapters, DTOs, and the installed-profile metadata path. The bit-exact
+implementation domains live in the development-tree reference package
+(`reference/wwise_wem_reference`, see `reference/AGENTS.md`); its
 byte-for-byte outputs remain the project's source of truth, and the Rust
 kernel is verified against it, never the reverse.
 
@@ -17,14 +17,23 @@ kernel is verified against it, never the reverse.
    calls go through the named site entries and, for exact-profile paths,
    through `FrozenMathTables` injection. New runtime transcendental inputs
    require the record → freeze workflow first (see `docs/profiles.md`).
-3. **Reference imports stay lazy.** Facade modules import
-   `wwise_wem_reference` only through `wwise_wem._reference.reference_module`
-   inside the call paths that need it; importing the package root must never
-   pull in reference modules (the wheel does not ship them).
-3. **Layer boundaries.** Follow `docs/architecture.md` import rules; `analysis`,
+3. **One-call rule: the single execution path is `wwise_wem._core`.**
+   Byte-producing code imports the in-package native extension directly
+   (a plain top-level `from .. import _core` in
+   `application/encoder.py`) and calls it unconditionally. No engine
+   probing, no availability checks, no fallback, no switch, no
+   environment variable: a missing extension surfaces as the ordinary
+   `ImportError` that the Python import machinery raises, and no code
+   invents a second way for it to fail. The extension's module name is
+   owned by the packaging surface (`distribution_allowlist.json`, root
+   `pyproject.toml`, the `wem-python` Cargo lib name, locked by the
+   distribution contract test); facade code never restates it.
+   The reference oracle is test-only: production code in this package
+   never imports `wwise_wem_reference`.
+4. **Layer boundaries.** Follow `docs/architecture.md` import rules; `analysis`,
    `vorbis`, `container` never read package resources; `profiles` is the only
    loader. Receiving typed tables is the only configuration mechanism.
-4. **Fail loudly.** Input/boundary errors are explicit `ValueError`s at the
+5. **Fail loudly.** Input/boundary errors are explicit `ValueError`s at the
    point of validation (mirror existing style). No silent defaults, no
    `try/except: pass`, no `assert` for invariants that `-O` would erase.
 

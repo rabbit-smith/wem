@@ -1,6 +1,6 @@
 name: nightly
 
-# Heavy dual-engine gates that do not belong in the PR path:
+# Heavy oracle-vs-kernel parity gates that do not belong in the PR path:
 #   * random-PCM differential fuzz (oracle vs native, byte-exact) on a
 #     fixed seed set sized for a < 30 minute budget;
 #   * the release-build performance gate (150ms median cap; 25% regression

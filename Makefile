@@ -1,4 +1,4 @@
-.PHONY: test test-fast frame-contract stage-contract proto-contract proto-smoke golden lint build wheel-smoke check clean
+.PHONY: test test-fast frame-contract stage-contract proto-contract proto-smoke golden lint build wheel-smoke check clean native
 
 PY ?= python3
 
@@ -29,6 +29,12 @@ MYPY ?= mypy
 lint:
 	$(RUFF) check src reference tests scripts
 	$(MYPY) src reference
+
+# Development-tree native kernel: builds the in-package extension
+# (src/wwise_wem/_core.abi3.so) into the active venv via maturin.
+# Required for every byte-producing call — there is no other path.
+native:
+	maturin develop -F extension-module
 
 build:
 	python3 -m pip wheel . --no-deps -w dist

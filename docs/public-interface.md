@@ -93,7 +93,7 @@ EncodeStats(
 ### Encode extended PCM inputs
 
 Two additional encoder entries accept PCM beyond the signed-16 golden path.
-Both convert at the adapter boundary, so both engines consume only in-domain
+Both convert at the adapter boundary, so the encoder consumes only in-domain
 samples:
 
 ```python
@@ -149,9 +149,10 @@ state is created):
 | | Zero frames, or non-finite 32-bit float sample | `ValueError` |
 | both | Profile geometry mismatch, or fewer than 4096 frames | `ValueError` (encoder rules) |
 
-Converted inputs (24-bit, float32) are deterministic and dual-engine
-consistent: encoding the same bytes always produces the same WEM, and both
-engines produce identical bytes for them. They are **not** promised to be
+Converted inputs (24-bit, float32) are deterministic: encoding the same
+bytes always produces the same WEM, and the native kernel and the reference
+oracle (a test asset that verifies it) produce identical bytes for them. They
+are **not** promised to be
 bit-exact against Wwise's own import of the same audio: the project's
 bit-exact guarantee covers the signed-16 path only.
 
@@ -167,9 +168,8 @@ The package root also exports immutable adapter-boundary models:
   read-only parsed view;
 - `PacketResult` holds immutable packet bytes and the short/long mode triple;
 - `EncodeStats` converts with `from_legacy_dict()` / `to_legacy_dict()`. The
-  legacy dictionary form carries an additive `engine` entry (the engine that
-  produced the bytes: `native` or `python`); `from_legacy_dict()` accepts
-  older dictionaries without it.
+  legacy dictionary form carries no provenance entry: there is a single
+  execution path (the native kernel), so nothing records which engine ran.
 
 These types are stable public adapters. Internal analysis buffers and
 transform state remain outside the public contract.
@@ -272,7 +272,7 @@ The bit-exact guarantee is scoped to signed-16 PCM input. Extended input
 forms (24-bit PCM, 32-bit IEEE-float PCM, and raw PCM in any of the three
 supported depths) are mapped into the signed-16 domain by the documented
 adapter conversion rules above before encoding; those conversions are
-deterministic and engine-consistent, but the project does not promise that
+deterministic, but the project does not promise that
 the resulting WEM bytes match Wwise's own import path for the same audio.
 
 ## Open questions
@@ -286,49 +286,33 @@ such inputs is unverified; no padding behaviour is implemented until an
 official Wwise reference sample for a short input is available. Until then,
 the explicit rejection is the only supported behaviour for short inputs.
 
-## Engine selection (native kernel / pure-Python reference fallback)
+## Execution path (single)
 
-The facade is engine-aware. Byte-producing calls (`Encoder.encode_pcm()`,
-`encode_wav()`, and the CLI) prefer the native kernel (the in-package
-extension `wwise_wem._native`, built from `crates/wem-python` by the
-maturin build backend) when it is importable and otherwise run the
-pure-Python reference implementation. Both engines produce byte-identical
-output; the reference implementation remains the reference oracle.
+The facade has a single execution path: byte-producing calls
+(`Encoder.encode_pcm()`, `encode_wav()`, and the CLI) run on the in-package
+native extension `wwise_wem._core` (built from `crates/wem-python` by the
+maturin build backend and embedded in the wheel).  There is no engine
+selection, no environment variable, and no fallback: the extension is a
+required runtime asset, and a missing one surfaces as the ordinary
+`ImportError` that the Python import machinery raises for
+`wwise_wem._core` — the facade invents no second way for it to fail.
 
-The wheel is a single distribution: the maturin backend embeds the abi3
-extension (`wwise_wem/_native.abi3.so`, or `.pyd`) inside the package, so a
-plain `pip install` of a wheel built from this repository already ships the
-native engine. The pure-Python reference implementation ships only with the
-development source tree (the `reference/wwise_wem_reference` package,
-importable when `reference/` is on `PYTHONPATH`); it is not part of the
-distributed wheel. An installed copy of the facade without the native
-extension raises a clear `ImportError` from byte-producing calls explaining
-how to install a distribution that carries it, instead of running a partial
-pipeline. The engine that produced a result is reported on
-`EncodeStats.engine`.
+The pure-Python reference implementation ships only with the development
+source tree (`reference/wwise_wem_reference`, importable when `reference/`
+is on `PYTHONPATH`); the test suites import it directly as the oracle that
+checks the kernel byte-for-byte.
 
-The `WWISE_WEM_ENGINE` environment variable pins the choice:
-
-| Value | Behavior |
-|---|---|
-| `auto` (default) | Native kernel when importable, pure-Python reference otherwise. |
-| `native` | Always the native kernel; a missing extension raises `ImportError` instead of downgrading. |
-| `python` | Always the pure-Python reference implementation; requires the development-tree reference package. |
-
-Engine-specific input rules:
+Input-domain rules:
 
 - The native kernel consumes integer signed-16 samples. Float PCM is
-  accepted by the native engine only when every sample is exactly an
-  integer multiple of `1/32768` within the signed-16 range (the domain
-  produced by `read_pcm16_wav` and `read_pcm16`). With
-  `WWISE_WEM_ENGINE=native`, an out-of-domain sample raises `ValueError`.
-  With `auto`, such a buffer is routed to the pure-Python implementation
-  instead.
+  accepted only when every sample is exactly an integer multiple of
+  `1/32768` within the signed-16 range (the domain produced by
+  `read_pcm16_wav` and `read_pcm16`). An out-of-domain sample raises a
+  plain `ValueError` from the facade, before the kernel is reached.
 
 `load_wem_profile`, `resolve_wem_profile`, and `ProfileRegistry` are
 metadata-only paths and always run in pure Python; they never touch the
-kernel. Engine status is queryable through the internal
-`wwise_wem._engine` module for diagnostics.
+kernel.
 
 ## Deliberately outside the public contract
 

@@ -11,7 +11,7 @@ count.
 The input adapters also accept 24-bit PCM, 32-bit IEEE-float PCM WAV files and
 raw PCM bytes with explicit geometry. Those forms are deterministically
 converted into the signed-16 domain at the adapter boundary; from that point
-on the pipeline (and both engines) sees only the signed-16 domain. Converted
+on the pipeline (and the native kernel) sees only the signed-16 domain. Converted
 inputs are deterministic but outside the signed-16 bit-exact guarantee.
 
 ## Encoder profile

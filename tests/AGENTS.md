@@ -24,9 +24,13 @@ enforce it, add the step (matching existing explicit runs).
 
 All test targets run with `PYTHONPATH=src:reference` (the Makefile sets it):
 `src` provides the distribution facade, `reference/` provides the pure-Python
-reference implementation that the oracle pipeline, dual-engine parity, and
-capture tests import. Native-kernel tests skip (with an install hint) when
-`wwise_wem._native` is not importable; every other test must pass without it.
+reference implementation that the oracle pipeline, core/oracle parity, and
+capture tests import directly (a test asset, not a runtime path).
+
+The native kernel (`wwise_wem._core`) is a **hard requirement** of every
+byte-producing test: build it with `make native` (or `pip install -e .`)
+before running the suite, and no test designs skip cases for
+native-absent environments — a missing kernel fails the suite, on purpose.
 
 ## Versioned asset rules (`tests/data/`, `tests/fixtures/`)
 

@@ -25,15 +25,16 @@ wwise-wem input.wav --output output.wem
 
 The build backend is maturin: an editable install (or any `pip install .`)
 builds the abi3 kernel from `crates/wem-python` and embeds it in the
-package as `wwise_wem._native`, so the native engine is available directly.
-That step needs a Rust toolchain on PATH. From a prebuilt wheel (or, when
-published, from the index) no Rust is needed at all: the single wheel ships
-facade and kernel together.
+package as `wwise_wem._core`, the facade's single execution path. That
+step needs a Rust toolchain on PATH. From a prebuilt wheel (or, when
+published, from the index) no Rust is needed at all: the single wheel
+ships the facade and its embedded kernel together.
 
-If you only need the pure-Python reference engine in the development tree,
-skip the native build and keep the repository layout on the path (for
-example `PYTHONPATH=src:reference`, as the Makefile uses), with
-`WWISE_WEM_ENGINE=python` or the auto fallback.
+In the development tree, build the kernel with `make native` (a one-line
+`maturin develop`) or `pip install -e .`; the pure-Python reference
+implementation under `reference/` is a test-time oracle only — the test
+suites import it directly to check the kernel byte-for-byte, and no
+runtime code path selects between the two.
 
 Automatic selection reads the WAV geometry. The same selection can be made
 explicitly:
@@ -47,20 +48,20 @@ wwise-wem input.wav \
   --output output.wem
 ```
 
-### Engine availability
+### Single execution path
 
-The facade is native-first: when the native kernel (`wwise_wem._native`,
-built from `crates/wem-python`) is importable it encodes; otherwise the
-facade delegates to the pure-Python reference implementation in the
-development tree (`reference/wwise_wem_reference`). A plain `pip install`
-of a wheel built from this repository already carries the native extension
-(the maturin backend embeds it in the wheel), so byte-producing calls work
-out of the box. The pure-Python reference engine ships only with the
-development source tree (`reference/wwise_wem_reference`, importable when
-`reference/` is on `PYTHONPATH`); an installed facade without the native
-extension raises a clear `ImportError` from byte-producing calls instead of
-running a partial pipeline. The engine that produced a result is reported on
-`EncodeStats.engine`.
+The facade has exactly one execution path: the native kernel extension
+(`wwise_wem._core`, built from `crates/wem-python`), embedded in the
+package. A plain `pip install` of a wheel built from this repository
+carries that extension (the maturin backend embeds it), so byte-producing
+calls work out of the box; the facade never selects, probes, or falls
+back. A missing extension surfaces as the ordinary `ImportError` of the
+Python import machinery — there is no second way for it to fail.
+
+The pure-Python reference implementation under
+`reference/wwise_wem_reference` ships only with the development source
+tree; it is a test-time oracle that the test suites import directly to
+check the kernel byte-for-byte.
 
 ## Python API
 
@@ -100,8 +101,8 @@ explicit selection, CLI output, and whole-file golden identity.
 
 ## Project boundary
 
-- `src/wwise_wem/`: distribution facade (root API, engine switch, CLI, adapters, profile metadata) and its DTOs.
-- `reference/wwise_wem_reference/`: bit-exact pure-Python reference implementation (development tree only, not in the wheel).
+- `src/wwise_wem/`: distribution facade (root API, CLI, adapters, profile metadata) and its DTOs; the single execution path is the in-package native extension `wwise_wem._core`.
+- `reference/wwise_wem_reference/`: bit-exact pure-Python reference implementation (development tree only, not in the wheel; a test-time oracle the suites import directly).
 - `src/wwise_wem/data/`: immutable setup, psychoacoustic and codebook tables.
 - `tests/fixtures/`: one PCM input and its bit-exact acceptance WEM.
 - `tests/data/frame-contract/`: checked per-frame hashes for the exact profile.

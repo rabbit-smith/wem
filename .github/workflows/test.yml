@@ -20,10 +20,12 @@ jobs:
       - run: mypy src reference
 
   regression:
-    # Pure-Python regression matrix: facade + reference oracle, no native
-    # extension and no wheel build. Native-dependent tests self-skip with
-    # install hints (the documented skip semantics); the wheel and native
-    # gates run in the `native` job.
+    # Single execution path: the facade's byte-producing calls run on the
+    # in-package native extension (wwise_wem._core, built from the
+    # wem-python binding crate). Every cell builds that kernel and runs
+    # the full suite against it as a hard gate — no native-absent skips.
+    # The reference oracle (reference/) stays on PYTHONPATH as a test
+    # asset for the parity and contract suites.
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
@@ -31,33 +33,17 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
       # dev extras without the package itself (the package imports from
-      # PYTHONPATH; pip-installing it would invoke the maturin Rust build)
-      - run: python -m pip install "grpcio>=1.60" "grpcio-tools>=1.60"
-      - name: full suite (pure Python; native tests skip)
-        run: python -m unittest discover -s tests -v
-        env:
-          PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/reference
-
-  native:
-    # Single-wheel distribution gate, ubuntu-only by deliberate choice:
-    # the abi3 wheel is platform-independent across Python versions, and
-    # a three-platform native matrix would triple the Rust build cost for
-    # marginal coverage. Wheel inventory, clean-venv byte-exact encode,
-    # and the full public API suite run on the native kernel here.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: editable install (maturin builds the embedded kernel)
-        run: python -m pip install -e ".[dev]"
-      - name: full suite on the native kernel
+      # PYTHONPATH; pip-installing it would run a second maturin build);
+      # the kernel build goes through the maturin develop step below
+      - run: python -m pip install "maturin>=1.7" "grpcio>=1.60" "grpcio-tools>=1.60"
+      - name: in-package native kernel (maturin develop)
+        run: maturin develop -F extension-module
+      - name: full suite on the native kernel (hard gate)
         run: python -m unittest discover -s tests -v
         env:
           PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/reference
@@ -65,7 +51,7 @@ jobs:
         run: python scripts/native_smoke.py
         env:
           PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/reference
-      - name: "wheel gate (single wheel: facade + native; clean-venv encode)"
+      - name: wheel gate (single wheel: facade + native; clean-venv encode)
         run: python scripts/wheel_smoke.py
       - name: differential parity PR gate (golden + 10 cases, < 1 minute)
         run: python scripts/fuzz_diff_parity.py --pr

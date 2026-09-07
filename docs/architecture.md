@@ -3,8 +3,10 @@
 This document defines the package boundaries for the encoder. The distribution
 facade (package root `wwise_wem`) is a stable API shell; the bit-exact
 implementation domains live in the development-tree reference package
-(`wwise_wem_reference`, under `reference/`), which the native-first facade
-delegates to for the pure-Python engine path. The reference implementation's
+(`wwise_wem_reference`, under `reference/`), which the test suites use as the
+reference oracle. The facade has a single execution path — the in-package
+native extension `wwise_wem._core` (built from `crates/wem-python`) — and
+never imports the reference tree at runtime. The reference implementation's
 byte-for-byte outputs are the project's source of truth; the Rust kernel is
 verified against it, never the reverse.
 
@@ -13,15 +15,14 @@ verified against it, never the reverse.
 ```text
 wwise_wem/                      # distribution facade (wheel)
 ├── __init__.py, __main__.py, api.py, cli.py   # root API shell + CLI
-├── _engine.py                   # native/reference engine switch
-├── _reference.py                # lazy access to the reference tree (clear wheel errors)
 ├── model.py                     # root DTOs
 ├── adapters/                    # external PCM/WAV inputs (facade duty)
-├── application/                 # Encoder facade (native-first), compat, result DTOs
-└── profiles/                    # profile identity, registry, and resource loaders
+├── application/                 # Encoder facade (single path: native core), compat, result DTOs
+├── profiles/                    # profile identity, registry, and resource loaders
+└── _core.abi3.so                # in-package native extension (built artifact)
 
-wwise_wem_reference/            # development-tree reference implementation (not in wheel)
-├── python_engine.py             # facade-delegated pure-Python encode pipeline
+wwise_wem_reference/            # development-tree reference oracle (not in wheel, test-time only)
+├── python_engine.py             # direct-import oracle encode pipeline (tests only)
 ├── analysis/                    # MDCT, spectrum, LPC, transient, psychoacoustics, session
 ├── vorbis/                      # bitstream, setup, floor, residue and packet codecs
 ├── container/                   # RIFF/WEM models and codecs
@@ -32,8 +33,9 @@ wwise_wem_reference/            # development-tree reference implementation (not
 Public DTOs remain importable from the package root. Their implementation may
 live next to the domain that owns them; root exports are the compatibility
 boundary. Internal module paths are not compatibility surfaces. The reference
-package may import facade DTOs and profile-metadata types; the facade imports
-the reference tree only lazily, on engine paths that require it.
+package may import facade DTOs and profile-metadata types; the facade never
+imports the reference tree (oracle parity is test-only, locked by the
+parity suites).
 
 ## Dependency direction
 
