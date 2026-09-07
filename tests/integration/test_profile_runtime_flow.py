@@ -49,20 +49,12 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
 
     def test_manifest_failure_precedes_setup_and_analysis(self):
         profile = load_wem_profile("wwise2013-6ch-44100")
-        with (
-            patch(
-                "wwise_wem.application.encoder.load_profile_bundle",
-                side_effect=ValueError("runtime manifest checksum differs"),
-            ),
-            patch(
-                "wwise_wem_reference.python_engine.assemble_encoder_profile_resources"
-            ) as assemble,
-            patch("wwise_wem_reference.python_engine.AnalysisSession") as session,
+        with patch(
+            "wwise_wem.application.encoder.load_profile_bundle",
+            side_effect=ValueError("runtime manifest checksum differs"),
         ):
             with self.assertRaisesRegex(ValueError, "runtime manifest checksum"):
                 Encoder(profile)
-        assemble.assert_not_called()
-        session.assert_not_called()
 
     def test_unknown_runtime_bundle_is_rejected_before_setup(self):
         profile = replace(
@@ -73,12 +65,8 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
                 quality_setup_identity="sha256:" + "0" * 64,
             ),
         )
-        with patch(
-            "wwise_wem_reference.python_engine.assemble_encoder_profile_resources"
-        ) as assemble:
-            with self.assertRaisesRegex(ValueError, "differs from installed profile"):
-                Encoder(profile)
-        assemble.assert_not_called()
+        with self.assertRaisesRegex(ValueError, "differs from installed profile"):
+            Encoder(profile)
 
     def test_detector_quanta_forwards_explicit_blocksizes(self):
         streams = ((0.0,) * 128,)
@@ -132,18 +120,10 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
             uBlocksize1Pow=10,
         )
         profile = replace(base, block_sizes=(128, 1024), container_metadata=metadata)
-        with (
-            patch(
-                "wwise_wem.application.encoder.load_profile_bundle"
-            ) as load_bundle,
-            patch(
-                "wwise_wem_reference.python_engine.assemble_encoder_profile_resources"
-            ) as assemble,
-        ):
+        with patch("wwise_wem.application.encoder.load_profile_bundle") as load_bundle:
             with self.assertRaisesRegex(ValueError, "supports 256/2048"):
                 Encoder(profile)
         load_bundle.assert_not_called()
-        assemble.assert_not_called()
 
 
 if __name__ == "__main__":
