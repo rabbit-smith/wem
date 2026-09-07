@@ -32,6 +32,9 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.10", "3.13"]
     runs-on: ${{ matrix.os }}
+    env:
+      # Windows parses PYTHONPATH with ';'; POSIX shells use ':'.
+      PYTHONPATH: ${{ matrix.os == 'windows-latest' && format('{0}/src;{0}/reference', github.workspace) || format('{0}/src:{0}/reference', github.workspace) }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -67,18 +70,12 @@ jobs:
           CARGO_TERM_COLOR: always
       - name: full suite on the native kernel (hard gate)
         run: python -m unittest discover -s tests -v
-        env:
-          PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/reference
       - name: native binding smoke (streaming + one-shot, byte-exact)
         run: python scripts/native_smoke.py
-        env:
-          PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/reference
       - name: "wheel gate (single wheel: facade + native; clean-venv encode)"
         run: python scripts/wheel_smoke.py
       - name: differential parity PR gate (golden + 10 cases, < 1 minute)
         run: python scripts/fuzz_diff_parity.py --pr
-        env:
-          PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/reference
 
   capi:
     # C ABI core surface (the single cross-language integration point):
