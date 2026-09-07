@@ -1,0 +1,475 @@
+//! Complete PCM-to-WEM encode orchestration.
+//!
+//! Mirrors Python `wwise_wem/application/encoder.py` (plus the profile
+//! lookup half of root `api.py`): the [`Encoder`] owns the immutable codec
+//! inputs and runs one complete encode per PCM buffer:
+//!
+//! ```text
+//! profiles (bundle + resources)
+//!   -> analysis session: selected_windows -> analyze_window per frame
+//!   -> pack_analysis_frame per analysis frame
+//!   -> build_vorbis_wem container assembly
+//! ```
+
+use sha2::{Digest, Sha256};
+use wem_analysis::config::AnalysisProfileResources;
+use wem_analysis::session::AnalysisSession;
+use wem_container::fmt::VorbisFmtFields;
+use wem_container::riff::Endian;
+use wem_container::wem::build_vorbis_wem;
+use wem_profiles::assembly::assemble_encoder_profile_resources;
+use wem_profiles::assembly::EncoderProfileResources;
+use wem_profiles::bundle::load_profile_bundle;
+use wem_profiles::data::DataDir;
+use wem_profiles::error::ProfileError;
+use wem_profiles::model::ContainerMetadata;
+use wem_profiles::model::EncoderProfile;
+use wem_profiles::registry::{load_wem_profile, ProfileRegistry};
+use wem_vorbis::codebook::Codebook;
+use wem_vorbis::setup::SetupInfo;
+
+use crate::error::{EncoderError, InternalError};
+use crate::pack::pack_analysis_frame;
+
+/// Minimum PCM frames for one encode (Python: 4096-frame lower bound).
+pub const MIN_PCM_FRAMES: u32 = 4096;
+
+// ---------------------------------------------------------------------------
+// PCM input
+// ---------------------------------------------------------------------------
+
+/// Typed PCM input in the signed-16 wire representation
+/// (Python `PcmBuffer`, i16 flavor).
+///
+/// Rows are channel-major with equal frame counts; the legacy float
+/// normalization (`value / 32768.0`) is applied only at the analysis
+/// boundary via [`Pcm16::to_float_rows`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pcm16 {
+    sample_rate: i64,
+    channels: Vec<Vec<i16>>,
+}
+
+impl Pcm16 {
+    /// Construct from channel-major i16 rows
+    /// (Python `PcmBuffer.__post_init__` checks).
+    pub fn new(sample_rate: i64, channels: Vec<Vec<i16>>) -> Result<Self, EncoderError> {
+        if sample_rate <= 0 {
+            return Err(EncoderError::StateError {
+                message: "sample rate must be positive".into(),
+            });
+        }
+        if channels.is_empty() {
+            return Err(EncoderError::StateError {
+                message: "PCM buffer needs at least one channel".into(),
+            });
+        }
+        if channels[0].is_empty() {
+            return Err(EncoderError::StateError {
+                message: "PCM buffer needs at least one frame".into(),
+            });
+        }
+        let frame_count = channels[0].len() as i64;
+        if channels.iter().any(|row| row.len() as i64 != frame_count) {
+            return Err(EncoderError::StateError {
+                message: "PCM channels must have equal frame counts".into(),
+            });
+        }
+        Ok(Self {
+            sample_rate,
+            channels,
+        })
+    }
+
+    /// Construct from interleaved little-endian signed-16 PCM bytes
+    /// (the wwise.v1 `PcmFrames.data` wire form).
+    ///
+    /// The byte length must be a multiple of `2 * channel_count`; a trailing
+    /// partial frame is a geometry violation (wwise.v1 GEOMETRY_MISMATCH).
+    pub fn from_interleaved_le(
+        sample_rate: i64,
+        channel_count: usize,
+        bytes: &[u8],
+    ) -> Result<Self, EncoderError> {
+        if channel_count == 0 {
+            return Err(EncoderError::StateError {
+                message: "PCM buffer needs at least one channel".into(),
+            });
+        }
+        if !bytes.len().is_multiple_of(2 * channel_count) {
+            return Err(EncoderError::GeometryMismatch {
+                message: "chunk carries a trailing partial PCM frame".into(),
+            });
+        }
+        let frames = bytes.len() / (2 * channel_count);
+        let mut channels = vec![Vec::with_capacity(frames); channel_count];
+        for frame in 0..frames {
+            for (slot, row) in channels.iter_mut().enumerate() {
+                let offset = (frame * channel_count + slot) * 2;
+                row.push(i16::from_le_bytes([bytes[offset], bytes[offset + 1]]));
+            }
+        }
+        Self::new(sample_rate, channels)
+    }
+
+    pub fn sample_rate(&self) -> i64 {
+        self.sample_rate
+    }
+
+    /// Number of channels (Python `channel_count`).
+    pub fn channel_count(&self) -> usize {
+        self.channels.len()
+    }
+
+    /// Frame count (Python `frame_count`).
+    pub fn frame_count(&self) -> i64 {
+        self.channels[0].len() as i64
+    }
+
+    /// Channel-major float rows at the legacy normalization
+    /// (`value / 32768.0`), exactly as Python `read_pcm16` feeds
+    /// `PcmBuffer`.
+    pub fn to_float_rows(&self) -> Vec<Vec<f64>> {
+        self.channels
+            .iter()
+            .map(|row| row.iter().map(|value| *value as f64 / 32768.0).collect())
+            .collect()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Container plan
+// ---------------------------------------------------------------------------
+
+/// Per-output container metadata, kept separate from codec identity
+/// (Python `_ContainerPlan`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContainerPlan {
+    fmt: VorbisFmtFields,
+    endian: Endian,
+    seek_table: Vec<u8>,
+    extra_chunks: Vec<([u8; 4], Vec<u8>)>,
+    metadata_source: String,
+}
+
+impl ContainerPlan {
+    /// Fresh plan from one installed profile
+    /// (Python `_ContainerPlan.from_profile`).
+    pub fn from_profile(profile: &EncoderProfile) -> Self {
+        let meta = profile.container_metadata();
+        let fmt = from_container_metadata(meta);
+        Self {
+            fmt,
+            endian: if profile.endian() == "be" {
+                Endian::Big
+            } else {
+                Endian::Little
+            },
+            seek_table: profile.seek_table().to_vec(),
+            extra_chunks: profile
+                .extra_chunks()
+                .iter()
+                .filter_map(|(id, payload)| {
+                    if id.len() != 4 {
+                        return None;
+                    }
+                    let mut chunk_id = [0u8; 4];
+                    chunk_id.copy_from_slice(&id[..4]);
+                    Some((chunk_id, payload.clone()))
+                })
+                .collect(),
+            metadata_source: format!("profile:{}", profile.name()),
+        }
+    }
+
+    pub fn fmt(&self) -> &VorbisFmtFields {
+        &self.fmt
+    }
+
+    pub fn endian(&self) -> Endian {
+        self.endian
+    }
+
+    pub fn seek_table(&self) -> &[u8] {
+        &self.seek_table
+    }
+
+    pub fn extra_chunks(&self) -> &[([u8; 4], Vec<u8>)] {
+        &self.extra_chunks
+    }
+
+    /// Provenance label reported in stats
+    /// (Python `metadata_source`; must be non-empty).
+    pub fn metadata_source(&self) -> &str {
+        &self.metadata_source
+    }
+}
+
+fn from_container_metadata(meta: &ContainerMetadata) -> VorbisFmtFields {
+    VorbisFmtFields {
+        w_format_tag: meta.w_format_tag as u16,
+        n_channels: meta.n_channels as u16,
+        n_samples_per_sec: meta.n_samples_per_sec as u32,
+        n_avg_bytes_per_sec: meta.n_avg_bytes_per_sec as u32,
+        n_block_align: meta.n_block_align as u16,
+        w_bits_per_sample: meta.w_bits_per_sample as u16,
+        cb_size: meta.cb_size as u16,
+        w_reserved0: meta.w_reserved0 as u16,
+        dw_channel_mask: meta.dw_channel_mask as u32,
+        dw_total_pcm_frames: meta.dw_total_pcm_frames as u32,
+        dw_first_audio_packet_offset: meta.dw_first_audio_packet_offset as u32,
+        dw_data_payload_size: meta.dw_data_payload_size as u32,
+        dw_unknown_0x24: meta.dw_unknown_0x24 as u32,
+        dw_seek_table_size: meta.dw_seek_table_size as u32,
+        dw_vorbis_data_offset: meta.dw_vorbis_data_offset as u32,
+        u_max_packet_size: meta.u_max_packet_size as u16,
+        u_unknown_0x32: meta.u_unknown_0x32 as u16,
+        dw_unknown_0x34: meta.dw_unknown_0x34 as u32,
+        dw_unknown_0x38: meta.dw_unknown_0x38 as u32,
+        dw_unknown_0x3c: meta.dw_unknown_0x3c as u32,
+        u_blocksize0_pow: meta.u_blocksize0_pow as u8,
+        u_blocksize1_pow: meta.u_blocksize1_pow as u8,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Results
+// ---------------------------------------------------------------------------
+
+/// Immutable encode statistics (Python `EncodeStats`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EncodeStats {
+    pub pcm_frames: i64,
+    pub channels: i64,
+    pub audio_packets: i64,
+    pub short_packets: i64,
+    pub long_packets: i64,
+    pub bytes: i64,
+    pub metadata_source: String,
+}
+
+/// Immutable encode result (Python `EncodeResult`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EncodeResult {
+    pub data: Vec<u8>,
+    pub stats: EncodeStats,
+}
+
+impl EncodeResult {
+    /// SHA-256 of the encoded bytes, lowercase hex
+    /// (Python `EncodeResult.sha256`).
+    pub fn sha256(&self) -> String {
+        let digest = Sha256::digest(&self.data);
+        wem_profiles::resources::hex(digest.as_slice())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Encoder
+// ---------------------------------------------------------------------------
+
+/// Owns immutable codec inputs and runs one complete encode per PCM buffer
+/// (Python `Encoder`).
+pub struct Encoder {
+    profile: EncoderProfile,
+    container: ContainerPlan,
+    resources: EncoderProfileResources,
+}
+
+impl Encoder {
+    /// Load one installed profile by name and construct the encoder
+    /// (Python `load_wem_profile` + `Encoder.__init__`).
+    pub fn from_profile(name: &str) -> Result<Self, EncoderError> {
+        let profile = match load_wem_profile(name) {
+            Ok(profile) => profile,
+            Err(ProfileError::UnknownProfile { .. }) => {
+                return Err(EncoderError::ProfileNotFound {
+                    requested: name.to_string(),
+                });
+            }
+            Err(error) => {
+                return Err(EncoderError::Internal(InternalError::Profile(error)));
+            }
+        };
+        Self::from_profile_model(&profile, None)
+    }
+
+    /// Construct from an encoder profile (Python `Encoder.__init__`).
+    ///
+    /// `container` may override the profile-derived container plan
+    /// (Python `_container` parameter); the geometry cross-check still
+    /// applies.
+    pub fn from_profile_model(
+        profile: &EncoderProfile,
+        container: Option<ContainerPlan>,
+    ) -> Result<Self, EncoderError> {
+        if profile.block_sizes() != [256, 2048] {
+            return Err(EncoderError::StateError {
+                message: "selected profile block geometry is unsupported; \
+                          the installed runtime supports 256/2048 blocks"
+                    .into(),
+            });
+        }
+        let plan = match container {
+            Some(plan) => plan,
+            None => ContainerPlan::from_profile(profile),
+        };
+        let (plan_channels, plan_rate) = (
+            plan.fmt.n_channels as i64,
+            plan.fmt.n_samples_per_sec as i64,
+        );
+        if (plan_channels, plan_rate) != (profile.channels(), profile.sample_rate()) {
+            return Err(EncoderError::StateError {
+                message: "container metadata geometry differs from encoder profile".into(),
+            });
+        }
+
+        let data = DataDir::from_env()?;
+        let bundle = load_profile_bundle(&data, Some(profile.name()), false)?;
+        if bundle.key() != profile.key() {
+            return Err(EncoderError::StateError {
+                message: "selected profile differs from installed profile bundle".into(),
+            });
+        }
+        let setup_sha = bundle.setup()?.sha256().to_string();
+        if profile.setup_sha256() != setup_sha {
+            return Err(EncoderError::StateError {
+                message: format!(
+                    "selected profile {} differs from installed profile setup",
+                    profile.name()
+                ),
+            });
+        }
+        let setup_packet = profile.setup_packet()?;
+        let resources = assemble_encoder_profile_resources(&bundle, Some(&setup_packet))?;
+
+        Ok(Self {
+            profile: profile.clone(),
+            container: plan,
+            resources,
+        })
+    }
+
+    /// The selected encoder profile (Python `profile`).
+    pub fn profile(&self) -> &EncoderProfile {
+        &self.profile
+    }
+
+    /// The analysis resources for this profile
+    /// (Python `_analysis_resources`; used by stage timers and streaming
+    /// shells).
+    pub fn analysis_resources(&self) -> &AnalysisProfileResources {
+        &self.resources.analysis
+    }
+
+    /// The parsed Vorbis setup (Python `_setup`).
+    pub fn setup(&self) -> &SetupInfo {
+        &self.resources.setup
+    }
+
+    /// The resolved codebooks (Python `_books`).
+    pub fn codebooks(&self) -> &[Codebook] {
+        &self.resources.codebooks
+    }
+
+    /// The verified setup packet bytes (Python `_setup_packet`).
+    pub fn setup_packet(&self) -> &[u8] {
+        &self.resources.setup_packet
+    }
+
+    /// The container plan for this encoder (Python `_container`).
+    pub fn container_plan(&self) -> &ContainerPlan {
+        &self.container
+    }
+
+    /// Encode one independent PCM buffer into a complete Wwise WEM
+    /// (Python `Encoder.encode_pcm`).
+    pub fn encode_pcm(&self, pcm: &Pcm16) -> Result<EncodeResult, EncoderError> {
+        if (pcm.channel_count() as i64, pcm.sample_rate())
+            != (self.profile.channels(), self.profile.sample_rate())
+        {
+            return Err(EncoderError::GeometryMismatch {
+                message: "PCM channel count/sample rate differs from encoder profile".into(),
+            });
+        }
+        if pcm.frame_count() < MIN_PCM_FRAMES as i64 {
+            return Err(EncoderError::InputTooShort {
+                want: MIN_PCM_FRAMES,
+                got: pcm.frame_count() as u32,
+            });
+        }
+
+        let mut session = AnalysisSession::new(
+            self.profile.channels(),
+            self.profile.sample_rate(),
+            self.profile.block_sizes(),
+            self.resources.analysis.clone(),
+        )?;
+
+        let pcm_rows = pcm.to_float_rows();
+        let (modes, windows) = session.selected_windows(&pcm_rows)?;
+
+        let channels = self.profile.channels() as u32;
+        let mut audio_packets: Vec<Vec<u8>> = Vec::with_capacity(windows.len());
+        for window in windows {
+            let analysis = session.analyze_window(window, None)?;
+            let packet = pack_analysis_frame(
+                &self.resources.setup,
+                &self.resources.codebooks,
+                &analysis,
+                channels,
+            )?;
+            audio_packets.push(packet.packet);
+        }
+        if audio_packets.len() != modes.len() {
+            return Err(EncoderError::Internal(InternalError::Invariant {
+                message: "analysis window and mode counts diverged",
+            }));
+        }
+
+        let mut fields = self.container.fmt;
+        fields.dw_total_pcm_frames = pcm.frame_count() as u32;
+
+        let mut packets = Vec::with_capacity(1 + audio_packets.len());
+        packets.push(self.resources.setup_packet.clone());
+        packets.extend(audio_packets);
+
+        let built = build_vorbis_wem(
+            fields,
+            &packets,
+            &self.container.seek_table,
+            self.container.endian,
+            &self.container.extra_chunks,
+            true,
+            None,
+        )?;
+
+        let short_packets = modes.iter().filter(|&&m| m == 0).count() as i64;
+        let long_packets = modes.iter().filter(|&&m| m == 1).count() as i64;
+        let bytes = built.wem_bytes.len() as i64;
+        Ok(EncodeResult {
+            data: built.wem_bytes,
+            stats: EncodeStats {
+                pcm_frames: pcm.frame_count(),
+                channels: pcm.channel_count() as i64,
+                audio_packets: short_packets + long_packets,
+                short_packets,
+                long_packets,
+                bytes,
+                metadata_source: self.container.metadata_source.clone(),
+            },
+        })
+    }
+}
+
+/// Resolve an installed profile by PCM geometry
+/// (Python `resolve_wem_profile`; used by the CLI when no profile is named).
+pub fn resolve_profile_by_geometry(
+    channels: i64,
+    sample_rate: i64,
+) -> Result<Encoder, EncoderError> {
+    let data = DataDir::from_env()?;
+    let registry: ProfileRegistry = wem_profiles::registry::installed_registry(&data)?;
+    let profile = registry.resolve_geometry(channels, sample_rate)?;
+    Encoder::from_profile_model(profile, None)
+}

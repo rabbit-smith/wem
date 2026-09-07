@@ -196,6 +196,7 @@ dependencies = [
 name = "wem-core"
 version = "0.1.0"
 dependencies = [
+ "sha2",
  "wem-analysis",
  "wem-container",
  "wem-profiles",

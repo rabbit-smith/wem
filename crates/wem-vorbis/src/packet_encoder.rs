@@ -52,6 +52,8 @@ pub enum PacketError {
     FloorFit(FloorFitError),
     /// residue packing failed.
     Residue(ResidueError),
+    /// analysis channel count differs from packet mapping.
+    AnalysisChannelsMismatch { want: usize, got: usize },
 }
 
 impl std::fmt::Display for PacketError {
@@ -91,6 +93,9 @@ impl std::fmt::Display for PacketError {
             PacketError::Floor1(e) => write!(f, "floor1: {e}"),
             PacketError::FloorFit(e) => write!(f, "floor fit: {e}"),
             PacketError::Residue(e) => write!(f, "residue: {e}"),
+            PacketError::AnalysisChannelsMismatch { want, got } => {
+                write!(f, "analysis channel count differs from packet mapping ({got} != {want})")
+            }
         }
     }
 }

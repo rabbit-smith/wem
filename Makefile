@@ -36,6 +36,12 @@ build:
 wheel-smoke:
 	python3 scripts/wheel_smoke.py
 
+rust-test:
+	cd crates && cargo test --workspace
+
+rust-bench:
+	cd crates && cargo build --release -p wem-core && target/release/wwise-wem ../tests/fixtures/input.wav --output /dev/null --time
+
 check: lint test wheel-smoke
 
 clean:

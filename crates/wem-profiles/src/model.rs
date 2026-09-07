@@ -301,6 +301,21 @@ impl EncoderProfile {
         self.key.sample_rate()
     }
 
+    /// Container endianness marker (Python `endian` field).
+    pub fn endian(&self) -> &str {
+        &self.endian
+    }
+
+    /// Container seek-table payload (Python `seek_table` field).
+    pub fn seek_table(&self) -> &[u8] {
+        &self.seek_table
+    }
+
+    /// Extra RIFF chunks carried by the profile (Python `extra_chunks`).
+    pub fn extra_chunks(&self) -> &[(Vec<u8>, Vec<u8>)] {
+        &self.extra_chunks
+    }
+
     /// Fresh legacy fmt dictionary (Python `fmt` property).
     pub fn fmt(&self) -> Map<String, Value> {
         self.container_metadata
