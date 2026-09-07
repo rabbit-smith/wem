@@ -1,8 +1,11 @@
-# src/wwise_wem/ — Python oracle and facade
+# src/wwise_wem/ — distribution facade
 
-This package is the reference oracle today (and after the Rust cutover, a thin
-facade + compatibility shell). Its byte-for-byte outputs are the project's
-source of truth; the Rust kernel is verified against it, never the reverse.
+This package is the thin distribution facade: root API shell, engine
+switch, CLI, WAV adapters, DTOs, and the installed-profile metadata path.
+The bit-exact implementation domains live in the development-tree reference
+package (`reference/wwise_wem_reference`, see `reference/AGENTS.md`); its
+byte-for-byte outputs remain the project's source of truth, and the Rust
+kernel is verified against it, never the reverse.
 
 ## Hard rules
 
@@ -10,10 +13,14 @@ source of truth; the Rust kernel is verified against it, never the reverse.
    `make stage-contract`, and `make golden` green. If a change alters any
    digest, it is a project decision, not a code change — stop and escalate.
 2. **No direct transcendentals.** `math.sin/cos/log/log10/pow/exp` outside
-   `wwise_wem._tmath` is prohibited in encoder paths; all such calls go through
-   the named site entries and, for exact-profile paths, through
-   `FrozenMathTables` injection. New runtime transcendental inputs require the
-   record → freeze workflow first (see `docs/profiles.md`).
+   `wwise_wem_reference._tmath` is prohibited in encoder paths; all such
+   calls go through the named site entries and, for exact-profile paths,
+   through `FrozenMathTables` injection. New runtime transcendental inputs
+   require the record → freeze workflow first (see `docs/profiles.md`).
+3. **Reference imports stay lazy.** Facade modules import
+   `wwise_wem_reference` only through `wwise_wem._reference.reference_module`
+   inside the call paths that need it; importing the package root must never
+   pull in reference modules (the wheel does not ship them).
 3. **Layer boundaries.** Follow `docs/architecture.md` import rules; `analysis`,
    `vorbis`, `container` never read package resources; `profiles` is the only
    loader. Receiving typed tables is the only configuration mechanism.
@@ -39,6 +46,9 @@ Every new module or packaged data file requires, in the same commit:
 3. profile data: manifest `resources` entry + SHA-256 + `index.json` re-hash
    (`scripts/generate_frozen_tables.py` shows the canonical update path),
 4. `make wheel-smoke` green (installed + zip import paths).
+
+This applies to the facade only: reference-tree modules are development-tree
+code and must not be added to the allowlist.
 
 ## Provenance vocabulary (contract-enforced)
 

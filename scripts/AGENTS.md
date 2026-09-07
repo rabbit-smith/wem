@@ -29,9 +29,13 @@ or CI gates. They must be boring, idempotent, and offline.
   the container byte-identically to `tests/fixtures/reference.wem`, with
   the unknown-digest path returning the enumerated PROFILE_NOT_FOUND error;
   v1 semantics are otherwise pinned by the wem-server integration tests.
-- `wheel_smoke.py` verifies installed and zip-import resource paths; when
-  packaging changes (new data, native artifacts), update it in the same commit
-  — its expected sets are contracts, not constants.
+- `wheel_smoke.py` verifies the facade-only wheel inventory against the
+  distribution allowlist, the installed and zip-import resource paths, the
+  clear `ImportError` without the native kernel and without the reference
+  tree, and — when the native kernel is importable in the runner — a
+  byte-exact native encode from the installed wheel; when packaging changes
+  (new data, native artifacts), update it in the same commit — its expected
+  sets are contracts, not constants.
 - Naming: verb-first (`record_`, `generate_`, `emit_`, `verify_`); one script,
   one artifact family; shared helpers belong in `tests/*_support.py` when the
   consumer is a contract.

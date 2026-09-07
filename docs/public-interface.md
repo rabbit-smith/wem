@@ -100,7 +100,10 @@ The package root also exports immutable adapter-boundary models:
 - `SetupConfig` holds setup bytes, channel count, book IDs and a recursively
   read-only parsed view;
 - `PacketResult` holds immutable packet bytes and the short/long mode triple;
-- `EncodeStats` converts with `from_legacy_dict()` / `to_legacy_dict()`;
+- `EncodeStats` converts with `from_legacy_dict()` / `to_legacy_dict()`. The
+  legacy dictionary form carries an additive `engine` entry (the engine that
+  produced the bytes: `native` or `python`); `from_legacy_dict()` accepts
+  older dictionaries without it.
 - `EncodeResult` converts with `from_legacy_tuple()` / `to_legacy_tuple()`.
 
 These types are stable public adapters. Internal analysis buffers and
@@ -234,22 +237,30 @@ produce identical results:
 These are compatibility gates for refactoring, not general promises that all
 inputs have the same size or packet counts.
 
-## Engine selection (native kernel / pure-Python fallback)
+## Engine selection (native kernel / pure-Python reference fallback)
 
 The facade is engine-aware. Byte-producing calls (`Encoder.encode_pcm()`,
 `encode_wav()`, and the CLI) prefer the native kernel
 (`_wwise_wem_native`, built from `crates/wem-python`) when it is importable
-and otherwise run the pure-Python implementation. Both engines produce
-byte-identical output; the pure-Python implementation remains the reference
-oracle.
+and otherwise run the pure-Python reference implementation. Both engines
+produce byte-identical output; the reference implementation remains the
+reference oracle.
+
+The pure-Python reference implementation ships only with the development
+source tree (the `reference/wwise_wem_reference` package, importable when
+`reference/` is on `PYTHONPATH`); it is not part of the distributed wheel.
+An installed copy of the facade without the native kernel raises a clear
+`ImportError` from byte-producing calls explaining how to build or install
+the native kernel, instead of running a partial pipeline. The engine that
+produced a result is reported on `EncodeStats.engine`.
 
 The `WWISE_WEM_ENGINE` environment variable pins the choice:
 
 | Value | Behavior |
 |---|---|
-| `auto` (default) | Native kernel when importable, pure Python otherwise. |
+| `auto` (default) | Native kernel when importable, pure-Python reference otherwise. |
 | `native` | Always the native kernel; a missing extension raises `ImportError` instead of downgrading. |
-| `python` | Always the pure-Python implementation. |
+| `python` | Always the pure-Python reference implementation; requires the development-tree reference package. |
 
 Engine-specific input rules:
 
@@ -261,9 +272,11 @@ Engine-specific input rules:
   With `auto`, such a buffer is routed to the pure-Python implementation
   instead.
 - The compatibility template path (`template=PATH` / `--template`) always
-  uses the pure-Python implementation: it carries template-provided RIFF
-  container metadata (byte order, fmt values, seek-table bytes, extra
-  chunks) that the native one-shot API does not accept.
+  uses the pure-Python reference implementation: it carries template-provided
+  RIFF container metadata (byte order, fmt values, seek-table bytes, extra
+  chunks) that the native one-shot API does not accept. It also requires the
+  development-tree reference package; a wheel-only installation without the
+  native kernel reports a clear `ImportError` for template input.
 
 `load_wem_profile`, `resolve_wem_profile`, and `ProfileRegistry` are
 metadata-only paths and always run in pure Python; they never touch the

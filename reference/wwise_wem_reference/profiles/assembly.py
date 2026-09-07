@@ -13,7 +13,7 @@ from ..analysis.config import (
 from ..vorbis.codebook import Codebook
 from ..vorbis.setup import parse_setup
 from .book_ids import load_book_table
-from .bundle import ProfileBundle
+from wwise_wem.profiles.bundle import ProfileBundle
 from .codebooks import load_setup_codebooks
 from .frozen import load_frozen_tables
 from .transform import load_mdct_looks

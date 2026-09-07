@@ -10,8 +10,8 @@ from wwise_wem.application.compat import encode_wav_to_wem
 from wwise_wem.application.encoder import Encoder
 from wwise_wem.application.models import EncodeResult, EncodeStats
 from wwise_wem.model import PcmBuffer
-from wwise_wem.analysis.preprocessing.detector_input import iter_detector_quanta
-from wwise_wem.analysis.session import AnalysisSession
+from wwise_wem_reference.analysis.preprocessing.detector_input import iter_detector_quanta
+from wwise_wem_reference.analysis.session import AnalysisSession
 from wwise_wem.profiles.registry import load_wem_profile
 
 
@@ -56,9 +56,9 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
                 side_effect=ValueError("runtime manifest checksum differs"),
             ),
             patch(
-                "wwise_wem.application.encoder.assemble_encoder_profile_resources"
+                "wwise_wem_reference.python_engine.assemble_encoder_profile_resources"
             ) as assemble,
-            patch("wwise_wem.application.encoder.AnalysisSession") as session,
+            patch("wwise_wem_reference.python_engine.AnalysisSession") as session,
         ):
             with self.assertRaisesRegex(ValueError, "runtime manifest checksum"):
                 Encoder(profile)
@@ -75,7 +75,7 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
             ),
         )
         with patch(
-            "wwise_wem.application.encoder.assemble_encoder_profile_resources"
+            "wwise_wem_reference.python_engine.assemble_encoder_profile_resources"
         ) as assemble:
             with self.assertRaisesRegex(ValueError, "differs from installed profile"):
                 Encoder(profile)
@@ -84,7 +84,7 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
     def test_detector_quanta_forwards_explicit_blocksizes(self):
         streams = ((0.0,) * 128,)
         with patch(
-            "wwise_wem.analysis.preprocessing.detector_input.detector_pcm_streams",
+            "wwise_wem_reference.analysis.preprocessing.detector_input.detector_pcm_streams",
             return_value=streams,
         ) as detector:
             rows = tuple(
@@ -110,7 +110,7 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
         )
         pcm = [[0.0] * 4096]
         with patch(
-            "wwise_wem.analysis.session.iter_detector_quanta", return_value=()
+            "wwise_wem_reference.analysis.session.iter_detector_quanta", return_value=()
         ) as detector:
             modes = stream.select_modes(pcm)
         self.assertTrue(modes)
@@ -138,7 +138,7 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
                 "wwise_wem.application.encoder.load_profile_bundle"
             ) as load_bundle,
             patch(
-                "wwise_wem.application.encoder.assemble_encoder_profile_resources"
+                "wwise_wem_reference.python_engine.assemble_encoder_profile_resources"
             ) as assemble,
         ):
             with self.assertRaisesRegex(ValueError, "supports 256/2048"):

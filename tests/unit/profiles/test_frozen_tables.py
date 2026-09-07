@@ -11,11 +11,11 @@ import unittest
 import wave
 from pathlib import PurePosixPath
 
-from wwise_wem.analysis.config import FrozenMathTables, make_wwise_psy_look
-from wwise_wem._tmath import math_bits
-from wwise_wem.profiles.assembly import assemble_encoder_profile_resources
+from wwise_wem_reference.analysis.config import FrozenMathTables, make_wwise_psy_look
+from wwise_wem_reference._tmath import math_bits
+from wwise_wem_reference.profiles.assembly import assemble_encoder_profile_resources
 from wwise_wem.profiles.bundle import load_profile_bundle
-from wwise_wem.profiles.frozen import load_frozen_tables
+from wwise_wem_reference.profiles.frozen import load_frozen_tables
 
 ROOT = PurePosixPath(os.path.dirname(__file__)).parents[2]
 ENUMERABLE_SITES = (
@@ -27,11 +27,12 @@ ENUMERABLE_SITES = (
 
 _SUBPROCESS_ENCODE = """
 import os, sys
-sys.path.insert(0, os.environ["WEM_SRC"])
+for path_entry in os.environ["WEM_SRC"].split(os.pathsep):
+    sys.path.insert(0, path_entry)
 from pathlib import Path
 from wwise_wem import encode_wav
 result = encode_wav(Path(os.environ["WEM_INPUT"]))
-from wwise_wem._tmath import write_recording
+from wwise_wem_reference._tmath import write_recording
 counts = write_recording()
 print(",".join(f"{k}={v}" for k, v in sorted(counts.items())))
 """
@@ -72,7 +73,7 @@ class FrozenTableEqualityTests(unittest.TestCase):
         )
 
     def test_windows_reproduce_reference_synthesis(self) -> None:
-        from wwise_wem.analysis.dsp.transform import vorbis_window
+        from wwise_wem_reference.analysis.dsp.transform import vorbis_window
 
         for size in (256, 2048):
             reference = vorbis_window(size)
@@ -116,7 +117,7 @@ class FrozenLiveCallTests(unittest.TestCase):
             environment.update(
                 {
                     "WEM_TMATH_RECORD": record_dir,
-                    "WEM_SRC": str(ROOT / "src"),
+                    "WEM_SRC": str(ROOT / "src") + os.pathsep + str(ROOT / "reference"),
                     "WEM_INPUT": wav_path,
                     "PYTHONDONTWRITEBYTECODE": "1",
                 }

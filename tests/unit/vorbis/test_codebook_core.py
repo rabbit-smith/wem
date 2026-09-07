@@ -9,9 +9,9 @@ import sys
 import unittest
 from pathlib import Path
 
-import wwise_wem.vorbis.codebook as core
-from wwise_wem.vorbis.bitio import BitReader, OggPack
-from wwise_wem.vorbis.codebook import StaticCodebook
+import wwise_wem_reference.vorbis.codebook as core
+from wwise_wem_reference.vorbis.bitio import BitReader, OggPack
+from wwise_wem_reference.vorbis.codebook import StaticCodebook
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -76,12 +76,12 @@ package = types.ModuleType("wwise_wem")
 package.__path__ = [os.environ["WWISE_PACKAGE_DIR"]]
 package.__package__ = "wwise_wem"
 sys.modules["wwise_wem"] = package
-core = importlib.import_module("wwise_wem.vorbis.codebook")
+core = importlib.import_module("wwise_wem_reference.vorbis.codebook")
 result = core.make_codewords([1, 1])
 banned = [name for name in (
-    "wwise_wem.profiles.book_ids",
+    "wwise_wem_reference.profiles.book_ids",
     "wwise_wem.profiles.resources",
-    "wwise_wem.profiles.codebooks",
+    "wwise_wem_reference.profiles.codebooks",
 ) if name in sys.modules]
 print(json.dumps({"result": result, "banned": banned}))
 '''

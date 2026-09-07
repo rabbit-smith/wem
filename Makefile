@@ -5,30 +5,30 @@ PY ?= python3
 test: test-fast frame-contract stage-contract golden proto-contract proto-smoke
 
 test-fast:
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest discover -s tests/unit -t . -v
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest discover -s tests/integration -t . -v
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest discover -s tests/contract -t . -v
+	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference python3 -m unittest discover -s tests/unit -t . -v
+	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference python3 -m unittest discover -s tests/integration -t . -v
+	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference python3 -m unittest discover -s tests/contract -t . -v
 
 frame-contract:
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.contract.frame_pipeline_contract -v
+	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference python3 -m unittest tests.contract.frame_pipeline_contract -v
 
 stage-contract:
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.contract.stage_pipeline_contract -v
+	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference python3 -m unittest tests.contract.stage_pipeline_contract -v
 
 proto-contract:
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src $(PY) -m unittest tests.contract.test_proto_contract -v
+	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest tests.contract.test_proto_contract -v
 
 proto-smoke:
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src $(PY) scripts/interop_grpc_smoke.py
+	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) scripts/interop_grpc_smoke.py
 
 golden:
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.golden.test_golden -v
+	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference python3 -m unittest tests.golden.test_golden -v
 
 RUFF ?= ruff
 MYPY ?= mypy
 lint:
-	$(RUFF) check src tests scripts
-	$(MYPY) src
+	$(RUFF) check src reference tests scripts
+	$(MYPY) src reference
 
 build:
 	python3 -m pip wheel . --no-deps -w dist

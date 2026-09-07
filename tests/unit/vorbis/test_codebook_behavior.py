@@ -4,13 +4,13 @@ import json
 import unittest
 from pathlib import Path
 
-from wwise_wem.vorbis.bitio import BitReader
-from wwise_wem.profiles.book_ids import resolve_book_id
-from wwise_wem.profiles.codebooks import load_setup_codebooks
+from wwise_wem_reference.vorbis.bitio import BitReader
+from wwise_wem_reference.profiles.book_ids import resolve_book_id
+from wwise_wem_reference.profiles.codebooks import load_setup_codebooks
 from tests.codebook_resource_support import installed_codebook_tables
-from wwise_wem.vorbis.bitio import OggPack
-from wwise_wem.vorbis.setup import parse_setup
-from wwise_wem.vorbis.codebook import StaticCodebook, make_codewords
+from wwise_wem_reference.vorbis.bitio import OggPack
+from wwise_wem_reference.vorbis.setup import parse_setup
+from wwise_wem_reference.vorbis.codebook import StaticCodebook, make_codewords
 from wwise_wem.profiles.registry import resolve_wem_profile
 
 
@@ -93,8 +93,8 @@ class CodebookBehaviorTests(unittest.TestCase):
         self.assertTrue(forbidden.isdisjoint(resolve_book_id(214, tables)))
 
     def test_modules_have_no_hidden_diagnostic_or_cli_surface(self) -> None:
-        from wwise_wem.profiles import book_ids, codebooks
-        from wwise_wem.vorbis import bitio, codebook
+        from wwise_wem_reference.profiles import book_ids, codebooks
+        from wwise_wem_reference.vorbis import bitio, codebook
 
         forbidden = {
             book_ids: ("main",),

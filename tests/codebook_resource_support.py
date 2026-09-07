@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from types import MappingProxyType
 
-from wwise_wem.profiles.book_ids import load_book_table
+from wwise_wem_reference.profiles.book_ids import load_book_table
 from wwise_wem.profiles.bundle import load_profile_bundle
 
 

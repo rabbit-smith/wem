@@ -20,6 +20,9 @@ python3 -m venv .venv
 . .venv/bin/activate
 pip install -e .
 
+# native kernel (preferred engine when importable)
+cd crates/wem-python && maturin develop -F extension-module && cd ../..
+
 wwise-wem input.wav --output output.wem
 ```
 
@@ -40,6 +43,19 @@ The template metadata compatibility path remains available:
 ```bash
 wwise-wem input.wav --template reference.wem --output output.wem
 ```
+
+### Engine availability
+
+The facade is native-first: when the native kernel (`_wwise_wem_native`,
+built from `crates/wem-python`) is importable it encodes; otherwise the
+facade delegates to the pure-Python reference implementation in the
+development tree (`reference/wwise_wem_reference`). Until the maturin
+distribution chain ships the native extension inside the wheel, a plain
+`pip install` of the distributed wheel has no engine at all and byte-producing
+calls raise a clear `ImportError` pointing at the native build. For
+development-tree encoding without the native kernel, keep the repository
+layout on the path (for example `PYTHONPATH=src:reference`, as the Makefile
+uses).
 
 ## Python API
 
@@ -78,7 +94,8 @@ explicit selection, CLI output, and whole-file golden identity.
 
 ## Project boundary
 
-- `src/wwise_wem/`: encoder, packet/container implementation and profile registry.
+- `src/wwise_wem/`: distribution facade (root API, engine switch, CLI, adapters, profile metadata) and its DTOs.
+- `reference/wwise_wem_reference/`: bit-exact pure-Python reference implementation (development tree only, not in the wheel).
 - `src/wwise_wem/data/`: immutable setup, psychoacoustic and codebook tables.
 - `tests/fixtures/`: one PCM input and its bit-exact acceptance WEM.
 - `tests/data/frame-contract/`: checked per-frame hashes for the exact profile.

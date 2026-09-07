@@ -12,7 +12,7 @@ import struct
 from typing import Any
 
 from ...analysis.config import WwisePsyLongTables
-from ..resources import ResourceRef
+from wwise_wem.profiles.resources import ResourceRef
 
 
 SCHEMA = "wem.psy-long-static.v1"

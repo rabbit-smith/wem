@@ -6,15 +6,15 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from wwise_wem.profiles.book_ids import resolve_book_id
-from wwise_wem.vorbis.setup import ilog, pack_setup, parse_setup
-from wwise_wem.profiles.transient import load_transient_tables
-from wwise_wem.profiles.psychoacoustics.long_tables import (
+from wwise_wem_reference.profiles.book_ids import resolve_book_id
+from wwise_wem_reference.vorbis.setup import ilog, pack_setup, parse_setup
+from wwise_wem_reference.profiles.transient import load_transient_tables
+from wwise_wem_reference.profiles.psychoacoustics.long_tables import (
     load_long_psy_tables,
     table_sha256,
 )
-from wwise_wem.profiles.psychoacoustics.long_variants import load_long_variant
-from wwise_wem.profiles.psychoacoustics.short_tables import load_short_psy_profiles
+from wwise_wem_reference.profiles.psychoacoustics.long_variants import load_long_variant
+from wwise_wem_reference.profiles.psychoacoustics.short_tables import load_short_psy_profiles
 from wwise_wem.profiles.registry import (
     WWISE2013_6CH_44100,
     load_wem_profile,

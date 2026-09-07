@@ -8,7 +8,7 @@ from functools import lru_cache
 from ...analysis.config import (
     WwisePsySeedSurface,
 )
-from ..resources import ResourceRef
+from wwise_wem.profiles.resources import ResourceRef
 from ...analysis.dsp.transform import _f32
 
 TONE_LEVEL_COUNT = 8

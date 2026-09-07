@@ -24,7 +24,11 @@ class GoldenEncoderTests(unittest.TestCase):
         reference = (FIXTURES / "reference.wem").read_bytes()
         self.assertEqual(encoded, reference)
         self.assertEqual(hashlib.sha256(encoded).hexdigest(), EXPECTED_SHA256)
-        self.assertEqual(stats, EXPECTED_STATS)
+        self.assertEqual(
+            {key: value for key, value in stats.items() if key != "engine"},
+            EXPECTED_STATS,
+        )
+        self.assertIn(stats["engine"], {"native", "python"})
 
 
 if __name__ == "__main__":

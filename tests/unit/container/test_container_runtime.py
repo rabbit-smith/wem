@@ -6,10 +6,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from wwise_wem.container.fmt import pack_vorbis_fmt, parse_vorbis_fmt
-from wwise_wem.container.packets import build_packet_stream, extract_packets
-from wwise_wem.container.riff import build_riff, parse_chunks
-from wwise_wem.container.wem import (
+from wwise_wem_reference.container.fmt import pack_vorbis_fmt, parse_vorbis_fmt
+from wwise_wem_reference.container.packets import build_packet_stream, extract_packets
+from wwise_wem_reference.container.riff import build_riff, parse_chunks
+from wwise_wem_reference.container.wem import (
     build_vorbis_wem,
     load_wem_parts_bytes,
     parse_wem_bytes,

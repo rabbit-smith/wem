@@ -7,16 +7,16 @@ from pathlib import PurePosixPath
 from unittest.mock import patch
 
 from tests.codebook_resource_support import installed_codebook_tables
-from wwise_wem.vorbis.bitio import BitReader
-from wwise_wem.profiles.book_ids import (
+from wwise_wem_reference.vorbis.bitio import BitReader
+from wwise_wem_reference.profiles.book_ids import (
     T219_COUNT,
     T97_COUNT,
     load_book_table,
     resolve_book_id,
 )
-from wwise_wem.profiles.codebooks import load_codebook
+from wwise_wem_reference.profiles.codebooks import load_codebook
 from wwise_wem.profiles.bundle import load_profile_bundle
-from wwise_wem.vorbis.bitio import OggPack
+from wwise_wem_reference.vorbis.bitio import OggPack
 from wwise_wem.profiles.resources import ResourceRef
 
 

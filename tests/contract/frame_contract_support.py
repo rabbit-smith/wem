@@ -13,11 +13,11 @@ import struct
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-from wwise_wem.vorbis.packet_encoder import pack_analysis_frame
-from wwise_wem.profiles.assembly import assemble_encoder_profile_resources
+from wwise_wem_reference.vorbis.packet_encoder import pack_analysis_frame
+from wwise_wem_reference.profiles.assembly import assemble_encoder_profile_resources
 from wwise_wem.profiles.bundle import load_profile_bundle
 from wwise_wem.application.compat import read_pcm16_wav
-from wwise_wem.analysis.session import AnalysisSession
+from wwise_wem_reference.analysis.session import AnalysisSession
 from wwise_wem.profiles.registry import load_wem_profile, resolve_wem_profile
 
 

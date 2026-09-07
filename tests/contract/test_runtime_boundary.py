@@ -1,4 +1,9 @@
-"""Strict structural boundary for the importable runtime package."""
+"""Strict structural boundary for the facade and reference trees.
+
+The importable runtime facade (``src/wwise_wem``) stays thin; the reference
+oracle (``reference/wwise_wem_reference``) keeps the domain layout whose
+one-directional import graph is checked here.
+"""
 
 from __future__ import annotations
 
@@ -7,21 +12,22 @@ import unittest
 from dataclasses import fields
 from pathlib import Path
 
-from wwise_wem.scheduling.model import FramePlan
-from wwise_wem.analysis.preprocessing.windowing import WindowedFrame
+from wwise_wem_reference.scheduling.model import FramePlan
+from wwise_wem_reference.analysis.preprocessing.windowing import WindowedFrame
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PACKAGE = ROOT / "src" / "wwise_wem"
+FACADE = ROOT / "src" / "wwise_wem"
+REFERENCE = ROOT / "reference" / "wwise_wem_reference"
 PUBLIC_CLI_MODULES = {"__main__", "cli"}
 BANNED_RUNTIME_MODULES = {"_capture_log", "residue_trace"}
 BANNED_MODULE_NAME_MARKERS = ("capture", "fixture", "research")
 
 
-def _module_files() -> dict[str, Path]:
+def _module_files(base: Path) -> dict[str, Path]:
     files: dict[str, Path] = {}
-    for path in sorted(PACKAGE.rglob("*.py")):
-        relative = path.relative_to(PACKAGE).with_suffix("")
+    for path in sorted(base.rglob("*.py")):
+        relative = path.relative_to(base).with_suffix("")
         parts = relative.parts
         if parts[-1] == "__init__":
             module = ".".join(parts[:-1]) or "__init__"
@@ -31,10 +37,11 @@ def _module_files() -> dict[str, Path]:
     return files
 
 
-def _trees() -> dict[str, ast.Module]:
+def _trees(base: Path) -> dict[str, ast.Module]:
+    files = _module_files(base)
     return {
         module: ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for module, path in _module_files().items()
+        for module, path in files.items()
     }
 
 
@@ -92,11 +99,11 @@ def _qualified_plain_imports(node: ast.Import, known: set[str]) -> set[str]:
     return targets
 
 
-def _internal_import_graph() -> dict[str, set[str]]:
-    files = _module_files()
+def _internal_import_graph(base: Path) -> dict[str, set[str]]:
+    files = _module_files(base)
     known = set(files)
     graph = {module: set() for module in known}
-    for module, tree in _trees().items():
+    for module, tree in _trees(base).items():
         candidates: set[str] = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -116,7 +123,7 @@ def _first_failure(title: str, failures: list[str]) -> str:
 
 class RuntimeBoundaryTests(unittest.TestCase):
     def test_runtime_import_graph_is_acyclic(self):
-        graph = _internal_import_graph()
+        graph = _internal_import_graph(REFERENCE)
         visited: set[str] = set()
         active: list[str] = []
         positions: dict[str, int] = {}
@@ -141,7 +148,7 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertEqual(cycles, [])
 
     def test_recursive_names_and_relative_levels_are_fully_qualified(self):
-        files = _module_files()
+        files = _module_files(REFERENCE)
         self.assertIn("container.riff", files)
         self.assertIn("vorbis.codebook", files)
         self.assertNotIn("riff", files)
@@ -149,7 +156,7 @@ class RuntimeBoundaryTests(unittest.TestCase):
 
         known = set(files)
         same_package = ast.parse("from .packets import extract_packets").body[0]
-        parent_package = ast.parse("from .. import model").body[0]
+        parent_package = ast.parse("from .. import scheduling").body[0]
         self.assertIsInstance(same_package, ast.ImportFrom)
         self.assertIsInstance(parent_package, ast.ImportFrom)
         self.assertEqual(
@@ -160,13 +167,13 @@ class RuntimeBoundaryTests(unittest.TestCase):
         )
         self.assertEqual(
             _qualified_import_from(
-                "container.wem", files["container.wem"], parent_package, known
+                "analysis.session", files["analysis.session"], parent_package, known
             ),
-            {"model"},
+            {"scheduling"},
         )
 
     def test_psychoacoustic_domains_have_canonical_owners(self):
-        trees = _trees()
+        trees = _trees(REFERENCE)
         expected_functions = {
             "analysis.config": {"make_wwise_psy_look"},
             "analysis.psychoacoustics.remap": {"wwise_psy_curve_smooth", "build_psy_remap"},
@@ -195,7 +202,7 @@ class RuntimeBoundaryTests(unittest.TestCase):
         )
 
     def test_floor_domains_have_canonical_owners(self):
-        trees = _trees()
+        trees = _trees(REFERENCE)
         topology_and_codec = {
             "postlist_from_floor",
             "floor1_neighbor_tables",
@@ -224,7 +231,7 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertFalse(topology_and_codec & fit_names)
 
     def test_analysis_session_does_not_depend_on_packet_or_container_layers(self):
-        targets = _internal_import_graph()["analysis.session"]
+        targets = _internal_import_graph(REFERENCE)["analysis.session"]
         failures = [
             f"analysis.session: analysis imports downstream layer {target}"
             for target in sorted(targets)
@@ -243,23 +250,23 @@ class RuntimeBoundaryTests(unittest.TestCase):
         )
 
     def test_transient_detector_does_not_own_selector_policy(self):
-        targets = _internal_import_graph()["analysis.transient.detector"]
+        targets = _internal_import_graph(REFERENCE)["analysis.transient.detector"]
         self.assertNotIn("scheduling.selector", targets)
         self.assertNotIn("analysis.session", targets)
 
     def test_mdct_and_transient_analysis_are_resource_io_free(self):
-        graph = _internal_import_graph()
+        graph = _internal_import_graph(REFERENCE)
         for module in ("analysis.dsp.transform", "analysis.transient.detector"):
             self.assertFalse(
                 any(target == "profiles" or target.startswith("profiles.") for target in graph[module]),
                 module,
             )
-            source = _module_files()[module].read_text(encoding="utf-8")
+            source = _module_files(REFERENCE)[module].read_text(encoding="utf-8")
             for marker in ("ResourceRef", "importlib.resources", "read_json(", "read_bytes("):
                 self.assertNotIn(marker, source, f"{module}: {marker}")
 
     def test_transient_implementation_has_one_module_owner(self):
-        trees = _trees()
+        trees = _trees(REFERENCE)
         transient_names = {
             node.name
             for node in trees["analysis.transient.detector"].body
@@ -279,7 +286,7 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertFalse(expected & transform_names)
 
     def test_pcm_feeders_do_not_depend_on_session_or_selector_state(self):
-        graph = _internal_import_graph()
+        graph = _internal_import_graph(REFERENCE)
         forbidden = {
             "analysis.session",
             "scheduling.selector",
@@ -293,7 +300,7 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertEqual(graph["scheduling.model"], set())
 
     def test_scheduling_package_does_not_depend_on_downstream_domains(self):
-        graph = _internal_import_graph()
+        graph = _internal_import_graph(REFERENCE)
         forbidden = (
             "analysis",
             "application",
@@ -321,7 +328,7 @@ class RuntimeBoundaryTests(unittest.TestCase):
         )
 
     def test_psychoacoustics_package_does_not_depend_on_downstream_domains(self):
-        graph = _internal_import_graph()
+        graph = _internal_import_graph(REFERENCE)
         forbidden = ("application", "container", "profiles", "vorbis")
         failures = []
         for source, targets in graph.items():
@@ -345,7 +352,7 @@ class RuntimeBoundaryTests(unittest.TestCase):
         )
 
     def test_analysis_dsp_does_not_depend_on_downstream_domains(self):
-        graph = _internal_import_graph()
+        graph = _internal_import_graph(REFERENCE)
         forbidden = ("application", "container", "vorbis")
         failures = []
         for source, targets in graph.items():
@@ -382,17 +389,19 @@ class RuntimeBoundaryTests(unittest.TestCase):
         )
 
     def test_runtime_has_no_research_named_modules(self):
-        modules = set(_module_files())
-        failures = [
-            f"{module}: runtime module name contains {marker!r}"
-            for module in modules
-            for marker in BANNED_MODULE_NAME_MARKERS
-            if marker in module.lower()
-        ]
-        failures.extend(
-            f"{module}: deleted diagnostic module still exists"
-            for module in modules & BANNED_RUNTIME_MODULES
-        )
+        failures: list[str] = []
+        for base in (FACADE, REFERENCE):
+            modules = set(_module_files(base))
+            failures.extend(
+                f"{module}: runtime module name contains {marker!r}"
+                for module in modules
+                for marker in BANNED_MODULE_NAME_MARKERS
+                if marker in module.lower()
+            )
+            failures.extend(
+                f"{module}: deleted diagnostic module still exists"
+                for module in modules & BANNED_RUNTIME_MODULES
+            )
         self.assertFalse(
             failures,
             _first_failure("research module entered runtime", failures)
@@ -402,19 +411,24 @@ class RuntimeBoundaryTests(unittest.TestCase):
 
     def test_runtime_does_not_import_deleted_diagnostics(self):
         failures: list[str] = []
-        for module, tree in _trees().items():
-            for node in ast.walk(tree):
-                targets: set[str] = set()
-                if isinstance(node, ast.Import):
-                    targets.update(
-                        alias.name.split(".")[-1] for alias in node.names
-                    )
-                elif isinstance(node, ast.ImportFrom):
-                    if node.module:
-                        targets.add(node.module.split(".")[-1])
-                    targets.update(alias.name.split(".")[-1] for alias in node.names)
-                for target in targets & BANNED_RUNTIME_MODULES:
-                    failures.append(f"{module}: imports deleted module {target}")
+        for base in (FACADE, REFERENCE):
+            for module, tree in _trees(base).items():
+                for node in ast.walk(tree):
+                    targets: set[str] = set()
+                    if isinstance(node, ast.Import):
+                        targets.update(
+                            alias.name.split(".")[-1] for alias in node.names
+                        )
+                    elif isinstance(node, ast.ImportFrom):
+                        if node.module:
+                            targets.add(node.module.split(".")[-1])
+                        targets.update(
+                            alias.name.split(".")[-1] for alias in node.names
+                        )
+                    for target in targets & BANNED_RUNTIME_MODULES:
+                        failures.append(
+                            f"{module}: imports deleted module {target}"
+                        )
         self.assertFalse(
             failures,
             _first_failure("deleted diagnostic dependency returned", failures)
@@ -424,17 +438,18 @@ class RuntimeBoundaryTests(unittest.TestCase):
 
     def test_runtime_has_no_top_level_research_entrypoints(self):
         failures: list[str] = []
-        for module, tree in _trees().items():
-            for node in tree.body:
-                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    continue
-                name = node.name.lower()
-                if name.lstrip("_") == "self_test":
-                    failures.append(f"{module}: top-level {node.name}")
-                elif "first_fixture" in name:
-                    failures.append(f"{module}: top-level {node.name}")
-                elif name.startswith("verify_") and "capture" in name:
-                    failures.append(f"{module}: top-level {node.name}")
+        for base in (FACADE, REFERENCE):
+            for module, tree in _trees(base).items():
+                for node in tree.body:
+                    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        continue
+                    name = node.name.lower()
+                    if name.lstrip("_") == "self_test":
+                        failures.append(f"{module}: top-level {node.name}")
+                    elif "first_fixture" in name:
+                        failures.append(f"{module}: top-level {node.name}")
+                    elif name.startswith("verify_") and "capture" in name:
+                        failures.append(f"{module}: top-level {node.name}")
         self.assertFalse(
             failures,
             _first_failure("research entrypoint entered runtime", failures)
@@ -444,21 +459,25 @@ class RuntimeBoundaryTests(unittest.TestCase):
 
     def test_only_public_cli_modules_have_cli_structure(self):
         failures: list[str] = []
-        for module, tree in _trees().items():
-            if module in PUBLIC_CLI_MODULES:
-                continue
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Import) and any(
-                    alias.name == "argparse" for alias in node.names
-                ):
-                    failures.append(f"{module}: imports argparse")
-                elif isinstance(node, ast.ImportFrom) and node.module == "argparse":
-                    failures.append(f"{module}: imports from argparse")
-            for node in tree.body:
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "main":
-                    failures.append(f"{module}: top-level main")
-                elif isinstance(node, ast.If) and "__name__" in ast.unparse(node.test):
-                    failures.append(f"{module}: top-level __name__ guard")
+        for base in (FACADE, REFERENCE):
+            for module, tree in _trees(base).items():
+                if module in PUBLIC_CLI_MODULES:
+                    continue
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import) and any(
+                        alias.name == "argparse" for alias in node.names
+                    ):
+                        failures.append(f"{module}: imports argparse")
+                    elif isinstance(node, ast.ImportFrom) and node.module == "argparse":
+                        failures.append(f"{module}: imports from argparse")
+                for node in tree.body:
+                    if (
+                        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                        and node.name == "main"
+                    ):
+                        failures.append(f"{module}: top-level main")
+                    elif isinstance(node, ast.If) and "__name__" in ast.unparse(node.test):
+                        failures.append(f"{module}: top-level __name__ guard")
         self.assertFalse(
             failures,
             _first_failure("hidden CLI entered runtime", failures)

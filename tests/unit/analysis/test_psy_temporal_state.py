@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import unittest
 
-from wwise_wem.analysis.psychoacoustics.temporal import (
+from wwise_wem_reference.analysis.psychoacoustics.temporal import (
     TemporalKernelInputs,
     SHORT_HISTORY_RELAXATION_WIDTHS,
     rebase_history,

@@ -14,25 +14,30 @@ a byte-exact reference for the Rust kernel port:
   i32le words, and packet bytes verbatim.
 
 Capture uses the production path only: observing wrappers installed at
-runtime on ``Encoder.encode_pcm``, ``AnalysisSession.analyze_window``, the
-encoder-module references to ``pack_analysis_frame`` and
-``build_vorbis_wem`` record the values the real pipeline computes, then are
-removed.  No production module is modified on disk.
+runtime on ``Encoder.encode_pcm``, ``AnalysisSession.analyze_window``, and
+the reference engine module's own references to ``pack_analysis_frame``
+and ``build_vorbis_wem`` record the values the real pipeline computes, then
+are removed.  No production module is modified on disk.  The facade engine
+is pinned to the pure-Python reference implementation for the capture, so
+the oracle pipeline is what gets observed regardless of whether the native
+kernel happens to be importable in the environment.
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import struct
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-import wwise_wem.application.encoder as encoder_module
-from wwise_wem.analysis.session import AnalysisSession
+import wwise_wem._engine as _facade_engine
+import wwise_wem_reference.python_engine as reference_engine_module
+from wwise_wem_reference.analysis.session import AnalysisSession
 from wwise_wem.application.compat import encode_wav_to_wem
 from wwise_wem.application.encoder import Encoder
-from wwise_wem.container.wem import load_wem_parts_bytes
+from wwise_wem_reference.container.wem import load_wem_parts_bytes
 
 
 SCHEMA = "wwise-wem.stage-golden.v1"
@@ -314,8 +319,8 @@ def stage_capture() -> Iterator[_StageCapture]:
     session_class = AnalysisSession
     original_encode = encoder_class.encode_pcm
     original_analyze = session_class.analyze_window
-    original_pack = encoder_module.pack_analysis_frame
-    original_build = encoder_module.build_vorbis_wem
+    original_pack = reference_engine_module.pack_analysis_frame
+    original_build = reference_engine_module.build_vorbis_wem
 
     def wrapped_encode_pcm(self, pcm):
         capture.on_encode_pcm(self, pcm)
@@ -357,15 +362,15 @@ def stage_capture() -> Iterator[_StageCapture]:
 
     encoder_class.encode_pcm = wrapped_encode_pcm
     session_class.analyze_window = wrapped_analyze_window
-    encoder_module.pack_analysis_frame = wrapped_pack_analysis_frame
-    encoder_module.build_vorbis_wem = wrapped_build_vorbis_wem
+    reference_engine_module.pack_analysis_frame = wrapped_pack_analysis_frame
+    reference_engine_module.build_vorbis_wem = wrapped_build_vorbis_wem
     try:
         yield capture
     finally:
         encoder_class.encode_pcm = original_encode
         session_class.analyze_window = original_analyze
-        encoder_module.pack_analysis_frame = original_pack
-        encoder_module.build_vorbis_wem = original_build
+        reference_engine_module.pack_analysis_frame = original_pack
+        reference_engine_module.build_vorbis_wem = original_build
 
 
 def build_stage_golden(
@@ -373,8 +378,16 @@ def build_stage_golden(
 ) -> tuple[dict[str, Any], dict[str, bytes]]:
     """Run the real encoder and return (stage index, raw dump blobs)."""
     wav = Path(wav)
-    with stage_capture() as capture:
-        wem_bytes, stats = encode_wav_to_wem(wav, profile=profile)
+    previous_engine = os.environ.get(_facade_engine.ENGINE_ENV_VAR)
+    os.environ[_facade_engine.ENGINE_ENV_VAR] = "python"
+    try:
+        with stage_capture() as capture:
+            wem_bytes, stats = encode_wav_to_wem(wav, profile=profile)
+    finally:
+        if previous_engine is None:
+            os.environ.pop(_facade_engine.ENGINE_ENV_VAR, None)
+        else:
+            os.environ[_facade_engine.ENGINE_ENV_VAR] = previous_engine
 
     frames = capture.frame_rows
     if len(frames) != stats["audio_packets"]:

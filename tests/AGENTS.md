@@ -20,6 +20,14 @@ via their Makefile targets and the CI steps that mirror them. Keep it that way:
 new heavy per-frame suites get an explicit target, and if a workflow should
 enforce it, add the step (matching existing explicit runs).
 
+## Environment
+
+All test targets run with `PYTHONPATH=src:reference` (the Makefile sets it):
+`src` provides the distribution facade, `reference/` provides the pure-Python
+reference implementation that the oracle pipeline, dual-engine parity, and
+capture tests import. Native-kernel tests skip (with an install hint) when
+`_wwise_wem_native` is not importable; every other test must pass without it.
+
 ## Versioned asset rules (`tests/data/`, `tests/fixtures/`)
 
 - `fixtures/input.wav` + `fixtures/reference.wem`: sacred inputs/outputs, never

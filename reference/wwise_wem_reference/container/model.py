@@ -7,7 +7,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from ..model import ContainerMetadata
+from wwise_wem.model import ContainerMetadata
 from .riff import build_riff, parse_chunks
 
 

@@ -1,26 +1,39 @@
 # Architecture
 
-This document defines the package boundaries for the encoder. The package root is a stable API shell; implementation code belongs to a named domain.
+This document defines the package boundaries for the encoder. The distribution
+facade (package root `wwise_wem`) is a stable API shell; the bit-exact
+implementation domains live in the development-tree reference package
+(`wwise_wem_reference`, under `reference/`), which the native-first facade
+delegates to for the pure-Python engine path. The reference implementation's
+byte-for-byte outputs are the project's source of truth; the Rust kernel is
+verified against it, never the reverse.
 
 ## Package layout
 
 ```text
-wwise_wem/
-├── __init__.py, __main__.py, api.py, cli.py
-├── application/       # use-case orchestration and compatibility adapters
-├── adapters/          # external PCM/WAV inputs
-├── scheduling/        # immutable frame plans and mode-selection policy
-├── analysis/
-│   ├── dsp/            # MDCT, spectrum and LPC primitives
-│   ├── preprocessing/  # LPC-padded detector input and window materialization
-│   ├── transient/      # transient detector algorithm
-│   └── psychoacoustics/# remap, seed, envelope and temporal analysis
-├── vorbis/             # bitstream, setup, floor, residue and packet codecs
-├── container/          # RIFF/WEM models and codecs
-└── profiles/           # profile identity, registry, resources, codebooks, and calibrated tables
+wwise_wem/                      # distribution facade (wheel)
+├── __init__.py, __main__.py, api.py, cli.py   # root API shell + CLI
+├── _engine.py                   # native/reference engine switch
+├── _reference.py                # lazy access to the reference tree (clear wheel errors)
+├── model.py                     # root DTOs
+├── adapters/                    # external PCM/WAV inputs (facade duty)
+├── application/                 # Encoder facade (native-first), compat, result DTOs
+└── profiles/                    # profile identity, registry, and resource loaders
+
+wwise_wem_reference/            # development-tree reference implementation (not in wheel)
+├── python_engine.py             # facade-delegated pure-Python encode pipeline
+├── analysis/                    # MDCT, spectrum, LPC, transient, psychoacoustics, session
+├── vorbis/                      # bitstream, setup, floor, residue and packet codecs
+├── container/                   # RIFF/WEM models and codecs
+├── scheduling/                  # immutable frame plans and mode-selection policy
+└── profiles/                    # table loaders, codebook assembly, resource assembly
 ```
 
-Public DTOs remain importable from the package root. Their implementation may live next to the domain that owns them; root exports are the compatibility boundary. Internal module paths are not compatibility surfaces.
+Public DTOs remain importable from the package root. Their implementation may
+live next to the domain that owns them; root exports are the compatibility
+boundary. Internal module paths are not compatibility surfaces. The reference
+package may import facade DTOs and profile-metadata types; the facade imports
+the reference tree only lazily, on engine paths that require it.
 
 ## Dependency direction
 

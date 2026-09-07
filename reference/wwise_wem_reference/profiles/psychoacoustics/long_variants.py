@@ -7,7 +7,7 @@ from dataclasses import replace
 from functools import lru_cache
 
 from ...analysis.config import WwisePsyLongTables
-from ..resources import ResourceRef
+from wwise_wem.profiles.resources import ResourceRef
 
 
 SCHEMA = "wem.psy-long-analysis-variants.v1"

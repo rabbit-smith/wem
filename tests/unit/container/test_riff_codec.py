@@ -3,7 +3,7 @@ from __future__ import annotations
 import struct
 import unittest
 
-from wwise_wem.container.riff import build_riff, parse_chunks
+from wwise_wem_reference.container.riff import build_riff, parse_chunks
 
 
 class RiffCodecTests(unittest.TestCase):

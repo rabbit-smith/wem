@@ -102,12 +102,21 @@ class EngineParityTests(unittest.TestCase):
                 self.assertEqual(
                     hashlib.sha256(result.data).hexdigest(), EXPECTED_SHA256
                 )
-                self.assertEqual(result.stats.to_legacy_dict(), EXPECTED_STATS)
+                self.assertEqual(
+                    {
+                        key: value
+                        for key, value in result.stats.to_legacy_dict().items()
+                        if key != "engine"
+                    },
+                    EXPECTED_STATS,
+                )
                 self.assertEqual(result.sha256, EXPECTED_SHA256)
 
+        self.assertEqual(python_result.stats.engine, "python")
+        self.assertEqual(internal_result.stats.engine, "python")
+        self.assertEqual(native_result.stats.engine, "native")
         self.assertEqual(bytes(direct.data), reference)
         self.assertEqual(direct.sha256(), EXPECTED_SHA256)
-        self.assertEqual(native_result.stats.to_legacy_dict(), EXPECTED_STATS)
         self.assertEqual(native_result.sha256, direct.sha256())
 
     def test_default_auto_prefers_the_native_engine_when_importable(self):

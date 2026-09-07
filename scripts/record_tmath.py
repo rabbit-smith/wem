@@ -29,7 +29,7 @@ os.environ["WEM_TMATH_RECORD"] = str(OUT_DIR)
 sys.path.insert(0, str(ROOT / "src"))
 
 from wwise_wem import encode_wav  # noqa: E402
-from wwise_wem._tmath import write_recording  # noqa: E402
+from wwise_wem_reference._tmath import write_recording  # noqa: E402
 
 
 def read_pairs(path: Path) -> list[tuple[float, float]]:

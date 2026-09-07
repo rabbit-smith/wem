@@ -5,7 +5,7 @@ import struct
 
 from ..analysis.config import FrozenMathTables
 from ..analysis.dsp.transform import _u32_f32
-from .resources import ResourceRef
+from wwise_wem.profiles.resources import ResourceRef
 
 
 def _bits_to_f64(hex_bits: str) -> float:

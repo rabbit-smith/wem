@@ -2,11 +2,11 @@ import hashlib
 import math
 import unittest
 
-import wwise_wem.vorbis.packet_encoder as packet_encoder
-from wwise_wem.profiles.codebooks import load_setup_codebooks
+import wwise_wem_reference.vorbis.packet_encoder as packet_encoder
+from wwise_wem_reference.profiles.codebooks import load_setup_codebooks
 from tests.codebook_resource_support import installed_codebook_tables
-from wwise_wem.vorbis.floor_fit import floor1_fit_simple
-from wwise_wem.vorbis.setup import parse_setup
+from wwise_wem_reference.vorbis.floor_fit import floor1_fit_simple
+from wwise_wem_reference.vorbis.setup import parse_setup
 from wwise_wem.profiles.registry import resolve_wem_profile
 
 

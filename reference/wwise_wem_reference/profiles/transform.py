@@ -9,7 +9,7 @@ from typing import Mapping
 
 from ..analysis.config import MdctLook
 from ..analysis.dsp.transform import make_mdct_look
-from .resources import ResourceRef
+from wwise_wem.profiles.resources import ResourceRef
 
 
 @lru_cache(maxsize=None)

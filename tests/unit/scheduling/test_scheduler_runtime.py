@@ -5,16 +5,16 @@ import unittest
 from collections import Counter
 from pathlib import Path
 
-from wwise_wem.analysis.preprocessing.detector_input import iter_detector_quanta
-from wwise_wem.scheduling.model import FramePlan
-from wwise_wem.scheduling.planner import (
+from wwise_wem_reference.analysis.preprocessing.detector_input import iter_detector_quanta
+from wwise_wem_reference.scheduling.model import FramePlan
+from wwise_wem_reference.scheduling.planner import (
     append_samples,
     emit_block,
     initial_state,
     required_samples,
 )
-from wwise_wem.scheduling.selector import ModeSelector
-from wwise_wem.analysis.preprocessing.windowing import iter_pcm_windows
+from wwise_wem_reference.scheduling.selector import ModeSelector
+from wwise_wem_reference.analysis.preprocessing.windowing import iter_pcm_windows
 
 
 FRAME_CONTRACT = (

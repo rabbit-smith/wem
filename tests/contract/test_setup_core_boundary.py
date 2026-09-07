@@ -9,11 +9,12 @@ import sys
 import unittest
 from pathlib import Path
 
-from wwise_wem.vorbis.setup import pack_setup, parse_setup
+from wwise_wem_reference.vorbis.setup import pack_setup, parse_setup
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PACKAGE = ROOT / "src" / "wwise_wem"
+FACADE = ROOT / "src" / "wwise_wem"
+REFERENCE = ROOT / "reference" / "wwise_wem_reference"
 
 
 def _minimal_setup() -> dict:
@@ -84,11 +85,11 @@ import os
 import sys
 import types
 
-package = types.ModuleType("wwise_wem")
+package = types.ModuleType("wwise_wem_reference")
 package.__path__ = [os.environ["WWISE_PACKAGE_DIR"]]
-package.__package__ = "wwise_wem"
-sys.modules["wwise_wem"] = package
-setup = importlib.import_module("wwise_wem.vorbis.setup")
+package.__package__ = "wwise_wem_reference"
+sys.modules["wwise_wem_reference"] = package
+setup = importlib.import_module("wwise_wem_reference.vorbis.setup")
 info = {
     "channels": 1,
     "nbooks": 1, "book_ids": [0],
@@ -109,9 +110,9 @@ info = {
 packet = setup.pack_setup(info)
 parsed = setup.parse_setup(packet, channels=1)
 banned = [name for name in (
-    "wwise_wem.profiles.book_ids",
+    "wwise_wem_reference.profiles.book_ids",
     "wwise_wem.profiles.resources",
-    "wwise_wem.profiles.codebooks",
+    "wwise_wem_reference.profiles.codebooks",
 ) if name in sys.modules]
 print(json.dumps({
     "banned": banned,
@@ -119,7 +120,7 @@ print(json.dumps({
 }))
 '''
         env = dict(os.environ)
-        env["WWISE_PACKAGE_DIR"] = str(PACKAGE)
+        env["WWISE_PACKAGE_DIR"] = str(REFERENCE)
         completed = subprocess.run(
             [sys.executable, "-c", code],
             cwd=ROOT,

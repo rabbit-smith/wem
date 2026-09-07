@@ -1,10 +1,11 @@
-"""Engine selection between the native kernel and the pure-Python implementation.
+"""Engine selection between the native kernel and the reference implementation.
 
 The public encode facade prefers the Rust kernel (module
 ``_wwise_wem_native``, built from ``crates/wem-python``) when it is
-importable, and falls back to the pure-Python implementation otherwise.
-Both engines are contractually byte-identical; the pure-Python
-implementation remains the reference oracle.
+importable, and falls back to the pure-Python reference implementation in
+the development-tree ``wwise_wem_reference`` package otherwise.  Both
+engines are contractually byte-identical; the reference implementation
+remains the reference oracle.
 
 The ``WWISE_WEM_ENGINE`` environment variable pins the choice:
 

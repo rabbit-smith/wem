@@ -3,7 +3,10 @@
 The :class:`Encoder` is a native-first facade: byte-producing calls run on
 the Rust kernel (``_wwise_wem_native``) when the resolved engine is native
 (see ``wwise_wem._engine`` and ``WWISE_WEM_ENGINE``), and otherwise on the
-pure-Python implementation below, which stays the reference oracle.
+pure-Python reference implementation in the development-tree
+``wwise_wem_reference`` package, which stays the reference oracle.  That
+package is not part of the wheel, so an installed facade without the native
+kernel reports a clear ``ImportError`` instead of running a half-built path.
 """
 
 from __future__ import annotations
@@ -14,15 +17,11 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from .. import _engine
-from ..vorbis.packet_encoder import pack_analysis_frame
-from ..profiles.assembly import assemble_encoder_profile_resources
+from .. import _engine, _reference
 from ..profiles.bundle import load_profile_bundle
-from ..container.wem import build_vorbis_wem
-from .models import EncodeResult, EncodeStats
-from ..model import PcmBuffer
-from ..analysis.session import AnalysisSession
 from ..profiles.model import EncoderProfile
+from ..model import PcmBuffer
+from .models import EncodeResult, EncodeStats
 
 
 @dataclass(frozen=True)
@@ -98,31 +97,21 @@ class Encoder:
             raise ValueError(
                 f"selected profile {profile.name} differs from installed profile setup"
             )
-        setup_packet = profile.setup_packet()
-        resources = assemble_encoder_profile_resources(
-            bundle,
-            setup_packet=setup_packet,
-        )
 
         self.profile = profile
         self._container = plan
-        self._resources = resources
-        self._setup_packet = resources.setup_packet
-        self._analysis_resources = resources.analysis
-        self._setup = resources.setup
-        self._books = resources.codebooks
         self._native_backend: Any = None
 
     def encode_pcm(self, pcm: PcmBuffer) -> EncodeResult:
         """Encode one independent PCM buffer into a complete Wwise WEM.
 
         Engine dispatch (see ``wwise_wem._engine``): template containers
-        always use the pure-Python implementation (the native one-shot API
-        is profile-container only); profile containers use the native
-        kernel when the resolved engine is native and the PCM values sit in
-        the signed-16 sample domain, raising ``ValueError`` otherwise under
-        an explicit ``native`` pin while ``auto`` routes such buffers to the
-        pure-Python implementation.
+        always use the pure-Python reference implementation (the native
+        one-shot API is profile-container only); profile containers use the
+        native kernel when the resolved engine is native and the PCM values
+        sit in the signed-16 sample domain, raising ``ValueError`` otherwise
+        under an explicit ``native`` pin while ``auto`` routes such buffers
+        to the pure-Python reference implementation.
         """
         if not isinstance(pcm, PcmBuffer):
             raise TypeError("pcm must be PcmBuffer")
@@ -156,7 +145,7 @@ class Encoder:
         domain is ``value / 32768.0`` as produced by ``read_pcm16_wav`` /
         ``read_pcm16``. Every sample must be exactly that of an integer in
         the signed-16 range; anything else is rejected the same way the
-        pure-Python path rejects input errors (``ValueError``).
+        reference path rejects input errors (``ValueError``).
         """
         rows: list[list[int]] = []
         for channel, row in enumerate(pcm.channels):
@@ -214,52 +203,18 @@ class Encoder:
             long_packets=int(result.long_packets),
             bytes=int(result.bytes_out),
             metadata_source=self._container.metadata_source,
+            engine="native",
         )
         return EncodeResult(bytes(result.data), stats)
 
     def _encode_pcm_python(self, pcm: PcmBuffer) -> EncodeResult:
         """Pure-Python reference encode path (oracle behavior)."""
-        session = AnalysisSession(
-            self.profile.channels,
-            sample_rate=self.profile.sample_rate,
-            blocksizes=self.profile.block_sizes,
-            resources=self._analysis_resources,
+        python_engine = _reference.reference_module("python_engine")
+        return python_engine.encode_pcm_python(
+            profile=self.profile,
+            container=self._container,
+            pcm=pcm,
         )
-        modes, windows = session.selected_windows(pcm.channels)
-        audio_packets: list[bytes] = []
-        for window in windows:
-            analysis = session.analyze_window(window)
-            audio_packets.append(
-                pack_analysis_frame(
-                    self._setup,
-                    self._books,
-                    analysis,
-                    channels=self.profile.channels,
-                ).packet
-            )
-        if len(audio_packets) != len(modes):
-            raise AssertionError("analysis window and mode counts diverged")
-
-        fmt = dict(self._container.fmt)
-        fmt["dwTotalPCMFrames"] = pcm.frame_count
-        encoded = build_vorbis_wem(
-            fmt,
-            [self._setup_packet, *audio_packets],
-            seek_table=self._container.seek_table,
-            endian=self._container.endian,
-            extra_chunks=list(self._container.extra_chunks),
-            recompute_sizes=True,
-        )
-        stats = EncodeStats(
-            pcm_frames=pcm.frame_count,
-            channels=pcm.channel_count,
-            audio_packets=len(audio_packets),
-            short_packets=modes.count(0),
-            long_packets=modes.count(1),
-            bytes=len(encoded),
-            metadata_source=self._container.metadata_source,
-        )
-        return EncodeResult(encoded, stats)
 
 
 __all__ = ["Encoder"]

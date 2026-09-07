@@ -3,11 +3,11 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from wwise_wem.vorbis.packet_encoder import EncodedPacket, pack_analysis_frame
-from wwise_wem.vorbis.packet_encoder import BlockPacketResult
-from wwise_wem.analysis.model import PsyFrame, SpectrumFrame
-from wwise_wem.scheduling.model import FramePlan
-from wwise_wem.analysis.preprocessing.windowing import WindowedFrame
+from wwise_wem_reference.vorbis.packet_encoder import EncodedPacket, pack_analysis_frame
+from wwise_wem_reference.vorbis.packet_encoder import BlockPacketResult
+from wwise_wem_reference.analysis.model import PsyFrame, SpectrumFrame
+from wwise_wem_reference.scheduling.model import FramePlan
+from wwise_wem_reference.analysis.preprocessing.windowing import WindowedFrame
 
 
 def _window(index: int, previous: int, current: int, following: int, center: int):
@@ -47,11 +47,11 @@ class AudioPacketTests(unittest.TestCase):
         }
         with (
             patch(
-                "wwise_wem.vorbis.packet_encoder.floor1_fit_wwise",
+                "wwise_wem_reference.vorbis.packet_encoder.floor1_fit_wwise",
                 return_value=[10],
             ) as fit,
             patch(
-                "wwise_wem.vorbis.packet_encoder.pack_block_packet_details",
+                "wwise_wem_reference.vorbis.packet_encoder.pack_block_packet_details",
                 return_value=BlockPacketResult(b"packet", ((4,),)),
             ) as pack,
         ):

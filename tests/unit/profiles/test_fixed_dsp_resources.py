@@ -5,11 +5,11 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-import wwise_wem.profiles.psychoacoustics.config as psy_profiles
+import wwise_wem_reference.profiles.psychoacoustics.config as psy_profiles
 from wwise_wem.profiles.bundle import load_profile_bundle
-from wwise_wem.profiles.transform import load_mdct_looks
-from wwise_wem.profiles.transient import load_transient_tables
-from wwise_wem.profiles.psychoacoustics.short_tables import load_short_psy_profiles
+from wwise_wem_reference.profiles.transform import load_mdct_looks
+from wwise_wem_reference.profiles.transient import load_transient_tables
+from wwise_wem_reference.profiles.psychoacoustics.short_tables import load_short_psy_profiles
 from wwise_wem.profiles.resources import ResourceRef
 
 

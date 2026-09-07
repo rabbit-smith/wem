@@ -4,11 +4,11 @@ import unittest
 from unittest.mock import patch
 
 from wwise_wem.profiles.bundle import load_profile_bundle
-from wwise_wem.profiles.psychoacoustics.long_tables import (
+from wwise_wem_reference.profiles.psychoacoustics.long_tables import (
     load_long_psy_tables,
     table_sha256,
 )
-from wwise_wem.profiles.psychoacoustics.long_variants import load_long_variant
+from wwise_wem_reference.profiles.psychoacoustics.long_variants import load_long_variant
 from wwise_wem.profiles.resources import ResourceRef
 
 

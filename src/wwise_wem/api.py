@@ -20,7 +20,7 @@ def encode_wav(
     """
     import hashlib
 
-    from .container.wem import load_wem_parts_bytes
+    from ._reference import reference_module
     from .application.encoder import Encoder, _ContainerPlan
     from .adapters.wav import read_pcm16
     from .profiles.registry import (
@@ -35,6 +35,7 @@ def encode_wav(
 
     container = None
     if template is not None:
+        load_wem_parts_bytes = reference_module("container.wem").load_wem_parts_bytes
         template_path = Path(template)
         parts = load_wem_parts_bytes(
             template_path.read_bytes(),

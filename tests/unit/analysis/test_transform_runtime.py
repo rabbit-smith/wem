@@ -3,8 +3,8 @@ import math
 import struct
 import unittest
 
-import wwise_wem.analysis.dsp.transform as transform
-import wwise_wem.analysis.dsp.spectrum as log_spectrum
+import wwise_wem_reference.analysis.dsp.transform as transform
+import wwise_wem_reference.analysis.dsp.spectrum as log_spectrum
 
 
 def f32(value):

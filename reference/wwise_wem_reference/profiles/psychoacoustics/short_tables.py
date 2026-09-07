@@ -6,7 +6,7 @@ from functools import lru_cache
 from typing import cast
 
 from ...analysis.config import ShortPsyProfile
-from ..resources import ResourceRef
+from wwise_wem.profiles.resources import ResourceRef
 
 
 @lru_cache(maxsize=None)

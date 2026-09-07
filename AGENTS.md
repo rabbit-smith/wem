@@ -87,7 +87,8 @@ Adding any file under `src/wwise_wem/` or packaged data requires:
 | Area | Guide |
 |---|---|
 | Rust kernel | [`crates/AGENTS.md`](crates/AGENTS.md) |
-| Python oracle/facade | [`src/wwise_wem/AGENTS.md`](src/wwise_wem/AGENTS.md) |
+| Distribution facade | [`src/wwise_wem/AGENTS.md`](src/wwise_wem/AGENTS.md) |
+| Python reference implementation | [`reference/AGENTS.md`](reference/AGENTS.md) |
 | Contracts & assets | [`tests/AGENTS.md`](tests/AGENTS.md) |
 | gRPC IDL | [`proto/AGENTS.md`](proto/AGENTS.md) |
 | Tooling scripts | [`scripts/AGENTS.md`](scripts/AGENTS.md) |

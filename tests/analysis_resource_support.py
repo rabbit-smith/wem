@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from wwise_wem.analysis.config import AnalysisProfileResources
-from wwise_wem.profiles.assembly import assemble_analysis_resources
+from wwise_wem_reference.analysis.config import AnalysisProfileResources
+from wwise_wem_reference.profiles.assembly import assemble_analysis_resources
 from wwise_wem.profiles.bundle import load_profile_bundle
 
 

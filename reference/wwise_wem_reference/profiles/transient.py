@@ -6,7 +6,7 @@ import struct
 from functools import lru_cache
 
 from ..analysis.config import TransientBandConfig, TransientDetectorTables
-from .resources import ResourceRef
+from wwise_wem.profiles.resources import ResourceRef
 
 
 def _u32_f32(value: int) -> float:

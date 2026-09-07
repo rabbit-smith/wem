@@ -42,7 +42,7 @@ select = ["E4", "E7", "E9", "F", "W"]
 
 [tool.mypy]
 python_version = "3.10"
-mypy_path = "src"
+mypy_path = "src:reference"
 # Baseline gate: type-check without forcing full annotation coverage.
 # Tighten (disallow_untyped_defs etc.) as a dedicated change.
 check_untyped_defs = true

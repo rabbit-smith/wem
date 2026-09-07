@@ -9,9 +9,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from wwise_wem.container.fmt import pack_pcm_ext_fmt
-from wwise_wem.container.riff import build_riff
-from wwise_wem.container.wem import (
+from wwise_wem_reference.container.fmt import pack_pcm_ext_fmt
+from wwise_wem_reference.container.riff import build_riff
+from wwise_wem_reference.container.wem import (
     build_pcm_wem,
     build_vorbis_wem,
     load_wem_parts_bytes,

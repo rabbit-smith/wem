@@ -119,6 +119,7 @@ class EncodeResultTests(unittest.TestCase):
             "long_packets": 1,
             "bytes": 4,
             "metadata_source": "profile:wwise2013-6ch-44100",
+            "engine": "python",
         }
         stats = EncodeStats.from_legacy_dict(legacy_stats)
         self.assertEqual(stats.to_legacy_dict(), legacy_stats)

@@ -165,16 +165,17 @@ import wwise_wem
 names = [
     'wwise_wem.application.encoder',
     'wwise_wem.application.compat',
-    'wwise_wem.analysis.dsp.transform',
-    'wwise_wem.analysis.psychoacoustics.pipeline',
-    'wwise_wem.vorbis.floor',
-    'wwise_wem.vorbis.residue',
-    'wwise_wem.analysis.session',
+    'wwise_wem_reference.python_engine',
+    'wwise_wem_reference.analysis.dsp.transform',
+    'wwise_wem_reference.analysis.psychoacoustics.pipeline',
+    'wwise_wem_reference.vorbis.floor',
+    'wwise_wem_reference.vorbis.residue',
+    'wwise_wem_reference.analysis.session',
 ]
 print(json.dumps([name for name in names if name in sys.modules]))
 """
         environment = dict(os.environ)
-        environment["PYTHONPATH"] = str(ROOT / "src")
+        environment["PYTHONPATH"] = str(ROOT / "src") + os.pathsep + str(ROOT / "reference")
         completed = subprocess.run(
             [sys.executable, "-c", code],
             cwd=ROOT,

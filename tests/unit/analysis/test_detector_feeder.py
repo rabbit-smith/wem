@@ -4,7 +4,7 @@ import hashlib
 import struct
 import unittest
 
-from wwise_wem.analysis.preprocessing.detector_input import (
+from wwise_wem_reference.analysis.preprocessing.detector_input import (
     detector_pcm_streams,
     iter_detector_quanta,
 )

@@ -6,7 +6,7 @@ import wave
 from pathlib import Path
 
 from wwise_wem import encode_wav, load_wem_profile
-from wwise_wem.container.wem import build_vorbis_wem
+from wwise_wem_reference.container.wem import build_vorbis_wem
 
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"

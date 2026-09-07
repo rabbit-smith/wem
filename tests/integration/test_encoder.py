@@ -13,6 +13,7 @@ from wwise_wem.profiles.registry import load_wem_profile
 
 
 PROFILE_NAME = "wwise2013-6ch-44100"
+REFERENCE_ENGINE = "wwise_wem_reference.python_engine"
 
 
 def _pcm(*, channels: int = 6, rate: int = 44100, frames: int = 4096) -> PcmBuffer:
@@ -49,42 +50,76 @@ class EncoderCoreTests(unittest.TestCase):
         self.profile = load_wem_profile(PROFILE_NAME)
 
     def _patch_constructor(self):
-        resources = SimpleNamespace(
-            analysis=object(),
-            setup_packet=b"setup",
-            setup={"book_ids": [7]},
-            codebooks=("book",),
-        )
         return (
             patch.object(EncoderProfile, "setup_packet", return_value=b"setup"),
             patch(
-                "wwise_wem.application.encoder.assemble_encoder_profile_resources",
-                return_value=resources,
+                f"{REFERENCE_ENGINE}.assemble_encoder_profile_resources",
+                return_value=SimpleNamespace(
+                    analysis=object(),
+                    setup_packet=b"setup",
+                    setup={"book_ids": [7]},
+                    codebooks=("book",),
+                ),
             ),
         )
 
-    def test_constructor_owns_manifest_setup_and_books(self) -> None:
-        setup_packet, assemble = self._patch_constructor()
-        with setup_packet as setup_mock, assemble as assemble_mock:
+    def _python_engine_patch(self):
+        """Route facade dispatch to the pure-Python reference path."""
+        return patch("wwise_wem._engine.active_engine", return_value="python")
+
+    def test_constructor_owns_profile_and_container_plan(self) -> None:
+        encoder = Encoder(self.profile)
+
+        self.assertIs(encoder.profile, self.profile)
+        self.assertEqual(
+            encoder._container.metadata_source, f"profile:{PROFILE_NAME}"
+        )
+        self.assertEqual(
+            (encoder._container.fmt["nChannels"], encoder._container.fmt["nSamplesPerSec"]),
+            (6, 44100),
+        )
+
+    def test_python_encode_path_assembles_resources_via_reference_engine(self) -> None:
+        assemble = patch(
+            f"{REFERENCE_ENGINE}.assemble_encoder_profile_resources",
+            return_value=SimpleNamespace(
+                analysis=object(),
+                setup_packet=b"setup",
+                setup={"book_ids": [7]},
+                codebooks=("book",),
+            ),
+        )
+        with (
+            self._python_engine_patch(),
+            patch.object(
+                EncoderProfile, "setup_packet", return_value=b"setup"
+            ) as setup_mock,
+            assemble as assemble_mock,
+            patch(f"{REFERENCE_ENGINE}.AnalysisSession", FakeSession),
+            patch(
+                f"{REFERENCE_ENGINE}.pack_analysis_frame",
+                side_effect=_pack_analysis,
+            ),
+            patch(f"{REFERENCE_ENGINE}.build_vorbis_wem", return_value=b"WEM!"),
+        ):
             encoder = Encoder(self.profile)
+            encoder.encode_pcm(_pcm())
 
         setup_mock.assert_called_once_with()
         self.assertEqual(assemble_mock.call_count, 1)
         self.assertEqual(assemble_mock.call_args.kwargs, {"setup_packet": b"setup"})
-        self.assertIs(encoder.profile, self.profile)
-        self.assertEqual(encoder._setup_packet, b"setup")
-        self.assertEqual(encoder._books, ("book",))
 
     def test_encode_pcm_returns_typed_result_and_builds_canonical_container(self) -> None:
         patches = self._patch_constructor()
         with (
             patches[0], patches[1],
-            patch("wwise_wem.application.encoder.AnalysisSession", FakeSession),
+            self._python_engine_patch(),
+            patch(f"{REFERENCE_ENGINE}.AnalysisSession", FakeSession),
             patch(
-                "wwise_wem.application.encoder.pack_analysis_frame",
+                f"{REFERENCE_ENGINE}.pack_analysis_frame",
                 side_effect=_pack_analysis,
             ) as pack,
-            patch("wwise_wem.application.encoder.build_vorbis_wem", return_value=b"WEM!") as build,
+            patch(f"{REFERENCE_ENGINE}.build_vorbis_wem", return_value=b"WEM!") as build,
         ):
             result = Encoder(self.profile).encode_pcm(_pcm())
 
@@ -101,6 +136,7 @@ class EncoderCoreTests(unittest.TestCase):
                 "long_packets": 1,
                 "bytes": 4,
                 "metadata_source": f"profile:{PROFILE_NAME}",
+                "engine": "python",
             },
         )
         self.assertEqual(len(FakeSession.instances), 1)
@@ -138,12 +174,13 @@ class EncoderCoreTests(unittest.TestCase):
         patches = self._patch_constructor()
         with (
             patches[0], patches[1],
-            patch("wwise_wem.application.encoder.AnalysisSession", FakeSession),
+            self._python_engine_patch(),
+            patch(f"{REFERENCE_ENGINE}.AnalysisSession", FakeSession),
             patch(
-                "wwise_wem.application.encoder.pack_analysis_frame",
+                f"{REFERENCE_ENGINE}.pack_analysis_frame",
                 side_effect=_pack_analysis,
             ),
-            patch("wwise_wem.application.encoder.build_vorbis_wem", return_value=b"WEM!"),
+            patch(f"{REFERENCE_ENGINE}.build_vorbis_wem", return_value=b"WEM!"),
         ):
             encoder = Encoder(self.profile)
             first = encoder.encode_pcm(_pcm())
@@ -157,7 +194,8 @@ class EncoderCoreTests(unittest.TestCase):
         patches = self._patch_constructor()
         with (
             patches[0], patches[1],
-            patch("wwise_wem.application.encoder.AnalysisSession", FakeSession),
+            self._python_engine_patch(),
+            patch(f"{REFERENCE_ENGINE}.AnalysisSession", FakeSession),
         ):
             encoder = Encoder(self.profile)
             with self.assertRaisesRegex(TypeError, "PcmBuffer"):
@@ -190,12 +228,13 @@ class EncoderCoreTests(unittest.TestCase):
         patches = self._patch_constructor()
         with (
             patches[0], patches[1],
-            patch("wwise_wem.application.encoder.AnalysisSession", FakeSession),
+            self._python_engine_patch(),
+            patch(f"{REFERENCE_ENGINE}.AnalysisSession", FakeSession),
             patch(
-                "wwise_wem.application.encoder.pack_analysis_frame",
+                f"{REFERENCE_ENGINE}.pack_analysis_frame",
                 side_effect=_pack_analysis,
             ),
-            patch("wwise_wem.application.encoder.build_vorbis_wem", return_value=b"WEM!") as build,
+            patch(f"{REFERENCE_ENGINE}.build_vorbis_wem", return_value=b"WEM!") as build,
         ):
             result = Encoder(self.profile, _container=plan).encode_pcm(_pcm())
 
@@ -215,7 +254,7 @@ class EncoderCoreTests(unittest.TestCase):
             ),
         )
         with patch(
-            "wwise_wem.application.encoder.assemble_encoder_profile_resources"
+            f"{REFERENCE_ENGINE}.assemble_encoder_profile_resources"
         ) as assemble:
             with self.assertRaisesRegex(ValueError, "differs from installed profile"):
                 Encoder(profile)

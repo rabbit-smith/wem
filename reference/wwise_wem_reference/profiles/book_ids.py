@@ -15,7 +15,7 @@ from functools import lru_cache
 
 from collections.abc import Mapping, Sequence
 
-from .resources import ResourceRef
+from wwise_wem.profiles.resources import ResourceRef
 
 T97_COUNT = 97
 T219_COUNT = 219

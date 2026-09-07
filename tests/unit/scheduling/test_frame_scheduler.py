@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from wwise_wem.scheduling.model import FramePlan, SchedulerState
-from wwise_wem.scheduling.planner import (
+from wwise_wem_reference.scheduling.model import FramePlan, SchedulerState
+from wwise_wem_reference.scheduling.planner import (
     append_samples,
     emit_block,
     initial_state,

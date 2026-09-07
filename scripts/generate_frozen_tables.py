@@ -24,10 +24,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from wwise_wem._tmath import math_bits  # noqa: E402
-from wwise_wem.analysis.dsp.transform import vorbis_window  # noqa: E402
+from wwise_wem_reference._tmath import math_bits  # noqa: E402
+from wwise_wem_reference.analysis.dsp.transform import vorbis_window  # noqa: E402
 from wwise_wem.profiles.bundle import load_profile_bundle  # noqa: E402
-from wwise_wem.profiles.psychoacoustics.config import load_short_seed_surface  # noqa: E402
+from wwise_wem_reference.profiles.psychoacoustics.config import load_short_seed_surface  # noqa: E402
 
 PROFILE = "wwise2013-6ch-44100"
 MANIFEST_PATH = ROOT / "src/wwise_wem/data/profiles" / PROFILE / "manifest.json"

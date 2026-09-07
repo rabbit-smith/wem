@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-import wwise_wem.container as container
-import wwise_wem.container.fmt as fmt_codec
+import wwise_wem_reference.container as container
+import wwise_wem_reference.container.fmt as fmt_codec
 
 
 def _all_vorbis_fields() -> dict:

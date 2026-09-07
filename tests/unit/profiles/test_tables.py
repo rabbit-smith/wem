@@ -5,12 +5,12 @@ from pathlib import Path
 
 import wwise_wem
 
-from wwise_wem.profiles.transient import load_transient_tables
-from wwise_wem.profiles.psychoacoustics.long_tables import load_long_psy_tables
-from wwise_wem.profiles.psychoacoustics.long_variants import load_long_variant
-from wwise_wem.profiles.psychoacoustics.short_tables import load_short_psy_profiles
+from wwise_wem_reference.profiles.transient import load_transient_tables
+from wwise_wem_reference.profiles.psychoacoustics.long_tables import load_long_psy_tables
+from wwise_wem_reference.profiles.psychoacoustics.long_variants import load_long_variant
+from wwise_wem_reference.profiles.psychoacoustics.short_tables import load_short_psy_profiles
 from wwise_wem.profiles.bundle import load_profile_bundle
-from wwise_wem.profiles.transform import load_mdct_looks
+from wwise_wem_reference.profiles.transform import load_mdct_looks
 
 
 class PackagedTableTests(unittest.TestCase):
