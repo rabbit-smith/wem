@@ -43,6 +43,7 @@ jobs:
       # the kernel build goes through the maturin develop step below
       - run: python -m pip install "maturin>=1.7" "grpcio>=1.60" "grpcio-tools>=1.60"
       - name: in-package native kernel (maturin build + drop extension into src)
+        shell: bash
         run: |
           set -euo pipefail
           maturin build --release -o native-wheel
