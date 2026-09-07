@@ -10,33 +10,28 @@ pipeline without modifying it on disk.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from wwise_wem.application.models import EncodeResult, EncodeStats
 from wwise_wem.model import PcmBuffer
 from wwise_wem.profiles.bundle import load_profile_bundle
 from wwise_wem.profiles.model import EncoderProfile
 
 from .analysis.session import AnalysisSession
+from .container.model import ContainerPlan
 from .container.wem import build_vorbis_wem
 from .profiles.assembly import assemble_encoder_profile_resources
 from .vorbis.packet_encoder import pack_analysis_frame
-
-if TYPE_CHECKING:
-    from wwise_wem.application.encoder import _ContainerPlan
 
 
 def encode_pcm_python(
     *,
     profile: EncoderProfile,
-    container: "_ContainerPlan",
+    container: ContainerPlan,
     pcm: PcmBuffer,
 ) -> EncodeResult:
     """Run one complete pure-Python reference encode.
 
-    ``container`` is the facade's immutable per-output container plan (``fmt``,
-    ``endian``, ``seek_table``, ``extra_chunks``, ``metadata_source``); it
-    carries container metadata only, never codec state.
+    ``container`` is the per-output container plan (:class:`ContainerPlan`);
+    it carries container metadata only, never codec state.
     """
     bundle = load_profile_bundle(profile=profile.name, verify_all=False)
     setup_packet = profile.setup_packet()
@@ -88,4 +83,4 @@ def encode_pcm_python(
     return EncodeResult(encoded, stats)
 
 
-__all__ = ["encode_pcm_python"]
+__all__ = ["ContainerPlan", "encode_pcm_python"]

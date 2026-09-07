@@ -101,7 +101,6 @@ The package root also exports immutable adapter-boundary models:
   legacy dictionary form carries an additive `engine` entry (the engine that
   produced the bytes: `native` or `python`); `from_legacy_dict()` accepts
   older dictionaries without it.
-- `EncodeResult` converts with `from_legacy_tuple()` / `to_legacy_tuple()`.
 
 These types are stable public adapters. Internal analysis buffers and
 transform state remain outside the public contract.

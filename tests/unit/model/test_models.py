@@ -110,7 +110,7 @@ class PacketResultTests(unittest.TestCase):
 
 
 class EncodeResultTests(unittest.TestCase):
-    def test_legacy_dict_and_tuple_roundtrip(self):
+    def test_legacy_dict_roundtrip(self):
         legacy_stats = {
             "pcm_frames": 4096,
             "channels": 6,
@@ -123,16 +123,12 @@ class EncodeResultTests(unittest.TestCase):
         }
         stats = EncodeStats.from_legacy_dict(legacy_stats)
         self.assertEqual(stats.to_legacy_dict(), legacy_stats)
-        result = EncodeResult.from_legacy_tuple((b"WEM!", legacy_stats))
+        result = EncodeResult(b"WEM!", stats)
         self.assertEqual(result.stats, stats)
         self.assertEqual(result.sha256, hashlib.sha256(b"WEM!").hexdigest())
-        data, converted = result.to_legacy_tuple()
-        self.assertEqual(data, b"WEM!")
-        self.assertEqual(converted, legacy_stats)
         self.assertEqual(EncodeStats.from_legacy(legacy_stats), stats)
         self.assertEqual(stats.to_legacy(), legacy_stats)
-        self.assertEqual(EncodeResult.from_legacy((b"WEM!", legacy_stats)), result)
-        self.assertEqual(result.to_legacy(), (b"WEM!", legacy_stats))
+        converted = stats.to_legacy_dict()
         converted["bytes"] = 100
         self.assertEqual(result.stats.bytes, 4)
         with self.assertRaises(FrozenInstanceError):
@@ -144,8 +140,6 @@ class EncodeResultTests(unittest.TestCase):
         stats = EncodeStats(1, 1, 1, 1, 0, 4, "profile:test")
         with self.assertRaisesRegex(ValueError, "byte count"):
             EncodeResult(b"bad", stats)
-        with self.assertRaisesRegex(ValueError, "data and stats"):
-            EncodeResult.from_legacy_tuple((b"only",))
 
 
 if __name__ == "__main__":

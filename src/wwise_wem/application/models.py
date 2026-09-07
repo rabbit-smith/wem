@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Mapping, Sequence
+from typing import Mapping
 
 
 def _require_int(value: int, label: str, *, positive: bool = False) -> int:
@@ -87,20 +87,3 @@ class EncodeResult:
     @property
     def sha256(self) -> str:
         return hashlib.sha256(self.data).hexdigest()
-
-    @classmethod
-    def from_legacy_tuple(
-        cls, value: Sequence[bytes | Mapping[str, int | str]]
-    ) -> "EncodeResult":
-        if len(value) != 2:
-            raise ValueError("legacy encode result must contain data and stats")
-        data, stats = value
-        if not isinstance(data, (bytes, bytearray)) or not isinstance(stats, Mapping):
-            raise TypeError("legacy encode result must be (bytes, stats mapping)")
-        return cls(bytes(data), EncodeStats.from_legacy_dict(stats))
-
-    def to_legacy_tuple(self) -> tuple[bytes, dict[str, int | str]]:
-        return self.data, self.stats.to_legacy_dict()
-
-    from_legacy = from_legacy_tuple
-    to_legacy = to_legacy_tuple

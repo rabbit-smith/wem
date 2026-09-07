@@ -12,10 +12,8 @@ kernel reports a clear ``ImportError`` instead of running a half-built path.
 from __future__ import annotations
 
 import importlib.util
-from dataclasses import dataclass
 from pathlib import Path
-from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any
 
 from .. import _engine, _reference
 from ..profiles.bundle import load_profile_bundle
@@ -24,56 +22,10 @@ from ..model import PcmBuffer
 from .models import EncodeResult, EncodeStats
 
 
-@dataclass(frozen=True)
-class _ContainerPlan:
-    """Per-output container metadata, kept separate from codec identity."""
-
-    fmt: Mapping[str, Any]
-    endian: str
-    seek_table: bytes
-    extra_chunks: tuple[tuple[bytes, bytes], ...]
-    metadata_source: str
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.fmt, Mapping):
-            raise TypeError("container fmt must be a mapping")
-        if self.endian not in ("le", "be"):
-            raise ValueError("container endian must be 'le' or 'be'")
-        if not isinstance(self.metadata_source, str) or not self.metadata_source:
-            raise ValueError("metadata_source must be a non-empty string")
-        frozen_fmt = MappingProxyType(dict(self.fmt))
-        extras: list[tuple[bytes, bytes]] = []
-        for chunk_id, payload in self.extra_chunks:
-            chunk_id = bytes(chunk_id)
-            if len(chunk_id) != 4:
-                raise ValueError("container extra chunk id must be exactly 4 bytes")
-            extras.append((chunk_id, bytes(payload)))
-        object.__setattr__(self, "fmt", frozen_fmt)
-        object.__setattr__(self, "seek_table", bytes(self.seek_table))
-        object.__setattr__(self, "extra_chunks", tuple(extras))
-
-    @classmethod
-    def from_profile(cls, profile: EncoderProfile) -> "_ContainerPlan":
-        return cls(
-            fmt=profile.container_metadata.to_fmt_dict(
-                frame_count=profile.container_metadata.dwTotalPCMFrames
-            ),
-            endian=profile.endian,
-            seek_table=profile.seek_table,
-            extra_chunks=profile.extra_chunks,
-            metadata_source=f"profile:{profile.name}",
-        )
-
-
 class Encoder:
     """Own immutable codec inputs and run one complete encode per PCM buffer."""
 
-    def __init__(
-        self,
-        profile: EncoderProfile,
-        *,
-        _container: _ContainerPlan | None = None,
-    ) -> None:
+    def __init__(self, profile: EncoderProfile) -> None:
         if not isinstance(profile, EncoderProfile):
             raise TypeError("profile must be EncoderProfile")
         if tuple(profile.block_sizes) != (256, 2048):
@@ -81,14 +33,6 @@ class Encoder:
                 "selected profile block geometry is unsupported; "
                 "the installed runtime supports 256/2048 blocks"
             )
-        plan = _ContainerPlan.from_profile(profile) if _container is None else _container
-        if not isinstance(plan, _ContainerPlan):
-            raise TypeError("_container must be _ContainerPlan")
-        if (
-            int(plan.fmt["nChannels"]),
-            int(plan.fmt["nSamplesPerSec"]),
-        ) != (profile.channels, profile.sample_rate):
-            raise ValueError("container metadata geometry differs from encoder profile")
 
         bundle = load_profile_bundle(profile=profile.name, verify_all=False)
         if bundle.key != profile.key:
@@ -99,7 +43,6 @@ class Encoder:
             )
 
         self.profile = profile
-        self._container = plan
         self._native_backend: Any = None
 
     def encode_pcm(self, pcm: PcmBuffer) -> EncodeResult:
@@ -123,17 +66,16 @@ class Encoder:
         if pcm.frame_count < 4096:
             raise ValueError("PCM input must contain at least 4096 frames")
 
-        if self._container.metadata_source.startswith("profile:"):
-            engine = _engine.active_engine()
-            if engine == "native":
-                try:
-                    rows = self._int16_rows(pcm)
-                except ValueError:
-                    if _engine.requested_engine() != "auto":
-                        # An explicit native pin never downgrades silently.
-                        raise
-                    return self._encode_pcm_python(pcm)
-                return self._encode_pcm_native(pcm, rows)
+        engine = _engine.active_engine()
+        if engine == "native":
+            try:
+                rows = self._int16_rows(pcm)
+            except ValueError:
+                if _engine.requested_engine() != "auto":
+                    # An explicit native pin never downgrades silently.
+                    raise
+                return self._encode_pcm_python(pcm)
+            return self._encode_pcm_native(pcm, rows)
         return self._encode_pcm_python(pcm)
 
     def _int16_rows(self, pcm: PcmBuffer) -> list[list[int]]:
@@ -200,7 +142,7 @@ class Encoder:
             short_packets=int(result.short_packets),
             long_packets=int(result.long_packets),
             bytes=int(result.bytes_out),
-            metadata_source=self._container.metadata_source,
+            metadata_source=f"profile:{self.profile.name}",
             engine="native",
         )
         return EncodeResult(bytes(result.data), stats)
@@ -208,9 +150,10 @@ class Encoder:
     def _encode_pcm_python(self, pcm: PcmBuffer) -> EncodeResult:
         """Pure-Python reference encode path (oracle behavior)."""
         python_engine = _reference.reference_module("python_engine")
+        container = python_engine.ContainerPlan.from_profile(self.profile)
         return python_engine.encode_pcm_python(
             profile=self.profile,
-            container=self._container,
+            container=container,
             pcm=pcm,
         )
 

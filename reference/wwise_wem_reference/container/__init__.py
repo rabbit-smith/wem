@@ -6,7 +6,7 @@ from .fmt import (
     parse_pcm_ext_fmt,
     parse_vorbis_fmt,
 )
-from .model import RiffChunk, WemFmt, WemParts
+from .model import ContainerPlan, RiffChunk, WemFmt, WemParts
 from .packets import (
     build_packet_stream,
     extract_packets,
@@ -27,6 +27,7 @@ __all__ = [
     "build_pcm_wem",
     "extract_packets",
     "build_vorbis_wem",
+    "ContainerPlan",
     "load_wem_parts_bytes",
     "pack_pcm_ext_fmt",
     "pack_vorbis_fmt",

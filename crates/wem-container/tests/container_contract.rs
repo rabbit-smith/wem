@@ -3,9 +3,12 @@
 //! SHA-256 against `tests/data/stage-golden/stages/index.json`.
 //!
 //! The packet stream (setup packet + 205 audio packets, seek table, fmt
-//! fields, extra chunks) is captured from the live Python production path
+//! fields, extra chunks) is captured from the reference-oracle encode path
 //! via a subprocess: the stage-golden dumps only carry 28 representative
-//! audio packets, so the full 206-packet stream is fetched on demand. All
+//! audio packets, so the full 206-packet stream is fetched on demand. The
+//! capture pins `WWISE_WEM_ENGINE=python`, drives the typed public entry
+//! (`encode_wav`), and observes the arguments of the reference-tree
+//! `build_vorbis_wem` (`wwise_wem_reference.python_engine`). All
 //! assertions are against the committed index.json hashes.
 
 use std::path::{Path, PathBuf};
@@ -49,20 +52,22 @@ fn load_index() -> Value {
     serde_json::from_str(&raw).expect("index parses")
 }
 
-/// Python script: capture the production encoder's build_vorbis_wem
+/// Python script: capture the reference-oracle encoder's build_vorbis_wem
 /// arguments (packets / seek table / fmt fields / extra chunks) as JSON.
 /// Mirrors tests/contract/stage_golden_support.py's observing wrapper.
 const CAPTURE_SCRIPT: &str = r#"
-import base64, json, sys
+import base64, json, os, sys
 from pathlib import Path
 repo = Path(sys.argv[1])
 sys.path.insert(0, str(repo / "src"))
+sys.path.insert(0, str(repo / "reference"))
+os.environ["WWISE_WEM_ENGINE"] = "python"
 
-from wwise_wem.application import encoder as enc_mod
-from wwise_wem.application.compat import encode_wav_to_wem
+import wwise_wem_reference.python_engine as python_engine
+from wwise_wem import encode_wav
 
 captured = {}
-orig_build = enc_mod.build_vorbis_wem
+original_build = python_engine.build_vorbis_wem
 
 def capture_build(fmt_fields, packets, **kw):
     captured["fmt_fields"] = {k: int(v) for k, v in dict(fmt_fields).items()}
@@ -74,13 +79,13 @@ def capture_build(fmt_fields, packets, **kw):
     ]
     captured["recompute_sizes"] = kw.get("recompute_sizes", True)
     captured["fmt_raw"] = kw.get("fmt_raw")
-    return orig_build(fmt_fields, packets, **kw)
+    return original_build(fmt_fields, packets, **kw)
 
-enc_mod.build_vorbis_wem = capture_build
+python_engine.build_vorbis_wem = capture_build
 try:
-    wem, stats = encode_wav_to_wem(repo / "tests/fixtures/input.wav", profile=None)
+    encode_wav(repo / "tests/fixtures/input.wav", profile=None)
 finally:
-    enc_mod.build_vorbis_wem = orig_build
+    python_engine.build_vorbis_wem = original_build
 
 def b64(b):
     return base64.b64encode(b).decode("ascii") if b is not None else None
@@ -101,7 +106,19 @@ fn capture_packet_stream() -> Value {
     let root = repo_root();
     let script = root.join("crates/wem-container/.capture_packets.py");
     std::fs::write(&script, CAPTURE_SCRIPT).expect("write capture script");
+    #[cfg(unix)]
+    let list_separator = ":";
+    #[cfg(not(unix))]
+    let list_separator = ";";
+    let pythonpath = format!(
+        "{}{}{}",
+        root.join("src").display(),
+        list_separator,
+        root.join("reference").display()
+    );
     let output = Command::new("python3")
+        .current_dir(&root)
+        .env("PYTHONPATH", pythonpath)
         .arg(script.as_os_str())
         .arg(root.as_os_str())
         .output();

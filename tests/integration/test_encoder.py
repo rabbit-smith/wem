@@ -5,7 +5,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from wwise_wem.application.encoder import Encoder, _ContainerPlan
+from wwise_wem.application.encoder import Encoder
 from wwise_wem.application.models import EncodeResult, EncodeStats
 from wwise_wem.model import PcmBuffer
 from wwise_wem.profiles.model import EncoderProfile
@@ -67,17 +67,10 @@ class EncoderCoreTests(unittest.TestCase):
         """Route facade dispatch to the pure-Python reference path."""
         return patch("wwise_wem._engine.active_engine", return_value="python")
 
-    def test_constructor_owns_profile_and_container_plan(self) -> None:
+    def test_constructor_owns_profile(self) -> None:
         encoder = Encoder(self.profile)
 
         self.assertIs(encoder.profile, self.profile)
-        self.assertEqual(
-            encoder._container.metadata_source, f"profile:{PROFILE_NAME}"
-        )
-        self.assertEqual(
-            (encoder._container.fmt["nChannels"], encoder._container.fmt["nSamplesPerSec"]),
-            (6, 44100),
-        )
 
     def test_python_encode_path_assembles_resources_via_reference_engine(self) -> None:
         assemble = patch(
@@ -207,42 +200,6 @@ class EncoderCoreTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "at least 4096 frames"):
                 encoder.encode_pcm(_pcm(frames=3))
         self.assertEqual(FakeSession.instances, [])
-
-    def test_private_container_plan_is_defensive_and_controls_output_source(self) -> None:
-        fmt = {"nChannels": 6, "nSamplesPerSec": 44100, "marker": 1}
-        seek = bytearray(b"seek")
-        chunk_id = bytearray(b"JUNK")
-        payload = bytearray(b"meta")
-        plan = _ContainerPlan(
-            fmt=fmt,
-            endian="be",
-            seek_table=seek,
-            extra_chunks=((chunk_id, payload),),  # type: ignore[arg-type]
-            metadata_source="template:sample.wem",
-        )
-        fmt["marker"] = 2
-        seek[0] = ord("X")
-        chunk_id[0] = ord("X")
-        payload[0] = ord("X")
-
-        patches = self._patch_constructor()
-        with (
-            patches[0], patches[1],
-            self._python_engine_patch(),
-            patch(f"{REFERENCE_ENGINE}.AnalysisSession", FakeSession),
-            patch(
-                f"{REFERENCE_ENGINE}.pack_analysis_frame",
-                side_effect=_pack_analysis,
-            ),
-            patch(f"{REFERENCE_ENGINE}.build_vorbis_wem", return_value=b"WEM!") as build,
-        ):
-            result = Encoder(self.profile, _container=plan).encode_pcm(_pcm())
-
-        self.assertEqual(result.stats.metadata_source, "template:sample.wem")
-        self.assertEqual(build.call_args.args[0]["marker"], 1)
-        self.assertEqual(build.call_args.kwargs["endian"], "be")
-        self.assertEqual(build.call_args.kwargs["seek_table"], b"seek")
-        self.assertEqual(build.call_args.kwargs["extra_chunks"], [(b"JUNK", b"meta")])
 
     def test_unknown_runtime_bundle_fails_before_setup_parse(self) -> None:
         profile = replace(

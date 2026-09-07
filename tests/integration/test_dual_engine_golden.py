@@ -25,6 +25,7 @@ from wwise_wem import Encoder, load_wem_profile
 from wwise_wem.adapters.wav import read_pcm16
 from wwise_wem.model import PcmBuffer
 from wwise_wem_reference import python_engine
+from wwise_wem_reference.container.model import ContainerPlan
 
 try:
     import _wwise_wem_native
@@ -97,7 +98,6 @@ class DualEngineGoldenTests(unittest.TestCase):
         encoders = {
             "facade-python": Encoder(profile),
             "facade-native": Encoder(profile),
-            "direct": Encoder(profile),
         }
 
         with _pinned_engine("python"):
@@ -105,8 +105,8 @@ class DualEngineGoldenTests(unittest.TestCase):
         with _pinned_engine("native"):
             facade_native = encoders["facade-native"].encode_pcm(pcm)
         direct_reference = python_engine.encode_pcm_python(
-            profile=encoders["direct"].profile,
-            container=encoders["direct"]._container,
+            profile=profile,
+            container=ContainerPlan.from_profile(profile),
             pcm=pcm,
         )
         direct_native = _wwise_wem_native.Encoder(PROFILE_NAME).encode_pcm(
@@ -148,7 +148,7 @@ class DualEngineGoldenTests(unittest.TestCase):
 
                 oracle = python_engine.encode_pcm_python(
                     profile=profile,
-                    container=Encoder(profile)._container,
+                    container=ContainerPlan.from_profile(profile),
                     pcm=pcm,
                 )
                 with _pinned_engine("native"):
@@ -179,7 +179,7 @@ class DualEngineGoldenTests(unittest.TestCase):
                     facade_python = Encoder(profile).encode_pcm(pcm)
                 direct_reference = python_engine.encode_pcm_python(
                     profile=profile,
-                    container=Encoder(profile)._container,
+                    container=ContainerPlan.from_profile(profile),
                     pcm=pcm,
                 )
                 self.assertEqual(facade_python.data, direct_reference.data)
