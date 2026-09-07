@@ -45,7 +45,8 @@ class ResourceRef:
     """Immutable package resource identity validated by SHA-256."""
 
     package: str
-    path: PurePosixPath | str
+    # Normalized to PurePosixPath in __post_init__; str inputs remain accepted.
+    path: PurePosixPath
     sha256: str
 
     def __post_init__(self) -> None:

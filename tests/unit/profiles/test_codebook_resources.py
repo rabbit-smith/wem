@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import PurePosixPath
 from unittest.mock import patch
 
 from tests.codebook_resource_support import installed_codebook_tables
@@ -62,7 +63,7 @@ class CodebookResourceTests(unittest.TestCase):
             "outside", resolve_book_id(T97_COUNT + T219_COUNT, self.tables)["error"]
         )
         with self.assertRaises(FileNotFoundError):
-            load_book_table("unknown", ResourceRef("wwise_wem", "x", "0" * 64))
+            load_book_table("unknown", ResourceRef("wwise_wem", PurePosixPath("x"), "0" * 64))
 
     def test_inline_resolved_book_remains_filesystem_independent(self):
         book = load_codebook(

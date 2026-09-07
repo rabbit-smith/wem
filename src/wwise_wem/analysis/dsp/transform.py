@@ -253,10 +253,10 @@ def _b16(x: list[float], base: int) -> None:
 
 
 def _b32(x: list[float], base: int) -> None:
+    # Constants mirror libvorbis butterfly32; its s3 branch is unused here.
     c1 = 0.9238795042037964
     s1 = 0.3826834261417389
     c3 = 0.3826834261417389
-    s3 = 0.9238795042037964
     s2 = 0.7071067690849304
     r0 = _f32(x[base + 30] - x[base + 14])
     r1 = _f32(x[base + 31] - x[base + 15])

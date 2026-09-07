@@ -8,7 +8,7 @@ Floor1 body matches Vorbis I.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Any, Mapping, Sequence
 
 from ..analysis.model import PsyFrame
 from .bitio import OggPack
@@ -90,7 +90,7 @@ def _pick_subclass_cval(
 
 def pack_audio_header(
     op: OggPack,
-    setup: dict,
+    setup: Mapping[str, Any],
     mode: int,
     prev_window: int = 0,
     next_window: int = 0,
@@ -152,7 +152,7 @@ def pack_floor1_body(op: OggPack, floor: dict, books: Sequence[Codebook], Y: lis
 
 
 def pack_silence_packet(
-    setup: dict,
+    setup: Mapping[str, Any],
     channels: int,
     mode: int = 0,
     prev_window: int = 0,
@@ -172,7 +172,7 @@ def pack_silence_packet(
 
 
 def pack_floor_only_packet(
-    setup: dict,
+    setup: Mapping[str, Any],
     books: Sequence[Codebook],
     channels: int,
     mode: int,
@@ -230,7 +230,7 @@ class BlockPacketResult:
 
 
 def pack_block_packet_details(
-    setup: dict,
+    setup: Mapping[str, Any],
     books: Sequence[Codebook],
     channels: int,
     mode: int,
@@ -325,7 +325,7 @@ def pack_block_packet_details(
 
 
 def pack_block_packet(
-    setup: dict,
+    setup: Mapping[str, Any],
     books: Sequence[Codebook],
     channels: int,
     mode: int,
@@ -363,7 +363,7 @@ class EncodedPacket:
 
 
 def pack_analysis_frame(
-    setup: dict,
+    setup: Mapping[str, Any],
     books: Sequence[Codebook],
     analysis: PsyFrame,
     *,

@@ -71,21 +71,24 @@ class ProfileBundleTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     normalize_resource_path(path)
         with self.assertRaisesRegex(ValueError, "SHA-256"):
-            ResourceRef("wwise_wem", "data/profiles/index.json", "bad")
+            ResourceRef("wwise_wem", normalize_resource_path("data/profiles/index.json"), "bad")
         with self.assertRaisesRegex(ValueError, "SHA-256 differs"):
-            ResourceRef("wwise_wem", "data/profiles/index.json", "0" * 64).read_bytes()
+            ResourceRef("wwise_wem", normalize_resource_path("data/profiles/index.json"), "0" * 64).read_bytes()
 
     def test_bundle_loads_through_index_from_zip_resources(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             archive = Path(directory) / "profile.zip"
             package = "zip_profile_ok"
             _zip_package(archive, package)
-            sys.path.insert(0, str(archive)); importlib.invalidate_caches()
+            sys.path.insert(0, str(archive))
+            importlib.invalidate_caches()
             try:
                 bundle = load_profile_bundle(package=package, verify_all=True)
                 self.assertEqual(bundle.setup_packet(), b"minimal setup packet")
             finally:
-                sys.path.remove(str(archive)); sys.modules.pop(package, None); importlib.invalidate_caches()
+                sys.path.remove(str(archive))
+                sys.modules.pop(package, None)
+                importlib.invalidate_caches()
 
     def test_manifest_schema_geometry_sha_and_path_errors_are_rejected(self) -> None:
         cases = (
@@ -96,14 +99,18 @@ class ProfileBundleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             for index, (label, mutate, message) in enumerate(cases):
                 with self.subTest(case=label):
-                    archive = Path(directory) / f"{label}.zip"; package = f"zip_profile_bad_{index}"
+                    archive = Path(directory) / f"{label}.zip"
+                    package = f"zip_profile_bad_{index}"
                     _zip_package(archive, package, mutate)
-                    sys.path.insert(0, str(archive)); importlib.invalidate_caches()
+                    sys.path.insert(0, str(archive))
+                    importlib.invalidate_caches()
                     try:
                         with self.assertRaisesRegex(ValueError, message):
                             load_profile_bundle(package=package)
                     finally:
-                        sys.path.remove(str(archive)); sys.modules.pop(package, None); importlib.invalidate_caches()
+                        sys.path.remove(str(archive))
+                        sys.modules.pop(package, None)
+                        importlib.invalidate_caches()
 
 
 if __name__ == "__main__":

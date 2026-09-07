@@ -6,7 +6,7 @@ from types import MappingProxyType
 from typing import Iterable, Iterator, Mapping, TypeVar
 
 from .bundle import ProfileKey, WWISE_GENERATION, load_profile_bundle
-from .model import EncoderProfile, WwiseVorbisProfile
+from .model import EncoderProfile
 
 
 _DEFAULT = TypeVar("_DEFAULT")

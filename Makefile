@@ -1,4 +1,4 @@
-.PHONY: test test-fast frame-contract golden build wheel-smoke check clean
+.PHONY: test test-fast frame-contract golden lint build wheel-smoke check clean
 
 test: test-fast frame-contract golden
 
@@ -13,13 +13,19 @@ frame-contract:
 golden:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.golden.test_golden -v
 
+RUFF ?= ruff
+MYPY ?= mypy
+lint:
+	$(RUFF) check src tests scripts
+	$(MYPY) src
+
 build:
 	python3 -m pip wheel . --no-deps -w dist
 
 wheel-smoke:
 	python3 scripts/wheel_smoke.py
 
-check: test wheel-smoke
+check: lint test wheel-smoke
 
 clean:
 	python3 scripts/clean.py

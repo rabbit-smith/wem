@@ -5,7 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
-from ..config import LongFloorEnvelopeLook, WwisePsyLook
+from ..config import (
+    LongFloorEnvelopeLook,
+    WwisePsyLook,
+    WwisePsyLongTables,
+    make_long_floor_envelope_look,
+)
 from ..dsp.transform import _f32
 
 @dataclass
@@ -255,6 +260,8 @@ def shape_first_long_floor_envelope(
     :func:`make_long_floor_envelope_look`.
     """
     if look is None:
+        if table is None:
+            raise ValueError("floor-envelope stage requires look or table")
         look = make_long_floor_envelope_look(table)
     n = look.n
     if not (

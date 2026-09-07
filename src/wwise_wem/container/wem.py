@@ -120,15 +120,15 @@ def build_vorbis_wem(
         raise ValueError(f"vorbis fmt must be 66 bytes, got {len(fmt_payload)}")
     data_payload = build_packet_stream(packets, seek_table, endian=endian)
     if recompute_sizes and fmt_raw is not None:
-        fmt_payload = bytearray(fmt_payload)
-        struct.pack_into("<I", fmt_payload, 0x20, len(data_payload))
-        struct.pack_into("<I", fmt_payload, 0x28, len(seek_table))
+        fmt_buf = bytearray(fmt_payload)
+        struct.pack_into("<I", fmt_buf, 0x20, len(data_payload))
+        struct.pack_into("<I", fmt_buf, 0x28, len(seek_table))
         setup_offset = len(seek_table) + (2 + len(packets[0]) if packets else 0)
-        struct.pack_into("<I", fmt_payload, 0x1C, setup_offset)
-        struct.pack_into("<I", fmt_payload, 0x2C, setup_offset)
+        struct.pack_into("<I", fmt_buf, 0x1C, setup_offset)
+        struct.pack_into("<I", fmt_buf, 0x2C, setup_offset)
         if packets:
-            struct.pack_into("<H", fmt_payload, 0x30, max(len(packet) for packet in packets))
-        fmt_payload = bytes(fmt_payload)
+            struct.pack_into("<H", fmt_buf, 0x30, max(len(packet) for packet in packets))
+        fmt_payload = bytes(fmt_buf)
     chunks: list[tuple[bytes, bytes]] = [(b"fmt ", fmt_payload)]
     if extra_chunks:
         chunks.extend(extra_chunks)

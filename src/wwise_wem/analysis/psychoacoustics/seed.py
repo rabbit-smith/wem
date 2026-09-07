@@ -2,7 +2,6 @@
 """Floor seed propagation and frame-global spectrum peak state."""
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -14,6 +13,7 @@ from ..config import (
     NEGATIVE_INFINITY_DB,
     TONE_LEVEL_COUNT,
     WwisePsyLongSeedLook,
+    WwisePsyLongTables,
     WwisePsyLook,
     make_wwise_long_seed_look,
 )
@@ -62,6 +62,8 @@ def build_long_floor_seed(
     table: WwisePsyLongTables | None = None,
 ) -> list[float]:
     """Convenience entry point for a 44.1 kHz / 1024-bin long block."""
+    if table is None:
+        raise ValueError("build_long_floor_seed requires a profile long table")
     return build_long_floor_seed_from_look(
         make_wwise_long_seed_look(table),
         logfft,

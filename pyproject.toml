@@ -11,6 +11,9 @@ requires-python = ">=3.10"
 authors = [{name = "Wwise WEM Encoder Contributors"}]
 dependencies = []
 
+[project.optional-dependencies]
+dev = ["ruff>=0.6", "mypy>=1.11"]
+
 [project.scripts]
 wwise-wem = "wwise_wem.cli:main"
 
@@ -26,3 +29,22 @@ wwise_wem = ["data/profiles/*.json", "data/profiles/*/*.json", "data/profiles/*/
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["golden: complete bit-exact fixture encoding"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# Conservative rule set: correctness-focused, no reformatting churn.
+select = ["E4", "E7", "E9", "F", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+mypy_path = "src"
+# Baseline gate: type-check without forcing full annotation coverage.
+# Tighten (disallow_untyped_defs etc.) as a dedicated change.
+check_untyped_defs = true
+ignore_missing_imports = true
+

@@ -6,9 +6,7 @@ import math
 from functools import lru_cache
 
 from ...analysis.config import (
-    LongFloorEnvelopeLook, WwisePsyLongSeedLook, WwisePsyLook,
-    WwisePsyLongTables, WwisePsySeedSurface, make_long_floor_envelope_look,
-    make_wwise_long_seed_look, make_wwise_psy_look,
+    WwisePsySeedSurface,
 )
 from ..resources import ResourceRef
 from ...analysis.dsp.transform import _f32
@@ -51,9 +49,8 @@ def load_short_seed_surface(ref: ResourceRef) -> WwisePsySeedSurface:
     profile = payload.get("profile")
     geometry = payload.get("geometry")
     look = payload.get("look")
-    if not all(isinstance(section, dict) for section in (profile, geometry, look)):
+    if not (isinstance(profile, dict) and isinstance(geometry, dict) and isinstance(look, dict)):
         raise ValueError("short seed surface is missing a required section")
-    assert isinstance(profile, dict) and isinstance(geometry, dict) and isinstance(look, dict)
     n = geometry.get("n")
     sample_rate = geometry.get("sample_rate")
     if n != 128 or sample_rate != 44100:

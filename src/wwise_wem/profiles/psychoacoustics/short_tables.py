@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import cast
 
 from ...analysis.config import ShortPsyProfile
 from ..resources import ResourceRef
@@ -23,6 +24,9 @@ def load_short_psy_profiles(ref: ResourceRef) -> tuple[ShortPsyProfile, ...]:
         curves = row.get("mask_curves")
         if not isinstance(curves, list) or len(curves) != 3 or any(len(curve) != 128 for curve in curves):
             raise ValueError("short psychoacoustic profile has malformed mask curves")
+        band_limits = tuple(int(value) for value in row["band_limits"])
+        if len(band_limits) != 3:
+            raise ValueError("short psychoacoustic profile has malformed band limits")
         result.append(ShortPsyProfile(
             key=str(row["key"]),
             candidate_bias_by_mode=tuple(float(value) for value in row["candidate_bias_by_mode"]),
@@ -30,7 +34,7 @@ def load_short_psy_profiles(ref: ResourceRef) -> tuple[ShortPsyProfile, ...]:
             group_enabled=int(row["group_enabled"]),
             candidate_bound=int(row["candidate_bound"]),
             group_span=int(row["group_span"]),
-            band_limits=tuple(int(value) for value in row["band_limits"]),
+            band_limits=cast("tuple[int, int, int]", band_limits),
             side_gain=float(row["side_gain"]),
             peak_cutoff=int(row["peak_cutoff"]),
             blend_weight=float(row["blend_weight"]),

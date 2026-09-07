@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from ..config import WwisePsyLongTables, WwisePsyLook
+from ..dsp.transform import _f32, _u32_f32
 
 LONG_PSY_N = 1024
-from ..dsp.transform import _f32, _u32_f32
 
 def wwise_psy_peak_suppress(
     original: Sequence[float],
@@ -490,16 +490,18 @@ def wwise_psy_apply_q_extension(
     """
     if len(base_curve) != len(selector_curve):
         raise ValueError("psycho base and selector curves must have the same length")
-    low_table = (
-        tuple(float(value) for value in low_extension)
-        if not isinstance(low_extension, (int, float))
-        else None
-    )
-    high_table = (
-        tuple(float(value) for value in high_extension)
-        if not isinstance(high_extension, (int, float))
-        else None
-    )
+    low_table: tuple[float, ...] | None = None
+    high_table: tuple[float, ...] | None = None
+    low_scalar = 0.0
+    high_scalar = 0.0
+    if isinstance(low_extension, (int, float)):
+        low_scalar = float(low_extension)
+    else:
+        low_table = tuple(float(value) for value in low_extension)
+    if isinstance(high_extension, (int, float)):
+        high_scalar = float(high_extension)
+    else:
+        high_table = tuple(float(value) for value in high_extension)
     if low_table is not None and len(low_table) < 40:
         raise ValueError("low q-extension table needs 40 entries")
     if high_table is not None and len(high_table) < 40:
@@ -508,11 +510,11 @@ def wwise_psy_apply_q_extension(
     q_limit = len(base_curve) // 3
     for i, (base, selector) in enumerate(zip(base_curve, selector_curve)):
         index = max(0, min(39, int(float(selector) + 0.5)))
-        low = low_table[index] if low_table is not None else float(low_extension)
+        low = low_table[index] if low_table is not None else low_scalar
         high = (
             high_table[index]
             if high_table is not None
-            else float(high_extension)
+            else high_scalar
         )
         if float(q) > 0.0 and i < q_limit:
             output.append(_f32(low + float(base) - (low - high) * float(q)))
@@ -524,7 +526,7 @@ def wwise_psy_apply_q_extension(
 def build_psy_remap(
     original: Sequence[float],
     q: float,
-    look: WwisePsyLook | None = None,
+    look: WwisePsyLook,
     *,
     low_extension: float | Sequence[float] | None = None,
     high_extension: float | Sequence[float] | None = None,

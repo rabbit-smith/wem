@@ -7,10 +7,9 @@ Runtime encoder code imports only the checked static JSON table.
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 import struct
-from typing import Any, Sequence
+from typing import Any
 
 from ...analysis.config import WwisePsyLongTables
 from ..resources import ResourceRef

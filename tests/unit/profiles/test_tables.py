@@ -5,7 +5,6 @@ from pathlib import Path
 
 import wwise_wem
 
-from wwise_wem.analysis.dsp.transform import make_mdct_look
 from wwise_wem.profiles.transient import load_transient_tables
 from wwise_wem.profiles.psychoacoustics.long_tables import load_long_psy_tables
 from wwise_wem.profiles.psychoacoustics.long_variants import load_long_variant
