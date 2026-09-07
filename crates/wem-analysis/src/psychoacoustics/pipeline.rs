@@ -4,7 +4,8 @@
 //! orchestration that ties the transform, remap, seed, and envelope stages into
 //! the per-frame surfaces used by the golden dump.
 
-use crate::config::{AnalysisError, AnalysisProfileResources};
+use crate::config::{AnalysisError, AnalysisProfileResources, FrozenMathTables, MdctLook};
+
 use crate::dsp::spectrum::{wwise_log_curve, wwise_mdct_log_curve};
 use crate::dsp::transform::mdct_forward;
 use crate::psychoacoustics::envelope::{
@@ -16,6 +17,8 @@ use crate::psychoacoustics::seed::{
     wwise_seed_floor_from_look, SpectrumPeakState,
 };
 use crate::psychoacoustics::short::{ShortPsyAnalyzer, ShortPsyFrameResult};
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 
 /// Pure local surface for one fresh long-mode analysis group
 /// (Python `LongPsyFrame`).
@@ -76,10 +79,11 @@ pub fn analyze_long_frame(
     if table.n != 1024 {
         return Err(LongAnalysisTableBins { want: 1024 });
     }
-    if windowed_frames.iter().any(|frame| frame.len() as i64 != table.n * 2) {
-        return Err(LongAnalysisFrameSize {
-            want: table.n * 2,
-        });
+    if windowed_frames
+        .iter()
+        .any(|frame| frame.len() as i64 != table.n * 2)
+    {
+        return Err(LongAnalysisFrameSize { want: table.n * 2 });
     }
     if let Some(scratch) = &scratch {
         if scratch.len() as i64 != windowed_frames.len() as i64 {
@@ -103,62 +107,82 @@ pub fn analyze_long_frame(
 
     // Two scheduler variants are distinct psycho looks (mode 2 vs 3).
     let analysis_mode = 2 + long_variant;
-    let analysis_table = resources
-        .long_variants
-        .get(&analysis_mode)
+    let analysis_table =
+        resources
+            .long_variants
+            .get(&analysis_mode)
+            .ok_or(IncompleteResources {
+                reason: "analysis resources lack psychoacoustic variants",
+            })?;
+    let mdct_look = resources
+        .mdct_looks
+        .get(&(table.n * 2))
         .ok_or(IncompleteResources {
-            reason: "analysis resources lack psychoacoustic variants",
+            reason: "analysis resources lack required MDCT looks",
         })?;
-    let mdct_look = resources.mdct_looks.get(&(table.n * 2)).ok_or(IncompleteResources {
-        reason: "analysis resources lack required MDCT looks",
-    })?;
     if mdct_look.n != table.n * 2 {
         return Err(LongMdctLookGeometry { want: table.n * 2 });
     }
-    let coefficients: Vec<Vec<f64>> = windowed_frames
-        .iter()
-        .map(|frame| {
-            let f32_frame: Vec<f64> = frame.iter().map(|value| f32_of_local(*value)).collect();
-            mdct_forward(mdct_look, &f32_frame)
-        })
-        .collect::<Result<Vec<Vec<f64>>, AnalysisError>>()?;
-    let raw_mdct: Vec<Vec<f64>> = coefficients.iter().map(|c| wwise_mdct_log_curve(c)).collect();
     let frozen = resources.frozen_twiddles()?;
-    let fft: Vec<Vec<f64>> = windowed_frames
-        .iter()
-        .map(|frame| {
-            let f32_frame: Vec<f64> = frame.iter().map(|value| f32_of_local(*value)).collect();
-            wwise_log_curve(&f32_frame, frozen)
-        })
-        .collect::<Result<Vec<Vec<f64>>, AnalysisError>>()?;
+    // SAFETY (per-channel partition, `parallel` feature): each iteration
+    // reads only its own input slice plus immutable shared resources
+    // (mdct_look, frozen twiddles, resource tables). There is no
+    // cross-channel shared mutable state, `f32_of` is a pure, order-free
+    // rounding, and rayon preserves channel order in collect, so the
+    // results are bit-identical to the sequential loop. Guarded end-to-end
+    // by the golden_e2e / stage_frames / vorbis_golden byte-parity tests.
+    //
+    // Without `parallel` (threadless targets such as wasm32), run the same
+    // work sequentially.
+    #[cfg_attr(not(feature = "parallel"), allow(unused_mut))]
+    let transformed: Vec<(Vec<f64>, Vec<f64>, Vec<f64>)> =
+        transform_channel_rows(windowed_frames, mdct_look, frozen)?;
+
+    let mut coefficients: Vec<Vec<f64>> = Vec::with_capacity(transformed.len());
+    let mut raw_mdct: Vec<Vec<f64>> = Vec::with_capacity(transformed.len());
+    let mut fft: Vec<Vec<f64>> = Vec::with_capacity(transformed.len());
+    for (coeffs, raw, spectrum) in transformed {
+        coefficients.push(coeffs);
+        raw_mdct.push(raw);
+        fft.push(spectrum);
+    }
 
     let (channel_specmax, global_specmax) = match specmax_state {
         None => compute_spectrum_peak(&fft, carried_global_specmax)?,
-        Some(state) => {
-            update_frame_spectrum_peak(&fft, table.n, table.sample_rate, state)?
-        }
+        Some(state) => update_frame_spectrum_peak(&fft, table.n, table.sample_rate, state)?,
     };
 
-    // Resolve shared scratch from stream if provided.
-    let mut stream_scratch: Vec<FloorEnvelopeScratch> = Vec::new();
-    if let Some(stream) = &stream {
-        for channel in &stream.channels {
-            stream_scratch.push(FloorEnvelopeScratch {
-                current_curve: channel.state.clone(),
-                history_curve: channel.history.clone(),
-            });
-        }
-    }
+    // Resolve per-channel scratch from the stream when present (single
+    // direct clone; an earlier intermediate Vec doubled copy traffic).
 
-    let long_floor_envelope = resources.long_floor_looks.get(&analysis_mode).ok_or(
-        IncompleteResources {
-            reason: "analysis resources lack long floor looks",
-        },
-    )?;
+    let long_floor_envelope =
+        resources
+            .long_floor_looks
+            .get(&analysis_mode)
+            .ok_or(IncompleteResources {
+                reason: "analysis resources lack long floor looks",
+            })?;
 
     // Snapshot the scratch contents once to avoid moving the Option per iteration.
-    let scratch_snapshot: Option<Vec<FloorEnvelopeScratch>> =
-        scratch.as_ref().map(|v| v.to_vec());
+    let scratch_snapshot: Option<Vec<FloorEnvelopeScratch>> = scratch.as_ref().map(|v| v.to_vec());
+
+    // Resolve per-channel scratch up front (single direct clone each), so
+    // the parallel region below needs no shared mutable state.
+    let local_scratches: Vec<FloorEnvelopeScratch> = (0..raw_mdct.len())
+        .map(|ci| {
+            stream
+                .as_ref()
+                .map(|stream| {
+                    let channel = &stream.channels[ci];
+                    FloorEnvelopeScratch {
+                        current_curve: channel.state.clone(),
+                        history_curve: channel.history.clone(),
+                    }
+                })
+                .or_else(|| scratch_snapshot.as_ref().map(|s| s[ci].clone()))
+                .unwrap_or_else(make_channel_floor_envelope_scratch)
+        })
+        .collect();
 
     let mut remap: Vec<Vec<f64>> = Vec::new();
     let mut seed: Vec<Vec<f64>> = Vec::new();
@@ -166,28 +190,21 @@ pub fn analyze_long_frame(
     let mut side: Vec<Vec<f64>> = Vec::new();
     let mut scratches: Vec<FloorEnvelopeScratch> = Vec::new();
 
-    for channel_index in 0..raw_mdct.len() {
+    // SAFETY (per-channel partition, `parallel` feature): same argument as
+    // the transform region above; specmax values are read-only inputs
+    // computed before this region, and scratch copies are per-channel owned.
+    type PsychChannel = (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, FloorEnvelopeScratch);
+    let channel_count = raw_mdct.len();
+    let psych: Vec<PsychChannel> = channel_psych_map(channel_count, |channel_index| {
         let raw = &raw_mdct[channel_index];
         let logfft = &fft[channel_index];
         let specmax = channel_specmax[channel_index];
         let coeff = &coefficients[channel_index];
 
         let local_remap = build_long_psy_remap_variant(raw, analysis_mode, analysis_table)?.remap;
-        let local_seed = build_long_floor_seed(
-            table,
-            logfft,
-            specmax,
-            global_specmax,
-        )?;
+        let local_seed = build_long_floor_seed(table, logfft, specmax, global_specmax)?;
 
-        let local_scratch = if !stream_scratch.is_empty() {
-            stream_scratch[channel_index].clone()
-        } else if let Some(ref s) = scratch_snapshot {
-            s[channel_index].clone()
-        } else {
-            make_channel_floor_envelope_scratch()
-        };
-        let mut local_scratch = local_scratch;
+        let mut local_scratch = local_scratches[channel_index].clone();
         let local_post_side = shape_first_long_floor_envelope(
             &local_seed,
             &local_remap,
@@ -201,11 +218,21 @@ pub fn analyze_long_frame(
             1,
         )?;
 
-        remap.push(local_remap);
-        seed.push(local_seed);
-        post.push(local_post_side.0);
-        side.push(local_post_side.1);
-        scratches.push(local_scratch);
+        Ok::<(_, _, _, _, _), AnalysisError>((
+            local_remap,
+            local_seed,
+            local_post_side.0,
+            local_post_side.1,
+            local_scratch,
+        ))
+    })?;
+
+    for (r, s, p, sd, sc) in psych {
+        remap.push(r);
+        seed.push(s);
+        post.push(p);
+        side.push(sd);
+        scratches.push(sc);
     }
 
     // Write back scratch mutations into the stream channels, then commit state.
@@ -218,12 +245,7 @@ pub fn analyze_long_frame(
         }
         state_info = Some(
             stream
-                .commit_long_state(
-                    &raw_mdct,
-                    long_variant,
-                    following_mode,
-                    0,
-                )
+                .commit_long_state(&raw_mdct, long_variant, following_mode, 0)
                 .map_err(|_| LongAnalysisStreamChannels {
                     want: windowed_frames.len() as i64,
                 })?,
@@ -288,41 +310,35 @@ pub fn analyze_short_frame(
             reason: "short MDCT look differs from analysis geometry",
         });
     }
-    let coefficients: Vec<Vec<f64>> = windowed_frames
-        .iter()
-        .map(|frame| {
-            let f32_frame: Vec<f64> = frame.iter().map(|value| f32_of_local(*value)).collect();
-            mdct_forward(mdct_look, &f32_frame)
-        })
-        .collect::<Result<Vec<Vec<f64>>, AnalysisError>>()?;
-    let raw_mdct: Vec<Vec<f64>> = coefficients.iter().map(|c| wwise_mdct_log_curve(c)).collect();
+    // Short frames: the 256-sample per-channel work is too small for
+    // rayon's per-region sync overhead to pay off, so this stays
+    // sequential (the long-frame path above does use per-channel
+    // partitioning).
     let frozen = resources.frozen_twiddles()?;
-    let fft: Vec<Vec<f64>> = windowed_frames
-        .iter()
-        .map(|frame| {
-            let f32_frame: Vec<f64> = frame.iter().map(|value| f32_of_local(*value)).collect();
-            wwise_log_curve(&f32_frame, frozen)
-        })
-        .collect::<Result<Vec<Vec<f64>>, AnalysisError>>()?;
-
+    let mut coefficients: Vec<Vec<f64>> = Vec::with_capacity(windowed_frames.len());
+    let mut raw_mdct: Vec<Vec<f64>> = Vec::with_capacity(windowed_frames.len());
+    let mut fft: Vec<Vec<f64>> = Vec::with_capacity(windowed_frames.len());
+    for frame in windowed_frames {
+        let f32_frame: Vec<f64> = frame.iter().map(|value| f32_of_local(*value)).collect();
+        let coeffs = mdct_forward(mdct_look, &f32_frame)?;
+        let raw = wwise_mdct_log_curve(&coeffs);
+        let spectrum = wwise_log_curve(&f32_frame, frozen)?;
+        coefficients.push(coeffs);
+        raw_mdct.push(raw);
+        fft.push(spectrum);
+    }
+    // Frame-level sequential state update (cross-frame specmax must keep
+    // its exact order; it reads only the completed fft rows).
     let (channel_specmax, global_specmax) = match specmax_state {
         None => compute_spectrum_peak(&fft, carried_global_specmax)?,
-        Some(state) => {
-            update_frame_spectrum_peak(&fft, 128, 44100, state)?
-        }
+        Some(state) => update_frame_spectrum_peak(&fft, 128, 44100, state)?,
     };
-
     let look = &resources.short_look;
     let remap: Vec<Vec<f64>> = raw_mdct
         .iter()
         .map(|raw| {
-            build_psy_remap(
-                raw,
-                q,
-                look,
-                &resources.short_surface.remap_curve_offsets,
-            )
-            .map(|(_, _, _, noise_mask, _)| noise_mask)
+            build_psy_remap(raw, q, look, &resources.short_surface.remap_curve_offsets)
+                .map(|(_, _, _, noise_mask, _)| noise_mask)
         })
         .collect::<Result<Vec<Vec<f64>>, AnalysisError>>()?;
     let seed: Vec<Vec<f64>> = fft
@@ -332,7 +348,6 @@ pub fn analyze_short_frame(
             wwise_seed_floor_from_look(look, logfft, *channel_max, global_specmax)
         })
         .collect::<Result<Vec<Vec<f64>>, AnalysisError>>()?;
-
     let state_result = stream.process_frame(
         &remap,
         &seed,
@@ -368,6 +383,70 @@ pub fn analyze_short_frame(
         side,
         state_result,
     })
+}
+
+/// Per-channel long-frame transform result: (MDCT coefficients, raw log
+/// curve, FFT log curve).
+type LongChannelTransform = (Vec<f64>, Vec<f64>, Vec<f64>);
+
+/// Compute per-channel (MDCT coefficients, raw log curve, FFT log curve)
+/// for a long-frame window. Each channel is an independent transformation of
+/// its own slice plus immutable shared looks, so the `parallel` feature may
+/// run channels concurrently without changing any bit of output; without it
+/// the same work runs sequentially (threadless targets).
+fn transform_channel_rows(
+    windowed_frames: &[Vec<f64>],
+    mdct_look: &MdctLook,
+    frozen: &FrozenMathTables,
+) -> Result<Vec<LongChannelTransform>, AnalysisError> {
+    #[cfg(feature = "parallel")]
+    {
+        (0..windowed_frames.len())
+            .into_par_iter()
+            .map(|ci| transform_one_channel(&windowed_frames[ci], mdct_look, frozen))
+            .collect()
+    }
+    #[cfg(not(feature = "parallel"))]
+    {
+        (0..windowed_frames.len())
+            .map(|ci| transform_one_channel(&windowed_frames[ci], mdct_look, frozen))
+            .collect()
+    }
+}
+
+fn transform_one_channel(
+    frame: &[f64],
+    mdct_look: &MdctLook,
+    frozen: &FrozenMathTables,
+) -> Result<LongChannelTransform, AnalysisError> {
+    // Single f32-rounded copy reused by MDCT and FFT; rounding is idempotent,
+    // so this is bit-identical to rounding twice.
+    let f32_frame: Vec<f64> = frame.iter().map(|value| f32_of_local(*value)).collect();
+    let coeffs = mdct_forward(mdct_look, &f32_frame)?;
+    let raw = wwise_mdct_log_curve(&coeffs);
+    let spectrum = wwise_log_curve(&f32_frame, frozen)?;
+    Ok((coeffs, raw, spectrum))
+}
+
+/// Map a per-channel psych closure over `count` channels, using rayon when
+/// the `parallel` feature is on and a sequential loop otherwise. Output
+/// order is preserved either way.
+fn channel_psych_map<T, F>(count: usize, f: F) -> Result<Vec<T>, AnalysisError>
+where
+    F: Fn(usize) -> Result<T, AnalysisError> + Send + Sync,
+    T: Send,
+{
+    #[cfg(feature = "parallel")]
+    {
+        (0..count)
+            .into_par_iter()
+            .map(f)
+            .collect::<Result<Vec<_>, _>>()
+    }
+    #[cfg(not(feature = "parallel"))]
+    {
+        (0..count).map(f).collect::<Result<Vec<_>, _>>()
+    }
 }
 
 /// Round at the algorithm's float32 storage boundary.

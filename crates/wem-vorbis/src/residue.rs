@@ -304,29 +304,34 @@ pub fn pack_residue_vq(
                     let book = book_or_err(books, book_id)?;
                     let dim = book.dim() as usize;
                     let off = begin + partition * part;
+                    // Scratch VQ target: reused across dim steps of this
+                    // partition instead of a per-chunk allocation, with the
+                    // same zero-padding semantics as before.
+                    let mut vq_target: Vec<f64> = Vec::with_capacity(dim);
                     for v in (0..part).step_by(dim.max(1)) {
-                        let mut vec: Vec<f64> =
-                            work[j][off + v..(off + v + dim).min(work[j].len())].to_vec();
-                        if vec.len() < dim {
-                            vec.resize(dim, 0.0);
+                        let take = (off + v + dim).min(work[j].len()) - off - v;
+                        vq_target.clear();
+                        vq_target.extend_from_slice(&work[j][off + v..off + v + take]);
+                        if vq_target.len() < dim {
+                            vq_target.resize(dim, 0.0);
                         }
-                        let entry = book
-                            .best_vq(&vec)
-                            .map_err(|_| ResidueError::BookIndexOutOfRange {
+                        let entry = book.best_vq(&vq_target).map_err(|_| {
+                            ResidueError::BookIndexOutOfRange {
                                 book_id,
                                 books: books.len(),
-                            })?;
+                            }
+                        })?;
                         book.encode(op, entry)
                             .map_err(|_| ResidueError::BookIndexOutOfRange {
                                 book_id,
                                 books: books.len(),
                             })?;
-                        let vq_vec = book
-                            .vq_values(entry)
-                            .map_err(|_| ResidueError::BookIndexOutOfRange {
+                        let vq_vec = book.borrow_vq(entry).map_err(|_| {
+                            ResidueError::BookIndexOutOfRange {
                                 book_id,
                                 books: books.len(),
-                            })?;
+                            }
+                        })?;
                         for d in 0..dim {
                             work[j][off + v + d] -= vq_vec[d];
                         }
@@ -335,7 +340,6 @@ pub fn pack_residue_vq(
             }
         }
     }
-
     Ok(())
 }
 
@@ -391,10 +395,7 @@ mod tests {
         assert_eq!(classify_partition(&[0.6], 8).unwrap(), 2);
         assert_eq!(classify_partition(&[1.4], 8).unwrap(), 2);
         assert_eq!(classify_partition(&[2.4, 0.0], 8).unwrap(), 4);
-        assert_eq!(
-            classify_partition(&[4.6, 0.0, 0.0, 0.0], 8).unwrap(),
-            6
-        );
+        assert_eq!(classify_partition(&[4.6, 0.0, 0.0, 0.0], 8).unwrap(), 6);
         assert_eq!(classify_partition(&[28.0], 8).unwrap(), 6);
         assert_eq!(classify_partition(&[29.0], 8).unwrap(), 7); // fall through
     }

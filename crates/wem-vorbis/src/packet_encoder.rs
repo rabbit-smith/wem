@@ -83,7 +83,10 @@ impl std::fmt::Display for PacketError {
             PacketError::BadYLength { got, want } => {
                 write!(f, "Y len {got} != {want}")
             }
-            PacketError::MdctTooShort { channels, n_spectrum } => {
+            PacketError::MdctTooShort {
+                channels,
+                n_spectrum,
+            } => {
                 write!(f, "mdct row {channels} shorter than {n_spectrum}")
             }
             PacketError::MdctRowCount { got, want } => {
@@ -94,7 +97,10 @@ impl std::fmt::Display for PacketError {
             PacketError::FloorFit(e) => write!(f, "floor fit: {e}"),
             PacketError::Residue(e) => write!(f, "residue: {e}"),
             PacketError::AnalysisChannelsMismatch { want, got } => {
-                write!(f, "analysis channel count differs from packet mapping ({got} != {want})")
+                write!(
+                    f,
+                    "analysis channel count differs from packet mapping ({got} != {want})"
+                )
             }
         }
     }
@@ -105,25 +111,8 @@ impl std::error::Error for PacketError {}
 /// Map residual value to a used codebook entry (dim-1 maptype0:
 /// entry≈value) (Python `_nearest_used_entry`).
 fn nearest_used_entry(book: &Codebook, value: i64) -> Result<i64, PacketError> {
-    let used = book.used_entries();
-    if used.is_empty() {
-        return Err(PacketError::SubclassBookIndexOutOfRange {
-            book_id: value,
-        });
-    }
-    if used.contains(&value)
-        || (value >= 0 && value < book.entries() && book.lengthlist()[value as usize] > 0)
-    {
-        return Ok(value);
-    }
-    // nearest used (first on ties, like Python's min over ascending entries)
-    let mut best = used[0];
-    for &e in &used {
-        if (e - value).abs() < (best - value).abs() {
-            best = e;
-        }
-    }
-    Ok(best)
+    book.nearest_used_entry(value)
+        .ok_or(PacketError::SubclassBookIndexOutOfRange { book_id: value })
 }
 
 /// Choose masterbook cval so each dim's subclass book can represent Y
@@ -164,16 +153,9 @@ fn pick_subclass_cval(
                 score += 1;
             } else {
                 let b = &books[book_id as usize];
-                if y >= 0
-                    && y < b.entries()
-                    && b.lengthlist()[y as usize] > 0
-                {
+                if b.entry_is_used(y) {
                     score += 2;
-                } else if b
-                    .used_entries()
-                    .iter()
-                    .any(|&e| (e - y).abs() <= 2)
-                {
+                } else if b.has_used_within_two(y) {
                     score += 1;
                 } else {
                     score += 0;
@@ -195,7 +177,11 @@ fn pick_subclass_cval(
 ///
 /// `prev_window` / `next_window` are not packet fields in this format
 /// revision, which writes only the mode value.
-pub fn pack_audio_header(op: &mut OggPack, setup: &SetupInfo, mode: u32) -> Result<(), PacketError> {
+pub fn pack_audio_header(
+    op: &mut OggPack,
+    setup: &SetupInfo,
+    mode: u32,
+) -> Result<(), PacketError> {
     let nmodes = setup.nmodes;
     let mode_bits = if nmodes > 1 { ilog(nmodes - 1) } else { 0 };
     if mode_bits != 0 {
@@ -225,9 +211,7 @@ pub fn pack_floor1_body(
     let floor = setup
         .floors
         .get(floor_index as usize)
-        .ok_or(PacketError::FloorIndexOutOfRange {
-            index: floor_index,
-        })?;
+        .ok_or(PacketError::FloorIndexOutOfRange { index: floor_index })?;
     let rng = FLOOR1_RANGES[floor.multiplier as usize];
     let ybits = ilog(rng - 1);
     let nvals = 2 + floor.x_list.len();
@@ -242,33 +226,33 @@ pub fn pack_floor1_body(
         let c = v.clamp(0, rng as i64 - 1);
         c as u64
     };
-    op.write(clamped(Y[0]), ybits).map_err(|_| PacketError::BadYLength {
-        got: Y.len(),
-        want: nvals,
-    })?;
-    op.write(clamped(Y[1]), ybits).map_err(|_| PacketError::BadYLength {
-        got: Y.len(),
-        want: nvals,
-    })?;
+    op.write(clamped(Y[0]), ybits)
+        .map_err(|_| PacketError::BadYLength {
+            got: Y.len(),
+            want: nvals,
+        })?;
+    op.write(clamped(Y[1]), ybits)
+        .map_err(|_| PacketError::BadYLength {
+            got: Y.len(),
+            want: nvals,
+        })?;
     let mut ppos = 2usize;
     for &p in &floor.partition_classes {
         let cl = p as usize;
         let cdim = floor.class_dims[cl];
         let cbits = floor.class_subs[cl];
         let csub = (1u64 << cbits) - 1;
-        let y_slice: Vec<i64> = (0..cdim).map(|j| Y[ppos + j as usize]).collect();
+        let y_slice = &Y[ppos..ppos + cdim as usize];
         let mut cval;
         if cbits != 0 {
-            cval = pick_subclass_cval(floor, cl as u64, &y_slice, books)?;
-            let mb = floor
-                .class_masterbooks[cl]
-                .ok_or(PacketError::MasterBookMissing { class: cl as u64 })? as usize;
+            cval = pick_subclass_cval(floor, cl as u64, y_slice, books)?;
+            let mb = floor.class_masterbooks[cl]
+                .ok_or(PacketError::MasterBookMissing { class: cl as u64 })?
+                as usize;
             let entry = nearest_used_entry(&books[mb], cval as i64)?;
             books[mb]
                 .encode(op, entry)
-                .map_err(|_| PacketError::MasterBookIndexOutOfRange {
-                    book_id: cval,
-                })?;
+                .map_err(|_| PacketError::MasterBookIndexOutOfRange { book_id: cval })?;
         } else {
             cval = 0;
         }
@@ -298,7 +282,10 @@ pub fn pack_silence_packet(
     let mut op = OggPack::new(16);
     pack_audio_header(&mut op, setup, mode)?;
     for _ in 0..channels {
-        op.write(0, 1).map_err(|_| PacketError::ModeOutOfRange { mode, modes: setup.nmodes })?;
+        op.write(0, 1).map_err(|_| PacketError::ModeOutOfRange {
+            mode,
+            modes: setup.nmodes,
+        })?;
     }
     Ok(op.get_buffer())
 }
@@ -325,7 +312,10 @@ pub fn pack_floor_only_packet(
     let md = setup
         .modes
         .get(mode as usize)
-        .ok_or(PacketError::ModeOutOfRange { mode, modes: setup.nmodes })?;
+        .ok_or(PacketError::ModeOutOfRange {
+            mode,
+            modes: setup.nmodes,
+        })?;
     let mapping = setup
         .maps
         .get(md.mapping as usize)
@@ -345,14 +335,18 @@ pub fn pack_floor_only_packet(
         let y = curves.get(ch as usize).and_then(|row| row.as_ref());
         match y {
             None => {
-                op.write(0, 1).map_err(|_| PacketError::ModeOutOfRange { mode, modes: setup.nmodes })?;
+                op.write(0, 1).map_err(|_| PacketError::ModeOutOfRange {
+                    mode,
+                    modes: setup.nmodes,
+                })?;
             }
             Some(y) => {
-                op.write(1, 1).map_err(|_| PacketError::ModeOutOfRange { mode, modes: setup.nmodes })?;
+                op.write(1, 1).map_err(|_| PacketError::ModeOutOfRange {
+                    mode,
+                    modes: setup.nmodes,
+                })?;
                 if absolute_posts {
-                    let pl = postlist_from_floor(
-                        &setup.floors[floor_index as usize],
-                    );
+                    let pl = postlist_from_floor(&setup.floors[floor_index as usize]);
                     let rng = FLOOR1_RANGES[setup.floors[floor_index as usize].multiplier as usize];
                     let wrapped = crate::floor::floor1_wrap(y, &pl, rng as i64)
                         .map_err(PacketError::Floor1)?;
@@ -411,7 +405,10 @@ pub fn pack_block_packet_details(
     let md = setup
         .modes
         .get(mode as usize)
-        .ok_or(PacketError::ModeOutOfRange { mode, modes: setup.nmodes })?;
+        .ok_or(PacketError::ModeOutOfRange {
+            mode,
+            modes: setup.nmodes,
+        })?;
     let mapping = setup
         .maps
         .get(md.mapping as usize)
@@ -453,18 +450,22 @@ pub fn pack_block_packet_details(
         let floor = setup
             .floors
             .get(floor_index as usize)
-            .ok_or(PacketError::FloorIndexOutOfRange {
-                index: floor_index,
-            })?;
+            .ok_or(PacketError::FloorIndexOutOfRange { index: floor_index })?;
         let posts = absolute_posts.get(ch as usize).and_then(|p| p.as_ref());
         match posts {
             None => {
-                op.write(0, 1).map_err(|_| PacketError::ModeOutOfRange { mode, modes: setup.nmodes })?;
+                op.write(0, 1).map_err(|_| PacketError::ModeOutOfRange {
+                    mode,
+                    modes: setup.nmodes,
+                })?;
                 ch_used.push(false);
                 residuals.push(vec![0.0; n_spectrum]);
             }
             Some(posts) => {
-                op.write(1, 1).map_err(|_| PacketError::ModeOutOfRange { mode, modes: setup.nmodes })?;
+                op.write(1, 1).map_err(|_| PacketError::ModeOutOfRange {
+                    mode,
+                    modes: setup.nmodes,
+                })?;
                 let pl = postlist_from_floor(floor);
                 let rng = FLOOR1_RANGES[floor.multiplier as usize];
                 let packet_posts = if posts_are_10bit {
@@ -472,20 +473,15 @@ pub fn pack_block_packet_details(
                 } else {
                     posts.to_vec()
                 };
-                let (raster_posts, y) =
-                    floor1_wrap_with_posts(&packet_posts, &pl, rng as i64)
-                        .map_err(PacketError::Floor1)?;
+                let (raster_posts, y) = floor1_wrap_with_posts(&packet_posts, &pl, rng as i64)
+                    .map_err(PacketError::Floor1)?;
                 pack_floor1_body(&mut op, setup, floor_index, books, &y)?;
                 ch_used.push(true);
                 // amplitude floor curve for residual
                 // use unwrapped absolute posts (fit output already absolute)
-                let curve = floor1_curve_from_posts(
-                    &raster_posts,
-                    &pl,
-                    n_spectrum,
-                    floor.multiplier,
-                )
-                .map_err(PacketError::Floor1)?;
+                let curve =
+                    floor1_curve_from_posts(&raster_posts, &pl, n_spectrum, floor.multiplier)
+                        .map_err(PacketError::Floor1)?;
                 residuals.push(mdct_to_residue(&mdct[ch as usize], &curve, 1e-8));
             }
         }

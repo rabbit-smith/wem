@@ -70,12 +70,19 @@ impl<'a> BitReader<'a> {
 }
 
 /// LSB-first bit packer mirroring the x86 struct layout (Python `OggPack`).
+///
+/// Bits are accumulated in a u64 (LSB-first) and flushed as whole bytes the
+/// moment 8 bits are ready; the emitted byte stream is bit-identical to the
+/// previous per-write C store, while removing the per-write branch ladder.
 #[derive(Debug)]
 pub struct OggPack {
     buffer: Vec<u8>,
+    /// Number of complete bytes emitted into the buffer.
     ptr: usize,
-    endbyte: usize,
-    endbit: u32,
+    /// Pending bits, LSB-first.
+    acc: u64,
+    /// Valid bit count in `acc` (always < 8 after a flush).
+    accbits: u32,
 }
 
 impl OggPack {
@@ -86,8 +93,8 @@ impl OggPack {
         Self {
             buffer,
             ptr: 0,
-            endbyte: 0,
-            endbit: 0,
+            acc: 0,
+            accbits: 0,
         }
     }
 
@@ -96,57 +103,50 @@ impl OggPack {
         if bits > 32 {
             return Err(BitError::BitsOutOfRange { bits });
         }
-        if self.endbyte + 4 >= self.buffer.len() {
-            self.buffer.resize(self.buffer.len() + 256, 0);
+        if bits == 0 {
+            return Ok(());
         }
-        let mask = if bits == 32 {
-            u64::MAX
+        let v = if bits == 32 {
+            value
         } else {
-            (1u64 << bits) - 1
+            value & ((1u64 << bits) - 1)
         };
-        let v = value & mask;
-        let endbit = self.endbit;
-        // C byte store truncates: *ptr |= value << endbit
-        self.buffer[self.ptr] |= (v << endbit) as u8;
-        let total = endbit + bits;
-        if total >= 8 {
-            self.buffer[self.ptr + 1] = (v >> (8 - endbit)) as u8;
-            if total >= 16 {
-                self.buffer[self.ptr + 2] = (v >> (16 - endbit)) as u8;
-                if total >= 24 {
-                    self.buffer[self.ptr + 3] = (v >> (24 - endbit)) as u8;
-                    if total >= 32 {
-                        if endbit > 0 {
-                            self.buffer[self.ptr + 4] = (v >> (32 - endbit)) as u8;
-                        } else {
-                            self.buffer[self.ptr + 4] = 0;
-                        }
-                    }
-                }
+        self.acc |= v << self.accbits;
+        self.accbits += bits;
+        while self.accbits >= 8 {
+            if self.ptr + 1 >= self.buffer.len() {
+                self.buffer.resize(self.buffer.len() + 256, 0);
             }
+            self.buffer[self.ptr] = (self.acc & 0xFF) as u8;
+            self.ptr += 1;
+            self.acc >>= 8;
+            self.accbits -= 8;
         }
-        let add = (total / 8) as usize;
-        self.endbyte += add;
-        self.ptr += add;
-        self.endbit = total % 8;
         Ok(())
     }
 
     /// Bytes consumed so far (rounded up).
     pub fn bytes_used(&self) -> usize {
-        self.endbyte + (self.endbit + 7) as usize / 8
+        self.ptr + (self.accbits + 7) as usize / 8
     }
 
     /// Return the packed bytes.
+    ///
+    /// Pending bits (the final partial byte) live in the accumulator, not the
+    /// buffer, so they are appended here instead of read back from storage.
     pub fn get_buffer(&self) -> Vec<u8> {
-        self.buffer[..self.bytes_used()].to_vec()
+        let mut out = self.buffer[..self.ptr].to_vec();
+        if self.accbits > 0 {
+            out.push((self.acc & 0xFF) as u8);
+        }
+        out
     }
 
     /// Reset to the start of the buffer (Python `reset`).
     pub fn reset(&mut self) {
         self.ptr = 0;
-        self.endbyte = 0;
-        self.endbit = 0;
+        self.acc = 0;
+        self.accbits = 0;
         if !self.buffer.is_empty() {
             self.buffer[0] = 0;
         }

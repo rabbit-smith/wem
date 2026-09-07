@@ -63,7 +63,10 @@ impl std::fmt::Display for CodebookError {
             }
             CodebookError::DimTooSmall { dim } => write!(f, "dim {dim} must be >= 1"),
             CodebookError::OverpopulatedTree { entry, length } => {
-                write!(f, "overpopulated Huffman tree at entry {entry} length {length}")
+                write!(
+                    f,
+                    "overpopulated Huffman tree at entry {entry} length {length}"
+                )
             }
             CodebookError::CodePrefixCollision { entry } => {
                 write!(f, "code prefix collision at entry {entry}")
@@ -460,7 +463,16 @@ pub struct Codebook {
     /// maptype1: per-entry VQ vector, or None when unused.
     pub valuallist: Option<Vec<Option<Vec<f64>>>>,
     pub quantvals: i64,
-    vq_cache: Vec<(i64, Vec<f64>)>,
+    /// Assembly-time precompute of the used entries (length > 0), ascending.
+    /// Mirrors `used_entries()` without rebuilding it on every hot-path call.
+    used_entries_cache: Vec<i64>,
+    /// Per-entry membership flag (length > 0) for O(1) domain checks in the
+    /// floor1/residue packers; same domain as the Python length-list test.
+    used_flags: Vec<bool>,
+    /// Flat maptype1 VQ cache: entry ids followed by their concatenated
+    /// vectors, in the same order as the previous per-entry allocations.
+    vq_flat_entries: Vec<i64>,
+    vq_flat: Vec<f64>,
 }
 
 impl Codebook {
@@ -495,6 +507,21 @@ impl Codebook {
         }
         let valuallist = valuallist.clone();
         let vq_cache = build_vq_cache(&valuallist, &sc.lengthlist);
+        let vq_dim = sc.dim as usize;
+        let mut vq_flat_entries = Vec::with_capacity(vq_cache.len());
+        let mut vq_flat = Vec::with_capacity(vq_cache.len() * vq_dim);
+        for (e, vec) in &vq_cache {
+            vq_flat_entries.push(*e);
+            vq_flat.extend_from_slice(vec);
+        }
+        drop(vq_cache);
+        let used_entries_cache = sc
+            .lengthlist
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &l)| if l > 0 { Some(i as i64) } else { None })
+            .collect();
+        let used_flags = sc.lengthlist.iter().map(|&l| l > 0).collect();
         Ok(Self {
             static_codebook: sc,
             book_id,
@@ -504,7 +531,10 @@ impl Codebook {
             tree,
             valuallist,
             quantvals,
-            vq_cache,
+            used_entries_cache,
+            used_flags,
+            vq_flat_entries,
+            vq_flat,
         })
     }
 
@@ -526,11 +556,51 @@ impl Codebook {
 
     /// Entries with a non-zero length.
     pub fn used_entries(&self) -> Vec<i64> {
-        self.lengthlist()
-            .iter()
-            .enumerate()
-            .filter_map(|(i, &l)| if l > 0 { Some(i as i64) } else { None })
-            .collect()
+        self.used_entries_cache.clone()
+    }
+
+    /// True when entry `e` has a non-zero length (hot-path domain test).
+    pub fn entry_is_used(&self, e: i64) -> bool {
+        e >= 0 && (e as usize) < self.used_flags.len() && self.used_flags[e as usize]
+    }
+
+    /// True when some used entry is within distance 2 of `y`
+    /// (the Python `(e - y).abs() <= 2` scan, precomputed membership).
+    pub fn has_used_within_two(&self, y: i64) -> bool {
+        for offset in (y - 2)..=y + 2 {
+            if offset >= 0
+                && (offset as usize) < self.used_flags.len()
+                && self.used_flags[offset as usize]
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Nearest used entry (first on ties), or `None` when no entry is used.
+    /// Mirrors the Python `_nearest_used_entry` scan over ascending used
+    /// entries without rebuilding the list per call.
+    pub fn nearest_used_entry(&self, value: i64) -> Option<i64> {
+        let used = &self.used_entries_cache;
+        if used.is_empty() {
+            return None;
+        }
+        if self.entry_is_used(value) {
+            return Some(value);
+        }
+        let mut best = used[0];
+        for &e in used {
+            if (e - value).abs() < (best - value).abs() {
+                best = e;
+            }
+        }
+        Some(best)
+    }
+
+    /// Borrowed VQ vector for a used maptype1 entry (no allocation).
+    fn vq_slice(&self, entry: i64) -> Option<&[f64]> {
+        self.valuallist.as_ref()?[entry as usize].as_deref()
     }
 
     /// Write the Huffman code for entry index (maptype 0 or 1 index).
@@ -586,6 +656,17 @@ impl Codebook {
         Ok(vec)
     }
 
+    /// Borrowed VQ vector accessor used by the residue packer (maptype 1).
+    pub(crate) fn borrow_vq(&self, entry: i64) -> Result<&[f64], CodebookError> {
+        if self.maptype() != 1 || self.valuallist.is_none() {
+            return Err(CodebookError::VqMisuse {
+                reason: "vq_values requires maptype 1 with valuallist",
+            });
+        }
+        self.vq_slice(entry)
+            .ok_or(CodebookError::NoVqVector { entry })
+    }
+
     /// Return the unquantized VQ vector for an entry (maptype 1).
     pub fn vq_values(&self, entry: i64) -> Result<Vec<f64>, CodebookError> {
         if self.maptype() != 1 || self.valuallist.is_none() {
@@ -614,18 +695,22 @@ impl Codebook {
                 dim: self.dim(),
             });
         }
-        let cache = &self.vq_cache;
+        let cache_dim = self.dim() as usize;
         let mut best_e = -1i64;
         let mut best_err = f64::INFINITY;
-        for (e, vec) in cache {
+        for (k, &e) in self.vq_flat_entries.iter().enumerate() {
+            let base = k * cache_dim;
             let mut err = 0.0f64;
-            for i in 0..dim {
-                let d = target[i] - vec[i];
+            for (t, v) in target
+                .iter()
+                .zip(self.vq_flat[base..base + cache_dim].iter())
+            {
+                let d = t - v;
                 err += d * d;
             }
             if err < best_err {
                 best_err = err;
-                best_e = *e;
+                best_e = e;
                 if err == 0.0 {
                     break;
                 }
