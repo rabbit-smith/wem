@@ -179,12 +179,18 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "wem-analysis"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
+ "wem-profiles",
  "wem-scheduling",
 ]
 
 [[package]]
 name = "wem-container"
 version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "sha2",
+]
 
 [[package]]
 name = "wem-core"
@@ -211,12 +217,18 @@ dependencies = [
 [[package]]
 name = "wem-scheduling"
 version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "wem-vorbis"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
+ "sha2",
  "wem-analysis",
+ "wem-profiles",
 ]
 
 [[package]]

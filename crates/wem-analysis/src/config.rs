@@ -19,6 +19,14 @@ pub fn f32_round(value: f64) -> f32 {
     value as f32
 }
 
+/// Python `_f32` returning f64: round to the f32-representable value and
+/// promote back to f64. This is the normative float boundary in the
+/// bit-exact kernel; every Python `_f32(...)` maps to one call here.
+#[inline]
+pub fn f32_of(value: f64) -> f64 {
+    value as f32 as f64
+}
+
 /// Interpret a stored u32 bit pattern as an IEEE-754 float32 (Python `_u32_f32`).
 #[inline]
 pub fn u32_to_f32(bits: u32) -> f32 {
@@ -58,7 +66,312 @@ pub enum AnalysisError {
     LongFloorGeometry,
     /// Long floor-envelope scalar fields invalid.
     LongFloorScalars { len: usize, value: i64 },
+    // ------------------------------------------------------------------
+    // runtime rejection conditions (Python ValueError/RuntimeError family
+    // in analysis/*) — one variant per normative rejection site
+    // ------------------------------------------------------------------
+    /// "FFT size must be an even power of two >= 2"
+    FftSizeInvalid { n: i64 },
+    /// "need {need} samples, got {got}"
+    SamplesShort { need: i64, got: i64 },
+    /// "FFT stage fell outside the frozen twiddle domain"
+    FrozenTwiddlesMissing { length: i64 },
+    /// "frozen window half differs from the requested size"
+    FrozenWindowHalfMismatch { size: i64, want: i64, got: i64 },
+    /// "window size must be a positive even number"
+    WindowSizeInvalid { n: i64 },
+    /// "block window fell outside the frozen window domain"
+    FrozenWindowDomainMiss { size: i64 },
+    /// "psycho window needs at least two samples"
+    PsyWindowSize { n: i64 },
+    /// "transient window geometry differs from MDCT size"
+    TransientWindowGeometry { tables_n: i64, n: i64 },
+    /// "transient MDCT look geometry differs from samples"
+    TransientMdctGeometry { look_n: i64, n: i64 },
+    /// "current block size must be a positive even number"
+    BlockSizeInvalid { n: i64 },
+    /// "buffer does not contain the requested analysis block"
+    BufferBlockOutOfRange,
+    /// "block sizes must be positive even numbers"
+    WindowBlockSizeInvalid,
+    /// "window state index out of range"
+    WindowStateIndexOutOfRange { index: i64 },
+    /// "incompatible block/window sizes"
+    WindowIntervalsIncompatible,
+    /// "LPC order must be positive"
+    LpcOrderInvalid { order: i64 },
+    /// "LPC input must be longer than its order"
+    LpcSamplesShort { order: i64, got: i64 },
+    /// "LPC coefficients must not be empty"
+    LpcCoefficientsEmpty,
+    /// "LPC prime length must equal coefficient order"
+    LpcPrimeLengthMismatch { want: i64, got: i64 },
+    /// "LPC prediction count must not be negative"
+    LpcCountNegative { count: i64 },
+    /// "priming prefill must be positive"
+    LpcPrefillInvalid { prefill: i64 },
+    /// "priming batch must be longer than LPC order"
+    LpcBatchInvalid { batch: i64, order: i64 },
+    /// "source does not contain the first priming batch"
+    LpcSourceShort { want: i64, got: i64 },
+    /// "transient detector needs at least one PCM channel"
+    DetectorPcmEmpty,
+    /// "transient detector PCM must be equal-length and at least 4096 samples"
+    DetectorPcmShort { frames: i64 },
+    /// "transient-detector terminal prediction count must be non-negative"
+    DetectorTerminalNegative { terminal: i64 },
+    /// "transient-detector prefix length must be positive"
+    DetectorPrefixNonPositive { prefix: i64 },
+    /// "transient-detector hop/window must be positive"
+    DetectorHopWindowInvalid { hop: i64, window: i64 },
+    /// "requested {requested} transient quanta; only {available} available"
+    DetectorQuantaOutOfRange { requested: i64, available: i64 },
+    /// "frame plans must be contiguous and zero-based"
+    FramePlansNotContiguous,
+    /// "frame plan interval differs from its block mode"
+    FramePlanIntervalMismatch,
+    /// "adjacent frame plan transitions differ"
+    FramePlanTransitionsDiffer,
+    /// "PCM feeder needs at least one channel"
+    PcmFeederEmpty,
+    /// "PCM feeder needs 4096 samples for Wwise LPC priming"
+    PcmFeederShort { frames: i64 },
+    /// "all PCM channels must have the same frame count"
+    PcmChannelsUnequal { want: i64, got: i64 },
+    /// "transient quantum channel count differs from detector"
+    DetectorChannelCountMismatch { want: i64 },
+    /// "transient quantum must contain 128 samples per channel"
+    DetectorQuantumSamplesMismatch { want: i64 },
+    /// "psycho energy ring must contain 15 slots"
+    PsyEnergyRingSlots { want: usize, got: usize },
+    /// "psycho band state must contain twelve bands"
+    PsyBandStateRings { want: usize },
+    /// "psycho config row must contain fields 0..25"
+    PsyConfigRowShort { want: usize },
+    /// "psycho mask is shorter than the band table"
+    PsyMaskShortForBands { want: i64, got: i64 },
+    /// "transient mask requires 128 samples"
+    TransientMaskSamples { want: i64, got: i64 },
+    /// "psycho spectrum must contain an even number of bins"
+    PsySpectrumBinsOdd { bins: i64 },
+    /// "stream needs at least one channel"
+    SessionChannelsNonPositive { channels: i64 },
+    /// "sample rate must be positive"
+    SessionSampleRateNonPositive { sample_rate: i64 },
+    /// "the checked stream state expects 256/2048 blocks"
+    SessionBlockSizeMismatch {
+        got: [i64; 2],
+    },
+    /// "analysis frames must be contiguous: expected index {}, got {}"
+    AnalysisFrameNotContiguous { expected: i64, got: i64 },
+    /// "adjacent analysis frame modes differ"
+    AdjacentAnalysisFrameModesDiffer,
+    /// "short analysis expects a 256-sample scheduled window"
+    ShortAnalysisWindowGeometry {
+        want: i64,
+    },
+    /// "long analysis expects a 2048-sample scheduled window"
+    LongAnalysisWindowGeometry {
+        want: i64,
+    },
+    /// "analysis window samples differ from its scheduled mode"
+    AnalysisWindowSamplesMismatch,
+    /// "manual transient ingestion cannot be mixed with mode generation"
+    ManualIngestionMixed,
+    /// "mode selection requires a fresh stream selector"
+    ModeSelectionNotFresh,
+    /// "mode selection PCM must be equal-length and at least 4096 samples"
+    ModeSelectionPcmInvalid { frames: i64 },
+    /// "short psychoacoustic vectors must each contain 128 values"
+    ShortVectorsLength { want: i64 },
+    /// "short psychoacoustic mode is outside the curve table"
+    ShortModeOutOfRange { mode: i64, curves: i64 },
+    /// "short psychoacoustic mode is outside the bias table"
+    ShortModeBiasOutOfRange { mode: i64 },
+    /// "short psychoacoustic group work has the wrong length"
+    ShortGroupWorkLength { want: i64, got: i64 },
+    /// "short psychoacoustic frame channel count differs"
+    ShortFrameChannelCountMismatch,
+    /// "short psychoacoustic variant must be 0 or 1"
+    ShortVariantInvalid { variant: i64 },
+    /// "short psychoacoustic following mode must be 0 or 1"
+    ShortFollowingModeInvalid { following: i64 },
+    /// "short psychoacoustic channel state has wrong geometry"
+    ShortChannelStateGeometry,
+    /// "short psychoacoustic analyzer needs at least one channel"
+    ShortAnalyzerChannelsNonPositive {
+        channels: i64,
+    },
+    /// "short psychoacoustic analyzer needs exactly two profiles"
+    ShortAnalyzerProfiles { want: i64, got: i64 },
+    /// "short psychoacoustic channel-state count differs"
+    ShortAnalyzerChannelStateCount {
+        want: i64,
+    },
+    /// "long psychoacoustic variant must be 0 or 1"
+    LongVariantInvalid { variant: i64 },
+    /// "long analysis needs at least one channel frame"
+    LongAnalysisEmpty,
+    /// "long analysis expects 2048-sample windowed frames"
+    LongAnalysisFrameSize { want: i64 },
+    /// "long analysis table must have 1024 output bins"
+    LongAnalysisTableBins { want: i64 },
+    /// "long analysis scratch count must equal channel count"
+    LongAnalysisScratchCount {
+        want: i64,
+    },
+    /// "long analysis stream channel count differs from frames"
+    LongAnalysisStreamChannels {
+        want: i64,
+    },
+    /// "long MDCT look differs from analysis geometry"
+    LongMdctLookGeometry { want: i64 },
+    /// "long analysis accepts either scratch or shared stream, not both"
+    LongAnalysisBothScratchAndStream,
+    /// "short analysis needs at least one channel frame"
+    ShortAnalysisEmpty,
+    /// "short analysis channel count differs from state owner"
+    ShortAnalysisChannelCount {
+        want: i64,
+    },
+    /// "short analysis expects 256-sample windowed frames"
+    ShortAnalysisFrameSize { want: i64 },
+    /// "short analysis group-work count differs from channels"
+    ShortAnalysisGroupWorkCount {
+        want: i64,
+    },
+    /// "short MDCT look differs from analysis geometry"
+    ShortMdctLookGeometry { want: i64 },
+    /// "long state bridge needs one 1024-bin raw curve per channel"
+    LongStateBridgeGeometry,
+    /// "long state bridge needs one 1024-bin raw curve per channel" (count)
+    LongStateBridgeCount { want: i64 },
+    /// "long-to-short floor reduction expects 1024 bins"
+    LongToShortHistoryLength {
+        want_raw: i64,
+        want_state: i64,
+    },
+    /// "short-to-long floor expansion expects 128 bins"
+    ShortToLongHistoryLength { want: i64 },
+    /// "floor-envelope stage scratch length must be positive"
+    FloorEnvelopeScratchNonPositive { n: i64 },
+    /// "floor-envelope stage curves must have equal lengths"
+    FloorEnvelopeCurveLengthMismatch {
+        n: i64,
+    },
+    /// "floor-envelope stage source curve must have equal length"
+    FloorEnvelopeSourceLengthMismatch {
+        n: i64,
+    },
+    /// "floor-envelope stage regular port currently targets the regular branch"
+    FloorEnvelopeModeUnsupported { mode: i64 },
+    /// "first regular floor-envelope stage buffers must share one length"
+    FirstFloorEnvelopeBufferMismatch { n: i64 },
+    /// "first regular floor-envelope stage call entered peak branch"
+    FirstFloorEnvelopePeakBranch,
+    /// "long regular floor-envelope stage needs 1024 state bins and 128-or-1024 history bins"
+    LongFloorEnvelopeGeometry {
+        n: i64,
+    },
+    /// "fresh long regular floor-envelope stage call entered peak branch"
+    LongFloorEnvelopePeakBranch,
+    /// "cleared first regular floor-envelope stage call entered peak branch"
+    FirstLongFloorEnvelopePeakBranch,
+    /// "floor-envelope stage requires look or table"
+    LongFloorEnvelopeNoLook,
+    /// "psycho curves must have the same length"
+    PsyCurveLengthMismatch { want: i64, got: i64 },
+    /// "psycho look and curve length differ"
+    PsyLookCurveLengthMismatch { look_n: i64, got: i64 },
+    /// "psycho interval table is shorter than the curve"
+    PsyIntervalTableShort { want: i64, got: i64 },
+    /// "psycho interval endpoint out of range"
+    PsyIntervalEndpointOutOfRange { start: i64, end: i64, n: i64 },
+    /// "psycho base and selector curves must have the same length"
+    PsyBaseSelectorLengthMismatch { want: i64, got: i64 },
+    /// "psycho look is missing ATH state"
+    PsyLookMissingAth { n: i64 },
+    /// "psycho seed spectrum and look length differ"
+    PsySeedSpectrumLength { want: i64, got: i64 },
+    /// "psycho look is missing ATH or tone-curve state"
+    PsyLookMissingToneCurves,
+    /// "tone-curve level bank is shorter than the reference encoder bank"
+    ToneCurveBankShort { want: i64, got: i64 },
+    /// "tone-curve post array needs start and end"
+    ToneCurvePostArrayShort,
+    /// "tone-curve posts are shorter than their end"
+    ToneCurvePostsShort,
+    /// "tone-curve band bank is shorter than 17"
+    ToneCurveBandBankShort { want: i64, got: i64 },
+    /// "seed-loop inputs must have equal bin counts"
+    SeedLoopInputLengthMismatch {
+        want: i64,
+    },
+    /// "seed position falls outside total octave lines"
+    SeedPositionOutOfRange {
+        pos: i64,
+        total: i64,
+    },
+    /// "seed surface is shorter than total octave lines"
+    SeedSurfaceShort {
+        want: i64,
+    },
+    /// "octave and floor curves must have equal bin counts"
+    OctaveFloorLengthMismatch,
+    /// "history width table contains a nonpositive value"
+    RelaxWidthNonPositive,
+    /// "history/raw/widths must have equal length"
+    RelaxLengthMismatch,
+    /// "state/history length must equal n"
+    RebaseLengthMismatch { want: i64 },
+    /// "short temporal history expects 128 bins"
+    ShortTemporalBins { want: i64 },
+    /// "short temporal history curves must have 128 bins"
+    ShortTemporalLength { want: i64 },
+    /// "long floor-seed stage logFFT geometry differs from seed look"
+    LongSeedLogFftLength { want: i64, got: i64 },
+    /// "long psychoacoustic remap expects 1024 bins"
+    LongRemapBins { want: i64 },
+    /// "long psychoacoustic remap mode 2 expects 1024 bins"
+    LongRemapMode2Bins { want: i64 },
+    /// "long psycho table has an invalid mode-2 active span"
+    LongActiveSpanInvalid { active: i64 },
+    /// "long psycho table has no 40-entry remap LUT"
+    LongRemapLutShort {
+        got: i64,
+    },
+    /// "long psychoacoustic remap expects 1024 bins" (variant builder)
+    LongRemapVariantBins { want: i64 },
+    /// "long analysis variant must be 0 or 1"
+    LongFrameVariantInvalid { variant: i64 },
+    /// "FFT curve must contain at least one bin"
+    FftCurveEmpty,
+    /// "total octave lines must be positive"
+    SeedTotalLinesNonPositive { total: i64 },
+    /// "spectrum peak decay geometry is invalid"
+    SpecmaxGeometry { block_bins: i64, sample_rate: i64 },
+    /// "seed cursor left the seeded surface"
+    SeedCursorOutOfRange { cursor: i64, total: i64 },
+    /// "floor-envelope scratch length must be positive"
+    EnvelopeScratchLengthNonPositive { n: i64 },
+    /// "floor-envelope stage curves must have equal lengths"
+    EnvelopeStageLengthMismatch { want: i64 },
+    /// "floor-envelope stage regular port currently targets the regular branch"
+    EnvelopeStageModeUnsupported { mode: i64 },
+    /// "floor-envelope transition history expects a specific bin count"
+    FloorTransitionBins { want: i64, got: i64 },
+    /// "first regular floor-envelope stage buffers must share one length"
+    FirstEnvelopeBuffersMismatch { want: i64 },
+    /// "cleared first regular floor-envelope stage call entered peak branch"
+    FirstEnvelopeEnteredPeakBranch,
+    /// "long regular floor-envelope stage needs 1024 state bins and 128-or-1024 history bins"
+    LongEnvelopeStateBins,
+    /// "short psychoacoustic kernel must contain six words"
+    ShortKernelWords { got: i64 },
+    /// "short analysis cannot apply a long transition code"
+    ShortAnalysisCannotApplyLongTransition { transition: i64 },
 }
+
 
 // ---------------------------------------------------------------------------
 // MDCT and transient typed models
@@ -307,6 +620,15 @@ impl AnalysisProfileResources {
             long_floor_looks,
             frozen,
         })
+    }
+
+    /// Expose the frozen transcendental tables (Python `_frozen_twiddles`).
+    pub fn frozen_twiddles(&self) -> Result<&FrozenMathTables, AnalysisError> {
+        self.frozen
+            .as_ref()
+            .ok_or(AnalysisError::IncompleteResources {
+                reason: "analysis resources lack frozen math tables",
+            })
     }
 }
 

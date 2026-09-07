@@ -6,3 +6,7 @@ edition.workspace = true
 
 [dependencies]
 wem-scheduling = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+wem-profiles = { workspace = true }

@@ -6,3 +6,8 @@ edition.workspace = true
 
 [dependencies]
 wem-analysis = { workspace = true }
+
+[dev-dependencies]
+wem-profiles = { workspace = true }
+sha2 = { workspace = true }
+serde_json = { workspace = true }

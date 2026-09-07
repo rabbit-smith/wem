@@ -52,6 +52,61 @@ pub enum CodebookError {
     NoUsableVqEntries,
 }
 
+impl std::fmt::Display for CodebookError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CodebookError::RowMissingField { field } => {
+                write!(f, "book row missing field {field}")
+            }
+            CodebookError::LengthlistMismatch { got, want } => {
+                write!(f, "lengthlist len {got} != entries {want}")
+            }
+            CodebookError::DimTooSmall { dim } => write!(f, "dim {dim} must be >= 1"),
+            CodebookError::OverpopulatedTree { entry, length } => {
+                write!(f, "overpopulated Huffman tree at entry {entry} length {length}")
+            }
+            CodebookError::CodePrefixCollision { entry } => {
+                write!(f, "code prefix collision at entry {entry}")
+            }
+            CodebookError::CodeEmbedsLeaf { leaf, entry } => {
+                write!(f, "code embeds earlier leaf (entry {leaf}) at {entry}")
+            }
+            CodebookError::Maptype1RequiresQuantlist => {
+                write!(f, "maptype 1 requires quantlist")
+            }
+            CodebookError::QuantvalsNonPositive => {
+                write!(f, "quantvals must be positive for maptype1")
+            }
+            CodebookError::QuantlistTooShort { got, want } => {
+                write!(f, "quantlist length {got} < quantvals {want}")
+            }
+            CodebookError::EntryOutOfRange { entry, entries } => {
+                write!(f, "entry {entry} out of range 0..{entries}")
+            }
+            CodebookError::EntryUnused { entry } => {
+                write!(f, "entry {entry} is unused (length 0)")
+            }
+            CodebookError::EmptyCodebook => write!(f, "empty codebook (no used entries)"),
+            CodebookError::InvalidHuffmanCode => {
+                write!(f, "invalid Huffman code (no matching entry)")
+            }
+            CodebookError::NotMaptype1 { maptype } => {
+                write!(f, "decode_vq requires maptype 1, got {maptype}")
+            }
+            CodebookError::NoVqVector { entry } => {
+                write!(f, "entry {entry} has no VQ vector (unused)")
+            }
+            CodebookError::VqMisuse { reason } => write!(f, "vq misuse: {reason}"),
+            CodebookError::TargetTooShort { got, dim } => {
+                write!(f, "target len {got} < dim {dim}")
+            }
+            CodebookError::NoUsableVqEntries => write!(f, "no usable VQ entries"),
+        }
+    }
+}
+
+impl std::error::Error for CodebookError {}
+
 /// Bit count needed to represent values in `[0, 2^r)` (Python `codebook.ilog`):
 /// `ilog(0) = 0`, `ilog(1) = 1`, `ilog(2) = 1`, `ilog(3) = 2`.
 #[inline]
@@ -405,7 +460,7 @@ pub struct Codebook {
     /// maptype1: per-entry VQ vector, or None when unused.
     pub valuallist: Option<Vec<Option<Vec<f64>>>>,
     pub quantvals: i64,
-    vq_cache: Option<Vec<(i64, Vec<f64>)>>,
+    vq_cache: Vec<(i64, Vec<f64>)>,
 }
 
 impl Codebook {
@@ -438,6 +493,8 @@ impl Codebook {
                 &sc.lengthlist,
             )?);
         }
+        let valuallist = valuallist.clone();
+        let vq_cache = build_vq_cache(&valuallist, &sc.lengthlist);
         Ok(Self {
             static_codebook: sc,
             book_id,
@@ -447,7 +504,7 @@ impl Codebook {
             tree,
             valuallist,
             quantvals,
-            vq_cache: None,
+            vq_cache,
         })
     }
 
@@ -542,26 +599,9 @@ impl Codebook {
         Ok(vec)
     }
 
-    fn ensure_vq_cache(&mut self) {
-        if self.vq_cache.is_some() {
-            return;
-        }
-        let mut cache = Vec::new();
-        if let Some(valuallist) = &self.valuallist {
-            for (e, &l) in self.lengthlist().iter().enumerate() {
-                if l <= 0 {
-                    continue;
-                }
-                if let Some(vec) = &valuallist[e] {
-                    cache.push((e as i64, vec.clone()));
-                }
-            }
-        }
-        self.vq_cache = Some(cache);
-    }
-
-    /// Nearest used maptype1 entry (squared Euclidean distance).
-    pub fn best_vq(&mut self, target: &[f64]) -> Result<i64, CodebookError> {
+    /// Nearest used maptype1 entry (squared Euclidean distance; first entry
+    /// on ties, matching the Python scalar loop and `np.argmin`).
+    pub fn best_vq(&self, target: &[f64]) -> Result<i64, CodebookError> {
         if self.maptype() != 1 || self.valuallist.is_none() {
             return Err(CodebookError::VqMisuse {
                 reason: "best_vq requires maptype 1 with valuallist",
@@ -574,8 +614,7 @@ impl Codebook {
                 dim: self.dim(),
             });
         }
-        self.ensure_vq_cache();
-        let cache = self.vq_cache.as_ref().unwrap();
+        let cache = &self.vq_cache;
         let mut best_e = -1i64;
         let mut best_err = f64::INFINITY;
         for (e, vec) in cache {
@@ -597,6 +636,25 @@ impl Codebook {
         }
         Ok(best_e)
     }
+}
+
+/// Build the (entry, vector) cache for used maptype1 entries.
+fn build_vq_cache(
+    valuallist: &Option<Vec<Option<Vec<f64>>>>,
+    lengthlist: &[i64],
+) -> Vec<(i64, Vec<f64>)> {
+    let mut cache = Vec::new();
+    if let Some(valuallist) = valuallist {
+        for (e, &l) in lengthlist.iter().enumerate() {
+            if l <= 0 {
+                continue;
+            }
+            if let Some(vec) = &valuallist[e] {
+                cache.push((e as i64, vec.clone()));
+            }
+        }
+    }
+    cache
 }
 
 /// One decoded book descriptor from the profile tables (Python raw row dict).

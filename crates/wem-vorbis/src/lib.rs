@@ -7,4 +7,8 @@
 
 pub mod bitio;
 pub mod codebook;
+pub mod floor;
+pub mod floor_fit;
+pub mod packet_encoder;
+pub mod residue;
 pub mod setup;

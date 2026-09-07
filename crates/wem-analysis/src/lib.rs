@@ -13,33 +13,37 @@
 pub mod config;
 
 pub mod dsp {
+    pub mod lpc;
+    pub mod spectrum;
     pub mod transform;
 }
 
 /// LPC-padded detector input and window materialization
 /// (Python: `analysis/preprocessing/`).
 pub mod preprocessing {
-    // Intentionally empty: preprocessing lands with the analysis port.
+    pub mod detector_input;
+    pub mod windowing;
 }
 
 /// Transient detector algorithm (Python: `analysis/transient/`).
 pub mod transient {
-    // Intentionally empty: the detector lands with the analysis port.
+    pub mod detector;
 }
 
 /// Remap, seed, envelope, and temporal psychoacoustic analysis
 /// (Python: `analysis/psychoacoustics/`).
 pub mod psychoacoustics {
-    // Intentionally empty: the psychoacoustic algorithms land with the analysis port.
+    pub mod envelope;
+    pub mod pipeline;
+    pub mod remap;
+    pub mod seed;
+    pub mod short;
+    pub mod temporal;
 }
 
 /// Mutable cross-frame analysis session (Python: `analysis/session.py`).
-pub mod session {
-    // Intentionally empty: the session lands with the analysis port.
-}
+pub mod session;
 
 /// Analysis-side value model shared with the Vorbis packet encoder
 /// (Python: `analysis/model.py`, e.g. `PsyFrame`).
-pub mod model {
-    // Intentionally empty: `PsyFrame` lands with the analysis port.
-}
+pub mod model;
