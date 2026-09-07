@@ -109,4 +109,4 @@ explicit selection, CLI output, and whole-file golden identity.
 
 Domain terminology is defined in [`docs/domain-model.md`](docs/domain-model.md).
 Development-agent conduct is governed by the layered [`AGENTS.md`](AGENTS.md)
-guide set (root, `crates/`, `src/wwise_wem/`, `tests/`, `proto/`, `scripts/`).
+guide set (root, `crates/`, `src/wwise_wem/`, `tests/`, `scripts/`).

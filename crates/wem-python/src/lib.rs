@@ -5,12 +5,12 @@
 //! the kernel:
 //!
 //! * [`Encoder`] — one-shot PCM-to-WEM encode (`wem_core::encoder::Encoder`)
-//! * [`StreamSession`] — the wwise.v1 streaming lifecycle
+//! * [`StreamSession`] — the core streaming lifecycle
 //!   (Init -> chunks* -> Finish; `wem_core::stream::StreamSession`)
 //! * [`WemEncoderError`] — the single terminal exception; its `.code`
-//!   carries the wwise.v1 `EncoderErrorCode` value (without the
-//!   `ENCODER_ERROR_CODE_` prefix) and its message carries the kernel
-//!   diagnostic (`EncoderError` Display text).
+//!   carries the kernel error-code name (stable across the cross-language
+//!   shells) and its message carries the kernel diagnostic
+//!   (`EncoderError` Display text).
 //!
 //! Design rules (docs/architecture.md, crates/AGENTS.md):
 //! * No second implementation: validation, profile loading, checksums and
@@ -31,17 +31,18 @@ use wem_core::error::EncoderError;
 use wem_core::stream::{ProfileRef, StreamPacket, StreamSession as WemStreamSession};
 
 // ---------------------------------------------------------------------------
-// Error surface (wwise.v1 EncoderError)
+// Error surface (kernel encoder error codes)
 // ---------------------------------------------------------------------------
 
 pyo3::create_exception!(
     wwise_wem._core,
     WemEncoderError,
     PyException,
-    "Terminal wem-core encoder failure (wwise.v1 EncoderError)."
+    "Terminal wem-core encoder failure."
 );
 
-/// wwise.v1 `EncoderErrorCode` string values, without the proto prefix.
+/// Stable kernel error-code names (the same classes every cross-language
+/// shell maps from `EncoderError`).
 const CODE_PROFILE_NOT_FOUND: &str = "PROFILE_NOT_FOUND";
 const CODE_GEOMETRY_MISMATCH: &str = "GEOMETRY_MISMATCH";
 const CODE_INPUT_TOO_SHORT: &str = "INPUT_TOO_SHORT";
@@ -308,7 +309,7 @@ impl PyEncodeResult {
 }
 
 // ---------------------------------------------------------------------------
-// StreamSession (wwise.v1 Encode lifecycle)
+// StreamSession (streaming encode lifecycle)
 // ---------------------------------------------------------------------------
 
 /// One streaming encode session: `start` (Init) -> `push`* (chunks) ->
@@ -334,7 +335,7 @@ impl PyStreamSession {
         }
     }
 
-    /// Open the session on one installed profile (v1 `Init`).
+    /// Open the session on one installed profile (`Init`).
     ///
     /// `setup_sha256` is a hard identity assertion (lowercase hex);
     /// `name`, when given, is a soft cross-check that must match the
@@ -351,7 +352,7 @@ impl PyStreamSession {
     }
 
     /// Push one chunk of little-endian signed-16 interleaved PCM bytes
-    /// (v1 `PcmChunk`) and return the packets that just completed.
+    /// and return the packets that just completed.
     fn push(&mut self, py: Python<'_>, chunk: &Bound<'_, PyBytes>) -> PyResult<Vec<PyPacket>> {
         // Copy out before releasing the GIL so no Python object pointer
         // crosses the thread boundary.
@@ -374,7 +375,7 @@ impl PyStreamSession {
     }
 
     /// Mark the end of the PCM stream and assemble the container
-    /// (v1 `Finish`); returns the container summary.
+    /// (`Finish`); returns the container summary.
     fn finish(&mut self, py: Python<'_>) -> PyResult<PyWemComplete> {
         let result = py
             .allow_threads(|| self.inner.finish())
@@ -396,10 +397,10 @@ impl PyStreamSession {
 }
 
 // ---------------------------------------------------------------------------
-// wwise.v1 reply types
+// Streaming reply types
 // ---------------------------------------------------------------------------
 
-/// One emitted packet in reply-stream order (v1 `Packet`).
+/// One emitted packet in reply-stream order (the reply packet).
 #[pyclass(name = "Packet", module = "wwise_wem._core")]
 #[derive(Clone)]
 struct PyPacket {
@@ -409,7 +410,7 @@ struct PyPacket {
     data: Vec<u8>,
 }
 
-/// Terminal container summary (v1 `WemComplete`).
+/// Terminal container summary (the stream's completion result).
 #[pyclass(name = "WemComplete", module = "wwise_wem._core")]
 #[derive(Clone)]
 struct PyWemComplete {

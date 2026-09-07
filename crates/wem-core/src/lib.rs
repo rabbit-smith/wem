@@ -12,11 +12,11 @@
 //! * [`encoder::Pcm16`] / [`encoder::EncodeResult`] — typed I/O models
 //! * [`pack::pack_analysis_frame`] — frame-level floor-fit + packet
 //!   assembly (Python `pack_analysis_frame`, relocated here)
-//! * [`stream::StreamSession`] — the wwise.v1 streaming lifecycle
+//! * [`stream::StreamSession`] — the core streaming lifecycle
 //!   (Init -> chunk* -> Finish) with true incremental emission and
-//!   bounded input memory; shared by the future gRPC, PyO3 and
+//!   bounded input memory; shared by the C ABI, PyO3 and
 //!   wasm-bindgen shells
-//! * [`stream::StreamPacket`] — one emitted wwise.v1 reply packet
+//! * [`stream::StreamPacket`] — one emitted reply packet
 //! * [`usecases::wav`] — minimal signed-16 PCM WAV reader
 
 pub mod encoder;

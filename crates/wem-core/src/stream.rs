@@ -1,15 +1,13 @@
-//! Streaming encode session for the wwise.v1 contract.
+//! Streaming encode session: the core streaming lifecycle.
 //!
-//! Mirrors the `wwise.v1` `Encode` request lifecycle
-//! (`proto/wwise/v1/encode.proto`): exactly one `Init` (profile selection)
-//! as the first request, zero or more PCM `chunk`s, then exactly one
-//! `Finish`. Every lifecycle violation is reported as an
-//! [`EncoderError`](crate::error::EncoderError) variant — none panics, and
-//! none changes output bytes for valid streams.
+//! Exactly one `Init` (profile selection) as the first call, zero or more
+//! PCM `chunk`s, then exactly one `Finish`. Every lifecycle violation is
+//! reported as an [`EncoderError`](crate::error::EncoderError) variant —
+//! none panics, and none changes output bytes for valid streams.
 //!
-//! The future `wem-server` (gRPC) and PyO3 shells are thin wrappers over
-//! this session; the reply side is a packet sequence (seq 0 = setup packet,
-//! then audio packets) followed by the container summary, which
+//! The C ABI, PyO3 and wasm shells are thin wrappers over this session;
+//! the reply side is a packet sequence (seq 0 = setup packet, then audio
+//! packets) followed by the container summary, which
 //! [`EncodeResult`](crate::encoder::EncodeResult) plus
 //! [`load_wem_parts_bytes`](wem_container::load_wem_parts_bytes) provide.
 //!
@@ -60,17 +58,17 @@ use crate::encoder::{EncodeResult, EncodeStats, Encoder, MIN_PCM_FRAMES};
 use crate::error::{EncoderError, InternalError};
 use crate::pack::pack_analysis_frame;
 
-/// Profile selection reference (wwise.v1 `ProfileRef`).
+/// Profile selection reference.
 ///
-/// `TemplateRef` is rejected in v1 (reserved for a future revision); this
-/// type intentionally only carries the profile-reference fields.
+/// A hard identity assertion (setup SHA-256) plus an optional soft name
+/// cross-check; this type intentionally carries only these two fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProfileRef {
     /// Hard identity assertion: must exactly match an installed profile's
     /// setup SHA-256 (lowercase hex).
     pub setup_sha256: String,
     /// Soft cross-check: compared against the resolved profile name; a
-    /// mismatch is a state error (the v1 reference server rejects it).
+    /// mismatch is a state error (the reference semantics reject it).
     pub name: Option<String>,
 }
 
@@ -84,7 +82,7 @@ impl ProfileRef {
     }
 }
 
-/// One wwise.v1 `Packet` emitted by a streaming encode.
+/// One packet emitted by a streaming encode.
 ///
 /// Emission order is the reply stream order: the first emitted packet is
 /// the Vorbis setup packet (seq 0); every later one is an audio packet in
@@ -108,7 +106,7 @@ pub struct StreamPacket {
 /// in the worst alignment. 2048 keeps a whole long block of margin.
 const STREAM_LOOKAHEAD: i64 = 2048;
 
-/// One streaming encode session (wwise.v1 `Encode` request lifecycle).
+/// One streaming encode session (the core streaming lifecycle).
 ///
 /// Build with [`StreamSession::new`] and drive `init_profile` ->
 /// `push_pcm_chunk`* -> `finish`, or use the convenience constructor
@@ -421,7 +419,7 @@ impl StreamPipeline {
 }
 
 impl StreamSession {
-    /// Create an uninitialized session (the v1 stream before `Init`).
+    /// Create an uninitialized session (the stream before `Init`).
     pub fn new() -> Self {
         Self {
             initialized: false,
@@ -431,7 +429,7 @@ impl StreamSession {
         }
     }
 
-    /// Open the session on one installed profile (v1 `Init`).
+    /// Open the session on one installed profile (`Init`).
     ///
     /// - `PROFILE_NOT_FOUND` when no installed profile's setup SHA-256 matches.
     /// - `STATE_ERROR` on a second Init or a soft `name` cross-check failure.
@@ -482,13 +480,13 @@ impl StreamSession {
         Ok(session)
     }
 
-    /// Open the session on one profile carried entirely as bytes (v1 `Init`
+    /// Open the session on one profile carried entirely as bytes (`Init`
     /// from a bytes bundle; the threadless / wasm32-unknown-unknown entry).
     ///
     /// `index` / `files` are the profile bytes as documented on
     /// [`Encoder::from_profile_bytes`]; every logical resource is SHA-256
     /// verified on load. The reference is then asserted against the
-    /// selected profile with the same v1 semantics as [`init_profile`](Self::init_profile):
+    /// selected profile with the same semantics as [`init_profile`](Self::init_profile):
     ///
     /// - `PROFILE_NOT_FOUND` when the bundle's setup SHA-256 does not match
     ///   `ref_.setup_sha256`.
@@ -525,8 +523,7 @@ impl StreamSession {
     }
 
     /// Push one chunk of little-endian signed-16 interleaved PCM bytes
-    /// (v1 `PcmChunk`, `PCM_SAMPLE_LAYOUT_SIGNED_16_INTERLEAVED`) and
-    /// return the packets that just completed.
+    /// and return the packets that just completed.
     ///
     /// `STATE_ERROR` before Init or after Finish; `GEOMETRY_MISMATCH` when
     /// the chunk carries a trailing partial PCM frame. An empty chunk is a
@@ -536,7 +533,7 @@ impl StreamSession {
     /// huge chunk materializes only `SEGMENT_FRAMES` of float rows at a
     /// time — input memory stays bounded by the streaming contract.
     ///
-    /// Emitted packets follow the wwise.v1 reply order: the first packet
+    /// Emitted packets follow the reply order: the first packet
     /// ever emitted is the setup packet (seq 0), then audio packets in
     /// encoding order. Frames whose mode look-ahead or end-of-stream tail
     /// is not determined yet are withheld and flushed at `finish`.
@@ -602,7 +599,7 @@ impl StreamSession {
     }
 
     /// Mark the end of the PCM stream and complete the encode
-    /// (v1 `Finish`).
+    /// (`Finish`).
     ///
     /// `STATE_ERROR` when Init did not run or Finish already did;
     /// `INPUT_TOO_SHORT` below the 4096-frame minimum; otherwise the full

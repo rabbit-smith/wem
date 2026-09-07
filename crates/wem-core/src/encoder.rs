@@ -82,10 +82,10 @@ impl Pcm16 {
     }
 
     /// Construct from interleaved little-endian signed-16 PCM bytes
-    /// (the wwise.v1 `PcmFrames.data` wire form).
+    /// (the interleaved wire form of the streaming API).
     ///
     /// The byte length must be a multiple of `2 * channel_count`; a trailing
-    /// partial frame is a geometry violation (wwise.v1 GEOMETRY_MISMATCH).
+    /// partial frame is a geometry violation (GEOMETRY_MISMATCH).
     pub fn from_interleaved_le(
         sample_rate: i64,
         channel_count: usize,

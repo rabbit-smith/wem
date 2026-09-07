@@ -37,8 +37,8 @@ impl Wav16 {
         self.samples.len() / self.channels
     }
 
-    /// Interleaved little-endian signed-16 PCM bytes (the wwise.v1
-    /// `PcmFrames.data` wire form).
+    /// Interleaved little-endian signed-16 PCM bytes (the interleaved wire
+    /// form of the streaming API).
     pub fn interleaved_le_bytes(&self) -> Vec<u8> {
         self.samples
             .iter()

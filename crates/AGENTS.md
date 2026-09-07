@@ -2,8 +2,8 @@
 
 The Rust workspace is the performance and portability core: every high-throughput
 stage (scheduling, analysis, Vorbis coding, container assembly) runs here.
-Python and gRPC are thin shells over `wem-core`; nothing numerically hot stays
-on the wrapper side.
+Python (PyO3) and the C ABI are thin shells over `wem-core`; nothing
+numerically hot stays on the wrapper side.
 
 ## Crate map and allowed edges (acyclic; mirrors docs/architecture.md)
 

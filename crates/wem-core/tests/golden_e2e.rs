@@ -127,7 +127,7 @@ fn stream_session_with_seven_uneven_chunks_matches_encode_pcm() {
     );
     assert_eq!(streamed.data, read_fixture("reference.wem"));
     assert_eq!(streamed.stats, oneshot.stats);
-    // The container walk exposes the wwise.v1 packet stream: the setup
+    // The container walk exposes the reply packet stream: the setup
     // packet (seq 0) followed by the audio packets in encoding order.
     let parts = wem_container::load_wem_parts_bytes(&streamed.data).expect("wem parts");
     assert!(parts.is_wwise_vorbis);
@@ -143,7 +143,7 @@ fn stream_session_with_seven_uneven_chunks_matches_encode_pcm() {
     }
     assert!(
         parts.data_raw.starts_with(&reassembled),
-        "data chunk payload does not start with the wwise.v1 packet stream"
+        "data chunk payload does not start with the reply packet stream"
     );
 }
 

@@ -1,8 +1,8 @@
-.PHONY: test test-fast frame-contract stage-contract proto-contract proto-smoke golden lint build wheel-smoke check clean native
+.PHONY: test test-fast frame-contract stage-contract golden lint build wheel-smoke check clean native
 
 PY ?= python3
 
-test: test-fast frame-contract stage-contract golden proto-contract proto-smoke
+test: test-fast frame-contract stage-contract golden
 
 test-fast:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference python3 -m unittest discover -s tests/unit -t . -v
@@ -14,12 +14,6 @@ frame-contract:
 
 stage-contract:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference python3 -m unittest tests.contract.stage_pipeline_contract -v
-
-proto-contract:
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest tests.contract.test_proto_contract -v
-
-proto-smoke:
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) scripts/interop_grpc_smoke.py
 
 golden:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference python3 -m unittest tests.golden.test_golden -v

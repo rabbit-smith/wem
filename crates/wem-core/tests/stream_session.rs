@@ -1,4 +1,4 @@
-//! StreamSession contract tests (wwise.v1 streaming lifecycle).
+//! StreamSession contract tests (the core streaming lifecycle).
 //!
 //! Three gates live here:
 //!

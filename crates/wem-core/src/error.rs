@@ -1,15 +1,9 @@
 //! Orchestration-layer errors (wem-core).
 //!
-//! Variant semantics mirror the `wwise.v1` gRPC contract
-//! (`EncoderErrorCode` in `proto/wwise/v1/encode.proto`) so the future
-//! `wem-server` and PyO3 shells can map them one-to-one:
-//!
-//! * `ProfileNotFound`    -> ENCODER_ERROR_CODE_PROFILE_NOT_FOUND
-//! * `StateError`         -> ENCODER_ERROR_CODE_STATE_ERROR
-//! * `GeometryMismatch`   -> ENCODER_ERROR_CODE_GEOMETRY_MISMATCH
-//! * `InputTooShort`      -> ENCODER_ERROR_CODE_INPUT_TOO_SHORT
-//! * `FormatUnsupported`  -> ENCODER_ERROR_CODE_FORMAT_UNSUPPORTED
-//! * `Internal`           -> ENCODER_ERROR_CODE_INTERNAL
+//! Each variant is one stable class of the kernel's error-code contract:
+//! variant identity and order are part of the cross-language contract, and
+//! the language shells (the C ABI core surface, the PyO3 binding) map them
+//! one-to-one.
 //!
 //! Every public path returns one of these; none panics on input-derived
 //! conditions (crates/AGENTS.md).
@@ -19,26 +13,22 @@ use wem_container::error::ContainerError;
 use wem_profiles::error::ProfileError;
 use wem_vorbis::packet_encoder::PacketError;
 
-/// Terminal encoder failure carrying the wwise.v1 error class.
+/// Terminal encoder failure carrying the kernel error class.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EncoderError {
-    /// No installed profile matches the requested setup digest
-    /// (ENCODER_ERROR_CODE_PROFILE_NOT_FOUND).
+    /// No installed profile matches the requested setup digest.
     ProfileNotFound { requested: String },
     /// A request arrived outside the Init -> chunk -> Finish lifecycle, or
-    /// a soft profile cross-check failed
-    /// (ENCODER_ERROR_CODE_STATE_ERROR).
+    /// a soft profile cross-check failed.
     StateError { message: String },
     /// Requested PCM channels or sample rate differ from the selected
-    /// profile geometry (ENCODER_ERROR_CODE_GEOMETRY_MISMATCH).
+    /// profile geometry.
     GeometryMismatch { message: String },
-    /// The accumulated PCM stream is shorter than the 4096-frame minimum
-    /// (ENCODER_ERROR_CODE_INPUT_TOO_SHORT).
+    /// The accumulated PCM stream is shorter than the 4096-frame minimum.
     InputTooShort { want: u32, got: u32 },
-    /// The requested sample layout is not supported by this revision
-    /// (ENCODER_ERROR_CODE_FORMAT_UNSUPPORTED).
+    /// The requested sample layout is not supported by this revision.
     FormatUnsupported { message: String },
-    /// An internal fault while encoding (ENCODER_ERROR_CODE_INTERNAL).
+    /// An internal fault while encoding.
     Internal(InternalError),
 }
 
