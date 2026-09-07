@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterator, Sequence
+from typing import Iterator, Mapping, Sequence
 
 from ...scheduling.model import DEFAULT_BLOCKSIZES, FramePlan
 from ...scheduling.planner import (
@@ -52,6 +52,7 @@ def iter_pcm_windows(
     *,
     blocksizes: Sequence[int] = DEFAULT_BLOCKSIZES,
     terminal_following: int = 1,
+    frozen_windows: Mapping[int, Sequence[float]] | None = None,
 ) -> Iterator[WindowedFrame]:
     """Yield hybrid-windowed PCM blocks for an already-decided mode stream.
 
@@ -66,7 +67,9 @@ def iter_pcm_windows(
         blocksizes=blocksizes,
         terminal_following=terminal_following,
     )
-    yield from iter_planned_pcm_windows(pcm, plans, blocksizes=blocksizes)
+    yield from iter_planned_pcm_windows(
+        pcm, plans, blocksizes=blocksizes, frozen_windows=frozen_windows
+    )
 
 
 def iter_planned_pcm_windows(
@@ -74,6 +77,7 @@ def iter_planned_pcm_windows(
     plans: Sequence[FramePlan],
     *,
     blocksizes: Sequence[int] = DEFAULT_BLOCKSIZES,
+    frozen_windows: Mapping[int, Sequence[float]] | None = None,
 ) -> Iterator[WindowedFrame]:
     """Materialize PCM exclusively from scheduler-owned frame plans."""
     if not plans:
@@ -151,7 +155,13 @@ def iter_planned_pcm_windows(
             window_modes = (0, 0, 0) if current == 0 else (
                 previous, current, following
             )
-            rows.append(tuple(apply_vorbis_window(raw, blocksizes, *window_modes)))
+            rows.append(
+                tuple(
+                    apply_vorbis_window(
+                        raw, blocksizes, *window_modes, frozen_windows=frozen_windows
+                    )
+                )
+            )
         yield WindowedFrame(
             plan=plan,
             center=center,

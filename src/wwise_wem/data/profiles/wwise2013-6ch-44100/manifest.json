@@ -72,6 +72,11 @@
     "psychoacoustics.long-modes": {
       "path": "psychoacoustics/long-modes.json",
       "sha256": "e8b27bfdc79cbde5bc5832bb7eae954bafcb3a91d92ce259ce0a1f9c1f1cdfbd"
+    },
+    "analysis.frozen-tables": {
+      "path": "analysis/frozen-tables.json",
+      "schema": "wem.frozen-math.v1",
+      "sha256": "9fcebd50865d71500dc55692b2f6766dfa707c9676beaba65a959019e1ba21d2"
     }
   }
 }

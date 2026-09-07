@@ -5,11 +5,11 @@ The encoder may stop mid-residue; decoding treats EOF as end of residue.
 """
 from __future__ import annotations
 
-import math
 from typing import List, Sequence
 
 from .bitio import BitReader, OggPack
 from .codebook import Codebook
+from .._tmath import log10_f64
 
 
 class ResidueEOP(Exception):
@@ -187,7 +187,7 @@ def _classify_partition_heuristic(samples: Sequence[float], nclass: int) -> int:
     if peak < 1e-5 and energy < 1e-8:
         return 0
     # log peak → 1..nclass-1
-    e = math.log10(peak + 1e-12)
+    e = log10_f64(peak + 1e-12)
     # peak ~1e-4 → low class, peak ~1 → high
     t = (e + 5.0) / 5.0  # roughly 0..1 for e in [-5,0]
     c = 1 + int(t * (nclass - 2))

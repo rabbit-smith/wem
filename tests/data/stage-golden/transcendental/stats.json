@@ -1,0 +1,43 @@
+{
+  "config.ln": {
+    "enumerable": true,
+    "on_live_path": true,
+    "unique_inputs": 128
+  },
+  "floor_fit.ln": {
+    "on_live_path": false,
+    "unique_inputs": 0
+  },
+  "residue.log10": {
+    "on_live_path": false,
+    "unique_inputs": 0
+  },
+  "spectrum.cos": {
+    "enumerable": true,
+    "on_live_path": true,
+    "unique_inputs": 11
+  },
+  "spectrum.sin": {
+    "enumerable": true,
+    "on_live_path": true,
+    "unique_inputs": 11
+  },
+  "transform.cos": {
+    "enumerable": false,
+    "on_live_path": false,
+    "unique_inputs": 0
+  },
+  "transform.sin": {
+    "enumerable": false,
+    "on_live_path": false,
+    "unique_inputs": 0
+  },
+  "transform.window_long.sin": {
+    "on_live_path": false,
+    "unique_inputs": 0
+  },
+  "transform.window_short.sin": {
+    "on_live_path": true,
+    "unique_inputs": 2304
+  }
+}

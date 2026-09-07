@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import math
 import struct
-from typing import Sequence
+from typing import Mapping, Sequence
+
+from ..._tmath import cos_f64, sin_f64
 
 
 WWISE_LOG_SCALE = 0.0000007177114298428933
@@ -25,7 +27,11 @@ def wwise_float_log(value: float) -> float:
     return _f32(_float_abs_bits(value) * WWISE_LOG_SCALE - WWISE_LOG_BIAS)
 
 
-def wwise_fft_packed(samples: Sequence[float]) -> list[float]:
+def wwise_fft_packed(
+    samples: Sequence[float],
+    *,
+    twiddles: Mapping[int, tuple[float, float]] | None = None,
+) -> list[float]:
     """Return the packed real-FFT layout used by frame analysis.
 
     For an even ``n`` the layout is ``[DC, Re(1), Im(1), ..., Re(n/2)]``.
@@ -51,9 +57,16 @@ def wwise_fft_packed(samples: Sequence[float]) -> list[float]:
     length = 2
     while length <= n:
         half = length >> 1
-        angle = -2.0 * math.pi / length
-        step_re = _f32(math.cos(angle))
-        step_im = _f32(math.sin(angle))
+        if twiddles is None:
+            angle = -2.0 * math.pi / length
+            step_re = _f32(cos_f64(angle))
+            step_im = _f32(sin_f64(angle))
+        else:
+            entry = twiddles.get(length)
+            if entry is None:
+                raise ValueError("FFT stage fell outside the frozen twiddle domain")
+            step_re = _f32(entry[0])
+            step_im = _f32(entry[1])
         for start in range(0, n, length):
             wr = 1.0
             wi = 0.0
@@ -81,10 +94,14 @@ def wwise_fft_packed(samples: Sequence[float]) -> list[float]:
     return packed
 
 
-def wwise_log_curve(samples: Sequence[float]) -> list[float]:
+def wwise_log_curve(
+    samples: Sequence[float],
+    *,
+    twiddles: Mapping[int, tuple[float, float]] | None = None,
+) -> list[float]:
     """Convert a packed analysis spectrum to the encoder log domain."""
     n = len(samples)
-    packed = wwise_fft_packed(samples)
+    packed = wwise_fft_packed(samples, twiddles=twiddles)
     offset = _f32(wwise_float_log(4.0 / n) + WWISE_LOG_ADD)
     out = [_f32(wwise_float_log(packed[0]) + offset + WWISE_LOG_ADD)]
     for index in range(1, n - 1, 2):

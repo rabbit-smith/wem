@@ -21,7 +21,7 @@ before final container assembly.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterator, Sequence
+from typing import Iterator, Mapping, Sequence
 
 from .config import AnalysisProfileResources
 from .model import PsyFrame, SpectrumFrame
@@ -196,6 +196,7 @@ class AnalysisSession:
             modes,
             blocksizes=self.blocksizes,
             terminal_following=terminal_following,
+            frozen_windows=self._frozen_windows(),
         )
 
     def select_modes(self, pcm: Sequence[Sequence[float]]) -> tuple[int, ...]:
@@ -246,8 +247,12 @@ class AnalysisSession:
             modes, blocksizes=self.blocksizes, terminal_following=1
         )
         return modes, iter_planned_pcm_windows(
-            pcm, plans, blocksizes=self.blocksizes
+            pcm, plans, blocksizes=self.blocksizes, frozen_windows=self._frozen_windows()
         )
+
+    def _frozen_windows(self) -> Mapping[int, tuple[float, ...]] | None:
+        frozen = self.resources.frozen
+        return frozen.window_halves if frozen is not None else None
 
     def analyze_short(
         self,

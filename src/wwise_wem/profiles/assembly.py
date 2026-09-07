@@ -15,6 +15,7 @@ from ..vorbis.setup import parse_setup
 from .book_ids import load_book_table
 from .bundle import ProfileBundle
 from .codebooks import load_setup_codebooks
+from .frozen import load_frozen_tables
 from .transform import load_mdct_looks
 from .transient import load_transient_tables
 from .psychoacoustics.config import load_short_seed_surface
@@ -54,6 +55,12 @@ def assemble_analysis_resources(bundle: ProfileBundle) -> AnalysisProfileResourc
         mode: load_long_variant(mode, long_modes_ref, long_base)
         for mode in (2, 3)
     }
+    frozen_ref = (
+        manifest.resource("analysis.frozen-tables")
+        if "analysis.frozen-tables" in manifest.resources
+        else None
+    )
+    frozen = load_frozen_tables(frozen_ref) if frozen_ref is not None else None
     return AnalysisProfileResources(
         mdct_looks=load_mdct_looks(manifest.resource("transform.mdct")),
         transient=load_transient_tables(manifest.resource("analysis.transient")),
@@ -61,13 +68,17 @@ def assemble_analysis_resources(bundle: ProfileBundle) -> AnalysisProfileResourc
             manifest.resource("psychoacoustics.short-profiles")
         ),
         short_surface=short_surface,
-        short_look=make_wwise_psy_look(short_surface),
+        short_look=make_wwise_psy_look(
+            short_surface,
+            frozen_ln=frozen.coordinate_ln if frozen is not None else None,
+        ),
         long_base=long_base,
         long_variants=long_variants,
         long_floor_looks={
             mode: make_long_floor_envelope_look(table)
             for mode, table in long_variants.items()
         },
+        frozen=frozen,
     )
 
 

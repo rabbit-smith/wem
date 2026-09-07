@@ -142,7 +142,10 @@ def analyze_long_frame(
         for frame in windowed_frames
     ]
     raw_mdct = [wwise_mdct_log_curve(values) for values in coefficients]
-    fft = [wwise_log_curve([_f32(value) for value in frame]) for frame in windowed_frames]
+    fft = [
+        wwise_log_curve([_f32(value) for value in frame], twiddles=resources._frozen_twiddles())
+        for frame in windowed_frames
+    ]
     if specmax_state is None:
         channel_specmax, global_specmax = compute_spectrum_peak(
             fft, initial_global=carried_global_specmax
@@ -258,7 +261,10 @@ def analyze_short_frame(
         for frame in windowed_frames
     ]
     raw_mdct = [wwise_mdct_log_curve(values) for values in coefficients]
-    fft = [wwise_log_curve([_f32(value) for value in frame]) for frame in windowed_frames]
+    fft = [
+        wwise_log_curve([_f32(value) for value in frame], twiddles=resources._frozen_twiddles())
+        for frame in windowed_frames
+    ]
     if specmax_state is None:
         channel_specmax, global_specmax = compute_spectrum_peak(
             fft, initial_global=carried_global_specmax

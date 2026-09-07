@@ -7,10 +7,11 @@ opens a resource itself.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 import struct
 from types import MappingProxyType
 from typing import Mapping, Sequence
+
+from .._tmath import config_ln_f64, math_bits
 
 TONE_LEVEL_COUNT = 8
 TONE_BAND_COUNT = 17
@@ -217,6 +218,7 @@ def make_wwise_psy_look(
     surface: WwisePsySeedSurface,
     *,
     row: Sequence[float] | None = None,
+    frozen_ln: Mapping[int, float] | None = None,
 ) -> WwisePsyLook:
     n, sample_rate = surface.n, surface.sample_rate
     if n != 128 or sample_rate != 44100:
@@ -227,7 +229,14 @@ def make_wwise_psy_look(
 
     def coordinate(index: int) -> tuple[int, float]:
         frequency = (float(index) + 0.5) * float(sample_rate) / float(2 * n)
-        value = _f32(2.0 * (math.log(frequency) * 1.442695021629333 - 5.965784072875977))
+        if frozen_ln is None:
+            ln_value = config_ln_f64(frequency)
+        else:
+            key = math_bits(frequency)
+            if key not in frozen_ln:
+                raise ValueError("psy coordinate fell outside the frozen ln domain")
+            ln_value = frozen_ln[key]
+        value = _f32(2.0 * (ln_value * 1.442695021629333 - 5.965784072875977))
         value = max(0.0, min(16.0, value))
         base = int(value)
         return base, _f32(value - base)
@@ -257,6 +266,35 @@ def make_wwise_psy_look(
 
 
 @dataclass(frozen=True)
+class FrozenMathTables:
+    """Frozen transcendental results owned by one exact profile.
+
+    Keys and values are float64 IEEE bit patterns converted at load time:
+    ``coordinate_ln`` maps bits(frequency) to ln(frequency); ``fft_twiddles``
+    maps an FFT stage length to its ``(cos, sin)`` of ``-2*pi/length``; each
+    ``window_halves`` row is the post-patch first half of ``vorbis_window(n)``
+    with the array's symmetry supplying the tail.
+    """
+
+    coordinate_ln: Mapping[int, float]
+    fft_twiddles: Mapping[int, tuple[float, float]]
+    window_halves: Mapping[int, tuple[float, ...]]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "coordinate_ln", MappingProxyType(dict(self.coordinate_ln)))
+        object.__setattr__(
+            self,
+            "fft_twiddles",
+            MappingProxyType({int(k): (float(v[0]), float(v[1])) for k, v in self.fft_twiddles.items()}),
+        )
+        object.__setattr__(
+            self,
+            "window_halves",
+            MappingProxyType({int(k): tuple(float(x) for x in v) for k, v in self.window_halves.items()}),
+        )
+
+
+@dataclass(frozen=True)
 class AnalysisProfileResources:
     """Immutable resources injected into one analysis session.
 
@@ -272,6 +310,7 @@ class AnalysisProfileResources:
     long_base: WwisePsyLongTables
     long_variants: Mapping[int, WwisePsyLongTables]
     long_floor_looks: Mapping[int, LongFloorEnvelopeLook]
+    frozen: FrozenMathTables | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -284,3 +323,6 @@ class AnalysisProfileResources:
             raise ValueError("analysis resources lack required MDCT looks")
         if len(self.short_profiles) != 2 or set(self.long_variants) != {2, 3}:
             raise ValueError("analysis resources lack psychoacoustic variants")
+
+    def _frozen_twiddles(self) -> Mapping[int, tuple[float, float]] | None:
+        return self.frozen.fft_twiddles if self.frozen is not None else None

@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import math
 import struct
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from ..config import MdctLook, TransientDetectorTables
+from ..._tmath import (
+    transform_cos_f64,
+    transform_sin_f64,
+    window_long_sin_f64,
+    window_short_sin_f64,
+)
 
 def _f32(value: float) -> float:
     return struct.unpack("<f", struct.pack("<f", float(value)))[0]
@@ -62,20 +68,20 @@ def make_mdct_look(
         # the Wwise binary has no static bank for.
         trig = [0.0] * (n + n // 4)
         for i in range(n // 4):
-            trig[2 * i] = _f32(math.cos(math.pi / n * (4 * i)))
-            trig[2 * i + 1] = _f32(-math.sin(math.pi / n * (4 * i)))
+            trig[2 * i] = _f32(transform_cos_f64(math.pi / n * (4 * i)))
+            trig[2 * i + 1] = _f32(-transform_sin_f64(math.pi / n * (4 * i)))
             trig[n // 2 + 2 * i] = _f32(
-                math.cos(math.pi / (2 * n) * (2 * i + 1))
+                transform_cos_f64(math.pi / (2 * n) * (2 * i + 1))
             )
             trig[n // 2 + 2 * i + 1] = _f32(
-                math.sin(math.pi / (2 * n) * (2 * i + 1))
+                transform_sin_f64(math.pi / (2 * n) * (2 * i + 1))
             )
         for i in range(n // 8):
             trig[n + 2 * i] = _f32(
-                math.cos(math.pi / n * (4 * i + 2)) * 0.5
+                transform_cos_f64(math.pi / n * (4 * i + 2)) * 0.5
             )
             trig[n + 2 * i + 1] = _f32(
-                -math.sin(math.pi / n * (4 * i + 2)) * 0.5
+                -transform_sin_f64(math.pi / n * (4 * i + 2)) * 0.5
             )
 
     mask = (1 << (log2n - 1)) - 1
@@ -90,13 +96,23 @@ def make_mdct_look(
     return MdctLook(n, log2n, tuple(trig), tuple(bitrev), _f32(4.0 / n))
 
 
-def vorbis_window(n: int) -> list[float]:
+def vorbis_window(n: int, *, frozen_half: Sequence[float] | None = None) -> list[float]:
     """Symmetric same-size Vorbis window from the converter's f32 table."""
     if n < 2 or n & 1:
         raise ValueError("window size must be a positive even number")
+    if frozen_half is not None:
+        half = n // 2
+        if len(frozen_half) != half:
+            raise ValueError("frozen window half differs from the requested size")
+        left = list(frozen_half)
+        return left + left[::-1]
     half = n // 2
     left = [
-        _f32(math.sin(math.pi / 2.0 * math.sin(math.pi * (i + 0.5) / n) ** 2))
+        _f32(
+            window_short_sin_f64(
+                math.pi / 2.0 * window_short_sin_f64(math.pi * (i + 0.5) / n) ** 2
+            )
+        )
         for i in range(half)
     ]
     if n == 256:
@@ -120,7 +136,7 @@ def wwise_psy_window(n: int, tables: TransientDetectorTables) -> list[float]:
             raise ValueError("transient window geometry differs from MDCT size")
         return list(tables.window)
     return [
-        _f32(math.sin(math.pi * i / (n - 1)) ** 2) for i in range(n)
+        _f32(window_long_sin_f64(math.pi * i / (n - 1)) ** 2) for i in range(n)
     ]
 
 
@@ -144,6 +160,8 @@ def apply_vorbis_window(
     previous: int,
     current: int,
     following: int,
+    *,
+    frozen_windows: Mapping[int, Sequence[float]] | None = None,
 ) -> list[float]:
     """Apply the encoder-side Vorbis hybrid window to one block.
 
@@ -169,7 +187,16 @@ def apply_vorbis_window(
     if not (0 <= left_begin <= left_end <= right_begin <= right_end <= n):
         raise ValueError("incompatible block/window sizes")
 
-    windows = {size: vorbis_window(size) for size in {left_n, right_n}}
+    if frozen_windows is None:
+        windows = {size: vorbis_window(size) for size in {left_n, right_n}}
+    else:
+        try:
+            windows = {
+                size: vorbis_window(size, frozen_half=frozen_windows[size])
+                for size in (left_n, right_n)
+            }
+        except KeyError as error:
+            raise ValueError("block window fell outside the frozen window domain") from error
     out = list(samples[:n])
     for i in range(left_begin):
         out[i] = 0.0

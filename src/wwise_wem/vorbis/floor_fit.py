@@ -11,6 +11,7 @@ from .floor import (
     postlist_from_floor,
     render_point,
 )
+from .._tmath import ln_f64
 
 
 def _mag_to_quant(mag: float, mult: int, range_: int) -> int:
@@ -18,7 +19,7 @@ def _mag_to_quant(mag: float, mult: int, range_: int) -> int:
     if mag <= 0.0:
         return 0
     # todB on amplitude stored as coeff: log(x*x)*4.34294480
-    db = math.log(mag * mag) * 4.34294480
+    db = ln_f64(mag * mag) * 4.34294480
     # vorbis_dBquant: maps ~[-140, 0] dB → [0, 1023]
     q = int(db * 7.3142857 + 1023.5)
     if q > 1023:

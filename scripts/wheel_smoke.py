@@ -115,7 +115,7 @@ def main() -> None:
             "p=resolve_wem_profile(6,44100); "
             "b=load_profile_bundle(); b.verify_all(); "
             "assert b.runtime_manifest.resource('vorbis.setup')==b.setup; "
-            "assert set(b.runtime_manifest.resources)=={'vorbis.setup','vorbis.codebooks.t97','vorbis.codebooks.t219','transform.mdct','analysis.transient','psychoacoustics.short-profiles','psychoacoustics.short-seed','psychoacoustics.long-base','psychoacoustics.long-modes'}; "
+            "assert set(b.runtime_manifest.resources)=={'vorbis.setup','vorbis.codebooks.t97','vorbis.codebooks.t219','transform.mdct','analysis.transient','psychoacoustics.short-profiles','psychoacoustics.short-seed','psychoacoustics.long-base','psychoacoustics.long-modes','analysis.frozen-tables'}; "
             "assert p.name=='wwise2013-6ch-44100'; "
             "assert len(p.setup_packet())==201; "
             "assert len(load_book_table('t97',b.runtime_manifest.resource('vorbis.codebooks.t97')))==97; "

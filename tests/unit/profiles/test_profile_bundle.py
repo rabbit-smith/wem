@@ -60,7 +60,7 @@ class ProfileBundleTests(unittest.TestCase):
         self.assertEqual((bundle.key.channels, bundle.key.sample_rate), (6, 44100))
         self.assertEqual(bundle.block_sizes, (256, 2048))
         self.assertEqual(len(bundle.setup_packet()), 201)
-        self.assertEqual(len(bundle.runtime_manifest.resources), 9)
+        self.assertEqual(len(bundle.runtime_manifest.resources), 10)
         bundle.verify_all()
         with self.assertRaises(TypeError):
             bundle.runtime_manifest.resources["new"] = bundle.setup  # type: ignore[index]

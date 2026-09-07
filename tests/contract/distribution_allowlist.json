@@ -23,6 +23,7 @@
   "modules": [
     "wwise_wem/__init__.py",
     "wwise_wem/__main__.py",
+    "wwise_wem/_tmath.py",
     "wwise_wem/adapters/__init__.py",
     "wwise_wem/adapters/wav.py",
     "wwise_wem/analysis/__init__.py",
@@ -63,6 +64,7 @@
     "wwise_wem/profiles/book_ids.py",
     "wwise_wem/profiles/bundle.py",
     "wwise_wem/profiles/codebooks.py",
+    "wwise_wem/profiles/frozen.py",
     "wwise_wem/profiles/model.py",
     "wwise_wem/profiles/psychoacoustics/__init__.py",
     "wwise_wem/profiles/psychoacoustics/config.py",
@@ -89,6 +91,7 @@
   ],
   "resources": [
     "wwise_wem/data/profiles/index.json",
+    "wwise_wem/data/profiles/wwise2013-6ch-44100/analysis/frozen-tables.json",
     "wwise_wem/data/profiles/wwise2013-6ch-44100/analysis/transient.json",
     "wwise_wem/data/profiles/wwise2013-6ch-44100/manifest.json",
     "wwise_wem/data/profiles/wwise2013-6ch-44100/psychoacoustics/long-base.json",
