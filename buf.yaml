@@ -1,0 +1,12 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  except:
+    # The contract fixes the service name as WemEncoder.
+    - SERVICE_SUFFIX
+breaking:
+  use:
+    - WIRE_JSON

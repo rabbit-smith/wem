@@ -1,0 +1,218 @@
+// WEM encoder service: profile listing and one streaming encode.
+syntax = "proto3";
+
+// Versioned WEM encoding contract namespace.
+package wwise.v1;
+
+import "wwise/v1/common.proto";
+import "wwise/v1/profile.proto";
+
+// Wwise Vorbis WAV-to-WEM encoder service.
+service WemEncoder {
+  // List the installed encoder profiles, optionally filtered by geometry.
+  rpc ListProfiles(ListProfilesRequest) returns (ListProfilesResponse);
+
+  // Run one streaming encode.
+  //
+  // Request lifecycle, matching the analysis-session state machine:
+  //   1. exactly one Init as the first request;
+  //   2. zero or more PcmChunk requests after Init and before Finish;
+  //   3. exactly one Finish after the last chunk.
+  //
+  // Reply lifecycle, in order:
+  //   1. one Packet per emitted Wwise Vorbis packet, where seq 0 is the
+  //      setup packet and every later seq is an audio packet;
+  //   2. exactly one WemComplete once the container is assembled.
+  //
+  // Any protocol violation, or any failure while encoding, is reported
+  // with a single EncoderError and then the stream closes.
+  rpc Encode(stream EncodeRequest) returns (stream EncodeResponse);
+}
+
+// Lists installed profiles.
+message ListProfilesRequest {
+  // Optional geometry filter; when unset, every profile is returned.
+  ProfileKey key = 1;
+
+  // Reserved for future filter fields.
+  reserved 2 to 10;
+}
+
+// Lists installed profiles.
+message ListProfilesResponse {
+  // Every installed profile matching the request.
+  repeated ProfileInfo profiles = 1;
+
+  // Reserved for future list fields.
+  reserved 2 to 10;
+}
+
+// One client request inside an Encode stream.
+message EncodeRequest {
+  // Exactly one payload per request, in lifecycle order.
+  oneof payload {
+    // Opens the encode session.
+    Init init = 1;
+
+    // Carries PCM samples.
+    PcmChunk chunk = 2;
+
+    // Marks the end of the PCM stream.
+    Finish finish = 3;
+  }
+
+  // Reserved for future request fields.
+  reserved 4 to 10;
+}
+
+// Opens an encode session. It must be the first request of the stream.
+message Init {
+  // Profile selection reference.
+  oneof ref {
+    // Select an installed profile by checksum identity.
+    ProfileRef profile = 1;
+
+    // Select a profile from a template byte stream.
+    TemplateRef template = 2;
+  }
+
+  // Reserved for future init fields.
+  reserved 3 to 10;
+}
+
+// Profile selection by checksum identity.
+message ProfileRef {
+  // Strong check: the server matches this digest exactly against its
+  // installed setup packets. When no installed profile matches, the
+  // stream fails with ENCODER_ERROR_CODE_PROFILE_NOT_FOUND.
+  string setup_sha256 = 1;
+
+  // Soft check: the server compares this name with the profile resolved
+  // by setup_sha256. Servers may reject the stream on mismatch; the v1
+  // reference server rejects with ENCODER_ERROR_CODE_STATE_ERROR.
+  string name = 2;
+
+  // Reserved for future reference fields.
+  reserved 3 to 10;
+}
+
+// Template selection, reserved for a future revision.
+//
+// v1 servers answer a TemplateRef with ENCODER_ERROR_CODE_STATE_ERROR.
+// The reserved field numbers keep a future template payload from
+// colliding with the profile-reference fields.
+message TemplateRef {
+  reserved 1 to 10;
+}
+
+// One PCM payload segment sent after Init and before Finish.
+message PcmChunk {
+  // Sample format of this stream.
+  //
+  // Servers reject a layout that is not SIGNED_16_INTERLEAVED with
+  // ENCODER_ERROR_CODE_FORMAT_UNSUPPORTED, and reject a geometry that
+  // differs from the selected profile with
+  // ENCODER_ERROR_CODE_GEOMETRY_MISMATCH.
+  PcmFormat format = 1;
+
+  // Raw PCM frames for this segment.
+  PcmFrames frames = 2;
+
+  // Reserved for future chunk fields.
+  reserved 3 to 10;
+}
+
+// Marks the end of the PCM stream and requests finalization.
+message Finish {
+  reserved 1 to 10;
+}
+
+// One server reply inside an Encode stream.
+message EncodeResponse {
+  // Exactly one payload per reply.
+  oneof payload {
+    // One emitted packet, in stream order.
+    Packet packet = 1;
+
+    // The assembled WEM container summary.
+    WemComplete complete = 2;
+
+    // A terminal error that closes the stream.
+    EncoderError error = 3;
+  }
+
+  // Reserved for future reply fields.
+  reserved 4 to 10;
+}
+
+// One emitted Wwise Vorbis packet.
+message Packet {
+  // Zero-based position of this packet in the emitted packet stream.
+  //
+  // Sequence 0 is always the setup packet; every later sequence is an
+  // audio packet in encoding order.
+  uint32 seq = 1;
+
+  // Raw packet bytes as they appear inside the WEM data chunk.
+  bytes data = 2;
+
+  // Reserved for future packet fields.
+  reserved 3 to 10;
+}
+
+// Terminal reply describing the assembled WEM container.
+message WemComplete {
+  // Byte length of the assembled WEM container.
+  uint64 total_len = 1;
+
+  // SHA-256 of the assembled WEM bytes, lowercase hex, 64 characters.
+  string sha256 = 2;
+
+  // Optional complete WEM bytes for small outputs.
+  //
+  // When set, clients may take the container directly instead of
+  // reassembling it from the packet stream; the bytes always equal the
+  // reassembled stream.
+  bytes inline_bytes = 3;
+
+  // Reserved for future completion fields.
+  reserved 4 to 10;
+}
+
+// Terminal error reply.
+message EncoderError {
+  // Failure class.
+  EncoderErrorCode code = 1;
+
+  // Human-readable detail; not part of the stable contract.
+  string message = 2;
+
+  // Reserved for future error fields.
+  reserved 3 to 10;
+}
+
+// Failure classes reported by Encode streams.
+enum EncoderErrorCode {
+  // Missing or unset code.
+  ENCODER_ERROR_CODE_UNSPECIFIED = 0;
+
+  // No installed profile matches the requested setup digest.
+  ENCODER_ERROR_CODE_PROFILE_NOT_FOUND = 1;
+
+  // Requested PCM channels or sample rate differ from the selected
+  // profile geometry.
+  ENCODER_ERROR_CODE_GEOMETRY_MISMATCH = 2;
+
+  // The accumulated PCM stream is shorter than the 4096-frame minimum.
+  ENCODER_ERROR_CODE_INPUT_TOO_SHORT = 3;
+
+  // The requested sample layout is not supported by this revision.
+  ENCODER_ERROR_CODE_FORMAT_UNSUPPORTED = 4;
+
+  // A request arrived outside the Init to chunk to Finish lifecycle, or
+  // a soft profile cross-check failed.
+  ENCODER_ERROR_CODE_STATE_ERROR = 5;
+
+  // The server encountered an internal fault while encoding.
+  ENCODER_ERROR_CODE_INTERNAL = 6;
+}

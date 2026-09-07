@@ -1,0 +1,49 @@
+// Shared PCM geometry and payload types for the WEM encoding contract.
+syntax = "proto3";
+
+// Versioned WEM encoding contract namespace.
+//
+// The package is reserved for this revision; later revisions move to
+// wwise.v2, wwise.v3, and so on, without touching the v1 shapes.
+package wwise.v1;
+
+// PCM sampling geometry for one stream.
+message PcmFormat {
+  // Number of interleaved channels (for example 6 for a 5.1 layout).
+  uint32 channels = 1;
+
+  // Sample rate in hertz (for example 44100).
+  uint32 sample_rate = 2;
+
+  // Sample representation carried by every chunk of the stream.
+  //
+  // v1 accepts only SIGNED_16_INTERLEAVED. UNSPECIFIED is the zero value
+  // for partial messages; a real stream must always carry an explicit
+  // layout, and servers reject UNSPECIFIED.
+  PcmSampleLayout layout = 3;
+
+  // Reserved for future geometry fields.
+  reserved 4 to 10;
+}
+
+// How PCM samples are ordered inside a byte payload.
+enum PcmSampleLayout {
+  // Missing or unset layout.
+  PCM_SAMPLE_LAYOUT_UNSPECIFIED = 0;
+
+  // Signed 16-bit, little-endian, one sample per channel per frame,
+  // channels interleaved in layout order.
+  PCM_SAMPLE_LAYOUT_SIGNED_16_INTERLEAVED = 1;
+}
+
+// One PCM sample payload segment.
+message PcmFrames {
+  // Raw little-endian signed 16-bit interleaved PCM frames.
+  //
+  // The byte length must be a multiple of 2 times the channel count so
+  // that every channel receives an equal number of frames.
+  bytes data = 1;
+
+  // Reserved for future payload fields.
+  reserved 2 to 10;
+}
