@@ -1,0 +1,8 @@
+# Generated gRPC stubs — never committed (proto/AGENTS.md).
+# Regenerate with:
+#   cd <repo root>
+#   PATH="$HOME/go/bin:$PATH" protoc -I proto \
+#     --go_out=examples/grpc-go --go_opt=module=grpc-go --go_opt=paths=source_relative \
+#     --go-grpc_out=examples/grpc-go --go-grpc_opt=module=grpc-go --go-grpc_opt=paths=source_relative \
+#     proto/wwise/v1/common.proto proto/wwise/v1/profile.proto proto/wwise/v1/encode.proto
+wwise/

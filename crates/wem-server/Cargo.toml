@@ -1,0 +1,40 @@
+# wem-server — the tonic gRPC shell for the wwise.v1 WEM encode contract.
+#
+# Dependency isolation (crates/AGENTS.md): every gRPC-side dependency
+# (tonic, prost, tokio runtime, codegen) lives ONLY in this crate. The
+# kernel crates (wem-core et al.) never see them, so the wasm32 route that
+# does not compile this crate stays hermetically clean. The proto tree
+# (../../proto) is the single source of truth and is compiled at build
+# time into OUT_DIR — generated code is never committed (proto/AGENTS.md).
+
+[package]
+name = "wem-server"
+description = "tonic gRPC server implementing the wwise.v1 WEM encoding contract."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# Kernel (read-only dependency; the server never mutates kernel state).
+wem-core = { path = "../wem-core" }
+wem-container = { path = "../wem-container" }
+wem-profiles = { path = "../wem-profiles" }
+sha2 = { workspace = true }
+serde_json = { workspace = true }
+
+# gRPC-side stack (server-only; see the isolation note above).
+# tonic 0.14 split: the generated code references `tonic_prost::ProstCodec`,
+# so tonic-prost is a runtime dependency alongside tonic itself; prost is
+# needed directly for the generated message types.
+tonic = "0.14"
+tonic-prost = "0.14"
+prost = "0.14"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+
+[build-dependencies]
+# tonic-prost-build is the tonic 0.14 replacement for the old
+# tonic-build::configure codegen API (message + gRPC service generation).
+tonic-prost-build = "0.14"
+# Hermetic protoc: Google-built binary bundled with the crate instead of a
+# system install, so the build does not depend on the host toolchain.
+protoc-bin-vendored = "3.2.0"

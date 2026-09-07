@@ -18,6 +18,7 @@ members = [
     "wem-container",
     "wem-core",
     "wem-python",
+    "wem-server",
 ]
 
 [workspace.package]
