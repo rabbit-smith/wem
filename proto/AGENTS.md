@@ -1,8 +1,10 @@
 # proto/ — wwise.v1 gRPC contract
 
 The proto tree is the machine-readable architecture: the Rust kernel
-(`wem-server`) and any language client treat it as canonical. The Python mock
-server pins its semantics until the real one exists.
+(`wem-server`) and any language client treat it as canonical. Historical
+note: a Python mock server once pinned its semantics before the real one
+existed; v1 semantics are now pinned by the wem-server integration tests
+and `scripts/interop_grpc_smoke.py`.
 
 ## Evolution rules
 
@@ -26,9 +28,10 @@ server pins its semantics until the real one exists.
   CI-facing checks; `tests/contract/test_proto_contract.py` enforces structure
   without external tooling (skips with an install hint when grpcio-tools is
   absent; CI installs it).
-- `scripts/mock_grpc_smoke.py` must keep proving byte identity between the
-  streamed path and the local encode; a proto change that cannot preserve this
-  is a protocol redesign (new version), not an edit.
+- `scripts/interop_grpc_smoke.py` (and the wem-server integration tests) must
+  keep proving byte identity between the streamed path and the local encode;
+  a proto change that cannot preserve this is a protocol redesign (new
+  version), not an edit.
 - Generated code (`*_pb2*.py`, Rust/Go stubs) is never committed; tooling
   generates into temp directories at run time.
 

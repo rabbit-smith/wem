@@ -19,7 +19,7 @@ proto-contract:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src $(PY) -m unittest tests.contract.test_proto_contract -v
 
 proto-smoke:
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src $(PY) scripts/mock_grpc_smoke.py
+	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src $(PY) scripts/interop_grpc_smoke.py
 
 golden:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.golden.test_golden -v

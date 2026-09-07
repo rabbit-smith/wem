@@ -22,11 +22,13 @@ or CI gates. They must be boring, idempotent, and offline.
 - Scripts must pass `make lint` (ruff covers `scripts/`), use `#!/usr/bin/env
   python3`, type hints, and `SystemExit` codes; failures print the offending
   artifact path, never a stack-trace shrug.
-- Mock gRPC tooling (`mock_grpc_server.py`, `mock_grpc_smoke.py`) pins proto
-  semantics with the Python oracle: byte equality with `encode_wav` output is
-  the pass condition; ports are ephemeral, generated stubs live only in temp
-  directories, and error paths (unknown digest, lifecycle violation) must
-  return enumerated errors, not exceptions.
+- Real-server interop smoke (`interop_grpc_smoke.py`) pins the wwise.v1
+  contract end-to-end: a Python gRPC client streams
+  `tests/fixtures/input.wav` through the real Rust `wem-server` on an
+  ephemeral port (READY-line handshake, no fixed delays) and must rebuild
+  the container byte-identically to `tests/fixtures/reference.wem`, with
+  the unknown-digest path returning the enumerated PROFILE_NOT_FOUND error;
+  v1 semantics are otherwise pinned by the wem-server integration tests.
 - `wheel_smoke.py` verifies installed and zip-import resource paths; when
   packaging changes (new data, native artifacts), update it in the same commit
   — its expected sets are contracts, not constants.

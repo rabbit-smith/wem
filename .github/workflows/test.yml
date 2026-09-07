@@ -29,6 +29,17 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -e ".[dev]"
       - run: python -m unittest discover -s tests -v
-      - name: gRPC v1 streaming smoke
-        run: python scripts/mock_grpc_smoke.py
       - run: python scripts/wheel_smoke.py
+
+  server-interop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -e ".[dev]"
+      - run: cd crates && cargo build --release -p wem-server
+      - name: wwise.v1 interop smoke (Python client vs Rust wem-server)
+        run: python scripts/interop_grpc_smoke.py --server-bin crates/target/release/wem-server

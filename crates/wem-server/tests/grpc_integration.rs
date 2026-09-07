@@ -2,13 +2,14 @@
 //! `WemEncoderService` on an ephemeral loopback port, over the unmodified
 //! wem-core kernel.
 //!
-//! Semantic correspondence with `scripts/mock_grpc_smoke.py`:
-//! * the smoke test drives the *Python mock* server through the same
-//!   lifecycle (Init -> chunk* -> Finish) and asserts that the WEM
-//!   container reassembled from the received `Packet` stream is
-//!   byte-identical to the direct `encode_wav` output;
-//! * these tests run the same assertions against the *tonic* server with
-//!   the same golden fixture: the reassembled container bytes must equal
+//! Semantic correspondence with `scripts/interop_grpc_smoke.py` (the
+//! cross-language smoke driving this same server binary):
+//! * the interop smoke drives this *tonic* server through a Python gRPC
+//!   client with the same lifecycle (Init -> chunk* -> Finish) and asserts
+//!   that the WEM container reassembled from the received `Packet` stream
+//!   is byte-identical to the reference golden;
+//! * these tests run the same assertions from within Rust with the same
+//!   golden fixture: the reassembled container bytes must equal
 //!   `tests/fixtures/reference.wem` byte-for-byte (SHA-256
 //!   `17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247`),
 //!   with packets consumed in strict seq order and exactly one
