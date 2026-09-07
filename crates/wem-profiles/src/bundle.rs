@@ -1,0 +1,490 @@
+//! Validated, path-safe encoder profile bundles
+//! (Python: `profiles/bundle.py`).
+
+use serde_json::Value;
+
+use crate::data::DataDir;
+use crate::error::ProfileError;
+use crate::key::ProfileKey;
+use crate::model::ContainerMetadata;
+use crate::resources::{normalize_resource_path, ResourceRef};
+
+/// Profile index schema (Python `INDEX_SCHEMA`).
+pub const INDEX_SCHEMA: &str = "wwise-wem.profile-index.v1";
+/// Profile manifest schema (Python `BUNDLE_SCHEMA` / `MANIFEST_SCHEMA`).
+pub const BUNDLE_SCHEMA: &str = "wwise-wem.profile-manifest.v1";
+
+/// Profile manifest and its checksum-verified logical resources
+/// (Python `RuntimeResourceManifest`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuntimeResourceManifest {
+    /// The manifest's own checksum-addressed reference.
+    ref_: ResourceRef,
+    schema: String,
+    /// Logical name -> resource (insertion order of the JSON object).
+    resources: Vec<(String, ResourceRef)>,
+}
+
+impl RuntimeResourceManifest {
+    /// Load from an already-parsed manifest payload
+    /// (Python `RuntimeResourceManifest.load`).
+    pub(crate) fn load(ref_: &ResourceRef, payload: &Value) -> Result<Self, ProfileError> {
+        let schema = payload
+            .get("schema")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let resources_value = match payload.get("resources") {
+            Some(Value::Object(map)) => map,
+            _ => return Err(ProfileError::ManifestResourcesNotObject),
+        };
+        let mut resources = Vec::with_capacity(resources_value.len());
+        // Python: resources resolve against `ref.path.parent` (the profile
+        // directory), so resource entries are profile-dir-relative.
+        let manifest_parent = ref_
+            .path()
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_default();
+        for (name, entry) in resources_value {
+            if name.is_empty() {
+                return Err(ProfileError::ResourceNameEmpty);
+            }
+            let entry_map = entry
+                .as_object()
+                .ok_or_else(|| ProfileError::ResourceEntryNotObject { name: name.clone() })?;
+            let path = entry_map
+                .get("path")
+                .and_then(Value::as_str)
+                .filter(|p| !p.is_empty())
+                .ok_or_else(|| ProfileError::ResourcePathMissing { name: name.clone() })?;
+            let path = normalize_resource_path(path)?;
+            let full_path = if manifest_parent.as_os_str().is_empty() {
+                path.clone()
+            } else {
+                manifest_parent.join(path)
+            };
+            let sha256 = entry_map
+                .get("sha256")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| ProfileError::ResourceShaMissing { name: name.clone() })?;
+            // The optional `schema` entry is carried by the payload but not
+            // validated, exactly like the Python loader.
+            let ref_ = ResourceRef::new(
+                ref_.data().clone(),
+                &full_path.display().to_string(),
+                sha256,
+            )
+            .map_err(|_| ProfileError::ResourcePathMissing { name: name.clone() })?;
+            resources.push((name.clone(), ref_));
+        }
+        if schema != BUNDLE_SCHEMA {
+            return Err(ProfileError::UnsupportedManifestSchema { schema });
+        }
+        if resources.is_empty() {
+            return Err(ProfileError::ManifestResourcesEmpty);
+        }
+        Ok(Self {
+            ref_: ref_.clone(),
+            schema,
+            resources,
+        })
+    }
+
+    /// The manifest resource reference.
+    pub fn resource_ref(&self) -> &ResourceRef {
+        &self.ref_
+    }
+
+    /// Profiles-dir-relative manifest path.
+    pub fn ref_path(&self) -> &std::path::Path {
+        self.ref_.path()
+    }
+
+    pub fn schema(&self) -> &str {
+        &self.schema
+    }
+
+    /// All logical resources in manifest order.
+    pub fn resources(&self) -> &[(String, ResourceRef)] {
+        &self.resources
+    }
+
+    /// Look up a resource by logical name, or by its manifest-relative path
+    /// (Python `resource`).
+    pub fn resource(&self, name_or_path: &str) -> Result<&ResourceRef, ProfileError> {
+        if let Some((_, ref_)) = self.resources.iter().find(|(name, _)| name == name_or_path) {
+            return Ok(ref_);
+        }
+        let requested = normalize_resource_path(name_or_path)?;
+        let requested_display = requested.display().to_string();
+        let parent = self
+            .ref_
+            .path()
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_default();
+        for (_, ref_) in &self.resources {
+            let rel = match ref_.path().strip_prefix(&parent) {
+                Ok(p) => p.display().to_string(),
+                Err(_) => ref_.path().display().to_string(),
+            };
+            if rel == requested_display {
+                return Ok(ref_);
+            }
+        }
+        Err(ProfileError::ResourceNotFound {
+            key: name_or_path.to_string(),
+        })
+    }
+
+    /// Verify every resource in sorted name order (Python `verify_all`).
+    pub fn verify_all(&self) -> Result<(), ProfileError> {
+        let mut names: Vec<&String> = self.resources.iter().map(|(n, _)| n).collect();
+        names.sort_unstable();
+        for name in names {
+            self.resources
+                .iter()
+                .find(|(n, _)| n == name)
+                .expect("name came from the resource list")
+                .1
+                .verify()?;
+        }
+        Ok(())
+    }
+}
+
+/// Complete immutable profile identity and its runtime resource set
+/// (Python `ProfileBundle`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProfileBundle {
+    name: String,
+    key: ProfileKey,
+    container_metadata: ContainerMetadata,
+    runtime_manifest: RuntimeResourceManifest,
+    block_sizes: [i64; 2],
+}
+
+impl ProfileBundle {
+    /// Validate and construct (Python `__post_init__` checks).
+    pub(crate) fn new(
+        name: String,
+        key: ProfileKey,
+        container_metadata: ContainerMetadata,
+        runtime_manifest: RuntimeResourceManifest,
+        block_sizes: [i64; 2],
+    ) -> Result<Self, ProfileError> {
+        if name.is_empty() {
+            return Err(ProfileError::BundleNameEmpty);
+        }
+        if (key.channels(), key.sample_rate())
+            != (
+                container_metadata.n_channels,
+                container_metadata.n_samples_per_sec,
+            )
+        {
+            return Err(ProfileError::BundleGeometryMismatch);
+        }
+        let p0 = container_metadata.u_blocksize0_pow;
+        let p1 = container_metadata.u_blocksize1_pow;
+        if p0 >= 0 && p1 >= 0 {
+            let expected = [
+                1i64 << container_metadata.u_blocksize0_pow,
+                1i64 << container_metadata.u_blocksize1_pow,
+            ];
+            if block_sizes != expected {
+                return Err(ProfileError::BundleBlockSizesMismatch);
+            }
+        } else {
+            return Err(ProfileError::BundleBlockSizesMismatch);
+        }
+        let has_setup = runtime_manifest
+            .resources()
+            .iter()
+            .any(|(n, _)| n == "vorbis.setup");
+        if !has_setup {
+            return Err(ProfileError::BundleMissingVorbisSetup);
+        }
+        let setup_sha = runtime_manifest
+            .resource("vorbis.setup")
+            .expect("setup resource exists")
+            .sha256()
+            .to_string();
+        if key.quality_setup_identity() != Some(format!("sha256:{setup_sha}").as_str()) {
+            return Err(ProfileError::BundleSetupIdentityMismatch);
+        }
+        Ok(Self {
+            name,
+            key,
+            container_metadata,
+            runtime_manifest,
+            block_sizes,
+        })
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn key(&self) -> &ProfileKey {
+        &self.key
+    }
+
+    pub fn container_metadata(&self) -> &ContainerMetadata {
+        &self.container_metadata
+    }
+
+    pub fn runtime_manifest(&self) -> &RuntimeResourceManifest {
+        &self.runtime_manifest
+    }
+
+    pub fn block_sizes(&self) -> [i64; 2] {
+        self.block_sizes
+    }
+
+    /// The `vorbis.setup` resource (Python `setup` property).
+    pub fn setup(&self) -> Result<&ResourceRef, ProfileError> {
+        self.runtime_manifest.resource("vorbis.setup")
+    }
+
+    /// Verified setup packet bytes.
+    pub fn setup_packet(&self) -> Result<Vec<u8>, ProfileError> {
+        self.setup()?.read_bytes()
+    }
+
+    /// Verify every logical resource.
+    pub fn verify_all(&self) -> Result<(), ProfileError> {
+        self.runtime_manifest.verify_all()
+    }
+
+    /// Convert to the public identity model
+    /// (Python registry construction of `EncoderProfile`).
+    pub fn to_encoder_profile(&self) -> Result<crate::model::EncoderProfile, ProfileError> {
+        let setup_ref = self.setup()?.clone();
+        let setup_sha = setup_ref.sha256().to_string();
+        crate::model::EncoderProfile::new(
+            self.name.clone(),
+            self.key.clone(),
+            setup_ref,
+            setup_sha,
+            self.block_sizes,
+            self.container_metadata.clone(),
+        )
+    }
+}
+
+/// Strict JSON integer (mirrors Python `isinstance(x, int) and not bool`).
+fn strict_int(value: &Value) -> Option<i64> {
+    value
+        .as_i64()
+        .filter(|_| matches!(value, Value::Number(n) if n.is_i64() || n.is_u64()))
+}
+
+/// Strict JSON non-empty string (mirrors Python `_string`).
+fn strict_string(value: &Value) -> Option<&str> {
+    value.as_str().filter(|s| !s.is_empty())
+}
+
+/// Extract key / container_metadata / block_sizes from the manifest payload,
+/// mirroring the Python try/except that wraps failures as
+/// "profile manifest fields are malformed".
+fn build_bundle_fields(
+    payload: &serde_json::Map<String, Value>,
+) -> Result<(ProfileKey, ContainerMetadata, [i64; 2]), ProfileError> {
+    let result = (|| -> Result<(ProfileKey, ContainerMetadata, Vec<i64>), String> {
+        let key_data = payload
+            .get("key")
+            .and_then(Value::as_object)
+            .ok_or_else(|| "key must be an object".to_string())?;
+        let channels = strict_int(
+            key_data
+                .get("channels")
+                .ok_or_else(|| "'channels'".to_string())?,
+        )
+        .ok_or_else(|| "key.channels must be an integer".to_string())?;
+        let sample_rate = strict_int(
+            key_data
+                .get("sample_rate")
+                .ok_or_else(|| "'sample_rate'".to_string())?,
+        )
+        .ok_or_else(|| "key.sample_rate must be an integer".to_string())?;
+        let generation = strict_string(
+            key_data
+                .get("generation")
+                .ok_or_else(|| "'generation'".to_string())?,
+        )
+        .ok_or_else(|| "key.generation must be non-empty text".to_string())?
+        .to_string();
+        let channel_layout = strict_string(
+            key_data
+                .get("channel_layout")
+                .ok_or_else(|| "'channel_layout'".to_string())?,
+        )
+        .ok_or_else(|| "key.channel_layout must be non-empty text".to_string())?
+        .to_string();
+        let quality_setup_identity = strict_string(
+            key_data
+                .get("quality_setup_identity")
+                .ok_or_else(|| "'quality_setup_identity'".to_string())?,
+        )
+        .ok_or_else(|| "key.quality_setup_identity must be non-empty text".to_string())?
+        .to_string();
+        let key = ProfileKey::with_identity(
+            channels,
+            sample_rate,
+            Some(generation),
+            Some(channel_layout),
+            Some(quality_setup_identity),
+        )
+        .map_err(|e| e.to_string())?;
+
+        let metadata_map = payload
+            .get("container_metadata")
+            .and_then(Value::as_object)
+            .ok_or_else(|| "container_metadata must be an object".to_string())?;
+        let metadata = ContainerMetadata::from_fmt_map(metadata_map).map_err(|e| e.to_string())?;
+
+        let block_data = payload
+            .get("block_sizes")
+            .ok_or_else(|| "'block_sizes'".to_string())?;
+        if !block_data.is_array() {
+            return Err("profile bundle block_sizes must be an array".to_string());
+        }
+        let blocks: Vec<i64> = block_data
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| {
+                strict_int(v).ok_or_else(|| "block_sizes entry must be an integer".to_string())
+            })
+            .collect::<Result<_, _>>()?;
+        Ok((key, metadata, blocks))
+    })();
+    match result {
+        Ok((key, metadata, blocks)) => {
+            // Python builds a tuple of arbitrary length here; ProfileBundle
+            // rejects anything but exactly two entries.
+            if blocks.len() != 2 {
+                return Err(ProfileError::ManifestFieldMalformed {
+                    reason: format!(
+                        "profile bundle block_sizes must contain two entries, found {}",
+                        blocks.len()
+                    ),
+                });
+            }
+            Ok((key, metadata, [blocks[0], blocks[1]]))
+        }
+        Err(reason) => Err(ProfileError::ManifestFieldMalformed { reason }),
+    }
+}
+
+/// Load a profile through the package index and its self-contained manifest
+/// (Python `load_profile_bundle`).
+///
+/// * `profile` selects an index entry; `None` uses the index `default`.
+/// * `verify_all` runs SHA-256 verification over every logical resource.
+pub fn load_profile_bundle(
+    data: &DataDir,
+    profile: Option<&str>,
+    verify_all: bool,
+) -> Result<ProfileBundle, ProfileError> {
+    let index_path = data.index_path();
+    let raw = std::fs::read(&index_path).map_err(|_| ProfileError::MissingResource {
+        path: "index.json".to_string(),
+    })?;
+    let index: Value = serde_json::from_slice(&raw).map_err(|_| ProfileError::InvalidJson {
+        path: "index.json".to_string(),
+    })?;
+    let index = match index {
+        Value::Object(map) => map,
+        _ => {
+            return Err(ProfileError::IndexNotObject {
+                path: "index.json".to_string(),
+            })
+        }
+    };
+
+    let schema = index.get("schema").and_then(Value::as_str).unwrap_or("");
+    if schema != INDEX_SCHEMA {
+        return Err(ProfileError::UnsupportedIndexSchema {
+            schema: schema.to_string(),
+        });
+    }
+
+    let selected = match profile {
+        Some(name) if !name.is_empty() => name.to_string(),
+        _ => index
+            .get("default")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .ok_or(ProfileError::IndexDefaultMissing)?
+            .to_string(),
+    };
+
+    let profiles = index
+        .get("profiles")
+        .and_then(Value::as_object)
+        .ok_or(ProfileError::IndexProfilesNotObject)?;
+    let index_entry = profiles
+        .get(&selected)
+        .ok_or_else(|| ProfileError::ProfileNotInIndex {
+            profile: selected.clone(),
+        })?;
+    let index_entry =
+        index_entry
+            .as_object()
+            .ok_or_else(|| ProfileError::IndexProfileNotObject {
+                profile: selected.clone(),
+            })?;
+
+    let manifest_relative = strict_string(index_entry.get("manifest").unwrap_or(&Value::Null))
+        .ok_or(ProfileError::IndexManifestPathMissing)?;
+    let _ = normalize_resource_path(manifest_relative)?;
+    let sha256 = strict_string(index_entry.get("sha256").unwrap_or(&Value::Null))
+        .ok_or(ProfileError::IndexProfileShaMissing)?;
+
+    let manifest_ref = ResourceRef::new(data.clone(), manifest_relative, sha256)?;
+    let payload_raw = manifest_ref.read_bytes()?;
+    let payload: Value =
+        serde_json::from_slice(&payload_raw).map_err(|_| ProfileError::InvalidJson {
+            path: manifest_ref.path().display().to_string(),
+        })?;
+    let payload = match payload {
+        Value::Object(map) => map,
+        _ => {
+            return Err(ProfileError::ManifestNotObject {
+                path: manifest_ref.path().display().to_string(),
+            })
+        }
+    };
+
+    let schema = payload.get("schema").and_then(Value::as_str).unwrap_or("");
+    if schema != BUNDLE_SCHEMA {
+        return Err(ProfileError::UnsupportedManifestSchema {
+            schema: schema.to_string(),
+        });
+    }
+
+    let (key, container_metadata, block_sizes) = build_bundle_fields(&payload)?;
+    let payload_value = Value::Object(payload.clone());
+    let runtime_manifest = RuntimeResourceManifest::load(&manifest_ref, &payload_value)?;
+
+    let name = strict_string(payload.get("name").unwrap_or(&Value::Null))
+        .ok_or(ProfileError::BundleNameEmpty)?
+        .to_string();
+
+    let bundle = ProfileBundle::new(name, key, container_metadata, runtime_manifest, block_sizes)?;
+    if bundle.name() != selected {
+        return Err(ProfileError::IndexNameMismatch {
+            selected,
+            name: bundle.name().to_string(),
+        });
+    }
+    if verify_all {
+        bundle.verify_all()?;
+    }
+    Ok(bundle)
+}

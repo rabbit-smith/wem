@@ -1,0 +1,204 @@
+//! Installed Wwise Vorbis encoder profiles and exact profile registry
+//! (Python: `profiles/registry.py`).
+//!
+//! Python builds one module-level registry from the installed default
+//! profile at import time; the Rust equivalent is built lazily by
+//! [`installed_registry`] on the caller's [`DataDir`].
+
+use crate::bundle::load_profile_bundle;
+use crate::data::DataDir;
+use crate::error::ProfileError;
+use crate::key::{ProfileKey, WWISE_GENERATION};
+use crate::model::EncoderProfile;
+
+/// Read-only exact lookup by full profile key or stable profile name.
+#[derive(Debug, Clone, Default)]
+pub struct ProfileRegistry {
+    by_key: Vec<(ProfileKey, EncoderProfile)>,
+    by_name: Vec<(String, EncoderProfile)>,
+}
+
+impl ProfileRegistry {
+    /// Build the registry (Python `ProfileRegistry.__init__`): duplicate
+    /// keys or names are rejected.
+    pub fn new(profiles: Vec<EncoderProfile>) -> Result<Self, ProfileError> {
+        let mut by_key: Vec<(ProfileKey, EncoderProfile)> = Vec::new();
+        let mut by_name: Vec<(String, EncoderProfile)> = Vec::new();
+        for profile in profiles {
+            let key = profile.key().clone();
+            let name = profile.name().to_string();
+            if by_key.iter().any(|(k, _)| k == &key) {
+                return Err(ProfileError::RegistryDuplicateKey {
+                    key: key.describe(),
+                });
+            }
+            if by_name.iter().any(|(n, _)| n == &name) {
+                return Err(ProfileError::RegistryDuplicateName { name: name.clone() });
+            }
+            by_key.push((key, profile.clone()));
+            by_name.push((name, profile));
+        }
+        Ok(Self { by_key, by_name })
+    }
+
+    /// Lookup by exact key (Python `__getitem__`).
+    pub fn get_by_key(&self, key: &ProfileKey) -> Option<&EncoderProfile> {
+        self.by_key.iter().find(|(k, _)| k == key).map(|(_, p)| p)
+    }
+
+    /// Lookup by name (Python `get` with a string identity).
+    pub fn get_by_name(&self, name: &str) -> Option<&EncoderProfile> {
+        self.by_name.iter().find(|(n, _)| n == name).map(|(_, p)| p)
+    }
+
+    /// Resolve a complete profile identity (Python `resolve` with a key).
+    pub fn resolve_key(&self, key: &ProfileKey) -> Result<&EncoderProfile, ProfileError> {
+        self.get_by_key(key)
+            .ok_or_else(|| ProfileError::UnknownProfileKey {
+                key: key.describe(),
+            })
+    }
+
+    /// Resolve from WAV geometry (Python `resolve` with channels/sample_rate).
+    pub fn resolve_geometry(
+        &self,
+        channels: i64,
+        sample_rate: i64,
+    ) -> Result<&EncoderProfile, ProfileError> {
+        let matches: Vec<&EncoderProfile> = self
+            .by_key
+            .iter()
+            .filter(|(k, _)| (k.channels(), k.sample_rate()) == (channels, sample_rate))
+            .map(|(_, p)| p)
+            .collect();
+        if matches.is_empty() {
+            let installed = self
+                .list()
+                .iter()
+                .map(|p| format!("{}ch/{}Hz", p.channels(), p.sample_rate()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(ProfileError::NoProfileForGeometry {
+                channels,
+                sample_rate,
+                installed,
+            });
+        }
+        if matches.len() != 1 {
+            let names = matches
+                .iter()
+                .map(|p| p.name().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(ProfileError::AmbiguousProfileGeometry {
+                channels,
+                sample_rate,
+                names,
+            });
+        }
+        Ok(matches[0])
+    }
+
+    /// Resolve a complete profile identity carried by a template setup
+    /// (Python `resolve_setup`).
+    pub fn resolve_setup(
+        &self,
+        channels: i64,
+        sample_rate: i64,
+        setup_sha256: &str,
+    ) -> Result<&EncoderProfile, ProfileError> {
+        let setup_sha256 = setup_sha256.to_lowercase();
+        let matches: Vec<&EncoderProfile> = self
+            .by_key
+            .iter()
+            .filter(|(k, _)| (k.channels(), k.sample_rate()) == (channels, sample_rate))
+            .map(|(_, p)| p)
+            .collect();
+        let selected: Vec<&EncoderProfile> = matches
+            .iter()
+            .filter(|p| p.setup_sha256() == setup_sha256)
+            .copied()
+            .collect();
+        if selected.len() == 1 {
+            return Ok(selected[0]);
+        }
+        let installed = if matches.is_empty() {
+            "none".to_string()
+        } else {
+            matches
+                .iter()
+                .map(|p| format!("{}({})", p.name(), p.setup_sha256()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        Err(ProfileError::TemplateSetupNoInstalledProfile {
+            setup_sha256: setup_sha256.clone(),
+            channels,
+            sample_rate,
+            installed,
+        })
+    }
+
+    /// All profiles sorted by name (Python `list`).
+    pub fn list(&self) -> Vec<EncoderProfile> {
+        let mut profiles: Vec<EncoderProfile> =
+            self.by_name.iter().map(|(_, p)| p.clone()).collect();
+        profiles.sort_by(|a, b| a.name().cmp(b.name()));
+        profiles
+    }
+
+    /// Profiles indexed by name (Python `profiles_by_name`).
+    pub fn profiles_by_name(&self) -> Vec<(&str, &EncoderProfile)> {
+        self.by_name.iter().map(|(n, p)| (n.as_str(), p)).collect()
+    }
+
+    pub fn len(&self) -> usize {
+        self.by_key.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_key.is_empty()
+    }
+}
+
+/// Build the registry from the installed default profile
+/// (Python module-level `PROFILE_REGISTRY`).
+pub fn installed_registry(data: &DataDir) -> Result<ProfileRegistry, ProfileError> {
+    let bundle = load_profile_bundle(data, None, false)?;
+    let profile = bundle.to_encoder_profile()?;
+    ProfileRegistry::new(vec![profile])
+}
+
+/// Load one installed WEM profile by stable name
+/// (Python `load_wem_profile`).
+pub fn load_wem_profile(name: &str) -> Result<EncoderProfile, ProfileError> {
+    let data = DataDir::from_env()?;
+    let registry = installed_registry(&data)?;
+    let available = registry
+        .list()
+        .iter()
+        .map(|p| p.name().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    registry
+        .get_by_name(name)
+        .cloned()
+        .ok_or_else(|| ProfileError::UnknownProfile {
+            name: name.to_string(),
+            available,
+        })
+}
+
+/// Resolve an installed exact profile from WAV geometry
+/// (Python `resolve_wem_profile`).
+pub fn resolve_wem_profile(
+    channels: i64,
+    sample_rate: i64,
+) -> Result<EncoderProfile, ProfileError> {
+    let data = DataDir::from_env()?;
+    let registry = installed_registry(&data)?;
+    registry.resolve_geometry(channels, sample_rate).cloned()
+}
+
+/// Generation string used in registry diagnostics.
+pub const GENERATION: &str = WWISE_GENERATION;

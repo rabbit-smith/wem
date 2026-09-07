@@ -1,0 +1,8 @@
+[package]
+name = "wem-analysis"
+description = "WEM encoder analysis domain: typed resource models and DSP primitives (resource-free)."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+wem-scheduling = { workspace = true }

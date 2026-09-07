@@ -1,0 +1,36 @@
+# Rust workspace for the bit-exact WEM encoder kernel.
+#
+# Dependency direction (locked by docs/architecture.md):
+#   wem-scheduling        - no sibling dependencies (pure plans/policies)
+#   wem-analysis          - depends on wem-scheduling; resource-free typed models + DSP
+#   wem-vorbis            - depends on wem-analysis; bitstream/codebook/setup primitives
+#   wem-container         - no sibling dependencies; RIFF/WEM models
+#   wem-profiles          - depends on wem-analysis + wem-vorbis; sole owner of packaged
+#                           calibration resources, checksum verification, table loaders
+#   wem-core              - depends on everything; the only orchestration layer
+[workspace]
+resolver = "2"
+members = [
+    "wem-profiles",
+    "wem-scheduling",
+    "wem-analysis",
+    "wem-vorbis",
+    "wem-container",
+    "wem-core",
+]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+authors = ["wem"]
+
+[workspace.dependencies]
+sha2 = "0.10.9"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+
+wem-scheduling = { path = "wem-scheduling" }
+wem-analysis = { path = "wem-analysis" }
+wem-vorbis = { path = "wem-vorbis" }
+wem-container = { path = "wem-container" }
+wem-profiles = { path = "wem-profiles" }

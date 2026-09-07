@@ -1,0 +1,7 @@
+[package]
+name = "wem-container"
+description = "WEM encoder RIFF/WEM container models and codecs (no resource loading)."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

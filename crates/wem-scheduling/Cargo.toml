@@ -1,0 +1,7 @@
+[package]
+name = "wem-scheduling"
+description = "WEM encoder frame plans and mode-selection policy (resource-free)."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

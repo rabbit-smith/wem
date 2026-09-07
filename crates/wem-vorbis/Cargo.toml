@@ -1,0 +1,8 @@
+[package]
+name = "wem-vorbis"
+description = "WEM encoder Vorbis primitives: bitstream IO, codebooks, setup codec."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+wem-analysis = { workspace = true }
