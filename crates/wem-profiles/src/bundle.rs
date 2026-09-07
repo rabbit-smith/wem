@@ -9,7 +9,10 @@ use crate::data::DataDir;
 use crate::error::ProfileError;
 use crate::key::ProfileKey;
 use crate::model::ContainerMetadata;
-use crate::resources::{normalize_resource_path, ResourceBackend, ResourceRef};
+use crate::resources::{
+    join_logical_path, logical_parent, logical_relative, normalize_resource_path,
+    validate_logical_key, ResourceBackend, ResourceRef,
+};
 
 /// Profile index schema (Python `INDEX_SCHEMA`).
 pub const INDEX_SCHEMA: &str = "wwise-wem.profile-index.v1";
@@ -43,12 +46,11 @@ impl RuntimeResourceManifest {
         let mut resources = Vec::with_capacity(resources_value.len());
         // Python: resources resolve against `ref.path.parent` (the profile
         // directory), so resource entries are profile-dir-relative.
-        let manifest_parent = ref_
-            .path()
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .map(std::path::Path::to_path_buf)
-            .unwrap_or_default();
+        // The parent comes from the ref key's string shape (the prefix
+        // before its last '/'), never through std::path — whose display()
+        // would inject the OS separator on Windows and the joined key would
+        // fail the shared rejection rules below.
+        let manifest_parent = logical_parent(ref_.path());
         for (name, entry) in resources_value {
             if name.is_empty() {
                 return Err(ProfileError::ResourceNameEmpty);
@@ -61,12 +63,8 @@ impl RuntimeResourceManifest {
                 .and_then(Value::as_str)
                 .filter(|p| !p.is_empty())
                 .ok_or_else(|| ProfileError::ResourcePathMissing { name: name.clone() })?;
-            let path = normalize_resource_path(path)?;
-            let full_path = if manifest_parent.as_os_str().is_empty() {
-                path.clone()
-            } else {
-                manifest_parent.join(path)
-            };
+            let path = validate_logical_key(path)?;
+            let full_path = join_logical_path(manifest_parent, path);
             let sha256 = entry_map
                 .get("sha256")
                 .and_then(Value::as_str)
@@ -76,12 +74,8 @@ impl RuntimeResourceManifest {
             // validated, exactly like the Python loader.
             // Child refs inherit the parent ref's byte source (filesystem or
             // in-memory) so both entry points validate identically.
-            let ref_ = ResourceRef::with_backend(
-                ref_.backend().clone(),
-                &full_path.display().to_string(),
-                sha256,
-            )
-            .map_err(|_| ProfileError::ResourcePathMissing { name: name.clone() })?;
+            let ref_ = ResourceRef::with_backend(ref_.backend().clone(), &full_path, sha256)
+                .map_err(|_| ProfileError::ResourcePathMissing { name: name.clone() })?;
             resources.push((name.clone(), ref_));
         }
         if schema != BUNDLE_SCHEMA {
@@ -102,8 +96,9 @@ impl RuntimeResourceManifest {
         &self.ref_
     }
 
-    /// Profiles-dir-relative manifest path.
-    pub fn ref_path(&self) -> &std::path::Path {
+    /// Profiles-dir-relative manifest logical key (canonical slash form on
+    /// every platform).
+    pub fn ref_path(&self) -> &str {
         self.ref_.path()
     }
 
@@ -122,21 +117,14 @@ impl RuntimeResourceManifest {
         if let Some((_, ref_)) = self.resources.iter().find(|(name, _)| name == name_or_path) {
             return Ok(ref_);
         }
-        let requested = normalize_resource_path(name_or_path)?;
-        let requested_display = requested.display().to_string();
-        let parent = self
-            .ref_
-            .path()
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .map(std::path::Path::to_path_buf)
-            .unwrap_or_default();
+        // Path-form lookup compares canonical logical keys (slash form on
+        // every platform), manifest-parent-relative on both sides.
+        let requested = logical_relative(
+            validate_logical_key(name_or_path)?,
+            logical_parent(self.ref_.path()),
+        );
         for (_, ref_) in &self.resources {
-            let rel = match ref_.path().strip_prefix(&parent) {
-                Ok(p) => p.display().to_string(),
-                Err(_) => ref_.path().display().to_string(),
-            };
-            if rel == requested_display {
+            if logical_relative(ref_.path(), logical_parent(self.ref_.path())) == requested {
                 return Ok(ref_);
             }
         }
@@ -502,13 +490,13 @@ fn load_profile_bundle_with(
     let payload_raw = manifest_ref.read_bytes()?;
     let payload: Value =
         serde_json::from_slice(&payload_raw).map_err(|_| ProfileError::InvalidJson {
-            path: manifest_ref.path().display().to_string(),
+            path: manifest_ref.path().to_string(),
         })?;
     let payload = match payload {
         Value::Object(map) => map,
         _ => {
             return Err(ProfileError::ManifestNotObject {
-                path: manifest_ref.path().display().to_string(),
+                path: manifest_ref.path().to_string(),
             })
         }
     };

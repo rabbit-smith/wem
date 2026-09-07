@@ -517,6 +517,48 @@ fn resource_path_normalization_rejections() {
 }
 
 // ---------------------------------------------------------------------------
+// Cross-platform key-shape invariant
+// ---------------------------------------------------------------------------
+
+#[test]
+fn resource_keys_are_canonical_slash_form() {
+    // Key-shape invariant (holds on every platform): every logical resource
+    // key of a loaded bundle is a profiles-dir-relative POSIX path. The
+    // shared validator rejects backslashes, so any platform separator
+    // leaking into key construction (std::path's display() on Windows)
+    // fails here — asserted at the code level, no OS reproduction needed.
+    let bundle = load_profile_bundle(&data_dir(), None, false).expect("profile loads");
+    let manifest = bundle.runtime_manifest();
+    assert_eq!(manifest.ref_path(), "wwise2013-6ch-44100/manifest.json");
+    for (name, ref_) in manifest.resources() {
+        assert!(
+            !ref_.path().contains('\\'),
+            "resource key of {name} must stay slash-separated"
+        );
+        assert!(
+            normalize_resource_path(ref_.path()).is_ok(),
+            "resource key of {name} must stay valid against the shared rules"
+        );
+        assert!(
+            ref_.path()
+                .strip_prefix("wwise2013-6ch-44100/")
+                .is_some_and(|rel| !rel.is_empty()),
+            "resource key of {name} is profiles-dir-relative"
+        );
+    }
+    // The manifest view's keys are the same canonical keys, parent-relative.
+    let view = bundle
+        .to_encoder_profile()
+        .expect("encoder profile")
+        .runtime_manifest()
+        .expect("manifest view");
+    for key in view.files.keys() {
+        assert!(!key.contains('\\'), "manifest view key {key:?}");
+    }
+    assert!(view.files.contains_key("vorbis/setup.bin"));
+}
+
+// ---------------------------------------------------------------------------
 // Tamper detection with synthetic profile trees
 // ---------------------------------------------------------------------------
 

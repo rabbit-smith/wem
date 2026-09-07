@@ -6,7 +6,7 @@ use serde_json::{Map, Value};
 use crate::bundle::{load_profile_bundle, RuntimeResourceManifest};
 use crate::error::ProfileError;
 use crate::key::ProfileKey;
-use crate::resources::{ResourceBackend, ResourceRef};
+use crate::resources::{logical_parent, logical_relative, ResourceBackend, ResourceRef};
 
 /// Typed representation of the fixed 66-byte Wwise Vorbis fmt fields
 /// (Python `ContainerMetadata`).
@@ -328,7 +328,7 @@ impl EncoderProfile {
         let digest = crate::resources::hex(sha256_hex(&payload));
         if digest != self.setup_sha256 {
             return Err(ProfileError::ShaMismatch {
-                path: self.setup_path.path().display().to_string(),
+                path: self.setup_path.path().to_string(),
                 expected: self.setup_sha256.clone(),
                 actual: digest,
             });
@@ -373,16 +373,11 @@ impl EncoderProfile {
 
 /// Shared helper for manifest views (Python `runtime_manifest()` body).
 pub(crate) fn manifest_view(manifest: &RuntimeResourceManifest) -> ProfileManifestView {
-    let parent = manifest
-        .ref_path()
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(std::path::Path::to_path_buf)
-        .unwrap_or_default();
+    let parent = logical_parent(manifest.ref_path());
     let mut resources = std::collections::BTreeMap::new();
     let mut files = std::collections::BTreeMap::new();
     for (name, ref_) in manifest.resources() {
-        let rel = relative_to_profile_dir(ref_.path(), &parent);
+        let rel = relative_to_profile_dir(ref_.path(), parent);
         resources.insert(name.clone(), (rel.clone(), ref_.sha256().to_string()));
         files.insert(rel, ref_.sha256().to_string());
     }
@@ -393,14 +388,10 @@ pub(crate) fn manifest_view(manifest: &RuntimeResourceManifest) -> ProfileManife
     }
 }
 
-/// Convert a profiles-dir-relative path to a manifest-dir-relative path.
-pub(crate) fn relative_to_profile_dir(path: &std::path::Path, parent: &std::path::Path) -> String {
-    if parent.as_os_str().is_empty() {
-        return path.display().to_string();
-    }
-    path.strip_prefix(parent)
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|_| path.display().to_string())
+/// Convert a profiles-dir-relative logical key to a manifest-dir-relative
+/// key (canonical slash form on every platform).
+pub(crate) fn relative_to_profile_dir(path: &str, parent: &str) -> String {
+    logical_relative(path, parent).to_string()
 }
 
 fn sha256_hex(payload: &[u8]) -> [u8; 32] {

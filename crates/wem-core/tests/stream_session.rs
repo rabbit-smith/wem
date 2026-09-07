@@ -53,8 +53,10 @@ fn read_profile_bytes_bundle() -> (Vec<u8>, Vec<(String, Vec<u8>)>) {
                 walk(base, &path, out);
             } else if path.file_name() != Some("index.json".as_ref()) {
                 let rel = path.strip_prefix(base).expect("path under profiles dir");
+                // Canonical POSIX keys: the bytes contract is platform-
+                // independent (no OS separator may reach the kernel).
                 out.push((
-                    rel.to_string_lossy().into_owned(),
+                    rel.to_string_lossy().replace('\\', "/"),
                     std::fs::read(&path).expect("resource file reads"),
                 ));
             }
