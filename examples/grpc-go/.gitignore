@@ -1,8 +1,15 @@
 # Generated gRPC stubs — never committed (proto/AGENTS.md).
-# Regenerate with:
+# Regenerate with (identical to examples/grpc-go/README.md and the
+# server-interop job in .github/workflows/test.yml):
 #   cd <repo root>
 #   PATH="$HOME/go/bin:$PATH" protoc -I proto \
-#     --go_out=examples/grpc-go --go_opt=module=grpc-go --go_opt=paths=source_relative \
-#     --go-grpc_out=examples/grpc-go --go-grpc_opt=module=grpc-go --go-grpc_opt=paths=source_relative \
+#     --go_out=examples/grpc-go --go_opt=paths=source_relative \
+#     --go_opt=Mwwise/v1/common.proto=grpc-go/wwise/v1 \
+#     --go_opt=Mwwise/v1/profile.proto=grpc-go/wwise/v1 \
+#     --go_opt=Mwwise/v1/encode.proto=grpc-go/wwise/v1 \
+#     --go-grpc_out=examples/grpc-go --go-grpc_opt=paths=source_relative \
+#     --go-grpc_opt=Mwwise/v1/common.proto=grpc-go/wwise/v1 \
+#     --go-grpc_opt=Mwwise/v1/profile.proto=grpc-go/wwise/v1 \
+#     --go-grpc_opt=Mwwise/v1/encode.proto=grpc-go/wwise/v1 \
 #     proto/wwise/v1/common.proto proto/wwise/v1/profile.proto proto/wwise/v1/encode.proto
 wwise/

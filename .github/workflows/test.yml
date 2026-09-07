@@ -74,3 +74,70 @@ jobs:
         run: python scripts/interop_grpc_smoke.py --server-bin crates/target/release/wem-server
         env:
           PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/reference
+      # --- Go reference client (examples/grpc-go) rot gate ---------------
+      # Regenerates the gRPC stubs with the canonical recipe documented in
+      # examples/grpc-go/README.md and examples/grpc-go/.gitignore, then
+      # streams the fixture through wem-server and asserts the golden WEM
+      # sha256. Plugin versions are pinned to the ones verified against
+      # this repo's go.sum runtime; bump them deliberately.
+      # go.mod declares `go 1.26` (released); setup-go resolves the latest
+      # 1.26.x stable. If 1.26 were ever unavailable, use "stable" and
+      # require the toolchain to satisfy go.mod.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Install protoc + Go protoc plugins (pinned, verified)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq protobuf-compiler
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@1.5.1
+      - name: Regenerate Go gRPC stubs (canonical recipe; keep in sync with README/.gitignore)
+        run: |
+          set -euo pipefail
+          PATH="$HOME/go/bin:$PATH" protoc -I proto \
+            --go_out=examples/grpc-go --go_opt=paths=source_relative \
+            --go_opt=Mwwise/v1/common.proto=grpc-go/wwise/v1 \
+            --go_opt=Mwwise/v1/profile.proto=grpc-go/wwise/v1 \
+            --go_opt=Mwwise/v1/encode.proto=grpc-go/wwise/v1 \
+            --go-grpc_out=examples/grpc-go --go-grpc_opt=paths=source_relative \
+            --go-grpc_opt=Mwwise/v1/common.proto=grpc-go/wwise/v1 \
+            --go-grpc_opt=Mwwise/v1/profile.proto=grpc-go/wwise/v1 \
+            --go-grpc_opt=Mwwise/v1/encode.proto=grpc-go/wwise/v1 \
+            proto/wwise/v1/common.proto proto/wwise/v1/profile.proto proto/wwise/v1/encode.proto
+      - name: go vet + build the reference client
+        run: |
+          set -euo pipefail
+          cd examples/grpc-go
+          go vet ./...
+          go build ./...
+      - name: Go end-to-end (stream fixture through wem-server, assert golden sha256)
+        run: |
+          set -euo pipefail
+          LOG=$(mktemp)
+          ./crates/target/release/wem-server --addr 127.0.0.1:0 > "$LOG" 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          # Poll the server's READY line (its documented ready contract);
+          # bounded wait on an ephemeral port, no fixed sleeps.
+          READY_LINE=""
+          for _ in $(seq 1 30); do
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "wem-server exited early:"; cat "$LOG"; exit 1
+            fi
+            READY_LINE=$(grep -m1 '^READY ' "$LOG" || true)
+            if [ -n "$READY_LINE" ]; then break; fi
+            sleep 1
+          done
+          if [ -z "$READY_LINE" ]; then
+            echo "wem-server did not become ready within 30s:"; cat "$LOG"; exit 1
+          fi
+          ADDR="${READY_LINE#READY }"
+          echo "wem-server ready at $ADDR"
+          cd examples/grpc-go
+          go run . -addr "$ADDR" -wav ../../tests/fixtures/input.wav -out /tmp/go-ref-out.wem
+          GOT=$(sha256sum /tmp/go-ref-out.wem | awk '{print $1}')
+          if [ "$GOT" != "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247" ]; then
+            echo "golden sha256 mismatch: got $GOT"; exit 1
+          fi
+          echo "golden sha256 OK: $GOT"
