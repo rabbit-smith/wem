@@ -51,7 +51,7 @@ jobs:
         run: python scripts/native_smoke.py
         env:
           PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/reference
-      - name: wheel gate (single wheel: facade + native; clean-venv encode)
+      - name: "wheel gate (single wheel: facade + native; clean-venv encode)"
         run: python scripts/wheel_smoke.py
       - name: differential parity PR gate (golden + 10 cases, < 1 minute)
         run: python scripts/fuzz_diff_parity.py --pr
