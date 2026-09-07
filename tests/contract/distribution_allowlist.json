@@ -23,6 +23,7 @@
   "modules": [
     "wwise_wem/__init__.py",
     "wwise_wem/__main__.py",
+    "wwise_wem/_engine.py",
     "wwise_wem/_tmath.py",
     "wwise_wem/adapters/__init__.py",
     "wwise_wem/adapters/wav.py",

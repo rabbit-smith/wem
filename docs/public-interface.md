@@ -234,6 +234,42 @@ produce identical results:
 These are compatibility gates for refactoring, not general promises that all
 inputs have the same size or packet counts.
 
+## Engine selection (native kernel / pure-Python fallback)
+
+The facade is engine-aware. Byte-producing calls (`Encoder.encode_pcm()`,
+`encode_wav()`, and the CLI) prefer the native kernel
+(`_wwise_wem_native`, built from `crates/wem-python`) when it is importable
+and otherwise run the pure-Python implementation. Both engines produce
+byte-identical output; the pure-Python implementation remains the reference
+oracle.
+
+The `WWISE_WEM_ENGINE` environment variable pins the choice:
+
+| Value | Behavior |
+|---|---|
+| `auto` (default) | Native kernel when importable, pure Python otherwise. |
+| `native` | Always the native kernel; a missing extension raises `ImportError` instead of downgrading. |
+| `python` | Always the pure-Python implementation. |
+
+Engine-specific input rules:
+
+- The native kernel consumes integer signed-16 samples. Float PCM is
+  accepted by the native engine only when every sample is exactly an
+  integer multiple of `1/32768` within the signed-16 range (the domain
+  produced by `read_pcm16_wav` and `read_pcm16`). With
+  `WWISE_WEM_ENGINE=native`, an out-of-domain sample raises `ValueError`.
+  With `auto`, such a buffer is routed to the pure-Python implementation
+  instead.
+- The compatibility template path (`template=PATH` / `--template`) always
+  uses the pure-Python implementation: it carries template-provided RIFF
+  container metadata (byte order, fmt values, seek-table bytes, extra
+  chunks) that the native one-shot API does not accept.
+
+`load_wem_profile`, `resolve_wem_profile`, and `ProfileRegistry` are
+metadata-only paths and always run in pure Python; they never touch the
+kernel. Engine status is queryable through the internal
+`wwise_wem._engine` module for diagnostics.
+
 ## Deliberately outside the public contract
 
 Do not depend on internal modules such as `analysis.dsp.transform`,
