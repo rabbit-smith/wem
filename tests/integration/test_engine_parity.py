@@ -29,9 +29,9 @@ from wwise_wem.adapters.wav import read_pcm16
 from wwise_wem.model import PcmBuffer
 
 try:
-    import wwise_wem._native as native_mod
+    import _wwise_wem_native
 except ImportError:
-    native_mod = None
+    _wwise_wem_native = None
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
@@ -72,11 +72,9 @@ def _pinned_engine(name: str):
 
 
 @unittest.skipIf(
-    native_mod is None,
-    "native extension wwise_wem._native is not importable; "
-    "install a wheel built from the repository root "
-    "(pip install . with the maturin backend), or build it in the "
-    "development tree: maturin develop -F extension-module",
+    _wwise_wem_native is None,
+    "native extension _wwise_wem_native is not installed; "
+    "build it with: cd crates/wem-python && maturin develop -F extension-module",
 )
 class EngineParityTests(unittest.TestCase):
     def test_both_engines_are_byte_identical_on_reference_input(self):
@@ -90,7 +88,7 @@ class EngineParityTests(unittest.TestCase):
             native_result = Encoder(profile).encode_pcm(pcm)
         # The internal pure-Python path and the raw binding, directly.
         internal_result = Encoder(profile)._encode_pcm_python(pcm)
-        direct = native_mod.Encoder(PROFILE_NAME).encode_pcm(
+        direct = _wwise_wem_native.Encoder(PROFILE_NAME).encode_pcm(
             pcm.sample_rate, _rows_from_pcm(pcm)
         )
 
@@ -178,7 +176,7 @@ import sys
 
 class _NativeBlocker:
     def find_spec(self, name, path=None, target=None):
-        if name == "wwise_wem._native":
+        if name == "_wwise_wem_native":
             raise ImportError("native extension blocked for this test")
         return None
 
@@ -196,7 +194,7 @@ try:
     Encoder(profile).encode_pcm(pcm)
 except ImportError as error:
     message = str(error)
-    assert "wwise_wem._native" in message, message
+    assert "_wwise_wem_native" in message, message
     assert "WWISE_WEM_ENGINE" in message, message
     print("import-error-ok")
 else:
