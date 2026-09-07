@@ -27,6 +27,7 @@ jobs:
     # The reference oracle (reference/) stays on PYTHONPATH as a test
     # asset for the parity and contract suites.
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.10", "3.13"]
@@ -41,8 +42,28 @@ jobs:
       # PYTHONPATH; pip-installing it would run a second maturin build);
       # the kernel build goes through the maturin develop step below
       - run: python -m pip install "maturin>=1.7" "grpcio>=1.60" "grpcio-tools>=1.60"
-      - name: in-package native kernel (maturin develop)
-        run: maturin develop -F extension-module
+      - name: in-package native kernel (maturin build + drop extension into src)
+        run: |
+          set -euo pipefail
+          maturin build --release -o native-wheel
+          python - <<'PY'
+          import glob, pathlib, zipfile
+          wheel = sorted(glob.glob("native-wheel/*.whl"))[-1]
+          with zipfile.ZipFile(wheel) as z:
+              members = [
+                  n
+                  for n in z.namelist()
+                  if n.startswith("wwise_wem/_core.")
+                  and n.rsplit(".", 1)[-1] in ("so", "pyd", "dylib")
+              ]
+              assert members, f"no _core extension in {wheel}"
+              for m in members:
+                  target = pathlib.Path("src") / m
+                  target.write_bytes(z.read(m))
+                  print("installed", target)
+          PY
+        env:
+          CARGO_TERM_COLOR: always
       - name: full suite on the native kernel (hard gate)
         run: python -m unittest discover -s tests -v
         env:
@@ -91,7 +112,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq protobuf-compiler
           go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2
-          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@1.5.1
+          # module versions carry the v-prefix (proxy-verified v1.5.1)
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
       - name: Regenerate Go gRPC stubs (canonical recipe; keep in sync with README/.gitignore)
         run: |
           set -euo pipefail
