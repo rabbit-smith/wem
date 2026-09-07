@@ -5,9 +5,11 @@
 //! reported as an [`EncoderError`](crate::error::EncoderError) variant —
 //! none panics, and none changes output bytes for valid streams.
 //!
-//! The C ABI, PyO3 and wasm shells are thin wrappers over this session;
-//! the reply side is a packet sequence (seq 0 = setup packet, then audio
-//! packets) followed by the container summary, which
+//! This lifecycle, the reply framing, and the error codes are pinned for
+//! the cross-language shells in `include/wem.h` (see crates/AGENTS.md,
+//! "C ABI contract"). The C ABI, PyO3 and wasm shells are thin wrappers
+//! over this session; the reply side is a packet sequence (seq 0 = setup
+//! packet, then audio packets) followed by the container summary, which
 //! [`EncodeResult`](crate::encoder::EncodeResult) plus
 //! [`load_wem_parts_bytes`](wem_container::load_wem_parts_bytes) provide.
 //!

@@ -1,0 +1,3 @@
+# Build artifacts (the reference WEM output and the compiled binary).
+out.wem
+wem-go-cgo

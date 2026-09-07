@@ -370,6 +370,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "wem-capi"
+version = "0.1.0"
+dependencies = [
+ "sha2",
+ "wem-container",
+ "wem-core",
+ "wem-profiles",
+]
+
+[[package]]
 name = "wem-container"
 version = "0.1.0"
 dependencies = [

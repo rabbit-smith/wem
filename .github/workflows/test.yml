@@ -80,3 +80,30 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/reference
 
+  capi:
+    # C ABI core surface (the single cross-language integration point):
+    # proves byte-exactness end-to-end — the Rust FFI tests (capi_e2e)
+    # plus the Go cgo reference binding streaming the fixture through
+    # the C ABI and rebuilding the golden WEM.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cd crates && cargo build --release -p wem-capi
+      - run: cd crates && cargo test --release -p wem-capi
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Build + run the Go cgo reference binding (byte-exact)
+        run: |
+          set -euo pipefail
+          cd examples/go-cgo
+          go vet ./...
+          go build ./...
+          go run . -wav ../../tests/fixtures/input.wav -out "${RUNNER_TEMP}/go-capi-out.wem"
+          GOT=$(sha256sum "${RUNNER_TEMP}/go-capi-out.wem" | awk '{print $1}')
+          if [ "$GOT" != "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247" ]; then
+            echo "golden sha256 mismatch: got $GOT"; exit 1
+          fi
+          echo "golden sha256 OK: $GOT"
+

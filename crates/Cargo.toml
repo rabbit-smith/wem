@@ -17,6 +17,7 @@ members = [
     "wem-vorbis",
     "wem-container",
     "wem-core",
+    "wem-capi",
     "wem-python",
 ]
 
@@ -43,3 +44,4 @@ wem-analysis = { path = "wem-analysis" }
 wem-vorbis = { path = "wem-vorbis" }
 wem-container = { path = "wem-container" }
 wem-profiles = { path = "wem-profiles" }
+wem-core = { path = "wem-core" }
