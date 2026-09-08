@@ -42,7 +42,7 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
         ):
             result = encode_wav("input.wav", profile="test-profile")
 
-        load.assert_called_once_with("test-profile")
+        load.assert_called_once_with("test-profile", quality=None)
         self.assertEqual(captured, [selected])
         self.assertEqual(result.data, b"wem")
         self.assertEqual(result.stats.metadata_source, f"profile:{selected.name}")

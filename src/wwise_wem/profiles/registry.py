@@ -2,6 +2,7 @@
 """Installed Wwise Vorbis encoder profiles and exact profile registry."""
 from __future__ import annotations
 
+import dataclasses
 from types import MappingProxyType
 from typing import Iterable, Iterator, Mapping, TypeVar
 
@@ -120,15 +121,31 @@ PROFILE_REGISTRY = ProfileRegistry((WWISE2013_6CH_44100,))
 PROFILES = PROFILE_REGISTRY.profiles_by_name
 
 
-def load_wem_profile(name: str) -> EncoderProfile:
+def load_wem_profile(name: str, quality: float | None = None) -> EncoderProfile:
+    """Return the installed profile, optionally bound to a quality factor.
+
+    With ``quality`` omitted the registry's cached instance is returned exactly
+    as before. With a quality value, a copy of the profile carrying that quality
+    is returned; the quality is applied during analysis-resource assembly. The
+    registered profile itself is never mutated.
+    """
     profile = PROFILE_REGISTRY.get(str(name))
     if profile is None:
         raise ValueError(
             f"unknown WEM profile {name!r}; available={','.join(sorted(PROFILES))}"
         )
-    return profile
+    if quality is None:
+        return profile
+    return dataclasses.replace(profile, quality=float(quality))
 
 
-def resolve_wem_profile(channels: int, sample_rate: int) -> EncoderProfile:
+def resolve_wem_profile(
+    channels: int,
+    sample_rate: int,
+    quality: float | None = None,
+) -> EncoderProfile:
     """Resolve an installed exact profile from WAV geometry."""
-    return PROFILE_REGISTRY.resolve(int(channels), int(sample_rate))
+    profile = PROFILE_REGISTRY.resolve(int(channels), int(sample_rate))
+    if quality is None:
+        return profile
+    return dataclasses.replace(profile, quality=float(quality))

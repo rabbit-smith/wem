@@ -16,6 +16,7 @@ def main() -> None:
     )
     parser.add_argument("wav", type=Path)
     parser.add_argument("--profile", choices=sorted(PROFILES))
+    parser.add_argument("--quality", type=float, help="psy quality factor")
     parser.add_argument("--wwise-version", choices=("2013",), default="2013")
     parser.add_argument("--channels", type=int, help="assert input channel count")
     parser.add_argument("--sample-rate", type=int, help="assert input sample rate")
@@ -29,7 +30,7 @@ def main() -> None:
     if args.sample_rate is not None and args.sample_rate != wav_rate:
         parser.error(f"--sample-rate={args.sample_rate} differs from WAV ({wav_rate})")
 
-    result = encode_wav(args.wav, profile=args.profile)
+    result = encode_wav(args.wav, profile=args.profile, quality=args.quality)
     digest = result.sha256
     if args.expect_sha256 and digest.lower() != args.expect_sha256.lower():
         raise AssertionError(f"WEM SHA-256 differs: {digest} != {args.expect_sha256}")

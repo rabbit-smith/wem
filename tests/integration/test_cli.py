@@ -83,7 +83,9 @@ class CliTests(unittest.TestCase):
 
             self.assertEqual(output.read_bytes(), result.data)
         encode.assert_called_once_with(
-            Path("input.wav"), profile="wwise2013-6ch-44100"
+            Path("input.wav"),
+            profile="wwise2013-6ch-44100",
+            quality=None,
         )
         printed.assert_called_once()
         label, values = printed.call_args.args
@@ -91,6 +93,37 @@ class CliTests(unittest.TestCase):
         self.assertEqual(values["sha256"], result.sha256)
         self.assertEqual(values["output"], str(output))
         self.assertEqual(values["audio_packets"], 2)
+
+    def test_cli_quality_is_passed_through(self) -> None:
+        result = _result()
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output.wem"
+            argv = [
+                "wwise-wem",
+                "input.wav",
+                "--profile",
+                "wwise2013-6ch-44100",
+                "--quality",
+                "6",
+                "--output",
+                str(output),
+            ]
+            with (
+                patch("sys.argv", argv),
+                patch(
+                    "wwise_wem.cli.read_wav_geometry",
+                    return_value=(6, 44100),
+                ),
+                patch("wwise_wem.cli.encode_wav", return_value=result) as encode,
+                patch("builtins.print"),
+            ):
+                from wwise_wem.cli import main
+
+                main()
+            self.assertEqual(output.read_bytes(), result.data)
+        encode.assert_called_once_with(
+            Path("input.wav"), profile="wwise2013-6ch-44100", quality=6.0
+        )
 
     def test_hash_failure_does_not_create_output(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -11,6 +11,7 @@ def encode_wav(
     wav: Path,
     *,
     profile: str | None = None,
+    quality: float | None = None,
 ) -> EncodeResult:
     """Encode signed-16 PCM WAV input and return an immutable typed result.
 
@@ -26,9 +27,9 @@ def encode_wav(
 
     pcm = read_pcm16(wav)
     selected = (
-        load_wem_profile(profile)
+        load_wem_profile(profile, quality=quality)
         if profile is not None
-        else resolve_wem_profile(pcm.channel_count, pcm.sample_rate)
+        else resolve_wem_profile(pcm.channel_count, pcm.sample_rate, quality=quality)
     )
 
     return Encoder(selected).encode_pcm(pcm)
@@ -38,6 +39,7 @@ def encode_pcm_wav(
     wav: Path,
     *,
     profile: str | None = None,
+    quality: float | None = None,
 ) -> EncodeResult:
     """Encode a PCM WAV (16-bit, 24-bit, or 32-bit IEEE float) to a WEM.
 
@@ -58,9 +60,9 @@ def encode_pcm_wav(
 
     pcm = read_pcm_wav(wav)
     selected = (
-        load_wem_profile(profile)
+        load_wem_profile(profile, quality=quality)
         if profile is not None
-        else resolve_wem_profile(pcm.channel_count, pcm.sample_rate)
+        else resolve_wem_profile(pcm.channel_count, pcm.sample_rate, quality=quality)
     )
 
     return Encoder(selected).encode_pcm(pcm)
@@ -73,6 +75,7 @@ def encode_raw_pcm(
     channels: int,
     bits_per_sample: int,
     profile: str | None = None,
+    quality: float | None = None,
 ) -> EncodeResult:
     """Encode raw PCM bytes (16/24-bit signed or 32-bit float32) to a WEM.
 
@@ -96,9 +99,9 @@ def encode_raw_pcm(
         bits_per_sample=bits_per_sample,
     )
     selected = (
-        load_wem_profile(profile)
+        load_wem_profile(profile, quality=quality)
         if profile is not None
-        else resolve_wem_profile(pcm.channel_count, pcm.sample_rate)
+        else resolve_wem_profile(pcm.channel_count, pcm.sample_rate, quality=quality)
     )
 
     return Encoder(selected).encode_pcm(pcm)

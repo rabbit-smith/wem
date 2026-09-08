@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -41,6 +42,7 @@ class EncoderProfile:
     endian: str = "le"
     seek_table: bytes = b""
     extra_chunks: tuple[tuple[bytes, bytes], ...] = ()
+    quality: float | None = None
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -49,6 +51,11 @@ class EncoderProfile:
             raise TypeError("profile key must be ProfileKey")
         if not isinstance(self.container_metadata, ContainerMetadata):
             raise TypeError("profile container metadata must be ContainerMetadata")
+        if self.quality is not None:
+            quality = float(self.quality)
+            if not math.isfinite(quality):
+                raise ValueError("profile quality must be a finite number")
+            object.__setattr__(self, "quality", quality)
         if (self.channels, self.sample_rate) != (
             self.container_metadata.nChannels,
             self.container_metadata.nSamplesPerSec,

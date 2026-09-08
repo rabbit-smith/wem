@@ -46,7 +46,7 @@ class TypedApiTests(unittest.TestCase):
             )
 
         read.assert_called_once_with(Path("input.wav"))
-        resolve.assert_called_once_with("wwise2013-6ch-44100")
+        resolve.assert_called_once_with("wwise2013-6ch-44100", quality=None)
         encoder_type.assert_called_once_with(profile)
         encoder_type.return_value.encode_pcm.assert_called_once_with(pcm)
         self.assertIs(result, expected)

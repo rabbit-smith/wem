@@ -134,6 +134,34 @@ class ProfileRegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "no Wwise 2013.2 profile"):
             resolve_wem_profile(2, 48000)
 
+    def test_load_profile_quality_is_additive_and_pure(self) -> None:
+        base = load_wem_profile("wwise2013-6ch-44100")
+        # Omitting quality returns the cached registry instance unchanged.
+        self.assertIs(base, load_wem_profile("wwise2013-6ch-44100"))
+        self.assertIsNone(base.quality)
+        # Providing quality returns a distinct copy bound to that factor.
+        bound = load_wem_profile("wwise2013-6ch-44100", quality=4.0)
+        self.assertIsNot(base, bound)
+        self.assertEqual(bound.quality, 4.0)
+        self.assertEqual(bound.name, base.name)
+        self.assertEqual(bound.key, base.key)
+        # The registered profile is never mutated.
+        self.assertIsNone(load_wem_profile("wwise2013-6ch-44100").quality)
+
+    def test_resolve_profile_quality_is_additive_and_pure(self) -> None:
+        base = resolve_wem_profile(6, 44100)
+        self.assertIs(base, resolve_wem_profile(6, 44100))
+        self.assertIsNone(base.quality)
+        bound = resolve_wem_profile(6, 44100, quality=8)
+        self.assertIsNot(base, bound)
+        self.assertEqual(bound.quality, 8.0)
+
+    def test_profile_quality_rejects_non_finite_values(self) -> None:
+        with self.assertRaisesRegex(ValueError, "finite"):
+            load_wem_profile("wwise2013-6ch-44100", quality=float("nan"))
+        with self.assertRaisesRegex(ValueError, "finite"):
+            load_wem_profile("wwise2013-6ch-44100", quality=float("inf"))
+
 
 if __name__ == "__main__":
     unittest.main()

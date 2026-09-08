@@ -210,6 +210,36 @@ count and sample rate; callers can then resolve with a complete `ProfileKey`.
 The representation of fmt metadata, table paths, registries and packaged
 resources is an implementation detail.
 
+### Optional quality factor
+
+`load_wem_profile` and `resolve_wem_profile` each accept an optional
+keyword `quality`:
+
+```python
+profile = load_wem_profile("wwise2013-6ch-44100", quality=4.0)
+profile = resolve_wem_profile(6, 44100, quality=4.0)
+```
+
+With `quality` omitted (the default), the behavior is identical to the
+historical signature: the cached registry instance is returned unchanged and
+`profile.quality` is `None`. With a quality value, a copy of the profile
+carrying that factor is returned; the registered profile is never mutated.
+`quality` must be a finite number (a `ValueError` otherwise).
+
+Quality is a profile-internal psychoacoustic interpolation parameter: a
+profile optionally ships an `analysis/quality-curves.json` (schema
+`wem.quality-curves.v1`) that interpolates selected psychoacoustic fields
+along a fixed breakpoint table. Requesting a quality from a profile that has
+no such resource is a configuration error (`ValueError`); the installed
+built-in profile does not carry quality curves, so its encode output is
+unchanged. A `quality` value outside the recorded control points is clamped
+to the nearest control point, and the assembly records that the value was
+extrapolated (honesty flag).
+
+The encode entry points (`encode_wav`, `encode_pcm_wav`, `encode_raw_pcm`)
+and the CLI (`--quality`) forward an optional `quality` to profile selection;
+with no quality the behavior is identical to before.
+
 ## Supported CLI
 
 The command remains a single encode command in 0.x:
@@ -225,6 +255,7 @@ Supported options are:
 |---|---|
 | `--output PATH` | Required destination WEM. |
 | `--profile wwise2013-6ch-44100` | Explicit built-in profile. |
+| `--quality N` | Optional psychoacoustic quality factor forwarded to profile selection. |
 | `--wwise-version 2013` | Assert the supported Wwise generation. |
 | `--channels N` | Assert the WAV channel count before encoding. |
 | `--sample-rate HZ` | Assert the WAV sample rate before encoding. |

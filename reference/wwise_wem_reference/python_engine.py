@@ -40,6 +40,7 @@ def encode_pcm_python(
     resources = assemble_encoder_profile_resources(
         bundle,
         setup_packet=setup_packet,
+        quality=profile.quality,
     )
     session = AnalysisSession(
         profile.channels,

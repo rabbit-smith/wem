@@ -311,6 +311,8 @@ class AnalysisProfileResources:
     long_variants: Mapping[int, WwisePsyLongTables]
     long_floor_looks: Mapping[int, LongFloorEnvelopeLook]
     frozen: FrozenMathTables | None = None
+    quality_value: float | None = None
+    quality_extrapolated: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -319,6 +321,8 @@ class AnalysisProfileResources:
         object.__setattr__(self, "short_profiles", tuple(self.short_profiles))
         object.__setattr__(self, "long_variants", MappingProxyType(dict(self.long_variants)))
         object.__setattr__(self, "long_floor_looks", MappingProxyType(dict(self.long_floor_looks)))
+        if self.quality_extrapolated and self.quality_value is None:
+            raise ValueError("quality extrapolation requires a quality value")
         if not {128, 256, 2048} <= set(self.mdct_looks):
             raise ValueError("analysis resources lack required MDCT looks")
         if len(self.short_profiles) != 2 or set(self.long_variants) != {2, 3}:
