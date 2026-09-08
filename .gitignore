@@ -22,3 +22,7 @@ js/node_modules/
 native-wheel/
 js/pkg/.gitignore
 js/pkg-node/.gitignore
+
+# Unverified extraction/derived data (the analysis tool dumps, corpus candidates).
+# Nothing under corpus/ is a trusted contract asset until verified and moved.
+corpus/
