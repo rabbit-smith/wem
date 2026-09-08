@@ -5,6 +5,10 @@
     "wwise2013-6ch-44100": {
       "manifest": "wwise2013-6ch-44100/manifest.json",
       "sha256": "f36981acf01807117015d2cac64fa995a3352710e9c4a56ab72b05d9b05dfc44"
+    },
+    "wwise2013-2ch-48000": {
+      "manifest": "wwise2013-2ch-48000/manifest.json",
+      "sha256": "38bf18ae4cee92b54d335a3a64b8eab5f6250fd87c7f739cc1c1cba356052b5e"
     }
   }
 }

@@ -194,6 +194,45 @@ await expectWemError(
   "WEM_ERR_GEOMETRY_MISMATCH",
 );
 
+const DRAFT_PROFILE = "wwise2013-2ch-48000";
+
+// --- 4) draft profile (setup pending corpus export) --------------------------
+// The 2ch/48000 draft profile ships its static data (quality curves etc.); the
+// setup packet awaits a paired Wwise export. The kernel must load it through
+// the bytes entry and refuse encoding with a clear pending error.
+const draftIndexBytes = (() => {
+  const index = JSON.parse(new TextDecoder().decode(indexBytes));
+  index.default = DRAFT_PROFILE;
+  return new TextEncoder().encode(JSON.stringify(index, null, 2));
+})();
+
+let draftEncodeError = null;
+let draftBuildSucceeded = false;
+try {
+  const draftEncoder = new core.WemEncoder(draftIndexBytes, files);
+  draftBuildSucceeded = true;
+  draftEncoder.free();
+} catch (error) {
+  draftEncodeError = error;
+}
+check(
+  "draft profile files are present in the profile tree",
+  files.has(`${DRAFT_PROFILE}/analysis/quality-curves.json`) &&
+    files.has(`${DRAFT_PROFILE}/pending.json`) &&
+    files.has(`${DRAFT_PROFILE}/manifest.json`),
+);
+check(
+  "draft profile encode attempt -> WEM_ERR_STATE_ERROR with clear pending error",
+  !draftBuildSucceeded &&
+    draftEncodeError &&
+    typeof draftEncodeError.code === "string" &&
+    draftEncodeError.code === "WEM_ERR_STATE_ERROR" &&
+    typeof draftEncodeError.message === "string" &&
+    draftEncodeError.message.includes("setup packet pending") &&
+    draftEncodeError.message.includes("requires paired Wwise export"),
+  `code=${draftEncodeError?.code ?? "<no code>"}, message="${draftEncodeError?.message ?? draftEncodeError}"`,
+);
+
 // --- summary ------------------------------------------------------------------
 if (failures > 0) {
   console.error(`\n${failures} check(s) FAILED`);

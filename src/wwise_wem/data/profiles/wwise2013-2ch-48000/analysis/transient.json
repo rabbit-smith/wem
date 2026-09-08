@@ -1,0 +1,37 @@
+{
+  "schema": "wem.transient-setup-raw.v1",
+  "source": {
+    "generation": "2013.2",
+    "note": "Static transient setup constants; materialization into the detector table awaits corpus calibration"
+  },
+  "band_words": [
+    2,
+    4,
+    6,
+    9,
+    13,
+    17,
+    22,
+    12,
+    8,
+    3,
+    2,
+    1
+  ],
+  "stride_words": [
+    4,
+    5,
+    6,
+    8,
+    8,
+    8,
+    8,
+    4,
+    4,
+    3,
+    2,
+    4
+  ],
+  "window_build_constant": 3.8999020004650946,
+  "half_constant": 0.5
+}

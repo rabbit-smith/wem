@@ -1,0 +1,62 @@
+{
+  "schema": "wwise-wem.profile-manifest.v1",
+  "name": "wwise2013-2ch-48000",
+  "setup_available": false,
+  "pending_reason": "setup packet and codebooks require a paired Wwise export; only static profile data is present",
+  "key": {
+    "generation": "2013.2",
+    "channels": 2,
+    "sample_rate": 48000,
+    "channel_layout": "stereo",
+    "quality_setup_identity": "pending:corpus-export"
+  },
+  "block_sizes": [
+    256,
+    2048
+  ],
+  "container_metadata": {
+    "wFormatTag": 65535,
+    "nChannels": 2,
+    "nSamplesPerSec": 48000,
+    "nAvgBytesPerSec": 0,
+    "nBlockAlign": 0,
+    "wBitsPerSample": 0,
+    "cbSize": 48,
+    "wReserved0": 0,
+    "dwChannelMask": 3,
+    "dwTotalPCMFrames": 0,
+    "dwFirstAudioPacketOffset": 0,
+    "dwDataPayloadSize": 0,
+    "dwUnknown_0x24": 0,
+    "dwSeekTableSize": 0,
+    "dwVorbisDataOffset": 0,
+    "uMaxPacketSize": 0,
+    "uUnknown_0x32": 0,
+    "dwUnknown_0x34": 0,
+    "dwUnknown_0x38": 0,
+    "dwUnknown_0x3C": 0,
+    "uBlocksize0Pow": 8,
+    "uBlocksize1Pow": 11
+  },
+  "resources": {
+    "analysis.quality-curves": {
+      "path": "analysis/quality-curves.json",
+      "schema": "wem.quality-curves.v1",
+      "sha256": "40fd3cef1633cca97e809d06ff2c2eecc0fb1d0a4fcf1633454a94014f2815d5"
+    },
+    "transform.mdct": {
+      "path": "transform/mdct.json",
+      "sha256": "58c20937b94bc279adffa321921b794ac1df16f9937579925c3db1e997f3544a"
+    },
+    "analysis.transient": {
+      "path": "analysis/transient.json",
+      "schema": "wem.transient-setup-raw.v1",
+      "sha256": "ae76aab4abec41659b32d4d17dd99cca05155c3e6886e67a03994dc0457cd75a"
+    },
+    "meta.pending": {
+      "path": "pending.json",
+      "schema": "wem.profile-pending.v1",
+      "sha256": "198239db0378213f480ffe98ad2620c3ccd74737f041cdff0544054dd5476346"
+    }
+  }
+}

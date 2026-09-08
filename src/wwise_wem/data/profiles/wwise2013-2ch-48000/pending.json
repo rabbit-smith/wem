@@ -1,0 +1,67 @@
+{
+  "schema": "wem.profile-pending.v1",
+  "profile": "wwise2013-2ch-48000",
+  "status": "draft",
+  "items": [
+    {
+      "resource": "vorbis.setup",
+      "status": "pending",
+      "required": "paired Wwise 2013.2 export of 2ch/48000 audio; the setup packet is produced by the encoder and is absent from static data"
+    },
+    {
+      "resource": "vorbis.codebooks.t97",
+      "status": "pending",
+      "required": "decoded from the exported setup packet"
+    },
+    {
+      "resource": "vorbis.codebooks.t219",
+      "status": "pending",
+      "required": "decoded from the exported setup packet"
+    },
+    {
+      "resource": "psychoacoustics.short-seed",
+      "status": "pending",
+      "required": "psychoacoustic surface of this geometry from the paired export"
+    },
+    {
+      "resource": "psychoacoustics.short-profiles",
+      "status": "pending",
+      "required": "psychoacoustic profiles of this geometry from the paired export"
+    },
+    {
+      "resource": "psychoacoustics.long-base",
+      "status": "pending",
+      "required": "long psychoacoustic tables of this geometry from the paired export"
+    },
+    {
+      "resource": "psychoacoustics.long-modes",
+      "status": "pending",
+      "required": "long psychoacoustic mode tables of this geometry from the paired export"
+    },
+    {
+      "resource": "analysis.frozen-tables",
+      "status": "pending",
+      "required": "frozen transcendental tables recorded from the active encode path"
+    },
+    {
+      "resource": "analysis.quality-curves",
+      "status": "partial",
+      "note": "control points recorded from static data; the semantic mapping (which psychoacoustic field each curve drives) is unconfirmed and awaits behavior pairing"
+    },
+    {
+      "resource": "analysis.transient",
+      "status": "raw-only",
+      "note": "static setup constants recorded; the materialized detector table awaits corpus calibration"
+    },
+    {
+      "field": "key.quality_setup_identity",
+      "status": "pending",
+      "note": "placeholder identity until the setup packet exists"
+    },
+    {
+      "field": "container_metadata.unknowns",
+      "status": "pending",
+      "note": "avg-bytes/sec, channel mask, and the unknown fmt fields are placeholders until a paired export"
+    }
+  ]
+}

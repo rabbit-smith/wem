@@ -45,6 +45,11 @@
   ],
   "resources": [
     "wwise_wem/data/profiles/index.json",
+    "wwise_wem/data/profiles/wwise2013-2ch-48000/analysis/quality-curves.json",
+    "wwise_wem/data/profiles/wwise2013-2ch-48000/analysis/transient.json",
+    "wwise_wem/data/profiles/wwise2013-2ch-48000/manifest.json",
+    "wwise_wem/data/profiles/wwise2013-2ch-48000/pending.json",
+    "wwise_wem/data/profiles/wwise2013-2ch-48000/transform/mdct.json",
     "wwise_wem/data/profiles/wwise2013-6ch-44100/analysis/frozen-tables.json",
     "wwise_wem/data/profiles/wwise2013-6ch-44100/analysis/transient.json",
     "wwise_wem/data/profiles/wwise2013-6ch-44100/manifest.json",

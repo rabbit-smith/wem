@@ -882,14 +882,24 @@ fn resource_ref_rejections() {
 #[test]
 fn installed_registry_resolutions() {
     let registry = wem_profiles::installed_registry(&data_dir()).expect("registry");
-    assert_eq!(registry.len(), 1);
+    // The installed index carries the 6ch profile plus the 2ch/48000
+    // draft profile (setup pending corpus export).
+    assert_eq!(registry.len(), 2);
 
     let by_geometry = registry.resolve_geometry(6, 44100).expect("geometry");
     assert_eq!(by_geometry.name(), "wwise2013-6ch-44100");
     assert!(by_geometry.setup_available());
 
-    // Uninstalled geometry rejected.
-    assert!(registry.resolve_geometry(2, 48000).is_err());
+    // The draft profile resolves by its geometry, reports itself as
+    // setup-pending, and never matches a setup digest.
+    let draft = registry
+        .resolve_geometry(2, 48000)
+        .expect("draft geometry resolves");
+    assert_eq!(draft.name(), "wwise2013-2ch-48000");
+    assert!(!draft.setup_available());
+    assert_eq!(draft.setup_sha256(), "");
+    assert!(draft.pending_reason().is_some());
+
     // Unknown key rejected.
     let unknown = ProfileKey::with_identity(
         2,
@@ -909,6 +919,8 @@ fn installed_registry_resolutions() {
         .resolve_setup(6, 44100, sha)
         .expect("template setup resolves");
     assert_eq!(matched.name(), "wwise2013-6ch-44100");
+    // The draft carries no setup digest: no digest resolves to it.
+    assert!(registry.resolve_setup(2, 48000, "").is_err());
 
     // load_wem_profile / resolve_wem_profile through the environment.
     let name = "wwise2013-6ch-44100";
@@ -927,6 +939,9 @@ fn installed_registry_resolutions() {
     let registry = wem_profiles::installed_registry(&data_dir()).expect("registry");
     assert_eq!(registry.get_by_name(name).expect("original").quality(), None);
     assert!(wem_profiles::load_wem_profile_quality(name, Some(f64::NAN)).is_err());
+    let draft_by_name =
+        wem_profiles::load_wem_profile_quality("wwise2013-2ch-48000", None).expect("draft");
+    assert!(!draft_by_name.setup_available());
 }
 
 #[test]
