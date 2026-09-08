@@ -208,32 +208,73 @@ pub struct ProfileManifestView {
 
 /// Complete immutable identity, setup and container defaults for encoding
 /// (Python `EncoderProfile`).
+///
+/// Two construction shapes coexist, both additive:
+/// * complete profiles: setup resource + setup SHA-256 identity;
+/// * draft profiles (setup pending corpus): no setup resource; the profile
+///   is listed by the registry with `setup_available == false` and a
+///   `pending_reason`, and every encode attempt on it fails with a clear
+///   pending error instead of silently forging a setup.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EncoderProfile {
     name: String,
     key: ProfileKey,
-    setup_path: ResourceRef,
+    setup_path: Option<ResourceRef>,
     setup_sha256: String,
     block_sizes: [i64; 2],
     container_metadata: ContainerMetadata,
     endian: String,
     seek_table: Vec<u8>,
     extra_chunks: Vec<(Vec<u8>, Vec<u8>)>,
+    /// Optional quality factor bound to this profile copy
+    /// (Python `EncoderProfile.quality`; `None` = historical behavior).
+    quality: Option<f64>,
+    /// Whether the profile carries its setup resource.
+    setup_available: bool,
+    /// Manifest-declared pending reason for a draft profile.
+    pending_reason: Option<String>,
 }
 
 impl EncoderProfile {
     /// Validate and construct (Python `__post_init__` checks).
+    ///
+    /// `setup` is `Some` for complete profiles (its SHA-256 must match
+    /// `setup_sha256` and the key quality/setup identity) and `None` for
+    /// draft profiles, whose `setup_sha256` must be empty.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: String,
         key: ProfileKey,
-        setup_path: ResourceRef,
+        setup: Option<ResourceRef>,
         setup_sha256: String,
+        quality: Option<f64>,
         block_sizes: [i64; 2],
         container_metadata: ContainerMetadata,
+        setup_available: bool,
+        pending_reason: Option<String>,
     ) -> Result<Self, ProfileError> {
         if name.is_empty() {
             return Err(ProfileError::ProfileNameEmpty);
+        }
+        if let Some(quality) = quality {
+            if !quality.is_finite() {
+                return Err(ProfileError::QualityValueNonFinite);
+            }
+        }
+        if setup_available != setup.is_some() {
+            return Err(ProfileError::BundleMissingVorbisSetup);
+        }
+        match setup.as_ref() {
+            Some(_) => {
+                if key.quality_setup_identity() != Some(format!("sha256:{setup_sha256}").as_str()) {
+                    return Err(ProfileError::ProfileSetupIdentityMismatch);
+                }
+            }
+            None => {
+                if !setup_sha256.is_empty() {
+                    return Err(ProfileError::ProfileSetupIdentityMismatch);
+                }
+            }
         }
         if (key.channels(), key.sample_rate())
             != (
@@ -242,9 +283,6 @@ impl EncoderProfile {
             )
         {
             return Err(ProfileError::ProfileGeometryMismatch);
-        }
-        if key.quality_setup_identity() != Some(format!("sha256:{setup_sha256}").as_str()) {
-            return Err(ProfileError::ProfileSetupIdentityMismatch);
         }
         if block_sizes[0] <= 0 || block_sizes[1] <= 0 {
             return Err(ProfileError::ProfileBlockSizesMalformed);
@@ -259,14 +297,28 @@ impl EncoderProfile {
         Ok(Self {
             name,
             key,
-            setup_path,
+            setup_path: setup,
             setup_sha256,
             block_sizes,
             container_metadata,
             endian: "le".to_string(),
             seek_table: Vec::new(),
             extra_chunks: Vec::new(),
+            quality,
+            setup_available,
+            pending_reason,
         })
+    }
+
+    /// A copy of this profile bound to one quality factor
+    /// (Python `dataclasses.replace(profile, quality=...)`; the
+    /// registered profile itself is never mutated).
+    pub fn with_quality(mut self, quality: f64) -> Result<Self, ProfileError> {
+        if !quality.is_finite() {
+            return Err(ProfileError::QualityValueNonFinite);
+        }
+        self.quality = Some(quality);
+        Ok(self)
     }
 
     pub fn name(&self) -> &str {
@@ -277,8 +329,23 @@ impl EncoderProfile {
         &self.key
     }
 
-    pub fn setup_path(&self) -> &ResourceRef {
-        &self.setup_path
+    /// The quality factor bound to this profile copy, if any.
+    pub fn quality(&self) -> Option<f64> {
+        self.quality
+    }
+
+    /// Whether this profile carries its setup resource.
+    pub fn setup_available(&self) -> bool {
+        self.setup_available
+    }
+
+    /// The manifest-declared pending reason for a draft profile.
+    pub fn pending_reason(&self) -> Option<&str> {
+        self.pending_reason.as_deref()
+    }
+
+    pub fn setup_path(&self) -> Option<&ResourceRef> {
+        self.setup_path.as_ref()
     }
 
     pub fn setup_sha256(&self) -> &str {
@@ -324,11 +391,15 @@ impl EncoderProfile {
 
     /// Verified setup packet bytes (Python `setup_packet()`).
     pub fn setup_packet(&self) -> Result<Vec<u8>, ProfileError> {
-        let payload = self.setup_path.read_bytes()?;
+        let setup_path = self
+            .setup_path
+            .as_ref()
+            .ok_or(ProfileError::BundleMissingVorbisSetup)?;
+        let payload = setup_path.read_bytes()?;
         let digest = crate::resources::hex(sha256_hex(&payload));
         if digest != self.setup_sha256 {
             return Err(ProfileError::ShaMismatch {
-                path: self.setup_path.path().to_string(),
+                path: setup_path.path().to_string(),
                 expected: self.setup_sha256.clone(),
                 actual: digest,
             });
@@ -342,7 +413,13 @@ impl EncoderProfile {
     /// Defined for filesystem-backed profiles only; a profile assembled
     /// from an in-memory bytes bundle has no installed tree to view.
     pub fn runtime_manifest(&self) -> Result<ProfileManifestView, ProfileError> {
-        let bundle = match self.setup_path.backend() {
+        let setup_path = self
+            .setup_path
+            .as_ref()
+            .ok_or_else(|| ProfileError::InstalledBundleMismatch {
+                profile: self.name.clone(),
+            })?;
+        let bundle = match setup_path.backend() {
             ResourceBackend::Fs(data) => load_profile_bundle(data, Some(&self.name), false),
             ResourceBackend::Bytes { .. } => {
                 return Err(ProfileError::InstalledBundleMismatch {

@@ -279,6 +279,8 @@ pub enum AnalysisError {
     FirstLongFloorEnvelopePeakBranch,
     /// "floor-envelope stage requires look or table"
     LongFloorEnvelopeNoLook,
+    /// "quality extrapolation requires a quality value"
+    QualityExtrapolationWithoutValue,
     /// "psycho curves must have the same length"
     PsyCurveLengthMismatch { want: i64, got: i64 },
     /// "psycho look and curve length differ"
@@ -592,11 +594,17 @@ pub struct AnalysisProfileResources {
     pub long_variants: std::collections::BTreeMap<i64, WwisePsyLongTables>,
     pub long_floor_looks: std::collections::BTreeMap<i64, LongFloorEnvelopeLook>,
     pub frozen: Option<FrozenMathTables>,
+    /// Normalized quality value on the profile's breakpoint axis
+    /// (`None` = historical behavior, no quality interpolation).
+    pub quality_value: Option<f64>,
+    /// Whether the quality fell outside the recorded control points.
+    pub quality_extrapolated: bool,
 }
 
 impl AnalysisProfileResources {
     /// Validate the aggregate (Python `__post_init__`): required MDCT looks
-    /// {128, 256, 2048}, two short profiles, and long variants {2, 3}.
+    /// {128, 256, 2048}, two short profiles, long variants {2, 3}, and the
+    /// quality-extrapolation honesty rule.
     #[allow(clippy::too_many_arguments)] // 1:1 with the Python constructor
     pub fn new(
         mdct_looks: std::collections::BTreeMap<i64, MdctLook>,
@@ -608,6 +616,8 @@ impl AnalysisProfileResources {
         long_variants: std::collections::BTreeMap<i64, WwisePsyLongTables>,
         long_floor_looks: std::collections::BTreeMap<i64, LongFloorEnvelopeLook>,
         frozen: Option<FrozenMathTables>,
+        quality_value: Option<f64>,
+        quality_extrapolated: bool,
     ) -> Result<Self, AnalysisError> {
         for required in [128, 256, 2048] {
             if !mdct_looks.contains_key(&required) {
@@ -621,6 +631,9 @@ impl AnalysisProfileResources {
                 reason: "analysis resources lack psychoacoustic variants",
             });
         }
+        if quality_extrapolated && quality_value.is_none() {
+            return Err(AnalysisError::QualityExtrapolationWithoutValue);
+        }
         Ok(Self {
             mdct_looks,
             transient,
@@ -631,6 +644,8 @@ impl AnalysisProfileResources {
             long_variants,
             long_floor_looks,
             frozen,
+            quality_value,
+            quality_extrapolated,
         })
     }
 

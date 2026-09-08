@@ -486,7 +486,7 @@ fn profile_key_default_identity_and_rejections() {
 
 #[test]
 fn assembly_end_to_end() {
-    let res = assemble_encoder_profile_resources(&bundle(), None).expect("assembly succeeds");
+    let res = assemble_encoder_profile_resources(&bundle(), None, None).expect("assembly succeeds");
     assert_eq!(res.setup_packet.len(), 201);
     assert_eq!(res.setup.nbooks, 39);
     assert_eq!(res.codebooks.len(), 39);
@@ -886,6 +886,7 @@ fn installed_registry_resolutions() {
 
     let by_geometry = registry.resolve_geometry(6, 44100).expect("geometry");
     assert_eq!(by_geometry.name(), "wwise2013-6ch-44100");
+    assert!(by_geometry.setup_available());
 
     // Uninstalled geometry rejected.
     assert!(registry.resolve_geometry(2, 48000).is_err());
@@ -916,6 +917,16 @@ fn installed_registry_resolutions() {
     assert!(wem_profiles::load_wem_profile("nope").is_err());
     let resolved = wem_profiles::resolve_wem_profile(6, 44100).expect("geometry profile");
     assert_eq!(resolved.block_sizes(), [256, 2048]);
+    assert_eq!(resolved.quality(), None);
+
+    // Quality-bound lookups are additive copies (the registry instance is
+    // never mutated).
+    let bound =
+        wem_profiles::load_wem_profile_quality(name, Some(4.0)).expect("quality copy");
+    assert_eq!(bound.quality(), Some(4.0));
+    let registry = wem_profiles::installed_registry(&data_dir()).expect("registry");
+    assert_eq!(registry.get_by_name(name).expect("original").quality(), None);
+    assert!(wem_profiles::load_wem_profile_quality(name, Some(f64::NAN)).is_err());
 }
 
 #[test]

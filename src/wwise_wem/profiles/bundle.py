@@ -154,13 +154,21 @@ class RuntimeResourceManifest:
 
 @dataclass(frozen=True)
 class ProfileBundle:
-    """Complete immutable profile identity and its runtime resource set."""
+    """Complete immutable profile identity and its runtime resource set.
+
+    Draft bundles (setup pending corpus export, e.g. the 2ch/48000 profile)
+    carry ``setup_available == False`` and a manifest-declared
+    ``pending_reason``; their setup-dependent accessors raise instead of
+    silently forging a setup.
+    """
 
     name: str
     key: ProfileKey
     container_metadata: ContainerMetadata
     runtime_manifest: RuntimeResourceManifest
     block_sizes: tuple[int, int]
+    setup_available: bool = True
+    pending_reason: str | None = None
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -178,13 +186,23 @@ class ProfileBundle:
         if len(blocks) != 2 or blocks != expected:
             raise ValueError("profile bundle block sizes differ from container metadata")
         object.__setattr__(self, "block_sizes", blocks)
-        if "vorbis.setup" not in self.runtime_manifest.resources:
-            raise ValueError("profile manifest is missing vorbis.setup")
-        if self.key.quality_setup_identity != f"sha256:{self.setup.sha256}":
-            raise ValueError("profile bundle setup identity differs from setup SHA-256")
+        if "vorbis.setup" in self.runtime_manifest.resources:
+            if self.key.quality_setup_identity != f"sha256:{self.setup.sha256}":
+                raise ValueError(
+                    "profile bundle setup identity differs from setup SHA-256"
+                )
+        if bool(self.setup_available) != ("vorbis.setup" in self.runtime_manifest.resources):
+            raise ValueError(
+                "profile bundle setup_available differs from the manifest resources"
+            )
 
     @property
     def setup(self) -> ResourceRef:
+        if not self.setup_available:
+            raise ValueError(
+                "profile has no setup resource; "
+                "requires paired Wwise export; encoding unavailable"
+            )
         return self.runtime_manifest.resource("vorbis.setup")
 
     def setup_packet(self) -> bytes:
@@ -248,12 +266,23 @@ def load_profile_bundle(
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError(f"profile manifest fields are malformed: {error}") from error
     runtime_manifest = RuntimeResourceManifest.load(manifest_ref, payload)
+    setup_present = "vorbis.setup" in payload.get("resources", {})
+    setup_available = payload.get("setup_available", setup_present)
+    if not isinstance(setup_available, bool):
+        raise ValueError("profile manifest setup_available must be a boolean")
+    pending_reason = payload.get("pending_reason")
+    if pending_reason is not None and (
+        not isinstance(pending_reason, str) or not pending_reason
+    ):
+        raise ValueError("profile manifest pending_reason must be text")
     bundle = ProfileBundle(
         name=_string(payload.get("name"), "name"),
         key=key,
         container_metadata=metadata,
         runtime_manifest=runtime_manifest,
         block_sizes=blocks,  # type: ignore[arg-type]
+        setup_available=setup_available,
+        pending_reason=pending_reason,
     )
     if bundle.name != selected:
         raise ValueError("profile index name differs from profile manifest")

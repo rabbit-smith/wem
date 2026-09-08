@@ -41,7 +41,8 @@ fn streaming_frame_rows_match_batch_materialization() {
     let data_dir =
         wem_profiles::DataDir::from_profiles_dir(repo_root().join("src/wwise_wem/data/profiles"));
     let bundle = wem_profiles::load_profile_bundle(&data_dir, None, false).expect("profile loads");
-    let resources = wem_profiles::assemble_analysis_resources(&bundle).expect("resources assemble");
+    let resources =
+        wem_profiles::assemble_analysis_resources(&bundle, None).expect("resources assemble");
     let frozen = resources
         .frozen
         .as_ref()

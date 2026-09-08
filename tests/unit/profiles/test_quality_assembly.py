@@ -157,23 +157,26 @@ class QualityAssemblyWiringTests(unittest.TestCase):
                 self.assertIsNotNone(curves)
 
                 resources = assemble_analysis_resources(bundle, quality=2.0)
-                # q=2 with [1,2,4]/[-10,-20,-40] over [0,4,8]:
-                #   ath_offset   -> 1 + 0.5*(2-1) = 1.5
-                #   ath_floor    -> -10 + 0.5*(-20+10) = -15.0
-                self.assertEqual(resources.short_surface.ath_offset, 1.5)
-                self.assertEqual(resources.short_surface.ath_floor, -15.0)
+                # The quality is normalized onto the breakpoint axis first
+                # (qnorm = 2.0/10 + 1e-7 = 0.20000010000000001), then
+                # interpolated on [0,4,8]:
+                #   ath_offset   -> (1-f)*1 + f*2, f = 0.050000025  -> 1.0500000250000001
+                #   ath_floor    -> (1-f)*(-10) + f*(-20)          -> -10.500000250000001
+                self.assertEqual(resources.short_surface.ath_offset, 1.0500000250000001)
+                self.assertEqual(resources.short_surface.ath_floor, -10.500000250000001)
                 self.assertEqual(resources.quality_value, 2.0)
                 self.assertFalse(resources.quality_extrapolated)
                 # The rebuilt short look carries the overrides.
-                self.assertEqual(resources.short_look.ath_offset, 1.5)
-                self.assertEqual(resources.short_look.ath_floor, -15.0)
+                self.assertEqual(resources.short_look.ath_offset, 1.0500000250000001)
+                self.assertEqual(resources.short_look.ath_floor, -10.500000250000001)
 
-                # Out-of-domain quality clamps and flags extrapolation.
-                clamped = assemble_analysis_resources(bundle, quality=9.0)
-                self.assertEqual(clamped.short_surface.ath_offset, 4.0)
-                self.assertEqual(clamped.short_surface.ath_floor, -40.0)
+                # Below-domain quality clamps to the first control point
+                # and flags extrapolation (qnorm = -0.0999999 < 0).
+                clamped = assemble_analysis_resources(bundle, quality=-1.0)
+                self.assertEqual(clamped.short_surface.ath_offset, 1.0)
+                self.assertEqual(clamped.short_surface.ath_floor, -10.0)
                 self.assertTrue(clamped.quality_extrapolated)
-                self.assertEqual(clamped.quality_value, 9.0)
+                self.assertEqual(clamped.quality_value, -1.0)
             finally:
                 sys.path.remove(str(archive))
                 sys.modules.pop(package, None)
@@ -192,8 +195,9 @@ class QualityAssemblyWiringTests(unittest.TestCase):
                 resources = assemble_encoder_profile_resources(
                     bundle, quality=6.0
                 )
-                # q=6 -> 2nd segment midpoint: ath_offset = 2 + 0.5*(4-2) = 3.0
-                self.assertEqual(resources.analysis.short_surface.ath_offset, 3.0)
+                # q=6 -> qnorm = 0.6000000999999999 -> f = 0.150000025:
+                #   ath_offset = (1-f)*1 + f*2 = 1.150000025
+                self.assertEqual(resources.analysis.short_surface.ath_offset, 1.150000025)
                 self.assertEqual(resources.analysis.quality_value, 6.0)
                 self.assertFalse(resources.analysis.quality_extrapolated)
             finally:

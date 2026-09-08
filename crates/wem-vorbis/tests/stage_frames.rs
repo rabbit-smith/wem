@@ -205,7 +205,7 @@ fn stage_frames_packet_parity_all_28_representatives() {
     let res = {
         let data = DataDir::from_env().expect("WEM data dir resolves");
         let bundle = load_profile_bundle(&data, None, false).expect("installed profile loads");
-        assemble_encoder_profile_resources(&bundle, None).expect("assembly succeeds")
+        assemble_encoder_profile_resources(&bundle, None, None).expect("assembly succeeds")
     };
     // The setup packet must match the recorded setup hash.
     assert_eq!(

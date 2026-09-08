@@ -14,9 +14,12 @@ from wwise_wem_reference.profiles.quality import (
     QUALITY_CURVES_INTERPOLATION,
     QUALITY_CURVES_RESOURCE,
     QUALITY_CURVES_SCHEMA,
+    QUALITY_NORMALIZE_ADDEND,
+    QUALITY_NORMALIZE_CLAMP,
     QualityCurves,
     _linear_frac,
     load_quality_curves,
+    normalize_quality_factor,
 )
 
 
@@ -44,9 +47,11 @@ class QualityCurvesKernelTests(unittest.TestCase):
         self.assertFalse(extrapolated)
 
     def test_clamped_above_domain_reports_extrapolated(self):
+        # Above the last breakpoint the (N-1, N) segment carries the value
+        # via the spec N - 0.001 index clamp (not a plain samples[-1]).
         qc = _curves([0.0, 4.0, 8.0], [10.0, 20.0, 30.0])
         value, extrapolated = qc.evaluate_result(9.0)
-        self.assertEqual(value["short.ath_offset"], 30.0)
+        self.assertEqual(value["short.ath_offset"], 29.990000000000002)
         self.assertTrue(extrapolated)
 
     def test_clamped_below_domain_reports_extrapolated(self):
@@ -56,8 +61,10 @@ class QualityCurvesKernelTests(unittest.TestCase):
         self.assertTrue(extrapolated)
 
     def test_exact_control_points_are_not_extrapolated(self):
+        # The last control point is reached through the clamped index,
+        # not stored verbatim: 8.0 -> (1-f)*20 + f*30, f ~= 0.999.
         qc = _curves([0.0, 4.0, 8.0], [10.0, 20.0, 30.0])
-        for quality, expected in ((0.0, 10.0), (4.0, 20.0), (8.0, 30.0)):
+        for quality, expected in ((0.0, 10.0), (4.0, 20.0), (8.0, 29.990000000000002)):
             with self.subTest(quality=quality):
                 value, extrapolated = qc.evaluate_result(quality)
                 self.assertEqual(value["short.ath_offset"], expected)
@@ -74,6 +81,43 @@ class QualityCurvesKernelTests(unittest.TestCase):
         value, outside = _linear_frac((0.0, 4.0, 8.0), (10.0, 20.0, 30.0), 2.0)
         self.assertEqual(value, 15.0)
         self.assertFalse(outside)
+
+
+class QualityCurvesSpecParityTests(unittest.TestCase):
+    """Bit-for-bit parity pins shared with the Rust kernel (quality.rs)."""
+
+    def test_normalization_pins(self):
+        # Pinned shared vectors: Py and Rust must return identical doubles.
+        self.assertEqual(normalize_quality_factor(0.0), 1e-07)
+        self.assertEqual(normalize_quality_factor(4.0), 0.4000001)
+        self.assertEqual(normalize_quality_factor(9.0), 0.9000001)
+        self.assertEqual(normalize_quality_factor(10.0), QUALITY_NORMALIZE_CLAMP)
+        self.assertEqual(normalize_quality_factor(100.0), QUALITY_NORMALIZE_CLAMP)
+        self.assertEqual(QUALITY_NORMALIZE_CLAMP, 0.9998999834060669)
+        self.assertEqual(QUALITY_NORMALIZE_ADDEND, 1e-07)
+
+    def test_two_step_fraction_pins(self):
+        # (bp=[0.5,0.9], samples=[0,1]): the clamped-index segment and the
+        # in-domain two-step fraction, pinned doubles.
+        self.assertEqual(_linear_frac((0.5, 0.9), (0.0, 1.0), 0.1), (0.0, True))
+        self.assertEqual(
+            _linear_frac((0.5, 0.9), (0.0, 1.0), 0.7), (0.4999999999999999, False)
+        )
+        self.assertEqual(_linear_frac((0.5, 0.9), (0.0, 1.0), 0.9), (0.999, False))
+        self.assertEqual(_linear_frac((0.5, 0.9), (0.0, 1.0), 1.0), (0.999, True))
+        self.assertEqual(_linear_frac((0.5, 0.9), (0.0, 1.0), 2.0), (0.999, True))
+
+    def test_large_index_two_step_difference(self):
+        # At i > 0 the frac write/read round-trip is not the identity; pin
+        # the two-step result on the 13-breakpoint draft control table.
+        bp = (-0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+        samples = (
+            12.9, 13.8, 14.7, 15.6, 16.5, 17.1, 18.0, 19.5, 48.0, 999.0, 999.0, 999.0,
+            999.0,
+        )
+        value, outside = _linear_frac(bp, samples, normalize_quality_factor(4.0))
+        self.assertFalse(outside)
+        self.assertEqual(value, 18.0000015)
 
     def test_evaluate_rejects_non_finite_quality(self):
         qc = _curves([0.0, 4.0, 8.0], [10.0, 20.0, 30.0])

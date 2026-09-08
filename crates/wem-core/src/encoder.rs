@@ -24,7 +24,7 @@ use wem_profiles::data::DataDir;
 use wem_profiles::error::ProfileError;
 use wem_profiles::model::ContainerMetadata;
 use wem_profiles::model::EncoderProfile;
-use wem_profiles::registry::{load_wem_profile, ProfileRegistry};
+use wem_profiles::registry::{load_wem_profile_quality, ProfileRegistry};
 use wem_vorbis::codebook::Codebook;
 use wem_vorbis::setup::SetupInfo;
 
@@ -280,7 +280,18 @@ impl Encoder {
     /// Load one installed profile by name and construct the encoder
     /// (Python `load_wem_profile` + `Encoder.__init__`).
     pub fn from_profile(name: &str) -> Result<Self, EncoderError> {
-        let profile = match load_wem_profile(name) {
+        Self::from_profile_quality(name, None)
+    }
+
+    /// Load one installed profile bound to an explicit quality factor
+    /// (Python `load_wem_profile(name, quality=...)` + `Encoder.__init__`).
+    ///
+    /// `None` reproduces the historical behavior exactly; with a quality
+    /// value the analysis-resource assembly interpolates the profile's
+    /// quality curves (a missing quality-curves resource is a clear
+    /// configuration error, never a silent fallback).
+    pub fn from_profile_quality(name: &str, quality: Option<f64>) -> Result<Self, EncoderError> {
+        let profile = match load_wem_profile_quality(name, quality) {
             Ok(profile) => profile,
             Err(ProfileError::UnknownProfile { .. }) => {
                 return Err(EncoderError::ProfileNotFound {
@@ -298,7 +309,10 @@ impl Encoder {
     ///
     /// `container` may override the profile-derived container plan
     /// (Python `_container` parameter); the geometry cross-check still
-    /// applies.
+    /// applies. A quality factor bound to the profile (see
+    /// [`wem_profiles::load_wem_profile_quality`]) is forwarded to the
+    /// analysis-resource assembly; with no quality the historical bytes
+    /// are reproduced exactly.
     pub fn from_profile_model(
         profile: &EncoderProfile,
         container: Option<ContainerPlan>,
@@ -320,9 +334,26 @@ impl Encoder {
         index: &[u8],
         files: impl IntoIterator<Item = (String, Vec<u8>)>,
     ) -> Result<Self, EncoderError> {
+        Self::from_profile_bytes_with_quality(index, files, None)
+    }
+
+    /// The bytes entry with an explicit quality factor: the same
+    /// verification as [`from_profile_bytes`](Self::from_profile_bytes),
+    /// with the quality bound to the assembled profile and forwarded to
+    /// the analysis-resource assembly (None keeps the historical bytes).
+    pub fn from_profile_bytes_with_quality(
+        index: &[u8],
+        files: impl IntoIterator<Item = (String, Vec<u8>)>,
+        quality: Option<f64>,
+    ) -> Result<Self, EncoderError> {
         let bundle = load_profile_bundle_from_bytes(index, files, None, true)
             .map_err(|error| EncoderError::Internal(InternalError::Profile(error)))?;
-        let profile = bundle.to_encoder_profile()?;
+        let mut profile = bundle.to_encoder_profile()?;
+        if let Some(quality) = quality {
+            profile = profile
+                .with_quality(quality)
+                .map_err(|error| EncoderError::Internal(InternalError::Profile(error)))?;
+        }
         Self::from_profile_and_bundle(&profile, None, &bundle)
     }
 
@@ -360,6 +391,14 @@ impl Encoder {
                 message: "selected profile differs from installed profile bundle".into(),
             });
         }
+        // Draft profiles (setup pending corpus export) are listed by the
+        // registry but must never encode: refuse with a clear pending
+        // error instead of silently forging a setup packet.
+        if !profile.setup_available() {
+            return Err(EncoderError::StateError {
+                message: draft_pending_message(profile),
+            });
+        }
         let setup_sha = bundle.setup()?.sha256().to_string();
         if profile.setup_sha256() != setup_sha {
             return Err(EncoderError::StateError {
@@ -370,7 +409,8 @@ impl Encoder {
             });
         }
         let setup_packet = profile.setup_packet()?;
-        let resources = assemble_encoder_profile_resources(bundle, Some(&setup_packet))?;
+        let resources =
+            assemble_encoder_profile_resources(bundle, Some(&setup_packet), profile.quality())?;
 
         Ok(Self {
             profile: profile.clone(),
@@ -488,6 +528,20 @@ impl Encoder {
                 metadata_source: self.container.metadata_source.clone(),
             },
         })
+    }
+}
+
+/// The clear pending-corpus error for a draft profile encode attempt.
+pub fn draft_pending_message(profile: &EncoderProfile) -> String {
+    match profile.pending_reason() {
+        Some(reason) => format!(
+            "profile '{}': setup packet pending ({reason}); requires paired Wwise export; encoding unavailable",
+            profile.name()
+        ),
+        None => format!(
+            "profile '{}': setup packet missing; requires paired Wwise export; encoding unavailable",
+            profile.name()
+        ),
     }
 }
 

@@ -436,14 +436,44 @@ impl StreamSession {
     /// - `PROFILE_NOT_FOUND` when no installed profile's setup SHA-256 matches.
     /// - `STATE_ERROR` on a second Init or a soft `name` cross-check failure.
     pub fn init_profile(&mut self, ref_: &ProfileRef) -> Result<(), EncoderError> {
+        self.init_profile_quality(ref_, None)
+    }
+
+    /// Open the session on one installed profile with an explicit quality
+    /// factor (`Init` quality variant).
+    ///
+    /// The quality is bound to the resolved profile and forwarded to the
+    /// analysis-resource assembly (the profile-internal quality
+    /// interpolation); `None` reproduces the historical bytes exactly.
+    ///
+    /// - `PROFILE_NOT_FOUND` when no installed profile's setup SHA-256 matches.
+    /// - `STATE_ERROR` on a second Init, a soft `name` cross-check failure,
+    ///   a non-finite quality, or a setup-pending (draft) profile.
+    pub fn init_profile_quality(
+        &mut self,
+        ref_: &ProfileRef,
+        quality: Option<f64>,
+    ) -> Result<(), EncoderError> {
         if self.initialized || self.finished {
             return Err(EncoderError::StateError {
                 message: "Init must be the first request".into(),
             });
         }
+        if let Some(quality) = quality {
+            if !quality.is_finite() {
+                return Err(EncoderError::StateError {
+                    message: "profile quality must be a finite number".into(),
+                });
+            }
+        }
         let data = DataDir::from_env()?;
         let registry = installed_registry(&data)?;
         let wanted = ref_.setup_sha256.to_lowercase();
+        if wanted.is_empty() {
+            return Err(EncoderError::ProfileNotFound {
+                requested: ref_.setup_sha256.clone(),
+            });
+        }
         let candidate = registry
             .list()
             .into_iter()
@@ -467,6 +497,12 @@ impl StreamSession {
                 });
             }
         }
+        let profile = match quality {
+            Some(quality) => profile
+                .with_quality(quality)
+                .map_err(|error| EncoderError::Internal(InternalError::Profile(error)))?,
+            None => profile,
+        };
         let encoder = Encoder::from_profile_model(&profile, None)?;
         let pipeline = StreamPipeline::new(&encoder)?;
         self.encoder = Some(encoder);
@@ -479,6 +515,16 @@ impl StreamSession {
     pub fn for_profile_ref(ref_: &ProfileRef) -> Result<Self, EncoderError> {
         let mut session = Self::new();
         session.init_profile(ref_)?;
+        Ok(session)
+    }
+
+    /// Convenience constructor: `new()` + `init_profile_quality()`.
+    pub fn for_profile_ref_quality(
+        ref_: &ProfileRef,
+        quality: Option<f64>,
+    ) -> Result<Self, EncoderError> {
+        let mut session = Self::new();
+        session.init_profile_quality(ref_, quality)?;
         Ok(session)
     }
 
@@ -524,7 +570,41 @@ impl StreamSession {
         })
     }
 
-    /// Push one chunk of little-endian signed-16 interleaved PCM bytes
+    /// The bytes entry with an explicit quality factor: same semantics as
+    /// [`for_profile_ref_bytes`](Self::for_profile_ref_bytes), with the
+    /// quality bound to the assembled profile and forwarded to the
+    /// analysis-resource assembly (`None` keeps the historical bytes).
+    pub fn for_profile_ref_bytes_quality(
+        ref_: &ProfileRef,
+        index: &[u8],
+        files: impl IntoIterator<Item = (String, Vec<u8>)>,
+        quality: Option<f64>,
+    ) -> Result<Self, EncoderError> {
+        let encoder = Encoder::from_profile_bytes_with_quality(index, files, quality)?;
+        let profile = encoder.profile();
+        if profile.setup_sha256() != ref_.setup_sha256.to_lowercase() {
+            return Err(EncoderError::ProfileNotFound {
+                requested: ref_.setup_sha256.clone(),
+            });
+        }
+        if let Some(name) = &ref_.name {
+            if name != profile.name() {
+                return Err(EncoderError::StateError {
+                    message: format!(
+                        "profile name mismatch: setup_sha256 resolves to \n                         '{}', not '{name}'",
+                        profile.name()
+                    ),
+                });
+            }
+        }
+        let pipeline = StreamPipeline::new(&encoder)?;
+        Ok(Self {
+            initialized: true,
+            finished: false,
+            encoder: Some(encoder),
+            pipeline: Some(pipeline),
+        })
+    }
     /// and return the packets that just completed.
     ///
     /// `STATE_ERROR` before Init or after Finish; `GEOMETRY_MISMATCH` when

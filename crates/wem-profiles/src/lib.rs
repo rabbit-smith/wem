@@ -28,6 +28,7 @@ pub mod frozen;
 pub mod key;
 pub mod model;
 pub mod psychoacoustics;
+pub mod quality;
 pub mod registry;
 pub mod resources;
 pub mod transform;
@@ -47,7 +48,14 @@ pub use error::ProfileError;
 pub use frozen::load_frozen_tables;
 pub use key::{ProfileKey, WWISE2013_6CH_44100_SETUP_IDENTITY, WWISE_GENERATION};
 pub use model::{ContainerMetadata, EncoderProfile, ProfileManifestView};
-pub use registry::{installed_registry, load_wem_profile, resolve_wem_profile, ProfileRegistry};
+pub use quality::{
+    load_quality_curves, linear_frac, normalize_quality_factor, QualityCurves,
+    QUALITY_CURVES_INTERPOLATION, QUALITY_CURVES_RESOURCE, QUALITY_CURVES_SCHEMA,
+};
+pub use registry::{
+    installed_registry, load_wem_profile, load_wem_profile_quality, resolve_wem_profile,
+    resolve_wem_profile_quality, ProfileRegistry,
+};
 pub use resources::{normalize_resource_path, ResourceBackend, ResourceRef};
 pub use transform::load_mdct_looks;
 pub use transient::load_transient_tables;

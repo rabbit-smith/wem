@@ -259,6 +259,33 @@ pub enum ProfileError {
     /// Long variant field-19 curve malformed.
     LongVariantField19Malformed,
     // ------------------------------------------------------------------
+    // quality-curves resource (optional; absent -> historical behavior)
+    // ------------------------------------------------------------------
+    /// Quality-curves schema unexpected.
+    QualityCurvesSchemaUnexpected { schema: String },
+    /// Quality-curves interpolation marker unsupported.
+    QualityCurvesInterpolationUnsupported { interpolation: String },
+    /// Quality-curves `breakpoints` is not an array.
+    QualityCurvesBreakpointsNotArray,
+    /// Quality-curves has fewer than two breakpoints.
+    QualityCurvesTooFewBreakpoints,
+    /// Quality-curves breakpoints are not strictly increasing.
+    QualityCurvesBreakpointsNotIncreasing,
+    /// A quality curve's length differs from the breakpoint count.
+    QualityCurvesCurveLengthMismatch { name: String, want: usize, got: usize },
+    /// A quality curve carries a non-finite value.
+    QualityCurvesValueNonFinite { name: String },
+    /// Quality-curves carries no curves.
+    QualityCurvesEmptyCurves,
+    /// Quality-curves `curves` is not an object.
+    QualityCurvesCurvesNotObject,
+    /// The quality value is not a finite number.
+    QualityValueNonFinite,
+    /// A profile without the quality-curves resource asked for quality.
+    QualityCurvesResourceMissing { profile: String },
+    /// A quality curve names an unsupported override parameter.
+    QualityCurveParameterUnsupported { name: String },
+    // ------------------------------------------------------------------
     // downstream algorithm errors (forwarded)
     // ------------------------------------------------------------------
     /// wem-analysis structural validation failed.
@@ -383,6 +410,18 @@ impl std::fmt::Display for ProfileError {
             LongVariantIntervalsMalformed => write!(f, "malformed long variant intervals"),
             LongVariantCurvesMalformed => write!(f, "malformed long variant curves"),
             LongVariantField19Malformed => write!(f, "malformed long variant field-19 curve"),
+            QualityCurvesSchemaUnexpected { schema } => write!(f, "unexpected quality-curves schema: {schema:?}"),
+            QualityCurvesInterpolationUnsupported { interpolation } => write!(f, "unsupported quality-curves interpolation: {interpolation:?}"),
+            QualityCurvesBreakpointsNotArray => write!(f, "quality-curves breakpoints must be an array"),
+            QualityCurvesTooFewBreakpoints => write!(f, "quality-curves needs at least two breakpoints"),
+            QualityCurvesBreakpointsNotIncreasing => write!(f, "quality-curves breakpoints must be strictly increasing"),
+            QualityCurvesCurveLengthMismatch { name, want, got } => write!(f, "quality curve {name:?} must contain {want} values, found {got}"),
+            QualityCurvesValueNonFinite { name } => write!(f, "quality curve {name:?} must be finite (NaN/inf rejected)"),
+            QualityCurvesEmptyCurves => write!(f, "quality-curves must define at least one curve"),
+            QualityCurvesCurvesNotObject => write!(f, "quality-curves must define a non-empty curves object"),
+            QualityValueNonFinite => write!(f, "quality must be a finite number"),
+            QualityCurvesResourceMissing { profile } => write!(f, "profile {profile:?} has no quality-curves resource; quality interpolation is unavailable for this profile"),
+            QualityCurveParameterUnsupported { name } => write!(f, "quality curve {name:?} names an unsupported parameter"),
             Analysis(e) => write!(f, "analysis error: {e:?}"),
             Codebook(e) => write!(f, "codebook error: {e:?}"),
             Bit(e) => write!(f, "bitstream error: {e}"),

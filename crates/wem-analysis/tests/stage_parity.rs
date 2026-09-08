@@ -150,7 +150,7 @@ fn stage_parity_all_frames() {
     );
     let bundle = wem_profiles::load_profile_bundle(&data_dir, None, false)
         .expect("installed profile loads");
-    let resources = wem_profiles::assemble_analysis_resources(&bundle)
+    let resources = wem_profiles::assemble_analysis_resources(&bundle, None)
         .expect("analysis resources assemble");
 
     // Create the session and select modes + windows.

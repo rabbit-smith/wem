@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use wem_analysis::config::{
     make_long_floor_envelope_look, make_wwise_psy_look, AnalysisProfileResources,
-    LongFloorEnvelopeLook,
+    LongFloorEnvelopeLook, WwisePsySeedSurface,
 };
 use wem_vorbis::codebook::Codebook;
 use wem_vorbis::setup::{parse_setup, SetupInfo};
@@ -19,6 +19,7 @@ use crate::psychoacoustics::config::load_short_seed_surface;
 use crate::psychoacoustics::long_tables::load_long_psy_tables;
 use crate::psychoacoustics::long_variants::load_long_variant;
 use crate::psychoacoustics::short_tables::load_short_psy_profiles;
+use crate::quality::{load_quality_curves, normalize_quality_factor, QualityCurves};
 use crate::transform::load_mdct_looks;
 use crate::transient::load_transient_tables;
 
@@ -32,10 +33,159 @@ pub struct EncoderProfileResources {
     pub codebooks: Vec<Codebook>,
 }
 
+/// Scalar psychoacoustic fields that the quality factor varies along the
+/// profile's quality-curves table
+/// (Python `_SHORT_QUALITY_FIELDS`; the override points are the same-named
+/// set on the short psychoacoustic seed surface).
+///
+/// Long psy uses packed u32 coefficients and its mask-curve blend factors
+/// are not yet pinned to these names, so it is deliberately excluded
+/// (better to omit than to guess) — both implementations agree on this
+/// surface until corpus calibration says otherwise.
+const SHORT_QUALITY_FIELDS: &[&str] = &[
+    "ath_offset",
+    "ath_floor",
+    "seed_ceiling",
+    "max_curve_db",
+    "regular_curve_bias",
+    "regular_curve_cap",
+    "curve_offset",
+    "curve_slope",
+    "curve_offset_2",
+];
+
+/// The quality state resolved for one assembly: the curves resource, its
+/// evaluated control-point overrides and whether the quality extrapolated
+/// past the breakpoint domain. (The raw quality value is tracked by the
+/// caller, matching the Python reference which stores the un-normalized
+/// factor in `AnalysisProfileResources.quality_value`.)
+#[derive(Debug, Clone, PartialEq)]
+struct ResolvedQuality {
+    curves: Option<QualityCurves>,
+    overrides: Option<BTreeMap<String, f64>>,
+    extrapolated: bool,
+}
+
+impl ResolvedQuality {
+    fn none() -> Self {
+        Self {
+            curves: None,
+            overrides: None,
+            extrapolated: false,
+        }
+    }
+}
+
+/// Resolve and evaluate the profile's quality curves for one quality value
+/// (Python `_resolve_quality_curves`).
+///
+/// `None` keeps the historical behavior exactly: no resource lookup, no
+/// overrides. A quality value requires the profile to carry the optional
+/// resource; asking for it from a profile without curves is a
+/// configuration error, not a silent fallback. The quality is normalized
+/// onto the breakpoint axis before evaluation (spec profile-select entry).
+fn resolve_quality_curves(
+    bundle: &ProfileBundle,
+    quality: Option<f64>,
+) -> Result<ResolvedQuality, ProfileError> {
+    let Some(quality) = quality else {
+        return Ok(ResolvedQuality::none());
+    };
+    let curves_ref = bundle
+        .runtime_manifest()
+        .resources()
+        .iter()
+        .find(|(name, _)| name == "analysis.quality-curves")
+        .map(|(_, ref_)| ref_.clone());
+    let Some(curves_ref) = curves_ref else {
+        return Err(ProfileError::QualityCurvesResourceMissing {
+            profile: bundle.name().to_string(),
+        });
+    };
+    let curves = load_quality_curves(&curves_ref)?;
+    let normalized = normalize_quality_factor(quality);
+    let (values, extrapolated) = curves.evaluate_result(normalized)?;
+    Ok(ResolvedQuality {
+        curves: Some(curves),
+        overrides: Some(values),
+        extrapolated,
+    })
+}
+
+/// Return the short surface with recognized quality overrides applied
+/// (Python `_apply_short_quality_overrides`).
+///
+/// Override points (all on the short psychoacoustic seed surface, which the
+/// short look is then rebuilt from): the `short.<field>` curve names mapped
+/// onto the same-named surface fields. The reference stores the short
+/// psychoacoustic scalars as float32, so every override is rounded through
+/// the f32 boundary here (the reference's write-time cast). Unrecognized
+/// `short.*` parameter names are rejected so a malformed curves file can
+/// never silently take effect.
+fn apply_short_quality_overrides(
+    surface: WwisePsySeedSurface,
+    values: &BTreeMap<String, f64>,
+) -> Result<WwisePsySeedSurface, ProfileError> {
+    let mut overrides: BTreeMap<&str, f32> = BTreeMap::new();
+    for (name, value) in values {
+        let Some(field) = name.strip_prefix("short.") else {
+            continue;
+        };
+        if !SHORT_QUALITY_FIELDS.contains(&field) {
+            return Err(ProfileError::QualityCurveParameterUnsupported {
+                name: name.clone(),
+            });
+        }
+        // f32 boundary: the reference casts the interpolated value to
+        // float32 when writing the short surface field.
+        overrides.insert(field, *value as f32);
+    }
+    if overrides.is_empty() {
+        return Ok(surface);
+    }
+    Ok(WwisePsySeedSurface {
+        ath_offset: overrides.get("ath_offset").copied().unwrap_or(surface.ath_offset),
+        ath_floor: overrides.get("ath_floor").copied().unwrap_or(surface.ath_floor),
+        seed_ceiling: overrides
+            .get("seed_ceiling")
+            .copied()
+            .unwrap_or(surface.seed_ceiling),
+        max_curve_db: overrides
+            .get("max_curve_db")
+            .copied()
+            .unwrap_or(surface.max_curve_db),
+        curve_offset: overrides
+            .get("curve_offset")
+            .copied()
+            .unwrap_or(surface.curve_offset),
+        curve_slope: overrides
+            .get("curve_slope")
+            .copied()
+            .unwrap_or(surface.curve_slope),
+        curve_offset_2: overrides
+            .get("curve_offset_2")
+            .copied()
+            .unwrap_or(surface.curve_offset_2),
+        regular_curve_bias: overrides
+            .get("regular_curve_bias")
+            .copied()
+            .unwrap_or(surface.regular_curve_bias),
+        regular_curve_cap: overrides
+            .get("regular_curve_cap")
+            .copied()
+            .unwrap_or(surface.regular_curve_cap),
+        ..surface
+    })
+}
+
 /// Resolve MDCT/transient/psy inputs through stable manifest logical names
 /// (Python `assemble_analysis_resources`).
+///
+/// `quality` is the optional quality factor (0-10 Wwise convention).
+/// `None` reproduces the historical assembly byte for byte.
 pub fn assemble_analysis_resources(
     bundle: &ProfileBundle,
+    quality: Option<f64>,
 ) -> Result<AnalysisProfileResources, ProfileError> {
     let manifest = bundle.runtime_manifest();
 
@@ -55,6 +205,16 @@ pub fn assemble_analysis_resources(
         .find(|(name, _)| name == "analysis.frozen-tables")
         .map(|(_, ref_)| load_frozen_tables(ref_))
         .transpose()?;
+
+    // Quality interpolation is optional in the same sense: absent resource
+    // or absent quality -> the historical path is taken untouched.
+    let resolved_quality = resolve_quality_curves(bundle, quality)?;
+    let quality_values = resolved_quality.overrides;
+
+    let mut short_surface = short_surface;
+    if let Some(values) = &quality_values {
+        short_surface = apply_short_quality_overrides(short_surface, values)?;
+    }
 
     let mdct_looks = load_mdct_looks(manifest.resource("transform.mdct")?)?;
     let transient = load_transient_tables(manifest.resource("analysis.transient")?)?;
@@ -85,15 +245,21 @@ pub fn assemble_analysis_resources(
         long_variants,
         long_floor_looks,
         frozen,
+        quality, // raw quality factor, as in the Python reference
+        resolved_quality.extrapolated,
     )
     .map_err(ProfileError::Analysis)
 }
 
 /// Resolve every analysis and Vorbis input from one profile identity
 /// (Python `assemble_encoder_profile_resources`).
+///
+/// `quality` is forwarded to the analysis-resource assembly; `None` keeps
+/// the historical behavior exactly.
 pub fn assemble_encoder_profile_resources(
     bundle: &ProfileBundle,
     setup_packet: Option<&[u8]>,
+    quality: Option<f64>,
 ) -> Result<EncoderProfileResources, ProfileError> {
     // Argument evaluation order mirrors the Python implementation.
     let packet = match setup_packet {
@@ -107,7 +273,7 @@ pub fn assemble_encoder_profile_resources(
     let t219 = BookTable::load("t219", manifest.resource("vorbis.codebooks.t219")?)?;
     let tables = crate::book_ids::BookTables::new(t97, t219);
 
-    let analysis = assemble_analysis_resources(bundle)?;
+    let analysis = assemble_analysis_resources(bundle, quality)?;
     let codebooks = load_setup_codebooks(&setup.book_ids, &tables)?;
 
     Ok(EncoderProfileResources {

@@ -212,17 +212,20 @@ struct PyEncoder {
 #[pymethods]
 impl PyEncoder {
     #[new]
-    #[pyo3(signature = (profile_name, data_dir=None))]
-    fn new(profile_name: &str, data_dir: Option<&str>) -> PyResult<Self> {
+    #[pyo3(signature = (profile_name, data_dir=None, quality=None))]
+    fn new(profile_name: &str, data_dir: Option<&str>, quality: Option<f64>) -> PyResult<Self> {
         // The kernel's own entry points; `data_dir` scopes the kernel's
         // documented WEM_DATA_DIR override, otherwise the kernel default
-        // (WEM_DATA_DIR or the repository layout) applies.
+        // (WEM_DATA_DIR or the repository layout) applies. `quality`, when
+        // given, binds the quality factor to the resolved profile before
+        // assembly (the Python facade forwards `EncoderProfile.quality`
+        // here); omitted quality keeps the historical bytes exactly.
         let inner = match data_dir {
             Some(dir) => {
                 let _guard = DataDirGuard::set(dir);
-                WemEncoder::from_profile(profile_name)
+                WemEncoder::from_profile_quality(profile_name, quality)
             }
-            None => WemEncoder::from_profile(profile_name),
+            None => WemEncoder::from_profile_quality(profile_name, quality),
         }
         .map_err(error_to_pyerr)?;
         Ok(Self { inner })
@@ -339,15 +342,23 @@ impl PyStreamSession {
     ///
     /// `setup_sha256` is a hard identity assertion (lowercase hex);
     /// `name`, when given, is a soft cross-check that must match the
-    /// resolved profile name.
-    #[pyo3(signature = (setup_sha256, name=None))]
-    fn start(&mut self, setup_sha256: &str, name: Option<&str>) -> PyResult<()> {
+    /// resolved profile name. `quality`, when given, binds the quality
+    /// factor to the resolved profile before assembly (the profile
+    /// quality-curves are then interpolated); omitted keeps the
+    /// historical bytes exactly.
+    #[pyo3(signature = (setup_sha256, name=None, quality=None))]
+    fn start(
+        &mut self,
+        setup_sha256: &str,
+        name: Option<&str>,
+        quality: Option<f64>,
+    ) -> PyResult<()> {
         let profile_ref = ProfileRef {
             setup_sha256: setup_sha256.to_string(),
             name: name.map(str::to_string),
         };
         self.inner
-            .init_profile(&profile_ref)
+            .init_profile_quality(&profile_ref, quality)
             .map_err(error_to_pyerr)
     }
 

@@ -18,7 +18,12 @@ from .book_ids import load_book_table
 from wwise_wem.profiles.bundle import ProfileBundle
 from .codebooks import load_setup_codebooks
 from .frozen import load_frozen_tables
-from .quality import QUALITY_CURVES_RESOURCE, QualityCurves, load_quality_curves
+from .quality import (
+    QUALITY_CURVES_RESOURCE,
+    QualityCurves,
+    load_quality_curves,
+    normalize_quality_factor,
+)
 from .transform import load_mdct_looks
 from .transient import load_transient_tables
 from .psychoacoustics.config import load_short_seed_surface
@@ -73,7 +78,8 @@ def _resolve_quality_curves(
     ``quality`` of ``None`` keeps the historical behavior exactly: no resource
     lookup, no overrides. A quality value requires the profile to carry the
     optional resource; asking for it from a profile without curves is a
-    configuration error, not a silent fallback.
+    configuration error, not a silent fallback. The quality is normalized
+    onto the breakpoint axis before evaluation (spec profile-select entry).
     """
     if quality is None:
         return None, None, False
@@ -86,7 +92,8 @@ def _resolve_quality_curves(
     curves = load_quality_curves(curves_ref)
     if curves is None:
         raise ValueError(f"profile {bundle.name!r} quality-curves failed to load")
-    values, extrapolated = curves.evaluate_result(quality)
+    normalized = normalize_quality_factor(quality)
+    values, extrapolated = curves.evaluate_result(normalized)
     return curves, values, extrapolated
 
 

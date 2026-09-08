@@ -111,19 +111,28 @@ class Encoder:
         return str(candidate) if candidate.is_dir() else None
 
     def _encode_pcm_core(self, pcm: PcmBuffer, rows: list[list[int]]) -> EncodeResult:
-        """Run one encode on the native kernel and fill the Python DTOs."""
-        if self._core_backend is None:
-            self._core_backend = _core.Encoder(
-                self.profile.name,
-                self._profile_data_dir(),
-            )
+        """Run one encode on the native kernel and fill the Python DTOs.
+
+        The quality factor bound to the profile (``profile.quality``) is
+        forwarded to the kernel: with a quality value the kernel
+        interpolates the profile's quality curves during assembly; without
+        one the historical bytes are reproduced exactly.
+        """
         try:
+            if self._core_backend is None:
+                self._core_backend = _core.Encoder(
+                    self.profile.name,
+                    self._profile_data_dir(),
+                    self.profile.quality,
+                )
             result = self._core_backend.encode_pcm(pcm.sample_rate, rows)
         except _core.WemEncoderError as error:
             # The public contract surfaces input/configuration errors as
             # ValueError; kernel rejections reach the user only after all
             # Python-side validation passed, so the mapping preserves the
             # contract's error surface (message text is not contractual).
+            # (Backend construction can raise the same kernel error, e.g.
+            # a quality request on a profile without quality-curves.)
             raise ValueError(str(error)) from error
         stats = EncodeStats(
             pcm_frames=int(result.pcm_frames),

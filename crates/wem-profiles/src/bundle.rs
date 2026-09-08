@@ -158,6 +158,17 @@ pub struct ProfileBundle {
     container_metadata: ContainerMetadata,
     runtime_manifest: RuntimeResourceManifest,
     block_sizes: [i64; 2],
+    /// Whether the manifest carries the `vorbis.setup` resource.
+    ///
+    /// A bundle without setup is a draft profile: its static resources are
+    /// checksummed and usable (e.g. the quality-curves mechanism), but no
+    /// encode can run on it until a paired Wwise export supplies the setup
+    /// packet. `setup_available == false` is reported by the registry
+    /// together with [`ProfileBundle::pending_reason`].
+    setup_available: bool,
+    /// Manifest-declared reason the profile is not yet encodable
+    /// (`None` when the profile is complete).
+    pending_reason: Option<String>,
 }
 
 impl ProfileBundle {
@@ -168,6 +179,8 @@ impl ProfileBundle {
         container_metadata: ContainerMetadata,
         runtime_manifest: RuntimeResourceManifest,
         block_sizes: [i64; 2],
+        setup_available: bool,
+        pending_reason: Option<String>,
     ) -> Result<Self, ProfileError> {
         if name.is_empty() {
             return Err(ProfileError::BundleNameEmpty);
@@ -193,20 +206,21 @@ impl ProfileBundle {
         } else {
             return Err(ProfileError::BundleBlockSizesMismatch);
         }
-        let has_setup = runtime_manifest
-            .resources()
-            .iter()
-            .any(|(n, _)| n == "vorbis.setup");
-        if !has_setup {
-            return Err(ProfileError::BundleMissingVorbisSetup);
-        }
-        let setup_sha = runtime_manifest
-            .resource("vorbis.setup")
-            .expect("setup resource exists")
-            .sha256()
-            .to_string();
-        if key.quality_setup_identity() != Some(format!("sha256:{setup_sha}").as_str()) {
-            return Err(ProfileError::BundleSetupIdentityMismatch);
+        // A draft profile (setup pending) skips the setup identity check;
+        // complete profiles keep the historical verification exactly.
+        if setup_available {
+            let setup_ref = runtime_manifest
+                .resources()
+                .iter()
+                .find(|(n, _)| n == "vorbis.setup")
+                .map(|(_, ref_)| ref_.clone());
+            let Some(setup_ref) = setup_ref else {
+                return Err(ProfileError::BundleMissingVorbisSetup);
+            };
+            let setup_sha = setup_ref.sha256().to_string();
+            if key.quality_setup_identity() != Some(format!("sha256:{setup_sha}").as_str()) {
+                return Err(ProfileError::BundleSetupIdentityMismatch);
+            }
         }
         Ok(Self {
             name,
@@ -214,6 +228,8 @@ impl ProfileBundle {
             container_metadata,
             runtime_manifest,
             block_sizes,
+            setup_available,
+            pending_reason,
         })
     }
 
@@ -237,6 +253,17 @@ impl ProfileBundle {
         self.block_sizes
     }
 
+    /// Whether the profile carries its `vorbis.setup` resource.
+    pub fn setup_available(&self) -> bool {
+        self.setup_available
+    }
+
+    /// The manifest-declared pending reason for a draft profile
+    /// (`None` when the profile is complete).
+    pub fn pending_reason(&self) -> Option<&str> {
+        self.pending_reason.as_deref()
+    }
+
     /// The `vorbis.setup` resource (Python `setup` property).
     pub fn setup(&self) -> Result<&ResourceRef, ProfileError> {
         self.runtime_manifest.resource("vorbis.setup")
@@ -255,15 +282,21 @@ impl ProfileBundle {
     /// Convert to the public identity model
     /// (Python registry construction of `EncoderProfile`).
     pub fn to_encoder_profile(&self) -> Result<crate::model::EncoderProfile, ProfileError> {
-        let setup_ref = self.setup()?.clone();
-        let setup_sha = setup_ref.sha256().to_string();
+        let setup_ref = match self.setup() {
+            Ok(ref_) => Some(ref_.clone()),
+            Err(_) => None, // draft profile: setup pending
+        };
+        let setup_sha = setup_ref.as_ref().map(|ref_| ref_.sha256().to_string()).unwrap_or_default();
         crate::model::EncoderProfile::new(
             self.name.clone(),
             self.key.clone(),
             setup_ref,
             setup_sha,
+            None,
             self.block_sizes,
             self.container_metadata.clone(),
+            self.setup_available,
+            self.pending_reason.clone(),
         )
     }
 }
@@ -516,7 +549,25 @@ fn load_profile_bundle_with(
         .ok_or(ProfileError::BundleNameEmpty)?
         .to_string();
 
-    let bundle = ProfileBundle::new(name, key, container_metadata, runtime_manifest, block_sizes)?;
+    // Draft-profile metadata (additive; absent on complete profiles):
+    // a profile whose manifest lacks the vorbis.setup resource is a
+    // pending-corpus draft and is surfaced by the registry as such.
+    let setup_available = payload
+        .get("resources")
+        .and_then(Value::as_object)
+        .is_some_and(|resources| resources.contains_key("vorbis.setup"));
+    let pending_reason = strict_string(payload.get("pending_reason").unwrap_or(&Value::Null))
+        .map(str::to_string);
+
+    let bundle = ProfileBundle::new(
+        name,
+        key,
+        container_metadata,
+        runtime_manifest,
+        block_sizes,
+        setup_available,
+        pending_reason,
+    )?;
     if bundle.name() != selected {
         return Err(ProfileError::IndexNameMismatch {
             selected,
