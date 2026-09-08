@@ -1,9 +1,15 @@
-//! Draft profile (2ch/48000) loading: the setup-pending profile ships its
-//! static data (quality curves from the profile descriptor) even though its
-//! setup packet awaits corpus export. The registry lists it with
-//! `setup_available == false` and the manifest-declared pending reason.
+//! The 2ch/48000 profile: its setup packet, codebooks, and quality curves are
+//! all registered from the reverse-engineered paired-build sample. Its structure is
+//! complete (setup available); the psychoacoustic calibration still awaits a
+//! paired encode/decode, so the profile carries a manifest-declared pending
+//! reason while remaining setup-available.
 
 use wem_profiles::{load_profile_bundle, load_quality_curves, normalize_quality_factor, DataDir};
+
+const DRAFT_NAME: &str = "wwise2013-2ch-48000";
+/// Setup packet SHA-256 (215-byte 2ch/48k setup extracted from the corpus WEM).
+const DRAFT_SETUP_SHA: &str =
+    "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc";
 
 fn data_dir() -> DataDir {
     DataDir::from_profiles_dir(
@@ -16,20 +22,22 @@ fn data_dir() -> DataDir {
 }
 
 #[test]
-fn installed_draft_profile_exposes_its_quality_curves() {
-    // The draft profile (2ch/48000) ships its quality-curves control points
-    // from static data even though its setup awaits corpus export.
-    let bundle = load_profile_bundle(&data_dir(), Some("wwise2013-2ch-48000"), false)
-        .expect("draft bundle loads");
-    assert!(!bundle.setup_available());
+fn twenty_two_ch_profile_exposes_its_quality_curves() {
+    // The 2ch/48000 profile ships its quality-curves control points from
+    // static data, and now carries its setup packet as well.
+    let bundle =
+        load_profile_bundle(&data_dir(), Some(DRAFT_NAME), false).expect("2ch bundle loads");
+    assert!(bundle.setup_available());
     assert!(bundle.pending_reason().is_some());
+    assert_eq!(bundle.setup().expect("setup ref").sha256(), DRAFT_SETUP_SHA);
+    assert_eq!(bundle.setup_packet().unwrap().len(), 215);
 
     let curves_ref = bundle
         .runtime_manifest()
         .resources()
         .iter()
         .find(|(name, _)| name == "analysis.quality-curves")
-        .expect("draft registers the curves resource")
+        .expect("profile registers the curves resource")
         .1
         .clone();
     let curves = load_quality_curves(&curves_ref).expect("curves load");
@@ -47,17 +55,24 @@ fn installed_draft_profile_exposes_its_quality_curves() {
 }
 
 #[test]
-fn draft_profile_lists_in_the_registry_as_setup_pending() {
-    let registry =
-        wem_profiles::installed_registry(&data_dir()).expect("registry loads");
+fn twenty_two_ch_profile_lists_in_the_registry_as_setup_available() {
+    let registry = wem_profiles::installed_registry(&data_dir()).expect("registry loads");
     assert_eq!(registry.len(), 2);
-    let draft = registry
+    let profile = registry
         .resolve_geometry(2, 48000)
-        .expect("draft geometry resolves");
-    assert_eq!(draft.name(), "wwise2013-2ch-48000");
-    assert!(!draft.setup_available());
-    assert_eq!(draft.setup_sha256(), "");
-    assert!(draft.pending_reason().is_some());
-    // The draft carries no setup digest: no digest resolves to it.
+        .expect("2ch geometry resolves");
+    assert_eq!(profile.name(), DRAFT_NAME);
+    assert!(profile.setup_available());
+    assert_eq!(profile.setup_sha256(), DRAFT_SETUP_SHA);
+    assert!(profile.pending_reason().is_some());
+    // The profile now carries a setup digest: it resolves by that digest.
+    assert_eq!(
+        registry
+            .resolve_setup(2, 48000, DRAFT_SETUP_SHA)
+            .expect("2ch resolves by setup digest")
+            .name(),
+        DRAFT_NAME
+    );
+    // An empty digest no longer matches the registered profile.
     assert!(registry.resolve_setup(2, 48000, "").is_err());
 }

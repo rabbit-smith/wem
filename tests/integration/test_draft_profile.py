@@ -1,8 +1,10 @@
-"""Draft profile (2ch/48000, setup pending corpus export) runtime behavior.
+"""2ch/48000 profile runtime behavior.
 
-The draft profile registers in the native kernel with its static data; every
-encode path refuses it with the clear pending error instead of silently
-forging a setup packet.
+The 2ch/48000 profile now ships its setup packet and codebooks (structure
+registered from the reverse-engineered paired-build sample), so it resolves by
+geometry and setup digest. Its psychoacoustic calibration is still pending,
+however: every encode path refuses it with the clear analysis-pending error
+instead of silently encoding with incomplete psychoacoustics.
 """
 from __future__ import annotations
 
@@ -10,20 +12,22 @@ import unittest
 
 import wwise_wem._core as core_module
 
-_DRAFT_PROFILE_NAME = "wwise2013-2ch-48000"
+_T2CH_PROFILE_NAME = "wwise2013-2ch-48000"
 
 
-class DraftProfileRuntimeTests(unittest.TestCase):
-    def test_native_kernel_draft_profile_refuses_to_encode(self):
-        # The draft 2ch/48000 profile is registered in the native kernel
-        # (setup pending corpus export); building its encoder must fail with
-        # the clear pending error, not a profile-not-found.
+class TwoChannelProfileRuntimeTests(unittest.TestCase):
+    def test_2ch_profile_refuses_to_encode_until_analysis_ready(self):
+        # The 2ch/48000 profile is registered with its setup and codebooks;
+        # building its encoder must still fail because its psychoacoustic
+        # analysis resources are pending, not because the setup is missing.
         with self.assertRaises(core_module.WemEncoderError) as ctx:
-            core_module.Encoder(_DRAFT_PROFILE_NAME)
+            core_module.Encoder(_T2CH_PROFILE_NAME)
         self.assertEqual(ctx.exception.code, "STATE_ERROR")
         message = str(ctx.exception)
-        self.assertIn("setup packet pending", message)
-        self.assertIn("requires paired Wwise export", message)
+        self.assertIn("analysis", message)
+        self.assertIn("psychoacoustic", message)
+        self.assertIn("pending", message)
+        self.assertIn("encoding unavailable", message)
         # Unknown profiles still fail as PROFILE_NOT_FOUND.
         with self.assertRaises(core_module.WemEncoderError) as unknown:
             core_module.Encoder("not-a-profile")

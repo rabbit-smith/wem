@@ -10,7 +10,8 @@ use wem_profiles::psychoacoustics::{
 use wem_profiles::{
     assemble_encoder_profile_resources, load_book_table, load_frozen_tables, load_mdct_looks,
     load_profile_bundle, load_transient_tables, normalize_resource_path, resolve_book_id,
-    ContainerMetadata, DataDir, ProfileError, ProfileKey, ResourceRef, T219_COUNT, T97_COUNT,
+    ContainerMetadata, DataDir, ProfileError, ProfileKey, ResourceRef, T219_COUNT, T282_COUNT,
+    T97_COUNT,
 };
 use wem_vorbis::setup::{pack_setup, parse_setup};
 
@@ -85,7 +86,7 @@ fn book_id_resolution_oracle() {
         .expect("t219 loads");
     assert_eq!(t97.rows().len(), T97_COUNT);
     assert_eq!(t219.rows().len(), T219_COUNT);
-    let tables = wem_profiles::BookTables::new(t97, t219);
+    let tables = wem_profiles::BookTables::new(t97, Some(t219), None);
 
     assert_eq!(resolve_book_id(38, &tables).unwrap().table, "t97");
     assert_eq!(resolve_book_id(38, &tables).unwrap().index, 38);
@@ -99,13 +100,42 @@ fn book_id_resolution_oracle() {
 }
 
 #[test]
+fn twenty_two_ch_profile_resolves_t282_books() {
+    // The 2ch/48k profile's setup references t97 floor books plus t282
+    // residue books (IDs 316..597); the registry must attribute them to the
+    // t282 table rather than reject them as out-of-range.
+    let b = load_profile_bundle(&data_dir(), Some("wwise2013-2ch-48000"), true)
+        .expect("2ch profile bundle loads");
+    let manifest = b.runtime_manifest();
+    let t97 = load_book_table("t97", manifest.resource("vorbis.codebooks.t97").unwrap())
+        .expect("t97 loads");
+    let t282 = load_book_table("t282", manifest.resource("vorbis.codebooks.t282").unwrap())
+        .expect("t282 loads");
+    assert_eq!(t282.rows().len(), T282_COUNT);
+    let tables = wem_profiles::BookTables::new(t97, None, Some(t282));
+    // Floor book 42 -> t97[42]; residue book 416 -> t282[100]; book 597 ->
+    // t282[281]; the t219 range (97..315) is absent and must be rejected.
+    assert_eq!(resolve_book_id(42, &tables).unwrap().table, "t97");
+    assert_eq!(resolve_book_id(416, &tables).unwrap().table, "t282");
+    assert_eq!(resolve_book_id(416, &tables).unwrap().index, 100);
+    assert_eq!(resolve_book_id(597, &tables).unwrap().table, "t282");
+    assert_eq!(resolve_book_id(597, &tables).unwrap().index, 281);
+    assert!(resolve_book_id(100, &tables).is_err());
+    // Every book the setup references must attribute to an installed table.
+    let setup = parse_setup(&b.setup_packet().unwrap(), 2).unwrap();
+    for &book_id in setup.book_ids.iter() {
+        assert!(resolve_book_id(book_id as i64, &tables).is_ok(), "book {book_id} resolves");
+    }
+}
+
+#[test]
 fn codebook_golden_oracles() {
     let b = bundle();
     let manifest = b.runtime_manifest();
     let t97 = load_book_table("t97", manifest.resource("vorbis.codebooks.t97").unwrap()).unwrap();
     let t219 =
         load_book_table("t219", manifest.resource("vorbis.codebooks.t219").unwrap()).unwrap();
-    let tables = wem_profiles::BookTables::new(t97, t219);
+    let tables = wem_profiles::BookTables::new(t97, Some(t219), None);
 
     // Book 38 (t97[38]): dim=1, entries=8, maptype 0; oracle codewords.
     let resolved = resolve_book_id(38, &tables).unwrap();
@@ -883,21 +913,25 @@ fn resource_ref_rejections() {
 fn installed_registry_resolutions() {
     let registry = wem_profiles::installed_registry(&data_dir()).expect("registry");
     // The installed index carries the 6ch profile plus the 2ch/48000
-    // draft profile (setup pending corpus export).
+    // profile (its structure is registered; psychoacoustics pending).
     assert_eq!(registry.len(), 2);
 
     let by_geometry = registry.resolve_geometry(6, 44100).expect("geometry");
     assert_eq!(by_geometry.name(), "wwise2013-6ch-44100");
     assert!(by_geometry.setup_available());
 
-    // The draft profile resolves by its geometry, reports itself as
-    // setup-pending, and never matches a setup digest.
+    // The 2ch/48000 profile resolves by its geometry and now carries its
+    // setup digest (psychoacoustics still pending, so it also keeps a
+    // manifest-declared pending reason).
     let draft = registry
         .resolve_geometry(2, 48000)
-        .expect("draft geometry resolves");
+        .expect("2ch geometry resolves");
     assert_eq!(draft.name(), "wwise2013-2ch-48000");
-    assert!(!draft.setup_available());
-    assert_eq!(draft.setup_sha256(), "");
+    assert!(draft.setup_available());
+    assert_eq!(
+        draft.setup_sha256(),
+        "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc"
+    );
     assert!(draft.pending_reason().is_some());
 
     // Unknown key rejected.
@@ -919,7 +953,18 @@ fn installed_registry_resolutions() {
         .resolve_setup(6, 44100, sha)
         .expect("template setup resolves");
     assert_eq!(matched.name(), "wwise2013-6ch-44100");
-    // The draft carries no setup digest: no digest resolves to it.
+    // The 2ch profile now resolves by its own setup digest.
+    assert_eq!(
+        registry
+            .resolve_setup(
+                2,
+                48000,
+                "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc"
+            )
+            .expect("2ch resolves by setup digest")
+            .name(),
+        "wwise2013-2ch-48000"
+    );
     assert!(registry.resolve_setup(2, 48000, "").is_err());
 
     // load_wem_profile / resolve_wem_profile through the environment.
@@ -940,8 +985,8 @@ fn installed_registry_resolutions() {
     assert_eq!(registry.get_by_name(name).expect("original").quality(), None);
     assert!(wem_profiles::load_wem_profile_quality(name, Some(f64::NAN)).is_err());
     let draft_by_name =
-        wem_profiles::load_wem_profile_quality("wwise2013-2ch-48000", None).expect("draft");
-    assert!(!draft_by_name.setup_available());
+        wem_profiles::load_wem_profile_quality("wwise2013-2ch-48000", None).expect("2ch profile");
+    assert!(draft_by_name.setup_available());
 }
 
 #[test]

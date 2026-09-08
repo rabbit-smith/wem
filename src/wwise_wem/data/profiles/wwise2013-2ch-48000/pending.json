@@ -1,47 +1,47 @@
 {
   "schema": "wem.profile-pending.v1",
   "profile": "wwise2013-2ch-48000",
-  "status": "draft",
+  "status": "structure-registered",
   "items": [
     {
       "resource": "vorbis.setup",
-      "status": "pending",
-      "required": "paired Wwise 2013.2 export of 2ch/48000 audio; the setup packet is produced by the encoder and is absent from static data"
+      "status": "complete",
+      "note": "215-byte setup packet extracted from a paired 2ch/48k WEM; parse_setup completes with 0 pad bits"
     },
     {
       "resource": "vorbis.codebooks.t97",
-      "status": "pending",
-      "required": "decoded from the exported setup packet"
+      "status": "complete",
+      "note": "shared t97 floor table (IDs 0..96); this setup references floor books 38..76"
     },
     {
-      "resource": "vorbis.codebooks.t219",
-      "status": "pending",
-      "required": "decoded from the exported setup packet"
+      "resource": "vorbis.codebooks.t282",
+      "status": "complete",
+      "note": "282-row residue table; this setup references residue books 416..430 (IDs 316..597)"
     },
     {
       "resource": "psychoacoustics.short-seed",
       "status": "pending",
-      "required": "psychoacoustic surface of this geometry from the paired export"
+      "required": "psychoacoustic surface of this geometry from a paired encode/decode"
     },
     {
       "resource": "psychoacoustics.short-profiles",
       "status": "pending",
-      "required": "psychoacoustic profiles of this geometry from the paired export"
+      "required": "psychoacoustic profiles of this geometry from a paired encode/decode"
     },
     {
       "resource": "psychoacoustics.long-base",
       "status": "pending",
-      "required": "long psychoacoustic tables of this geometry from the paired export"
+      "required": "long psychoacoustic tables of this geometry from a paired encode/decode"
     },
     {
       "resource": "psychoacoustics.long-modes",
       "status": "pending",
-      "required": "long psychoacoustic mode tables of this geometry from the paired export"
+      "required": "long psychoacoustic mode tables of this geometry from a paired encode/decode"
     },
     {
       "resource": "analysis.frozen-tables",
       "status": "pending",
-      "required": "frozen transcendental tables recorded from the active encode path"
+      "required": "frozen transcendental tables recorded from the active 2ch encode path"
     },
     {
       "resource": "analysis.quality-curves",
@@ -55,13 +55,13 @@
     },
     {
       "field": "key.quality_setup_identity",
-      "status": "pending",
-      "note": "placeholder identity until the setup packet exists"
+      "status": "complete",
+      "note": "bound to the extracted setup packet SHA-256"
     },
     {
       "field": "container_metadata.unknowns",
-      "status": "pending",
-      "note": "avg-bytes/sec, channel mask, and the unknown fmt fields are placeholders until a paired export"
+      "status": "partial",
+      "note": "geometry, channel mask, and block sizes pinned from the paired WEM; the aux fmt fields and a canonical average byte-rate remain placeholders"
     }
   ]
 }

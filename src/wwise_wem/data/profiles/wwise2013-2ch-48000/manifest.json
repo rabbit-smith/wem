@@ -1,14 +1,14 @@
 {
   "schema": "wwise-wem.profile-manifest.v1",
   "name": "wwise2013-2ch-48000",
-  "setup_available": false,
-  "pending_reason": "setup packet and codebooks require a paired Wwise export; only static profile data is present",
+  "setup_available": true,
+  "pending_reason": "setup packet and codebooks are registered and framing-verified; psychoacoustic calibration (short/long psy, frozen tables) awaits paired encode/decode behavior pairing",
   "key": {
     "generation": "2013.2",
     "channels": 2,
     "sample_rate": 48000,
     "channel_layout": "stereo",
-    "quality_setup_identity": "pending:corpus-export"
+    "quality_setup_identity": "sha256:894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc"
   },
   "block_sizes": [
     256,
@@ -39,6 +39,18 @@
     "uBlocksize1Pow": 11
   },
   "resources": {
+    "vorbis.setup": {
+      "path": "vorbis/setup.bin",
+      "sha256": "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc"
+    },
+    "vorbis.codebooks.t97": {
+      "path": "vorbis/codebooks/t97.json",
+      "sha256": "b2b38d146f01c591db0d831f9c3c9ab7d39ed3c3c5ca16bdb199d252de4a2b7d"
+    },
+    "vorbis.codebooks.t282": {
+      "path": "vorbis/codebooks/t282.json",
+      "sha256": "aeb18cb75ca81b0c72f4f91775a2650adb998f8301461acd258a5a67c47285df"
+    },
     "analysis.quality-curves": {
       "path": "analysis/quality-curves.json",
       "schema": "wem.quality-curves.v1",
@@ -56,7 +68,7 @@
     "meta.pending": {
       "path": "pending.json",
       "schema": "wem.profile-pending.v1",
-      "sha256": "198239db0378213f480ffe98ad2620c3ccd74737f041cdff0544054dd5476346"
+      "sha256": "4b5464b77edfbc99f339aec6e94621248a3a4354700e0bbe88c0cd1fe9da6f81"
     }
   }
 }

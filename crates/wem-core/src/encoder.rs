@@ -408,6 +408,18 @@ impl Encoder {
                 ),
             });
         }
+        // A profile whose setup is registered but whose analysis resources
+        // (psychoacoustic tables, frozen tables) are still pending may be
+        // resolved and inspected, but it must not encode: refuse with a
+        // clear pending error instead of a mid-assembly fault.
+        if analysis_resources_pending(bundle) {
+            return Err(EncoderError::StateError {
+                message: format!(
+                    "profile '{}': analysis (psychoacoustic) resources pending; encoding unavailable",
+                    profile.name()
+                ),
+            });
+        }
         let setup_packet = profile.setup_packet()?;
         let resources =
             assemble_encoder_profile_resources(bundle, Some(&setup_packet), profile.quality())?;
@@ -543,6 +555,21 @@ pub fn draft_pending_message(profile: &EncoderProfile) -> String {
             profile.name()
         ),
     }
+}
+
+/// Whether the profile's analysis (psychoacoustic) resources are still
+/// pending: the profile carries its setup and codebooks but not the
+/// psychoacoustic tables the analysis pipeline assembles.
+fn analysis_resources_pending(bundle: &ProfileBundle) -> bool {
+    const REQUIRED: &[&str] = &[
+        "psychoacoustics.short-seed",
+        "psychoacoustics.short-profiles",
+        "psychoacoustics.long-base",
+        "psychoacoustics.long-modes",
+    ];
+    REQUIRED
+        .iter()
+        .any(|key| bundle.runtime_manifest().resource(key).is_err())
 }
 
 /// Resolve an installed profile by PCM geometry

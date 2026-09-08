@@ -15,7 +15,14 @@ Changing only RIFF header values is insufficient. A new channel/rate pair is
 registered only after its complete setup and analysis tables pass packet and
 whole-file regression.
 
-Currently installed: `ProfileKey(channels=6, sample_rate=44100)`.
+Currently installed:
+- `ProfileKey(channels=6, sample_rate=44100)` — `wwise2013-6ch-44100`,
+  structure and psychoacoustics complete; encodes.
+- `ProfileKey(channels=2, sample_rate=48000)` — `wwise2013-2ch-48000`,
+  its Vorbis setup packet and codebooks (t97 floor plus the t282 residue
+  table) are registered and framing-verified; the psychoacoustic calibration
+  still awaits a paired encode/decode, so it resolves by geometry/setup digest
+  but refuses to encode with a clear analysis-pending error.
 
 ## Exact setup identity
 

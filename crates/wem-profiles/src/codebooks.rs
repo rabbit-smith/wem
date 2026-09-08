@@ -3,14 +3,14 @@
 
 use wem_vorbis::codebook::Codebook;
 
-use crate::book_ids::{BookTables, T219_COUNT, T97_COUNT};
+use crate::book_ids::{BookTables, T219_COUNT, T282_COUNT, T97_COUNT};
 use crate::error::ProfileError;
 
 /// A resolved book descriptor (Python `resolve_book_id` return dict).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedBook {
     pub book_id: i64,
-    /// Table name ("t97" / "t219").
+    /// Table name ("t97" / "t219" / "t282").
     pub table: &'static str,
     /// Index within the named table.
     pub index: i64,
@@ -39,6 +39,9 @@ pub fn resolve_book_id(book_id: i64, tables: &BookTables) -> Result<ResolvedBook
     }
     let j = book_id - T97_COUNT as i64;
     if j < T219_COUNT as i64 {
+        if tables.get("t219").is_none() {
+            return Err(ProfileError::BookIdOutOfRange { book_id });
+        }
         let has_lengthlist = tables
             .get("t219")
             .and_then(|t| t.rows().get(j as usize))
@@ -49,6 +52,18 @@ pub fn resolve_book_id(book_id: i64, tables: &BookTables) -> Result<ResolvedBook
             table: "t219",
             index: j,
             from_direct_fields: has_lengthlist,
+        });
+    }
+    let k = book_id - T97_COUNT as i64 - T219_COUNT as i64;
+    if k < T282_COUNT as i64 {
+        if tables.get("t282").is_none() {
+            return Err(ProfileError::BookIdOutOfRange { book_id });
+        }
+        return Ok(ResolvedBook {
+            book_id,
+            table: "t282",
+            index: k,
+            from_direct_fields: false,
         });
     }
     Err(ProfileError::BookIdOutOfRange { book_id })

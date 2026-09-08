@@ -4,6 +4,7 @@
 //! The Wwise 2013 codebook registry assigns IDs contiguously:
 //!   t97  -> IDs 0 .. 96
 //!   t219 -> IDs 97 .. 315
+//!   t282 -> IDs 316 .. 597
 //!
 //! Extend the registry when another installed profile requires an
 //! additional table.
@@ -17,8 +18,14 @@ use crate::resources::ResourceRef;
 pub const T97_COUNT: usize = 97;
 /// Number of rows in the installed t219 table.
 pub const T219_COUNT: usize = 219;
+/// Number of rows in the installed t282 table (2ch/48k residue books).
+pub const T282_COUNT: usize = 282;
 
-const BOOK_COUNTS: &[(&str, usize)] = &[("t97", T97_COUNT), ("t219", T219_COUNT)];
+const BOOK_COUNTS: &[(&str, usize)] = &[
+    ("t97", T97_COUNT),
+    ("t219", T219_COUNT),
+    ("t282", T282_COUNT),
+];
 
 /// One loaded, checksum-verified decoded book table.
 #[derive(Debug, Clone)]
@@ -170,23 +177,34 @@ fn parse_row(table: &str, row: &serde_json::Value) -> Result<CodebookRow, Profil
     })
 }
 
-/// Both installed book tables (Python `tables` mapping).
+/// The installed book tables (Python `tables` mapping).
+///
+/// The 10-bit book_id encoding reserves fixed ranges for each table, but a
+/// profile carries only the tables its setup references: the t97 floor table
+/// is installed for every profile; t219 (residue) is used by the 6ch profile
+/// and t282 (residue) by the 2ch/48k profile.
 #[derive(Debug, Clone)]
 pub struct BookTables {
     t97: BookTable,
-    t219: BookTable,
+    t219: Option<BookTable>,
+    t282: Option<BookTable>,
 }
 
 impl BookTables {
-    pub fn new(t97: BookTable, t219: BookTable) -> Self {
-        Self { t97, t219 }
+    pub fn new(t97: BookTable, t219: Option<BookTable>, t282: Option<BookTable>) -> Self {
+        Self {
+            t97,
+            t219,
+            t282,
+        }
     }
 
     /// Fetch a table by its name.
     pub fn get(&self, name: &str) -> Option<&BookTable> {
         match name {
             "t97" => Some(&self.t97),
-            "t219" => Some(&self.t219),
+            "t219" => self.t219.as_ref(),
+            "t282" => self.t282.as_ref(),
             _ => None,
         }
     }

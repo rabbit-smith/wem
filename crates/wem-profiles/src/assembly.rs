@@ -270,8 +270,18 @@ pub fn assemble_encoder_profile_resources(
 
     let manifest = bundle.runtime_manifest();
     let t97 = BookTable::load("t97", manifest.resource("vorbis.codebooks.t97")?)?;
-    let t219 = BookTable::load("t219", manifest.resource("vorbis.codebooks.t219")?)?;
-    let tables = crate::book_ids::BookTables::new(t97, t219);
+    // A profile carries only the residue tables its setup references: t219
+    // (6ch) and/or t282 (2ch/48k). Load whichever are installed rather than
+    // assuming the historical t97+t219 pair.
+    let t219 = match manifest.resource("vorbis.codebooks.t219") {
+        Ok(ref_) => Some(BookTable::load("t219", ref_)?),
+        Err(_) => None,
+    };
+    let t282 = match manifest.resource("vorbis.codebooks.t282") {
+        Ok(ref_) => Some(BookTable::load("t282", ref_)?),
+        Err(_) => None,
+    };
+    let tables = crate::book_ids::BookTables::new(t97, t219, t282);
 
     let analysis = assemble_analysis_resources(bundle, quality)?;
     let codebooks = load_setup_codebooks(&setup.book_ids, &tables)?;

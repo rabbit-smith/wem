@@ -37,7 +37,7 @@ pub mod transient;
 pub use assembly::{
     assemble_analysis_resources, assemble_encoder_profile_resources, EncoderProfileResources,
 };
-pub use book_ids::{BookTable, BookTables, T219_COUNT, T97_COUNT};
+pub use book_ids::{BookTable, BookTables, T219_COUNT, T282_COUNT, T97_COUNT};
 pub use bundle::{
     load_profile_bundle, load_profile_bundle_from_bytes, ProfileBundle, RuntimeResourceManifest,
     BUNDLE_SCHEMA, INDEX_SCHEMA,

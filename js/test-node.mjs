@@ -196,10 +196,11 @@ await expectWemError(
 
 const DRAFT_PROFILE = "wwise2013-2ch-48000";
 
-// --- 4) draft profile (setup pending corpus export) --------------------------
-// The 2ch/48000 draft profile ships its static data (quality curves etc.); the
-// setup packet awaits a paired Wwise export. The kernel must load it through
-// the bytes entry and refuse encoding with a clear pending error.
+// --- 4) 2ch/48000 profile (structure registered, psychoacoustics pending) ----
+// The 2ch/48000 profile now ships its setup packet and codebooks (structure
+// registered from the reverse-engineered sample). The kernel must load it
+// through the bytes entry and refuse encoding because its psychoacoustic
+// analysis resources are still pending, with a clear error.
 const draftIndexBytes = (() => {
   const index = JSON.parse(new TextDecoder().decode(indexBytes));
   index.default = DRAFT_PROFILE;
@@ -216,20 +217,23 @@ try {
   draftEncodeError = error;
 }
 check(
-  "draft profile files are present in the profile tree",
+  "2ch profile files are present in the profile tree",
   files.has(`${DRAFT_PROFILE}/analysis/quality-curves.json`) &&
     files.has(`${DRAFT_PROFILE}/pending.json`) &&
-    files.has(`${DRAFT_PROFILE}/manifest.json`),
+    files.has(`${DRAFT_PROFILE}/manifest.json`) &&
+    files.has(`${DRAFT_PROFILE}/vorbis/setup.bin`) &&
+    files.has(`${DRAFT_PROFILE}/vorbis/codebooks/t97.json`) &&
+    files.has(`${DRAFT_PROFILE}/vorbis/codebooks/t282.json`),
 );
 check(
-  "draft profile encode attempt -> WEM_ERR_STATE_ERROR with clear pending error",
+  "2ch profile encode attempt -> WEM_ERR_STATE_ERROR with analysis-pending error",
   !draftBuildSucceeded &&
     draftEncodeError &&
     typeof draftEncodeError.code === "string" &&
     draftEncodeError.code === "WEM_ERR_STATE_ERROR" &&
     typeof draftEncodeError.message === "string" &&
-    draftEncodeError.message.includes("setup packet pending") &&
-    draftEncodeError.message.includes("requires paired Wwise export"),
+    draftEncodeError.message.includes("psychoacoustic") &&
+    draftEncodeError.message.includes("pending"),
   `code=${draftEncodeError?.code ?? "<no code>"}, message="${draftEncodeError?.message ?? draftEncodeError}"`,
 );
 
