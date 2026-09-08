@@ -26,3 +26,6 @@ js/pkg-node/.gitignore
 # Unverified extraction/derived data (the analysis tool dumps, corpus candidates).
 # Nothing under corpus/ is a trusted contract asset until verified and moved.
 corpus/
+
+# the round paired-corpus tooling outputs (scratch templates; not contract assets).
+rs_corpus_*.xml
