@@ -24,6 +24,7 @@ from .floor_fit import floor1_fit_wwise, floor1_quantize_posts
 from .residue import (
     mdct_to_residue,
     pack_residue_silent,
+    pack_residue_type2,
     pack_residue_vq,
     quantize_residue_value,
 )
@@ -86,6 +87,48 @@ def _pick_subclass_cval(
             if score == 2 * cdim:
                 break
     return best
+
+
+def apply_mapping_coupling(
+    residuals: list[list[float]],
+    coupling: Sequence[Mapping[str, int]],
+) -> None:
+    """In-place forward mapping0 stereo coupling (exact 4-branch pre-image).
+
+    The published decoder applies the libvorbis mapping0.c:765-787 four-
+    branch coupling between the residue inverse and floor1 inverse2 (dB
+    residue domain, scripts/decode_wem.py::decouple_db_domain).  For a
+    coupling step (mag, ang) and a pre-coupling pair (M, A), the stored pair
+    is the exact pre-image of that piecewise decode map, so decoding the
+    stored pair recovers (M, A) exactly:
+
+    - M > 0 and A < M:  store (M, M - A)
+    - M > 0 and A >= M: store (A, M - A)
+    - M <= 0 and A > M: store (M, A - M)
+    - M <= 0 and A <= M: store (A, A - M)
+    """
+    if not coupling:
+        return
+    for step in coupling:
+        mag_row = residuals[int(step["mag"])]
+        ang_row = residuals[int(step["ang"])]
+        for j in range(len(mag_row)):
+            m_value = mag_row[j]
+            a_value = ang_row[j]
+            if m_value > 0.0:
+                if a_value < m_value:
+                    mag_row[j] = m_value
+                    ang_row[j] = m_value - a_value
+                else:
+                    mag_row[j] = a_value
+                    ang_row[j] = m_value - a_value
+            else:
+                if a_value > m_value:
+                    mag_row[j] = m_value
+                    ang_row[j] = a_value - m_value
+                else:
+                    mag_row[j] = a_value
+                    ang_row[j] = a_value - m_value
 
 
 def pack_audio_header(
@@ -291,33 +334,62 @@ def pack_block_packet_details(
     quantized_residue = [[0] * n_spectrum for _ in range(channels)]
     if any(ch_used):
         res = setup["residues"][mapping["residues"][0]]
+        # Coupled streams (mapping0 coupling_steps > 0) store the (mag, ang)
+        # pair in the residue domain, not raw per-channel coefficients: apply
+        # the exact inverse of the decoder's 4-branch coupling (no-op when the
+        # mapping has no coupling steps, e.g. the 5.1 profile).
+        apply_mapping_coupling(residuals, mapping.get("coupling") or [])
         # Materialize the integer residue handoff once. The residue packer
         # accepts numeric rows and its own integer normalization is
         # idempotent, so these exact rows feed both classification and VQ.
         begin = int(res["begin"])
-        end = min(int(res["end"]), n_spectrum)
-        quantized_residue = [
-            [
-                quantize_residue_value(value)
-                if used and begin <= index < end
-                else 0
-                for index, value in enumerate(row)
+        if int(res.get("type")) == 2:
+            # Type 2 codes the flat (bin*channels+channel) domain: the
+            # quantized handoff and the bit schedule both follow that layout.
+            end_flat = min(int(res["end"]), n_spectrum * channels)
+            quantized_residue = [
+                [
+                    quantize_residue_value(value)
+                    if used and begin <= index * channels + ch_index < end_flat
+                    else 0
+                    for index, value in enumerate(row)
+                ]
+                for row, ch_index, used in zip(residuals, range(channels), ch_used)
             ]
-            for row, used in zip(residuals, ch_used)
-        ]
-        if residue_vq:
-            pack_residue_vq(
+            pack_residue_type2(
                 op,
                 res,
                 books,
-                quantized_residue,
+                residuals,
                 ch_used,
                 n_spectrum=n_spectrum,
+                n_channels=channels,
+                long_block=bool(md["blockflag"]),
             )
         else:
-            pack_residue_silent(
-                op, res, books, sum(1 for u in ch_used if u), n_spectrum=n_spectrum
-            )
+            end = min(int(res["end"]), n_spectrum)
+            quantized_residue = [
+                [
+                    quantize_residue_value(value)
+                    if used and begin <= index < end
+                    else 0
+                    for index, value in enumerate(row)
+                ]
+                for row, used in zip(residuals, ch_used)
+            ]
+            if residue_vq:
+                pack_residue_vq(
+                    op,
+                    res,
+                    books,
+                    quantized_residue,
+                    ch_used,
+                    n_spectrum=n_spectrum,
+                )
+            else:
+                pack_residue_silent(
+                    op, res, books, sum(1 for u in ch_used if u), n_spectrum=n_spectrum
+                )
     return BlockPacketResult(
         op.get_buffer(),
         tuple(tuple(row) for row in quantized_residue),

@@ -208,16 +208,19 @@ def assemble_encoder_profile_resources(
     packet = bundle.setup_packet() if setup_packet is None else bytes(setup_packet)
     setup = parse_setup(packet, channels=bundle.key.channels)
     manifest = bundle.runtime_manifest
-    tables = MappingProxyType(
-        {
-            "t97": load_book_table(
-                "t97", manifest.resource("vorbis.codebooks.t97")
-            ),
-            "t219": load_book_table(
-                "t219", manifest.resource("vorbis.codebooks.t219")
-            ),
-        }
+    t97 = load_book_table(
+        "t97", manifest.resource("vorbis.codebooks.t97")
     )
+    # A profile carries only the residue tables its setup references: t219
+    # (6ch) and/or t282 (2ch/48k). Load whichever are installed rather than
+    # assuming the historical t97+t219 pair (mirrors the Rust assembly).
+    tables = {"t97": t97}
+    for name in ("vorbis.codebooks.t219", "vorbis.codebooks.t282"):
+        try:
+            ref = manifest.resource(name)
+        except ValueError:
+            continue
+        tables[name.rsplit(".", 1)[1]] = load_book_table(name.rsplit(".", 1)[1], ref)
     return EncoderProfileResources(
         analysis=assemble_analysis_resources(bundle, quality=quality),
         setup_packet=packet,

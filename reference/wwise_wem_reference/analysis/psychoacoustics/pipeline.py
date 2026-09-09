@@ -273,7 +273,7 @@ def analyze_short_frame(
         channel_specmax, global_specmax = update_frame_spectrum_peak(
             fft,
             block_bins=128,
-            sample_rate=44100,
+            sample_rate=resources.short_look.sample_rate,
             state=specmax_state,
         )
     look = resources.short_look

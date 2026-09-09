@@ -6,7 +6,11 @@ import struct
 from dataclasses import replace
 from functools import lru_cache
 
-from ...analysis.config import WwisePsyLongTables
+from ...analysis.config import (
+    CALIBRATION_SAMPLE_RATES,
+    LONG_PSYCH_ACOUSTIC_N,
+    WwisePsyLongTables,
+)
 from wwise_wem.profiles.resources import ResourceRef
 
 
@@ -34,7 +38,7 @@ def load_long_variant(
     if not isinstance(base, WwisePsyLongTables):
         raise TypeError("long variant base must be WwisePsyLongTables")
     payload = ref.read_json()
-    if payload.get("schema") != SCHEMA or payload.get("n") != 1024 or payload.get("sample_rate") != 44100:
+    if payload.get("schema") != SCHEMA or payload.get("n") != LONG_PSYCH_ACOUSTIC_N or payload.get("sample_rate") not in CALIBRATION_SAMPLE_RATES:
         raise ValueError("unexpected long analysis variant table")
     surface = payload.get("variants", {}).get(str(mode))
     if not isinstance(surface, dict):

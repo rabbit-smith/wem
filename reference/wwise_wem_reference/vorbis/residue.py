@@ -371,6 +371,193 @@ def pack_residue_vq(
     }
 
 
+def _vv_add_slots(offset: int, part: int, n_channels: int, dim: int):
+    """Yield per-entry (bin, channel) slot lists in the libvorbis
+    decodevv_add flat-domain order (bin-major, channel round-robin)."""
+    i = offset // n_channels
+    chptr = 0
+    m = (offset + part) // n_channels
+    while i < m:
+        slots = []
+        for _ in range(dim):
+            if i >= m:
+                break
+            slots.append((i, chptr))
+            chptr += 1
+            if chptr == n_channels:
+                chptr = 0
+                i += 1
+        yield slots
+
+
+def _classify_partition_type2(
+    samples_flat: Sequence[float], nclass: int, long_block: bool
+) -> int:
+    """Classify one type-2 partition (magnitude class across all channels).
+
+    Behavior-fitted from the 2ch/48k representative stream: the reference
+    class assignment tracks the quantized partition peak on the integer
+    book scale, with power-of-2 boundaries for high peaks and a
+    block-length-dependent split for peak 2. Deterministic.
+    """
+    if not samples_flat:
+        return 0
+    peak = 0.0
+    for s in samples_flat:
+        a = abs(float(s))
+        if a > peak:
+            peak = a
+    q = int(peak + 0.5)
+    if q <= 0:
+        return 0
+    if q <= 1:
+        return 1
+    if q == 2:
+        return 4 if long_block else 3
+    if q <= 4:
+        return 5
+    if q <= 8:
+        return 6
+    if q <= 16:
+        return 7
+    if q <= 32:
+        return 8
+    return 9
+
+
+def _pack_classbook_entry_type2(
+    op: OggPack, cb: Codebook, classes: Sequence[int], nclass: int
+) -> None:
+    """Mixed-radix classbook entry for the type-2 phrasebook.
+
+    entry = c0 * nclass^(ppw-1) + ... + c_{ppw-1}; the decoder unpacks the
+    same mixed radix.  A classbook only codes a subset of the mixed-radix
+    domain (e.g. the 2ch short classbook carries classes 4..9 only); an
+    uncoded combination falls back to the smallest coded entry, matching
+    the calibrated 2ch behavior.
+    """
+    entry = 0
+    for c in classes:
+        entry = entry * nclass + (int(c) % nclass)
+    if entry >= cb.entries or int(cb.lengthlist[entry]) <= 0:
+        entry = next(
+            e for e, length in enumerate(cb.lengthlist) if int(length) > 0
+        )
+    cb.encode(op, entry)
+
+
+def pack_residue_type2(
+    op: OggPack,
+    residue: dict,
+    books: Sequence[Codebook],
+    residuals: Sequence[Sequence[float]],
+    ch_used: Sequence[bool],
+    *,
+    n_spectrum: int,
+    n_channels: int,
+    long_block: bool = False,
+) -> dict:
+    """Pack residue type 2 (the libvorbis res2_inverse flat-domain layout).
+
+    Type 2 codes the residue on the flat (bin * n_channels + channel)
+    domain: one class per partition shared across all channels, classword
+    written once per partition-group, VQ vectors slot-major over
+    (bin, channel). Mirrors the decoder's res2_inverse bit schedule
+    (scripts/decode_wem.py::decode_residue_type2), so encoded packets
+    close strictly against that published decoder.
+
+    residuals[ch][bin]: coupled residue rows (floor-divided MDCT, mapping0
+    coupling already applied).
+    """
+    max_end = n_spectrum * n_channels
+    begin = int(residue["begin"])
+    end = int(residue["end"]) if int(residue["end"]) < max_end else max_end
+    span = end - begin
+    part = int(residue["partition_size"])
+    partvals = span // part if span > 0 else 0
+    if partvals <= 0 or not any(ch_used):
+        return {"status": "empty", "partvals": 0, "vq_count": 0}
+
+    nclass = int(residue["classifications"])
+    cascades = residue["cascades"]
+    stage_books = residue["books"]  # [class][stage] -> book or -1
+    cb = books[int(residue["classbook"])]
+    ppw = int(cb.dim)
+    if ppw <= 0:
+        ppw = 1
+    partwords = (partvals + ppw - 1) // ppw
+
+    # working residual copies (mutable), quantized as the forward path does
+    work: List[List[float]] = []
+    for ch in range(n_channels):
+        if ch_used[ch]:
+            work.append(
+                [float(quantize_residue_value(v)) for v in residuals[ch]]
+            )
+        else:
+            work.append([])
+
+    # classify each partition (class shared across channels), gathering in
+    # flat (bin*ch + ch) order so the metric sees the values the VQ stages
+    # will write (mirror of the _vv_add_slots layout)
+    partword: List[List[int]] = [[0] * ppw for _ in range(partwords)]
+    for lw in range(partwords):
+        for k in range(ppw):
+            p = lw * ppw + k
+            if p >= partvals:
+                break
+            off = begin + p * part
+            flat = []
+            for f in range(off, off + part):
+                bin_idx = f // n_channels
+                ch_idx = f % n_channels
+                if ch_used[ch_idx] and bin_idx < len(work[ch_idx]):
+                    flat.append(work[ch_idx][bin_idx])
+            partword[lw][k] = _classify_partition_type2(flat, nclass, long_block)
+
+    vq_count = 0
+    for s in range(8):
+        for lw in range(partwords):
+            if s == 0:
+                classes = partword[lw][:ppw]
+                while len(classes) < ppw:
+                    classes = classes + [0]
+                _pack_classbook_entry_type2(op, cb, classes, nclass)
+            for k in range(ppw):
+                p = lw * ppw + k
+                if p >= partvals:
+                    break
+                cls = partword[lw][k]
+                if not (int(cascades[cls]) & (1 << s)):
+                    continue
+                book_id = int(stage_books[cls][s])
+                if book_id < 0:
+                    continue
+                book = books[book_id]
+                dim = int(book.dim)
+                off = begin + p * part
+                for slots in _vv_add_slots(off, part, n_channels, dim):
+                    target = [0.0] * dim
+                    for j, (bin_idx, ch_idx) in enumerate(slots[:dim]):
+                        if ch_idx < len(work) and bin_idx < len(work[ch_idx]):
+                            target[j] = work[ch_idx][bin_idx]
+                        else:
+                            target[j] = 0.0
+                    entry = book.best_vq(target)
+                    book.encode(op, entry)
+                    vq_vec = book.vq_values(entry)
+                    for (bin_idx, ch_idx), val in zip(slots[:dim], vq_vec):
+                        if ch_idx < len(work) and bin_idx < len(work[ch_idx]):
+                            work[ch_idx][bin_idx] -= val
+                    vq_count += 1
+
+    return {
+        "status": "ok",
+        "partvals": partvals,
+        "vq_count": vq_count,
+    }
+
+
 def mdct_to_residue(
     mdct: Sequence[float],
     floor_amp: Sequence[float],

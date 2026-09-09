@@ -19,6 +19,13 @@ EHMER_OFFSET = 16
 TONE_REFERENCE_LEVEL_DB = 30.0
 NEGATIVE_INFINITY_DB = -9999.0
 SPECTRUM_PEAK_DECAY_DB_PER_SECOND = 6.0
+# Calibration sample rates accepted by the psychoacoustic loaders.  Each
+# resource declares its own geometry; the loaders check that declared
+# geometry against this set instead of one hard-coded rate.
+CALIBRATION_SAMPLE_RATES = (44100, 48000)
+# Block-derived analysis bin counts (short 256-sample / long 2048-sample).
+SHORT_PSYCH_ACOUSTIC_N = 128
+LONG_PSYCH_ACOUSTIC_N = 1024
 
 @dataclass(frozen=True)
 class MdctLook:
@@ -179,7 +186,7 @@ def _signed_u32(value: int) -> int:
 
 def make_wwise_long_seed_look(table: WwisePsyLongTables) -> WwisePsyLongSeedLook:
     outer, profile = table.seed_outer_u32, table.seed_profile_u32
-    if table.n != 1024 or table.sample_rate != 44100:
+    if table.n != LONG_PSYCH_ACOUSTIC_N or table.sample_rate not in CALIBRATION_SAMPLE_RATES:
         raise ValueError("long seed table has unsupported geometry")
     if outer[0] != table.n or outer[11] != table.sample_rate:
         raise ValueError("long seed geometry disagrees with the table header")
@@ -203,7 +210,7 @@ def make_wwise_long_seed_look(table: WwisePsyLongTables) -> WwisePsyLongSeedLook
 
 
 def make_long_floor_envelope_look(table: WwisePsyLongTables) -> LongFloorEnvelopeLook:
-    if table.n != 1024 or len(table.analysis_curves) < 2:
+    if table.n != LONG_PSYCH_ACOUSTIC_N or len(table.analysis_curves) < 2:
         raise ValueError("long floor-envelope table has unsupported geometry")
     profile = table.analysis_profile_u32
     if len(profile) <= 167 or int(profile[167]) < 0:
@@ -221,7 +228,7 @@ def make_wwise_psy_look(
     frozen_ln: Mapping[int, float] | None = None,
 ) -> WwisePsyLook:
     n, sample_rate = surface.n, surface.sample_rate
-    if n != 128 or sample_rate != 44100:
+    if n != SHORT_PSYCH_ACOUSTIC_N or sample_rate not in CALIBRATION_SAMPLE_RATES:
         raise ValueError("short psychoacoustic look has unsupported geometry")
     selected_row = surface.row if row is None else tuple(float(value) for value in row)
     if len(selected_row) != len(surface.row):

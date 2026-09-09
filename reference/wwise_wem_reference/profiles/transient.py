@@ -5,7 +5,12 @@ from __future__ import annotations
 import struct
 from functools import lru_cache
 
-from ..analysis.config import TransientBandConfig, TransientDetectorTables
+from ..analysis.config import (
+    CALIBRATION_SAMPLE_RATES,
+    SHORT_PSYCH_ACOUSTIC_N,
+    TransientBandConfig,
+    TransientDetectorTables,
+)
 from wwise_wem.profiles.resources import ResourceRef
 
 
@@ -21,12 +26,16 @@ def load_transient_tables(ref: ResourceRef) -> TransientDetectorTables:
     data = ref.read_json()
     if data.get("schema") != "wem.transient-detector-table.v1":
         raise ValueError("transient table schema changed")
-    if data.get("sample_rate") != 44100 or data.get("n") != 128:
+    if (
+        data.get("sample_rate") not in CALIBRATION_SAMPLE_RATES
+        or data.get("n") != SHORT_PSYCH_ACOUSTIC_N
+    ):
         raise ValueError("transient table geometry changed")
+    n = data.get("n")
     window_u32 = data.get("window_u32")
     config_u32 = data.get("config_u32")
     rows = data.get("bands")
-    if not isinstance(window_u32, list) or len(window_u32) != 128:
+    if not isinstance(window_u32, list) or len(window_u32) != n:
         raise ValueError("transient window must contain 128 float words")
     if not isinstance(config_u32, list) or len(config_u32) != 26:
         raise ValueError("transient config must contain 26 float words")
@@ -50,7 +59,7 @@ def load_transient_tables(ref: ResourceRef) -> TransientDetectorTables:
             scale=_u32_f32(int(row["scale_u32"])),
         ))
     return TransientDetectorTables(
-        n=128,
+        n=n,
         bias=_u32_f32(int(data["bias_u32"])),
         window=tuple(_u32_f32(value) for value in window_u32),
         config=tuple(_u32_f32(value) for value in config_u32),

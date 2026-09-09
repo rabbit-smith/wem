@@ -11,12 +11,16 @@ import math
 import struct
 from typing import Any
 
-from ...analysis.config import WwisePsyLongTables
+from ...analysis.config import (
+    CALIBRATION_SAMPLE_RATES,
+    LONG_PSYCH_ACOUSTIC_N,
+    WwisePsyLongTables,
+)
 from wwise_wem.profiles.resources import ResourceRef
 
 
 SCHEMA = "wem.psy-long-static.v1"
-N = 1024
+N = LONG_PSYCH_ACOUSTIC_N
 PROFILE_WORDS = 256
 LOOK_WORDS = 192
 TONE_BANDS = 17
@@ -60,7 +64,7 @@ def load_long_psy_tables(
     payload = ref.read_json()
     if not isinstance(payload, dict) or payload.get("schema") != SCHEMA:
         raise ValueError("unexpected long psychoacoustic-table schema")
-    if payload.get("n") != N or payload.get("sample_rate") != 44100:
+    if payload.get("n") != N or payload.get("sample_rate") not in CALIBRATION_SAMPLE_RATES:
         raise ValueError("long psychoacoustic table has unexpected geometry")
     profile_key = payload.get("profile_key")
     if not isinstance(profile_key, str) or not profile_key:
@@ -92,7 +96,7 @@ def load_long_psy_tables(
         )
 
     return WwisePsyLongTables(
-        sample_rate=44100,
+        sample_rate=int(payload["sample_rate"]),
         n=N,
         profile_key=profile_key,
         analysis_profile_u32=_u32s(analysis.get("profile_u32"), PROFILE_WORDS, "analysis.profile_u32"),

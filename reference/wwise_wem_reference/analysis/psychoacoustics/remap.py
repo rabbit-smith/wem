@@ -97,8 +97,8 @@ class LongRemapResult:
     The fields deliberately retain every boundary that the reference encoder exposes to the
     following stage.  They are useful for regression, while ``remap`` is the
     encoder-facing buffer passed to ``remapped spectrum``.  No field is populated from
-    a runtime-profile record: ``tables`` is the fixed 44100-Hz configuration
-    image in :mod:`profiles.psychoacoustics.long_tables`.
+    a runtime-profile record: ``tables`` is the calibration configuration
+    image in :mod:`profiles.psychoacoustics.long_tables` (44100 or 48000 Hz).
     """
 
     first_smooth: list[float]

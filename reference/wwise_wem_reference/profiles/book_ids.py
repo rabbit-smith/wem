@@ -4,8 +4,9 @@
 The Wwise 2013 codebook registry assigns IDs contiguously:
   t97  → IDs 0 .. 96
   t219 → IDs 97 .. 315
+  t282 → IDs 316 .. 597
 
-The installed Wwise 2013 profiles use these two exported tables. Extend the
+The installed Wwise 2013 profiles use these exported tables. Extend the
 registry when another installed profile requires an additional table.
 
 """
@@ -19,8 +20,9 @@ from wwise_wem.profiles.resources import ResourceRef
 
 T97_COUNT = 97
 T219_COUNT = 219
+T282_COUNT = 282
 
-_BOOK_COUNTS = {"t97": T97_COUNT, "t219": T219_COUNT}
+_BOOK_COUNTS = {"t97": T97_COUNT, "t219": T219_COUNT, "t282": T282_COUNT}
 
 
 @lru_cache(maxsize=None)
@@ -62,12 +64,34 @@ def resolve_book_id(
         }
     j = book_id - T97_COUNT
     if j < T219_COUNT:
-        books = tables["t219"]
-        b = books[j]
+        t219_books = tables.get("t219")
+        if t219_books is None:
+            return {"error": "book id is outside the installed codebook tables", "book_id": book_id}
+        b = t219_books[j]
         return {
             "book_id": book_id,
             "table": "t219",
             "index": j,
+            "dim": b["dim"],
+            "entries": b["entries"],
+            "maptype": b["maptype"],
+            "q_min": b.get("q_min"),
+            "q_delta": b.get("q_delta"),
+            "q_quant": b.get("q_quant"),
+            "q_sequencep": b.get("q_sequencep"),
+            "quantlist": b.get("quantlist"),
+            "lengthlist": b.get("lengthlist"),
+        }
+    k = book_id - T97_COUNT - T219_COUNT
+    if k < T282_COUNT:
+        t282_books = tables.get("t282")
+        if t282_books is None:
+            return {"error": "book id is outside the installed codebook tables", "book_id": book_id}
+        b = t282_books[k]
+        return {
+            "book_id": book_id,
+            "table": "t282",
+            "index": k,
             "dim": b["dim"],
             "entries": b["entries"],
             "maptype": b["maptype"],

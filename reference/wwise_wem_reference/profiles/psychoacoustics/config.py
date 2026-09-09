@@ -6,6 +6,8 @@ import math
 from functools import lru_cache
 
 from ...analysis.config import (
+    CALIBRATION_SAMPLE_RATES,
+    SHORT_PSYCH_ACOUSTIC_N,
     WwisePsySeedSurface,
 )
 from wwise_wem.profiles.resources import ResourceRef
@@ -53,7 +55,7 @@ def load_short_seed_surface(ref: ResourceRef) -> WwisePsySeedSurface:
         raise ValueError("short seed surface is missing a required section")
     n = geometry.get("n")
     sample_rate = geometry.get("sample_rate")
-    if n != 128 or sample_rate != 44100:
+    if n != SHORT_PSYCH_ACOUSTIC_N or sample_rate not in CALIBRATION_SAMPLE_RATES:
         raise ValueError("short seed surface has unsupported geometry")
     if payload.get("tone_shape") != [TONE_BAND_COUNT, TONE_LEVEL_COUNT, 58]:
         raise ValueError("short seed surface has an unexpected tone shape")
