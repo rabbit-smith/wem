@@ -913,16 +913,16 @@ fn resource_ref_rejections() {
 fn installed_registry_resolutions() {
     let registry = wem_profiles::installed_registry(&data_dir()).expect("registry");
     // The installed index carries the 6ch profile plus the 2ch/48000
-    // profile (its structure is registered; psychoacoustics pending).
+    // profile (fully registered: setup and psychoacoustics available).
     assert_eq!(registry.len(), 2);
 
     let by_geometry = registry.resolve_geometry(6, 44100).expect("geometry");
     assert_eq!(by_geometry.name(), "wwise2013-6ch-44100");
     assert!(by_geometry.setup_available());
 
-    // The 2ch/48000 profile resolves by its geometry and now carries its
-    // setup digest (psychoacoustics still pending, so it also keeps a
-    // manifest-declared pending reason).
+    // The 2ch/48000 profile resolves by its geometry and carries its setup
+    // digest; its psychoacoustics are registered, so the profile is fully
+    // ready (no manifest-declared pending reason).
     let draft = registry
         .resolve_geometry(2, 48000)
         .expect("2ch geometry resolves");
@@ -932,7 +932,7 @@ fn installed_registry_resolutions() {
         draft.setup_sha256(),
         "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc"
     );
-    assert!(draft.pending_reason().is_some());
+    assert!(draft.pending_reason().is_none());
 
     // Unknown key rejected.
     let unknown = ProfileKey::with_identity(

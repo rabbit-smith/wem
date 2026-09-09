@@ -147,10 +147,11 @@ class ExtendedInputEncodeContractTests(unittest.TestCase):
             )
 
     def test_unsupported_geometry_resolves_to_the_profile_error(self):
-        data = b"\x00\x00" * (2 * 4096)
+        # 4ch/48000 is not a registered profile (the 2ch profile is 48000).
+        data = b"\x00\x00" * (4 * 4096)
         with self.assertRaisesRegex(ValueError, "no Wwise 2013.2 profile"):
             encode_raw_pcm(
-                data, sample_rate=48000, channels=2, bits_per_sample=16
+                data, sample_rate=48000, channels=4, bits_per_sample=16
             )
 
 

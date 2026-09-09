@@ -43,7 +43,7 @@ class PublicProfileContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown WEM profile"):
             load_wem_profile("missing-profile")
         with self.assertRaisesRegex(ValueError, "no Wwise 2013.2 profile"):
-            resolve_wem_profile(2, 48000)
+            resolve_wem_profile(2, 44100)
 
 
 class PublicEncodeContractTests(unittest.TestCase):
@@ -88,12 +88,13 @@ class PublicEncodeContractTests(unittest.TestCase):
         )
 
     def test_unsupported_wav_geometry_is_an_error(self):
+        # 2ch/44100 is not a registered profile (the 2ch profile is 48000).
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "stereo.wav"
             with wave.open(str(path), "wb") as target:
                 target.setnchannels(2)
                 target.setsampwidth(2)
-                target.setframerate(48000)
+                target.setframerate(44100)
                 target.writeframes(b"\0" * (4096 * 2 * 2))
             with self.assertRaisesRegex(ValueError, "no Wwise 2013.2 profile"):
                 encode_wav(path)

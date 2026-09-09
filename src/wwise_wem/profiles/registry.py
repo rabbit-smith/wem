@@ -116,8 +116,23 @@ WWISE2013_6CH_44100 = EncoderProfile(
     container_metadata=_WWISE2013_6CH_44100_BUNDLE.container_metadata,
 )
 
+_WWISE2013_2CH_48000_BUNDLE = load_profile_bundle(
+    profile="wwise2013-2ch-48000", verify_all=False
+)
 
-PROFILE_REGISTRY = ProfileRegistry((WWISE2013_6CH_44100,))
+WWISE2013_2CH_48000 = EncoderProfile(
+    name=_WWISE2013_2CH_48000_BUNDLE.name,
+    key=_WWISE2013_2CH_48000_BUNDLE.key,
+    setup_path=_WWISE2013_2CH_48000_BUNDLE.setup,
+    setup_sha256=_WWISE2013_2CH_48000_BUNDLE.setup.sha256,
+    block_sizes=_WWISE2013_2CH_48000_BUNDLE.block_sizes,
+    container_metadata=_WWISE2013_2CH_48000_BUNDLE.container_metadata,
+)
+
+
+PROFILE_REGISTRY = ProfileRegistry(
+    (WWISE2013_6CH_44100, WWISE2013_2CH_48000)
+)
 PROFILES = PROFILE_REGISTRY.profiles_by_name
 
 

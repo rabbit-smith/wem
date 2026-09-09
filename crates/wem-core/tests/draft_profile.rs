@@ -1,8 +1,8 @@
 //! The 2ch/48000 profile: its setup packet, codebooks, and quality curves are
-//! all registered from the reverse-engineered paired-build sample. Its structure is
-//! complete (setup available); the psychoacoustic calibration still awaits a
-//! paired encode/decode, so the profile carries a manifest-declared pending
-//! reason while remaining setup-available.
+//! all registered from the reverse-engineered paired-build sample, and its
+//! psychoacoustic calibration is registered as well. The profile is fully
+//! registered: setup available and encoding available, with no
+//! manifest-declared pending reason.
 
 use wem_profiles::{
     load_profile_bundle, load_quality_curves, normalize_quality_factor, DataDir,
@@ -30,7 +30,7 @@ fn twenty_two_ch_profile_exposes_its_quality_curves() {
     let bundle =
         load_profile_bundle(&data_dir(), Some(DRAFT_NAME), false).expect("2ch bundle loads");
     assert!(bundle.setup_available());
-    assert!(bundle.pending_reason().is_some());
+    assert!(bundle.pending_reason().is_none());
     assert_eq!(bundle.setup().expect("setup ref").sha256(), DRAFT_SETUP_SHA);
     assert_eq!(bundle.setup_packet().unwrap().len(), 215);
 
@@ -67,7 +67,7 @@ fn twenty_two_ch_profile_lists_in_the_registry_as_setup_available() {
     assert_eq!(profile.name(), DRAFT_NAME);
     assert!(profile.setup_available());
     assert_eq!(profile.setup_sha256(), DRAFT_SETUP_SHA);
-    assert!(profile.pending_reason().is_some());
+    assert!(profile.pending_reason().is_none());
     // The profile now carries a setup digest: it resolves by that digest.
     assert_eq!(
         registry

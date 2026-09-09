@@ -80,12 +80,14 @@ class ProfileRegistryTests(unittest.TestCase):
 
     def test_registry_resolve_get_list_and_mapping_compatibility(self) -> None:
         profile = load_wem_profile("wwise2013-6ch-44100")
+        stereo = load_wem_profile("wwise2013-2ch-48000")
         self.assertIs(PROFILE_REGISTRY.resolve(6, 44100), profile)
         self.assertIs(PROFILE_REGISTRY.resolve(ProfileKey(6, 44100)), profile)
         self.assertIs(PROFILE_REGISTRY.get(profile.name), profile)
         self.assertIs(PROFILE_REGISTRY.get(profile.key), profile)
         self.assertIs(PROFILE_REGISTRY[ProfileKey(6, 44100)], profile)
-        self.assertEqual(PROFILE_REGISTRY.list(), (profile,))
+        self.assertIs(PROFILE_REGISTRY.resolve(2, 48000), stereo)
+        self.assertEqual(PROFILE_REGISTRY.list(), (stereo, profile))
         self.assertEqual(PROFILES[profile.name], profile)
         sentinel = object()
         self.assertIs(PROFILE_REGISTRY.get("missing", sentinel), sentinel)
@@ -132,7 +134,7 @@ class ProfileRegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown WEM profile"):
             load_wem_profile("missing")
         with self.assertRaisesRegex(ValueError, "no Wwise 2013.2 profile"):
-            resolve_wem_profile(2, 48000)
+            resolve_wem_profile(2, 44100)
 
     def test_load_profile_quality_is_additive_and_pure(self) -> None:
         base = load_wem_profile("wwise2013-6ch-44100")

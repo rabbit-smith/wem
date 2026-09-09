@@ -2,7 +2,6 @@
   "schema": "wwise-wem.profile-manifest.v1",
   "name": "wwise2013-2ch-48000",
   "setup_available": true,
-  "pending_reason": "setup packet and codebooks are registered and framing-verified; psychoacoustic calibration (short/long psy, frozen tables) awaits paired encode/decode behavior pairing",
   "key": {
     "generation": "2013.2",
     "channels": 2,
@@ -62,13 +61,38 @@
     },
     "analysis.transient": {
       "path": "analysis/transient.json",
-      "schema": "wem.transient-setup-raw.v1",
-      "sha256": "ae76aab4abec41659b32d4d17dd99cca05155c3e6886e67a03994dc0457cd75a"
+      "schema": "wem.transient-detector-table.v1",
+      "sha256": "cf949b923f96d1ccadfc8221e2c81c6efe3b68243cf263fddc45a1c69da1759f"
     },
     "meta.pending": {
       "path": "pending.json",
       "schema": "wem.profile-pending.v1",
-      "sha256": "4b5464b77edfbc99f339aec6e94621248a3a4354700e0bbe88c0cd1fe9da6f81"
+      "sha256": "93a4fb97575ba3bf049c56945dc5e64d9119b8be4f4c5dc5dfe40644f6046d99"
+    },
+    "analysis.frozen-tables": {
+      "path": "analysis/frozen-tables.json",
+      "schema": "wem.frozen-math.v1",
+      "sha256": "99a60c79cbe3d175bef9390361e9156bab892cfeb4a0409fac7127bbc6c9aa61"
+    },
+    "psychoacoustics.short-seed": {
+      "path": "psychoacoustics/short-seed.json",
+      "schema": "wem.seed-surface.v6",
+      "sha256": "22cf8684a4ce76422ea1291569348a81fa768b3ad4d4ccf20ea6a08609c7326d"
+    },
+    "psychoacoustics.short-profiles": {
+      "path": "psychoacoustics/short-profiles.json",
+      "schema": "wem.short-psy-profiles.v1",
+      "sha256": "167b4796c3b1c809a2f53eda5b374286f274917436aed7ef0e2de739bed3bb69"
+    },
+    "psychoacoustics.long-base": {
+      "path": "psychoacoustics/long-base.json",
+      "schema": "wem.psy-long-static.v1",
+      "sha256": "01f4ec3d01bc8b13e7663f05100cc4b2f6c21e87552d54bf12579ecedb3dd577"
+    },
+    "psychoacoustics.long-modes": {
+      "path": "psychoacoustics/long-modes.json",
+      "schema": "wem.psy-long-analysis-variants.v1",
+      "sha256": "235b2248522ed847ede9a1214eeea825274088cb8cb2291bdcce40789c774f0e"
     }
   }
 }

@@ -101,7 +101,7 @@ class SetupRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown WEM profile"):
             load_wem_profile("missing")
         with self.assertRaisesRegex(ValueError, "no Wwise 2013.2 profile"):
-            resolve_wem_profile(2, 48000)
+            resolve_wem_profile(2, 44100)
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "setup.bin"

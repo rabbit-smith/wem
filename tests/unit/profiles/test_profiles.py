@@ -15,12 +15,15 @@ class ProfileTests(unittest.TestCase):
         )
 
     def test_registry_key(self):
-        self.assertEqual(len(PROFILES), 1)
+        self.assertEqual(len(PROFILES), 2)
+        self.assertEqual(
+            set(PROFILES), {"wwise2013-6ch-44100", "wwise2013-2ch-48000"}
+        )
         self.assertEqual(ProfileKey(6, 44100).channels, 6)
 
     def test_unknown_geometry(self):
         with self.assertRaisesRegex(ValueError, "no Wwise 2013.2 profile"):
-            resolve_wem_profile(2, 48000)
+            resolve_wem_profile(2, 44100)
 
 
 if __name__ == "__main__":

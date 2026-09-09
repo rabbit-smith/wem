@@ -200,11 +200,13 @@ class ExtendedInputDomainTests(unittest.TestCase):
                         action()
 
     def test_geometry_mismatch_keeps_the_explicit_rejection(self):
+        # 2ch/44100 is not a registered profile (the 2ch profile is 48000):
+        # unsupported geometry must still fail with the explicit rejection.
         values = _synthetic_int16(4096, channels=2)
         with self.assertRaisesRegex(ValueError, "no Wwise 2013.2 profile"):
             W.encode_raw_pcm(
                 _int16_bytes(values),
-                sample_rate=48000,
+                sample_rate=44100,
                 channels=2,
                 bits_per_sample=16,
             )

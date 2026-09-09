@@ -1,7 +1,7 @@
 {
   "schema": "wem.profile-pending.v1",
   "profile": "wwise2013-2ch-48000",
-  "status": "structure-registered",
+  "status": "calibration-registered",
   "items": [
     {
       "resource": "vorbis.setup",
@@ -20,38 +20,38 @@
     },
     {
       "resource": "psychoacoustics.short-seed",
-      "status": "pending",
-      "required": "psychoacoustic surface of this geometry from a paired encode/decode"
+      "status": "complete",
+      "note": "geometry-derived for the 2ch/48k bin grid (44.1k calibration curve arrays frequency-mapped to 48k; scalars and structural rows carried from the 6ch calibration as candidate values); registered as the profile's short psychoacoustic set; per-field provenance preserved in corpus scratch"
     },
     {
       "resource": "psychoacoustics.short-profiles",
-      "status": "pending",
-      "required": "psychoacoustic profiles of this geometry from a paired encode/decode"
+      "status": "complete",
+      "note": "geometry-derived for the 2ch/48k bin grid (curve arrays frequency-mapped to 48k; scalars carried from the 6ch calibration as candidate values); registered as the profile's short psychoacoustic profiles; per-field provenance preserved in corpus scratch"
     },
     {
       "resource": "psychoacoustics.long-base",
-      "status": "pending",
-      "required": "long psychoacoustic tables of this geometry from a paired encode/decode"
+      "status": "complete",
+      "note": "geometry-derived for the 2ch/48k bin grid (44.1k calibration curve arrays frequency-mapped to 48k; scalars and structural words carried from the 6ch calibration as candidate values); registered as the profile's long psychoacoustic base; per-field provenance preserved in corpus scratch"
     },
     {
       "resource": "psychoacoustics.long-modes",
-      "status": "pending",
-      "required": "long psychoacoustic mode tables of this geometry from a paired encode/decode"
+      "status": "complete",
+      "note": "geometry-derived for the 2ch/48k bin grid (analysis surfaces for long modes 2/3 frequency-mapped to 48k); registered as the profile's long psychoacoustic variants; per-field provenance preserved in corpus scratch"
     },
     {
       "resource": "analysis.frozen-tables",
-      "status": "pending",
-      "required": "frozen transcendental tables recorded from the active 2ch encode path"
+      "status": "complete",
+      "note": "analytic 48k-domain recording: coordinate domain derived analytically from seed-surface n and manifest sample rate; twiddle and window constants asserted equal to the 6ch profile; cross-check against a live 2ch encode awaits behavior calibration"
     },
     {
       "resource": "analysis.quality-curves",
       "status": "partial",
-      "note": "control points recorded from static data; the semantic mapping (which psychoacoustic field each curve drives) is unconfirmed and awaits behavior pairing"
+      "note": "control points recorded from static data; the desc31.psy_double curve couples to the transient upper-band thresholds (behavior-confirmed); the remaining curve semantics await behavior pairing"
     },
     {
       "resource": "analysis.transient",
-      "status": "raw-only",
-      "note": "static setup constants recorded; the materialized detector table awaits corpus calibration"
+      "status": "complete",
+      "note": "behavior-fitted from a representative 2ch/48k stream: bias/upper/lower/carry offsets fit against the stream mode schedule (fit window 0-70s matched within 2 of 7495 blocks; full-track short rate within 1.5pp of the stream; two holdout windows deviate in opposite directions, content-dependent); window/band geometry carried from the paired 2ch setup raw; per-field provenance preserved in corpus scratch"
     },
     {
       "field": "key.quality_setup_identity",

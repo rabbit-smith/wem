@@ -194,7 +194,9 @@ Both calls return an `EncoderProfile`; `WwiseVorbisProfile` remains its
 compatibility alias. `PROFILE_REGISTRY` is a read-only `ProfileRegistry` with
 `get()`, `resolve()` and `list()` operations. `ProfileKey(6, 44100)` preserves
 the legacy geometry constructor while carrying the complete generation,
-channel-layout and quality/setup identity. The supported profile exposes:
+channel-layout and quality/setup identity. The 6ch profile shown here is one
+of two installed profiles (the other is `wwise2013-2ch-48000`);
+`PROFILE_REGISTRY.list()` reports both. The supported profile exposes:
 
 - `name == "wwise2013-6ch-44100"`
 - `channels == 6`

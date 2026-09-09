@@ -20,9 +20,17 @@ Currently installed:
   structure and psychoacoustics complete; encodes.
 - `ProfileKey(channels=2, sample_rate=48000)` — `wwise2013-2ch-48000`,
   its Vorbis setup packet and codebooks (t97 floor plus the t282 residue
-  table) are registered and framing-verified; the psychoacoustic calibration
-  still awaits a paired encode/decode, so it resolves by geometry/setup digest
-  but refuses to encode with a clear analysis-pending error.
+  table) are registered and framing-verified, and its full analysis
+  resource set is registered, so it resolves by geometry/setup digest
+  and encodes. Calibration basis: representative stream / behavior
+  pairing. The psychoacoustic four-set (short seed/profiles, long
+  base/modes) is geometry-derived (representative 44.1k curve arrays
+  frequency-mapped to 48k); the transient detector is behavior-fitted
+  on a representative 2ch/48k stream; the quality-curves semantics are
+  partial (the `desc31.psy_double` curve is identified as pointing at
+  the transient upper-band thresholds, and the assembly wiring of
+  curve values into psychoacoustic fields is pending); the container
+  aux fields stay partial pending behavior pairing.
 
 ## Exact setup identity
 
