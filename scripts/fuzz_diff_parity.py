@@ -54,16 +54,51 @@ FULL_CASES = 200
 FULL_MAX_FRAMES = 8192
 FULL_SEED_BASE = 20130712
 
+# 2ch/48000 parity contract: a fixed, named geometry item set pinned into
+# the contract (never randomized at run time).  The canonical seed list is
+# deterministic; the PR tier runs the leading slice and the full tier runs
+# the complete set, so the PR set is a strict subset of the full set.  A
+# separate seed family (302407xx) keeps the 2ch items disjoint from the
+# 6ch differential seeds (201307xx).
+TWO_CH_PROFILE = "wwise2013-2ch-48000"
+TWO_CH_SAMPLE_RATE = 48000
+_TWO_CH_48K_SEEDS = (
+    30240701,
+    30240702,
+    30240703,
+    30240704,
+    30240705,
+    30240706,
+    30240707,
+    30240708,
+    30240709,
+    30240710,
+    30240711,
+    30240712,
+    30240713,
+    30240714,
+    30240715,
+    30240716,
+    30240717,
+    30240718,
+    30240719,
+    30240720,
+)
+PR_TWO_CH_SEEDS = _TWO_CH_48K_SEEDS[:5]
+FULL_TWO_CH_SEEDS = _TWO_CH_48K_SEEDS
+
 
 def _sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _random_stream(seed: int, min_frames: int, max_frames: int) -> tuple[int, bytes]:
+def _random_stream(
+    seed: int, channels: int, min_frames: int, max_frames: int
+) -> tuple[int, bytes]:
     """One deterministic random PCM stream: (frames, interleaved s16le)."""
     rng = random.Random(seed)
     frames = rng.randint(min_frames, max_frames)
-    payload = bytearray(frames * CHANNELS * 2)
+    payload = bytearray(frames * channels * 2)
     rng.seed(seed ^ 0x5EED)
     for index in range(0, len(payload), 2):
         payload[index : index + 2] = struct.pack(
@@ -72,7 +107,7 @@ def _random_stream(seed: int, min_frames: int, max_frames: int) -> tuple[int, by
     return frames, bytes(payload)
 
 
-def _random_chunks(seed: int, frames: int) -> list[slice]:
+def _random_chunks(seed: int, frames: int, channels: int) -> list[slice]:
     """A deterministic frame-aligned chunk tiling of the stream."""
     rng = random.Random(seed ^ 0xC0FFEE)
     chunk_count = rng.randint(1, MAX_CHUNKS)
@@ -81,7 +116,7 @@ def _random_chunks(seed: int, frames: int) -> list[slice]:
     chunk_count = len(cuts)
     boundaries = [0, *cuts, frames]
     return [
-        slice(lo * CHANNELS * 2, hi * CHANNELS * 2)
+        slice(lo * channels * 2, hi * channels * 2)
         for lo, hi in zip(boundaries, boundaries[1:])
     ]
 
@@ -133,20 +168,23 @@ def _differential_case(
     min_frames: int,
     max_frames: int,
     profile,
+    channels: int,
+    sample_rate: int,
+    profile_name: str,
 ) -> None:
     """Oracle one-shot vs native streaming with a random chunk split."""
     from wwise_wem_reference import python_engine
     from wwise_wem_reference.container.model import ContainerPlan
 
-    frames, pcm_bytes = _random_stream(seed, min_frames, max_frames)
-    chunks = _random_chunks(seed, frames)
+    frames, pcm_bytes = _random_stream(seed, channels, min_frames, max_frames)
+    chunks = _random_chunks(seed, frames, channels)
     if len(chunks) < 1 or chunks[0].start != 0:
         raise RuntimeError("chunk tiling malformed")
 
-    rows = struct.unpack(f"<{frames * CHANNELS}h", pcm_bytes)
+    rows = struct.unpack(f"<{frames * channels}h", pcm_bytes)
     pcm_channels = tuple(
-        tuple(rows[frame * CHANNELS + c] for frame in range(frames))
-        for c in range(CHANNELS)
+        tuple(rows[frame * channels + c] for frame in range(frames))
+        for c in range(channels)
     )
     # Public float domain: sample / 32768 (exactly representable in binary).
     pcm_float = tuple(
@@ -157,13 +195,13 @@ def _differential_case(
     oracle = python_engine.encode_pcm_python(
         profile=profile,
         container=container,
-        pcm=_pcm_buffer(SAMPLE_RATE, pcm_float, frames),
+        pcm=_pcm_buffer(sample_rate, pcm_float, frames),
     )
     oracle_bytes = bytes(oracle.data)
 
     setup_sha = profile.setup_sha256
     session = native.StreamSession()
-    session.start(setup_sha, name=PROFILE_NAME)
+    session.start(setup_sha, name=profile_name)
     for chunk in chunks:
         session.push(pcm_bytes[chunk])
     complete = session.finish()
@@ -171,10 +209,13 @@ def _differential_case(
 
     if oracle_bytes != native_bytes:
         raise RuntimeError(
-            "differential parity failed: case={case} seed={seed} frames={frames} "
-            "chunks={chunks} oracle={o} native={n}".format(
+            "differential parity failed: case={case} seed={seed} geometry="
+            "{channels}ch/{rate}Hz frames={frames} chunks={chunks} oracle={o} "
+            "native={n}".format(
                 case=case_id,
                 seed=seed,
+                channels=channels,
+                rate=sample_rate,
                 frames=frames,
                 chunks=len(chunks),
                 o=_sha256_hex(oracle_bytes),
@@ -257,6 +298,11 @@ def main() -> int:
     from wwise_wem import load_wem_profile
 
     profile = load_wem_profile(PROFILE_NAME)
+    # The 2ch/48k geometry item uses its own installed profile.
+    two_ch_profile = load_wem_profile(TWO_CH_PROFILE)
+    two_ch_seeds = (
+        PR_TWO_CH_SEEDS if args.pr else FULL_TWO_CH_SEEDS
+    )
 
     start = time.monotonic()
     _golden_case(native)
@@ -270,16 +316,39 @@ def main() -> int:
             MIN_FRAMES,
             args.max_frames,
             profile,
+            CHANNELS,
+            SAMPLE_RATE,
+            PROFILE_NAME,
         )
         elapsed = time.monotonic() - started
         print(
             f"case {case_id:03d}: seed={seed} ok ({elapsed:.1f}s)"
         )
 
+    # Fixed 2ch/48k parity items: the seeds are pinned into the contract and
+    # both tiers run their (nested) sets.
+    for seed in two_ch_seeds:
+        started = time.monotonic()
+        _differential_case(
+            native,
+            seed,
+            seed,
+            MIN_FRAMES,
+            args.max_frames,
+            two_ch_profile,
+            2,
+            TWO_CH_SAMPLE_RATE,
+            TWO_CH_PROFILE,
+        )
+        elapsed = time.monotonic() - started
+        print(
+            f"case 2ch : seed={seed} ok ({elapsed:.1f}s)"
+        )
+
     total = time.monotonic() - start
     print(
-        f"fuzz_diff_parity OK: golden + {args.case_count} differential "
-        f"cases byte-identical in {total:.0f}s"
+        f"fuzz_diff_parity OK: golden + {args.case_count} differential + "
+        f"{len(two_ch_seeds)} 2ch cases byte-identical in {total:.0f}s"
     )
     return 0
 

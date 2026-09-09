@@ -25,6 +25,22 @@ npm run build:node   # → pkg-node/
 npm test             # → node test-node.mjs (requires pkg-node)
 ```
 
+> **Build-tool note (wasm-pack 0.15+):** `--out-dir` is resolved relative to
+> the crate (`crates/wem-wasm`), not the current directory, so the npm scripts
+> above may no longer update `pkg/` and `pkg-node/` in place.  If the
+> `test-node.mjs` gate behaves as if it ran against stale kernel bytes, rebuild
+> with an absolute out-dir, e.g. from `crates/`:
+>
+> ```sh
+> wasm-pack build wem-wasm --target web    --release --out-dir "$(pwd)/../js/pkg"
+> wasm-pack build wem-wasm --target nodejs --release --out-dir "$(pwd)/../js/pkg-node"
+> ```
+>
+> The committed `pkg/` and `pkg-node/` artifacts are refreshed that way and
+> must track the kernel source: the golden-sha gate in `test-node.mjs` fails
+> against stale kernel bytes, and its 2ch/48k positive gate fails against a
+> kernel that still refuses the 2ch profile.
+
 ## API (sketch)
 
 ```ts

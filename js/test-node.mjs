@@ -195,47 +195,94 @@ await expectWemError(
 );
 
 const DRAFT_PROFILE = "wwise2013-2ch-48000";
+const DRAFT_SETUP_SHA256 =
+  "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc";
 
-// --- 4) 2ch/48000 profile (structure registered, psychoacoustics pending) ----
-// The 2ch/48000 profile now ships its setup packet and codebooks (structure
-// registered from the reverse-engineered sample). The kernel must load it
-// through the bytes entry and refuse encoding because its psychoacoustic
-// analysis resources are still pending, with a clear error.
+// --- 4) 2ch/48000 profile (fully registered: positive gate) -----------------
+// The 2ch/48000 profile now ships its setup packet, codebooks, and the full
+// psychoacoustic calibration (registered from the reverse-engineered
+// sample), so the wasm kernel must build its encoder through the bytes entry
+// and encode — the old analysis-pending refusal is retired.  This is a
+// positive contract: a regression that re-introduces the refusal (or any
+// build/encode failure for 2ch) must fail this gate.
 const draftIndexBytes = (() => {
   const index = JSON.parse(new TextDecoder().decode(indexBytes));
   index.default = DRAFT_PROFILE;
   return new TextEncoder().encode(JSON.stringify(index, null, 2));
 })();
 
-let draftEncodeError = null;
-let draftBuildSucceeded = false;
-try {
-  const draftEncoder = new core.WemEncoder(draftIndexBytes, files);
-  draftBuildSucceeded = true;
-  draftEncoder.free();
-} catch (error) {
-  draftEncodeError = error;
-}
 check(
   "2ch profile files are present in the profile tree",
   files.has(`${DRAFT_PROFILE}/analysis/quality-curves.json`) &&
+    files.has(`${DRAFT_PROFILE}/analysis/frozen-tables.json`) &&
     files.has(`${DRAFT_PROFILE}/pending.json`) &&
     files.has(`${DRAFT_PROFILE}/manifest.json`) &&
     files.has(`${DRAFT_PROFILE}/vorbis/setup.bin`) &&
     files.has(`${DRAFT_PROFILE}/vorbis/codebooks/t97.json`) &&
-    files.has(`${DRAFT_PROFILE}/vorbis/codebooks/t282.json`),
+    files.has(`${DRAFT_PROFILE}/vorbis/codebooks/t282.json`) &&
+    files.has(`${DRAFT_PROFILE}/psychoacoustics/short-seed.json`) &&
+    files.has(`${DRAFT_PROFILE}/psychoacoustics/short-profiles.json`) &&
+    files.has(`${DRAFT_PROFILE}/psychoacoustics/long-base.json`) &&
+    files.has(`${DRAFT_PROFILE}/psychoacoustics/long-modes.json`),
 );
+
+let draftEncoder = null;
+let draftError = null;
+try {
+  draftEncoder = new core.WemEncoder(draftIndexBytes, files);
+} catch (error) {
+  draftError = error;
+}
 check(
-  "2ch profile encode attempt -> WEM_ERR_STATE_ERROR with analysis-pending error",
-  !draftBuildSucceeded &&
-    draftEncodeError &&
-    typeof draftEncodeError.code === "string" &&
-    draftEncodeError.code === "WEM_ERR_STATE_ERROR" &&
-    typeof draftEncodeError.message === "string" &&
-    draftEncodeError.message.includes("psychoacoustic") &&
-    draftEncodeError.message.includes("pending"),
-  `code=${draftEncodeError?.code ?? "<no code>"}, message="${draftEncodeError?.message ?? draftEncodeError}"`,
+  "2ch profile builds through the wasm kernel (analysis-pending refusal retired)",
+  draftEncoder !== null && draftError === null,
+  draftError
+    ? `code=${draftError.code ?? "<no code>"}, message="${draftError.message ?? draftError}"`
+    : "built",
 );
+if (draftEncoder) {
+  const info = draftEncoder.profile_info();
+  check(
+    "2ch encoder reports the registered 2ch/48000 geometry",
+    info.name === DRAFT_PROFILE &&
+      info.channels === 2 &&
+      info.sampleRate === 48000 &&
+      info.setupSha256 === DRAFT_SETUP_SHA256,
+    `name=${info.name}, ch=${info.channels}, rate=${info.sampleRate}, setup=${info.setupSha256.slice(0, 12)}...`,
+  );
+  // Encode a deterministic 8192-frame 2ch/48k stream (sines + LCG noise):
+  // the positive gate is that encoding succeeds with the right stats, not
+  // the audio quality (that is covered by the Python E2E round-trip suite).
+  const frames = 8192;
+  const draftPcm = new Uint8Array(frames * 2 * 2);
+  const draftView = new DataView(draftPcm.buffer);
+  let lcg = 0x9e3779b9;
+  const lcgNext = () => {
+    lcg = (Math.imul(lcg, 48271) + 11) | 0;
+    return lcg / 2147483648;
+  };
+  for (let f = 0; f < frames; f++) {
+    const t = f / 48000;
+    const s0 =
+      0.2 * Math.sin(2 * Math.PI * 440 * t) + 0.02 * (lcgNext() - 0.5);
+    const s1 =
+      0.15 * Math.sin(2 * Math.PI * 660 * t + 1.3) + 0.02 * (lcgNext() - 0.5);
+    draftView.setInt16(f * 4, Math.round(Math.max(-1, Math.min(1, s0)) * 32767), true);
+    draftView.setInt16(f * 4 + 2, Math.round(Math.max(-1, Math.min(1, s1)) * 32767), true);
+  }
+  const draftResult = draftEncoder.encode_pcm16_interleaved(draftPcm);
+  check(
+    "2ch encode produces a WEM stream through the wasm kernel",
+    draftResult.data.byteLength > 0 &&
+      draftResult.stats.channels === 2 &&
+      draftResult.stats.pcmFrames === frames &&
+      draftResult.stats.audioPackets > 0 &&
+      draftResult.stats.shortPackets + draftResult.stats.longPackets ===
+        draftResult.stats.audioPackets,
+    `bytes=${draftResult.data.byteLength}, packets=${draftResult.stats.audioPackets}, sha=${draftResult.sha256Hex.slice(0, 12)}...`,
+  );
+  draftEncoder.free();
+}
 
 // --- summary ------------------------------------------------------------------
 if (failures > 0) {
