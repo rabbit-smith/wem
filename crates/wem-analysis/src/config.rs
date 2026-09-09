@@ -12,6 +12,11 @@ pub const EHMER_OFFSET: i64 = 16;
 pub const TONE_REFERENCE_LEVEL_DB: f32 = 30.0;
 pub const NEGATIVE_INFINITY_DB: f32 = -9999.0;
 pub const SPECTRUM_PEAK_DECAY_DB_PER_SECOND: f32 = 6.0;
+/// Calibration sample rates accepted by the psychoacoustic loaders
+/// (Python `CALIBRATION_SAMPLE_RATES`). Each resource declares its own
+/// geometry; the loaders check that declared geometry against this set
+/// instead of one hard-coded rate.
+pub const CALIBRATION_SAMPLE_RATES: [i64; 2] = [44100, 48000];
 
 /// Round an f64 to its f32-representable value (Python `_f32`).
 #[inline]
@@ -674,7 +679,7 @@ pub fn make_wwise_psy_look(
 ) -> Result<WwisePsyLook, AnalysisError> {
     let n = surface.n;
     let sample_rate = surface.sample_rate;
-    if n != 128 || sample_rate != 44100 {
+    if n != 128 || !CALIBRATION_SAMPLE_RATES.contains(&sample_rate) {
         return Err(AnalysisError::PsyLookGeometry { n, sample_rate });
     }
     let selected_row: Vec<f64> = match row {
@@ -764,7 +769,9 @@ pub fn make_wwise_long_seed_look(
 ) -> Result<WwisePsyLongSeedLook, AnalysisError> {
     let outer = &table.seed_outer_u32;
     let profile = &table.seed_profile_u32;
-    if table.n != 1024 || table.sample_rate != 44100 {
+    if table.n != 1024
+        || !CALIBRATION_SAMPLE_RATES.contains(&table.sample_rate)
+    {
         return Err(AnalysisError::LongSeedGeometry);
     }
     if outer[0] as i64 != table.n || outer[11] as i64 != table.sample_rate {

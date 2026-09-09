@@ -1,7 +1,9 @@
 //! Immutable window and band configuration for transient detection
 //! (Python: `profiles/transient.py`).
 
-use wem_analysis::config::{TransientBandConfig, TransientDetectorTables};
+use wem_analysis::config::{
+    CALIBRATION_SAMPLE_RATES, TransientBandConfig, TransientDetectorTables,
+};
 
 use crate::error::ProfileError;
 use crate::resources::ResourceRef;
@@ -18,8 +20,10 @@ pub fn load_transient_tables(ref_: &ResourceRef) -> Result<TransientDetectorTabl
     {
         return Err(ProfileError::TransientSchemaChanged);
     }
-    if data.get("sample_rate").and_then(serde_json::Value::as_i64) != Some(44100)
-        || data.get("n").and_then(serde_json::Value::as_i64) != Some(128)
+    if !matches!(
+        data.get("sample_rate").and_then(serde_json::Value::as_i64),
+        Some(rate) if CALIBRATION_SAMPLE_RATES.contains(&rate)
+    ) || data.get("n").and_then(serde_json::Value::as_i64) != Some(128)
     {
         return Err(ProfileError::TransientSchemaChanged);
     }

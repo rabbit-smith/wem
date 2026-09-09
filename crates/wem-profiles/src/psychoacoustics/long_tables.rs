@@ -1,7 +1,9 @@
 //! Strict loader for the fixed 1024-bin Wwise psychoacoustic tables
 //! (Python: `profiles/psychoacoustics/long_tables.py`).
 
-use wem_analysis::config::{WwisePsyLongTables, TONE_BAND_COUNT, TONE_LEVEL_COUNT};
+use wem_analysis::config::{
+    CALIBRATION_SAMPLE_RATES, TONE_BAND_COUNT, TONE_LEVEL_COUNT, WwisePsyLongTables,
+};
 
 use crate::error::ProfileError;
 use crate::resources::ResourceRef;
@@ -32,11 +34,14 @@ pub fn load_long_psy_tables(ref_: &ResourceRef) -> Result<WwisePsyLongTables, Pr
                 .to_string(),
         });
     }
+    let sample_rate = payload
+        .get("sample_rate")
+        .and_then(serde_json::Value::as_i64);
     if payload.get("n").and_then(serde_json::Value::as_i64) != Some(N)
-        || payload
-            .get("sample_rate")
-            .and_then(serde_json::Value::as_i64)
-            != Some(44100)
+        || !matches!(
+            sample_rate,
+            Some(rate) if CALIBRATION_SAMPLE_RATES.contains(&rate)
+        )
     {
         return Err(ProfileError::LongTablesGeometryUnexpected);
     }
@@ -88,7 +93,7 @@ pub fn load_long_psy_tables(ref_: &ResourceRef) -> Result<WwisePsyLongTables, Pr
     }
 
     Ok(WwisePsyLongTables {
-        sample_rate: 44100,
+        sample_rate: sample_rate.expect("geometry validated the sample rate"),
         n: N,
         profile_key: profile_key.to_string(),
         analysis_profile_u32: u32s(

@@ -343,6 +343,249 @@ pub fn pack_residue_vq(
     Ok(())
 }
 
+/// Classify one type-2 partition (magnitude class across all channels)
+/// (Python `_classify_partition_type2`).
+///
+/// Behavior-fitted from the 2ch/48k representative stream: the reference
+/// class assignment tracks the quantized partition peak on the integer
+/// book scale, with power-of-2 boundaries for high peaks and a
+/// block-length-dependent split for peak 2. Deterministic.
+pub fn classify_partition_type2(
+    samples_flat: &[f64],
+    #[allow(unused_variables)] nclass: u64,
+    long_block: bool,
+) -> i64 {
+    if samples_flat.is_empty() {
+        return 0;
+    }
+    let mut peak = 0.0;
+    for s in samples_flat {
+        let a = s.abs();
+        if a > peak {
+            peak = a;
+        }
+    }
+    let q = (peak + 0.5) as i64;
+    if q <= 0 {
+        return 0;
+    }
+    if q <= 1 {
+        return 1;
+    }
+    if q == 2 {
+        return if long_block { 4 } else { 3 };
+    }
+    if q <= 4 {
+        return 5;
+    }
+    if q <= 8 {
+        return 6;
+    }
+    if q <= 16 {
+        return 7;
+    }
+    if q <= 32 {
+        return 8;
+    }
+    9
+}
+
+/// Mixed-radix classbook entry for the type-2 phrasebook
+/// (Python `_pack_classbook_entry_type2`).
+///
+/// entry = c0 * nclass^(ppw-1) + ... + c_{ppw-1}; the decoder unpacks the
+/// same mixed radix.  A classbook only codes a subset of the mixed-radix
+/// domain (e.g. the 2ch short classbook carries classes 4..9 only); an
+/// uncoded combination falls back to the smallest coded entry, matching
+/// the calibrated 2ch behavior.
+fn pack_classbook_entry_type2(
+    op: &mut OggPack,
+    cb: &Codebook,
+    classes: &[i64],
+    nclass: u64,
+) -> Result<(), ResidueError> {
+    let mut entry = 0i64;
+    for &c in classes {
+        entry = entry * nclass as i64 + (c % nclass as i64);
+    }
+    if entry as u64 >= cb.entries() as u64 || cb.lengthlist()[entry as usize] <= 0 {
+        // uncoded combination: smallest coded entry
+        for (e, &l) in cb.lengthlist().iter().enumerate() {
+            if l > 0 {
+                entry = e as i64;
+                break;
+            }
+        }
+    }
+    cb.encode(op, entry)
+        .map_err(|_| ResidueError::BookIndexOutOfRange {
+            book_id: entry,
+            books: 0,
+        })
+}
+
+/// Pack residue type 2 (the libvorbis res2_inverse flat-domain layout)
+/// (Python `pack_residue_type2`).
+///
+/// Type 2 codes the residue on the flat (bin * n_channels + channel)
+/// domain: one class per partition shared across all channels, classword
+/// written once per partition-group, VQ vectors slot-major over
+/// (bin, channel). Mirrors the decoder's res2_inverse bit schedule
+/// (scripts/decode_wem.py::decode_residue_type2), so encoded packets
+/// close strictly against that published decoder.
+///
+/// `residuals[ch][bin]`: coupled residue rows (floor-divided MDCT, mapping0
+/// coupling already applied).
+#[allow(clippy::too_many_arguments)] // signature mirrors Python pack_residue_type2
+pub fn pack_residue_type2(
+    op: &mut OggPack,
+    residue: &ResidueSetup,
+    books: &[Codebook],
+    residuals: &[Vec<f64>],
+    ch_used: &[bool],
+    n_spectrum: usize,
+    n_channels: usize,
+    long_block: bool,
+) -> Result<(), ResidueError> {
+    let max_end = n_spectrum * n_channels;
+    let begin = residue.begin as usize;
+    let end = (residue.end as usize).min(max_end);
+    let span = end.saturating_sub(begin);
+    let part = residue.partition_size as usize;
+    let partvals = if span > 0 { span / part } else { 0 };
+    if partvals == 0 || !ch_used.iter().any(|&u| u) {
+        return Ok(());
+    }
+
+    let nclass = residue.classifications;
+    let cascades = &residue.cascades;
+    let stage_books = &residue.books;
+    let cb = book_or_err(books, residue.classbook as i64)?;
+    let ppw = if cb.dim() > 0 { cb.dim() as usize } else { 1 };
+    let partwords = partvals.div_ceil(ppw);
+
+    // working residual copies (mutable), quantized as the forward path does
+    let mut work: Vec<Vec<f64>> = Vec::with_capacity(n_channels);
+    for ch in 0..n_channels {
+        if ch_used[ch] {
+            work.push(
+                residuals[ch]
+                    .iter()
+                    .map(|value| quantize_residue_value(*value) as f64)
+                    .collect(),
+            );
+        } else {
+            work.push(Vec::new());
+        }
+    }
+
+    // classify each partition (class shared across channels), gathering in
+    // flat (bin*ch + ch) order so the metric sees the values the VQ stages
+    // will write (mirror of the _vv_add_slots layout)
+    let mut partword: Vec<Vec<i64>> = vec![vec![0i64; ppw]; partwords];
+    // `lw`/`k` double as the partition-group index pair of the 2-D
+    // partword, so range loops are intentional (clippy's iter_mut
+    // suggestion would walk rows, not columns).
+    #[allow(clippy::needless_range_loop)]
+    for lw in 0..partwords {
+        for k in 0..ppw {
+            let p = lw * ppw + k;
+            if p >= partvals {
+                break;
+            }
+            let off = begin + p * part;
+            let mut flat = Vec::with_capacity(part);
+            for f in off..off + part {
+                let bin_idx = f / n_channels;
+                let ch_idx = f % n_channels;
+                if ch_used[ch_idx] && bin_idx < work[ch_idx].len() {
+                    flat.push(work[ch_idx][bin_idx]);
+                }
+            }
+            partword[lw][k] = classify_partition_type2(&flat, nclass, long_block);
+        }
+    }
+
+    #[allow(clippy::needless_range_loop)]
+    for s in 0..8u32 {
+        for lw in 0..partwords {
+            if s == 0 {
+                // one classword per partition-group, shared across channels
+                pack_classbook_entry_type2(op, cb, &partword[lw], nclass)?;
+            }
+            for k in 0..ppw {
+                let p = lw * ppw + k;
+                if p >= partvals {
+                    break;
+                }
+                let cls = partword[lw][k] as usize;
+                if cascades[cls] & (1 << s) == 0 {
+                    continue;
+                }
+                let book_id = stage_books[cls][s as usize];
+                if book_id < 0 {
+                    continue;
+                }
+                let book = book_or_err(books, book_id)?;
+                let dim = book.dim() as usize;
+                let off = begin + p * part;
+                // slot iteration mirrors the libvorbis decodevv_add
+                // flat-domain order (bin-major, channel round-robin);
+                // `chptr` persists across while iterations exactly as
+                // Python's _vv_add_slots generator state does.
+                let mut i = off / n_channels;
+                let m = (off + part) / n_channels;
+                let mut chptr = 0usize;
+                while i < m {
+                    let mut slots = Vec::with_capacity(dim);
+                    for _ in 0..dim {
+                        if i >= m {
+                            break;
+                        }
+                        slots.push((i, chptr));
+                        chptr += 1;
+                        if chptr == n_channels {
+                            chptr = 0;
+                            i += 1;
+                        }
+                    }
+                    let mut target = vec![0.0f64; dim];
+                    for (j, &(bin_idx, ch_idx)) in slots.iter().enumerate() {
+                        if ch_idx < work.len() && bin_idx < work[ch_idx].len() {
+                            target[j] = work[ch_idx][bin_idx];
+                        } else {
+                            target[j] = 0.0;
+                        }
+                    }
+                    let entry = book.best_vq(&target).map_err(|_| {
+                        ResidueError::BookIndexOutOfRange {
+                            book_id,
+                            books: books.len(),
+                        }
+                    })?;
+                    book.encode(op, entry)
+                        .map_err(|_| ResidueError::BookIndexOutOfRange {
+                            book_id,
+                            books: books.len(),
+                        })?;
+                    let vq_vec = book.borrow_vq(entry).map_err(|_| {
+                        ResidueError::BookIndexOutOfRange {
+                            book_id,
+                            books: books.len(),
+                        }
+                    })?;
+                    for ((bin_idx, ch_idx), &val) in slots.iter().zip(vq_vec.iter()) {
+                        if *ch_idx < work.len() && *bin_idx < work[*ch_idx].len() {
+                            work[*ch_idx][*bin_idx] -= val;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Multiplicative floor: residue = mdct / floor_amp (vorbis convention)
 /// (Python `mdct_to_residue`).
 pub fn mdct_to_residue(mdct: &[f32], floor_amp: &[f64], floor_eps: f64) -> Vec<f64> {

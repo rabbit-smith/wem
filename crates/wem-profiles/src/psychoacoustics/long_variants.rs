@@ -1,7 +1,7 @@
 //! Pure loader and runtime adapter for long analysis mode 2/mode 3
 //! (Python: `profiles/psychoacoustics/long_variants.py`).
 
-use wem_analysis::config::WwisePsyLongTables;
+use wem_analysis::config::{CALIBRATION_SAMPLE_RATES, WwisePsyLongTables};
 
 use crate::error::ProfileError;
 use crate::resources::ResourceRef;
@@ -31,10 +31,10 @@ pub fn load_long_variant(
     };
     if payload.get("schema").and_then(serde_json::Value::as_str) != Some(SCHEMA)
         || payload.get("n").and_then(serde_json::Value::as_i64) != Some(1024)
-        || payload
-            .get("sample_rate")
-            .and_then(serde_json::Value::as_i64)
-            != Some(44100)
+        || !matches!(
+            payload.get("sample_rate").and_then(serde_json::Value::as_i64),
+            Some(rate) if CALIBRATION_SAMPLE_RATES.contains(&rate)
+        )
     {
         return Err(ProfileError::LongVariantSchemaUnexpected {
             schema: payload

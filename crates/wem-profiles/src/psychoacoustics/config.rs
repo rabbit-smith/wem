@@ -1,6 +1,8 @@
 //! Short seed-surface loader (Python: `profiles/psychoacoustics/config.py`).
 
-use wem_analysis::config::{WwisePsySeedSurface, TONE_BAND_COUNT, TONE_LEVEL_COUNT};
+use wem_analysis::config::{
+    CALIBRATION_SAMPLE_RATES, TONE_BAND_COUNT, TONE_LEVEL_COUNT, WwisePsySeedSurface,
+};
 
 use super::{json_f32, json_int};
 use crate::error::ProfileError;
@@ -40,12 +42,16 @@ pub fn load_short_seed_surface(ref_: &ResourceRef) -> Result<WwisePsySeedSurface
     })?;
     let look = section("look").ok_or(ProfileError::ShortSeedSectionMissing { section: "look" })?;
 
+    let sample_rate = json_int(
+        geometry
+            .get("sample_rate")
+            .unwrap_or(&serde_json::Value::Null),
+    );
     if json_int(geometry.get("n").unwrap_or(&serde_json::Value::Null)) != Some(128)
-        || json_int(
-            geometry
-                .get("sample_rate")
-                .unwrap_or(&serde_json::Value::Null),
-        ) != Some(44100)
+        || !matches!(
+            sample_rate,
+            Some(rate) if CALIBRATION_SAMPLE_RATES.contains(&rate)
+        )
     {
         return Err(ProfileError::ShortSeedGeometryUnsupported);
     }
@@ -163,7 +169,7 @@ pub fn load_short_seed_surface(ref_: &ResourceRef) -> Result<WwisePsySeedSurface
 
     Ok(WwisePsySeedSurface {
         n: 128,
-        sample_rate: 44100,
+        sample_rate: sample_rate.expect("geometry validated the sample rate"),
         ath_offset: scalar("ath_offset", profile)?,
         ath_floor: scalar("ath_floor", profile)?,
         seed_ceiling: scalar("seed_ceiling", profile)?,

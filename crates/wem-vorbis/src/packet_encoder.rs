@@ -17,8 +17,10 @@ use crate::floor::{
 };
 use crate::floor_fit::{floor1_quantize_posts, FloorFitError};
 use crate::residue::{
-    mdct_to_residue, pack_residue_silent, pack_residue_vq, quantize_residue_value, ResidueError,
+    mdct_to_residue, pack_residue_silent, pack_residue_type2, pack_residue_vq,
+    quantize_residue_value, ResidueError,
 };
+use crate::setup::CouplingStep;
 use crate::setup::{ilog, SetupInfo};
 
 /// Audio packet assembly errors (Python: `ValueError` family).
@@ -272,6 +274,51 @@ pub fn pack_floor1_body(
     Ok(())
 }
 
+/// In-place forward mapping0 stereo coupling (exact 4-branch pre-image)
+/// (Python `apply_mapping_coupling`).
+///
+/// The published decoder applies the libvorbis mapping0.c four-branch
+/// coupling between the residue inverse and floor1 inverse2 (dB residue
+/// domain, scripts/decode_wem.py::decouple_db_domain).  For a
+/// coupling step (mag, ang) and a pre-coupling pair (M, A), the stored
+/// pair is the exact pre-image of that piecewise decode map, so decoding
+/// the stored pair recovers (M, A) exactly:
+///
+/// - M > 0 and A < M:  store (M, M - A)
+/// - M > 0 and A >= M: store (A, M - A)
+/// - M <= 0 and A > M: store (M, A - M)
+/// - M <= 0 and A <= M: store (A, A - M)
+fn apply_mapping_coupling(residuals: &mut [Vec<f64>], coupling: &[CouplingStep]) {
+    if coupling.is_empty() {
+        return;
+    }
+    for step in coupling {
+        let mag = step.mag as usize;
+        let ang = step.ang as usize;
+        for j in 0..residuals[mag].len() {
+            let m_value = residuals[mag][j];
+            let a_value = residuals[ang][j];
+            if m_value > 0.0 {
+                if a_value < m_value {
+                    residuals[mag][j] = m_value;
+                    residuals[ang][j] = m_value - a_value;
+                } else {
+                    residuals[mag][j] = a_value;
+                    residuals[ang][j] = m_value - a_value;
+                }
+            } else {
+                if a_value > m_value {
+                    residuals[mag][j] = m_value;
+                    residuals[ang][j] = a_value - m_value;
+                } else {
+                    residuals[mag][j] = a_value;
+                    residuals[ang][j] = a_value - m_value;
+                }
+            }
+        }
+    }
+}
+
 /// Silence audio packet: floor nonzero=0 for all channels → no residue
 /// (Python `pack_silence_packet`).
 pub fn pack_silence_packet(
@@ -494,46 +541,89 @@ pub fn pack_block_packet_details(
             .residues
             .get(res_index as usize)
             .ok_or(PacketError::ResidueIndexOutOfRange { index: res_index })?;
-        // Materialize the integer residue handoff once. The residue packer
-        // accepts numeric rows and its own integer normalization is
-        // idempotent, so these exact rows feed both classification and VQ.
-        let begin = res.begin as usize;
-        let end = (res.end as usize).min(n_spectrum);
-        quantized_residue = residuals
-            .iter()
-            .zip(ch_used.iter())
-            .map(|(row, &used)| {
-                row.iter()
-                    .enumerate()
-                    .map(|(index, value)| {
-                        if used && begin <= index && index < end {
-                            quantize_residue_value(*value)
-                        } else {
-                            0
-                        }
-                    })
-                    .collect()
-            })
-            .collect();
-        if residue_vq {
-            pack_residue_vq(
+        // Coupled streams (mapping0 coupling_steps > 0) store the (mag, ang)
+        // pair in the residue domain, not raw per-channel coefficients:
+        // apply the exact inverse of the decoder's 4-branch coupling
+        // (no-op when the mapping has no coupling steps, e.g. the 5.1
+        // profile).
+        apply_mapping_coupling(&mut residuals, &mapping.coupling);
+        if res.residue_type == 2 {
+            // Type 2 codes the flat (bin*channels+channel) domain: the
+            // quantized handoff and the bit schedule both follow that
+            // layout.
+            let end_flat = (res.end as usize).min(n_spectrum * channels as usize);
+            quantized_residue = residuals
+                .iter()
+                .enumerate()
+                .zip(ch_used.iter())
+                .map(|((ch_index, row), &used)| {
+                    row.iter()
+                        .enumerate()
+                        .map(|(index, value)| {
+                            let flat = index * channels as usize + ch_index;
+                            if used && res.begin as usize <= flat && flat < end_flat {
+                                quantize_residue_value(*value)
+                            } else {
+                                0
+                            }
+                        })
+                        .collect()
+                })
+                .collect();
+            pack_residue_type2(
                 &mut op,
                 res,
                 books,
-                &quantized_residue,
+                &residuals,
                 &ch_used,
-                Some(n_spectrum),
+                n_spectrum,
+                channels as usize,
+                md.blockflag != 0,
             )
             .map_err(PacketError::Residue)?;
         } else {
-            pack_residue_silent(
-                &mut op,
-                res,
-                books,
-                ch_used.iter().filter(|&&u| u).count() as u32,
-                Some(n_spectrum),
-            )
-            .map_err(PacketError::Residue)?;
+            // Materialize the integer residue handoff once. The residue
+            // packer accepts numeric rows and its own integer
+            // normalization is idempotent, so these exact rows feed both
+            // classification and VQ.
+            let begin = res.begin as usize;
+            let end = (res.end as usize).min(n_spectrum);
+            quantized_residue = residuals
+                .iter()
+                .zip(ch_used.iter())
+                .map(|(row, &used)| {
+                    row.iter()
+                        .enumerate()
+                        .map(|(index, value)| {
+                            if used && begin <= index && index < end {
+                                quantize_residue_value(*value)
+                            } else {
+                                0
+                            }
+                        })
+                        .collect()
+                })
+                .collect();
+            if residue_vq {
+                pack_residue_vq(
+                    &mut op,
+                    res,
+                    books,
+                    &quantized_residue,
+                    &ch_used,
+                    Some(n_spectrum),
+                )
+                .map_err(PacketError::Residue)?;
+            } else {
+                pack_residue_silent(
+                    &mut op,
+                    res,
+                    books,
+                    ch_used.iter().filter(|&&u| u).count() as u32,
+                    Some(n_spectrum),
+                )
+                .map_err(PacketError::Residue)?;
+            }
         }
     }
     Ok(BlockPacketResult {
@@ -566,4 +656,158 @@ pub fn pack_block_packet(
         posts_are_10bit,
     )?
     .packet)
+}
+
+#[cfg(test)]
+mod coupling_round_trip {
+    //! Round-trip proof that [`super::apply_mapping_coupling`] is the exact
+    //! pre-image of the published decoder's four-branch mapping0 coupling.
+    //!
+    //! The published decoder (scripts/decode_wem.py::decouple_db_domain,
+    //! mirroring libvorbis 1.3.7's mapping0.c) recovers a pre-coupling pair
+    //! (M, A) from the stored pair (mag', ang') via four branches. The encoder
+    //! stores the exact pre-image of that map; decoding the stored pair must
+    //! therefore recover (M, A) exactly. This test is the formal round-trip
+    //! invariant (leftover from the 2ch/48k release).
+
+    use super::apply_mapping_coupling;
+    use crate::setup::CouplingStep;
+
+    /// Mirror of the decoder's four-branch coupling inverse, per
+    /// libvorbis 1.3.7's mapping0.c:765-787 (the published decoder's
+    /// decouple_db_domain in scripts/decode_wem.py transcribes it).
+    /// For the stored pair (mag', ang') it returns the recovered
+    /// pre-coupling (mag, ang).
+    fn decode_branches(mag_stored: f64, ang_stored: f64) -> (f64, f64) {
+        if mag_stored > 0.0 {
+            if ang_stored > 0.0 {
+                // M' > 0, A' > 0: mag = M', ang = M' - A'
+                (mag_stored, mag_stored - ang_stored)
+            } else {
+                // M' > 0, A' <= 0: ang = M', mag = M' + A'
+                (mag_stored + ang_stored, mag_stored)
+            }
+        } else {
+            if ang_stored > 0.0 {
+                // M' <= 0, A' > 0: mag = M', ang = M' + A'
+                (mag_stored, mag_stored + ang_stored)
+            } else {
+                // M' <= 0, A' <= 0: ang = M', mag = M' - A'
+                (mag_stored - ang_stored, mag_stored)
+            }
+        }
+    }
+
+    /// One coupling step over two channels, one bin: forward map then the
+    /// decoder's four-branch inverse must be the identity.
+    fn assert_round_trip(mag: f64, ang: f64) {
+        let mut residuals: Vec<Vec<f64>> = vec![vec![mag], vec![ang]];
+        let coupling = vec![CouplingStep { mag: 0, ang: 1 }];
+        apply_mapping_coupling(&mut residuals, &coupling);
+        let (mag_stored, ang_stored) = (residuals[0][0], residuals[1][0]);
+        let (mag_rec, ang_rec) = decode_branches(mag_stored, ang_stored);
+        assert_eq!(
+            mag_rec, mag,
+            "mag mismatch for pre-coupling pair ({mag}, {ang})"
+        );
+        assert_eq!(
+            ang_rec, ang,
+            "ang mismatch for pre-coupling pair ({mag}, {ang})"
+        );
+    }
+
+    /// Named round-trip invariant: forward coupling followed by the decoder's
+    /// four-branch inverse is the exact identity. Covers the full branch
+    /// matrix plus the release-mandated boundary cases (M = 0, negative M,
+    /// equal absolute values) with codec-plausible magnitudes where the
+    /// floating-point cancellation is exact.
+    #[test]
+    fn apply_mapping_coupling_round_trips_through_decode_branches() {
+        // (M, A) pairs spanning all four store branches and the boundaries.
+        let cases: &[(f64, f64)] = &[
+            // M > 0, A < M
+            (5.0, 2.0),
+            (1024.0, 512.0),
+            (3.0, 1.5),
+            // M > 0, A == M (equal)
+            (5.0, 5.0),
+            // M > 0, A > M
+            (2.0, 5.0),
+            // M > 0, A = -M (equal absolute values, opposite signs)
+            (5.0, -5.0),
+            // M < 0, A > M
+            (-3.0, 5.0),
+            (-5.0, 5.0),
+            (-2.5, 1.0),
+            // M < 0, A == M (equal, both negative)
+            (-5.0, -5.0),
+            // M < 0, A < M
+            (-5.0, -3.0),
+            // M = 0 boundary
+            (0.0, 4.0),
+            (0.0, -4.0),
+            (0.0, 0.0),
+            // small fractions (exact binary)
+            (0.5, 0.25),
+        ];
+        for (m, a) in cases.iter() {
+            assert_round_trip(*m, *a);
+        }
+    }
+
+    /// Per-coefficient invariant: a full coefficient row (many bins) and a
+    /// two-step coupling chain must each round-trip exactly, coefficient by
+    /// coefficient, against the decoder's four-branch inverse applied in
+    /// reverse step order.
+    #[test]
+    fn apply_mapping_coupling_round_trips_per_coefficient_and_chained_steps() {
+        // Three channels, eight bins; each (mag, ang) pair is chosen so the
+        // stored values exercise every branch along the row.
+        let pairs: &[(f64, f64)] = &[
+            (7.0, 3.0),
+            (4.0, -1.5),
+            (-2.0, 9.0),
+            (-6.0, -6.0),
+            (0.0, 2.0),
+            (1.0, 1.0),
+            (-0.5, 0.0),
+            (1024.0, 512.0),
+        ];
+        let mut residuals: Vec<Vec<f64>> = vec![
+            pairs.iter().map(|(m, _)| *m).collect(),
+            pairs.iter().map(|(_, a)| *a).collect(),
+            vec![1.25; 8],
+        ];
+        let original: Vec<Vec<f64>> = residuals.iter().cloned().collect();
+
+        // Step 1 couples channels (0, 1); step 2 couples (0, 2) — the
+        // decoder reverses this order.
+        let coupling = vec![
+            CouplingStep { mag: 0, ang: 1 },
+            CouplingStep { mag: 0, ang: 2 },
+        ];
+        apply_mapping_coupling(&mut residuals, &coupling);
+
+        for step in coupling.iter().rev() {
+            let (mag, ang) = (step.mag as usize, step.ang as usize);
+            for j in 0..8 {
+                let (mag_stored, ang_stored) = (
+                    residuals[mag][j],
+                    residuals[ang][j],
+                );
+                let (mag_rec, ang_rec) = decode_branches(mag_stored, ang_stored);
+                residuals[mag][j] = mag_rec;
+                residuals[ang][j] = ang_rec;
+            }
+        }
+
+        for ch in 0..3usize {
+            for j in 0..8usize {
+                assert_eq!(
+                    residuals[ch][j], original[ch][j],
+                    "coefficient (ch {ch}, bin {j}) not recovered",
+                );
+            }
+        }
+    }
 }
