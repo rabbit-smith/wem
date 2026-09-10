@@ -52,8 +52,8 @@
     },
     "analysis.quality-curves": {
       "path": "analysis/quality-curves.json",
-      "schema": "wem.quality-curves.v1",
-      "sha256": "40fd3cef1633cca97e809d06ff2c2eecc0fb1d0a4fcf1633454a94014f2815d5"
+      "schema": "wem.quality-curves.v2",
+      "sha256": "0ad4b885718148e6651a422bf4be4a13c07b2113b0cfa147582eba32d95bd365"
     },
     "transform.mdct": {
       "path": "transform/mdct.json",
@@ -61,13 +61,13 @@
     },
     "analysis.transient": {
       "path": "analysis/transient.json",
-      "schema": "wem.transient-detector-table.v1",
-      "sha256": "cf949b923f96d1ccadfc8221e2c81c6efe3b68243cf263fddc45a1c69da1759f"
+      "schema": "wem.transient-record-family.v1",
+      "sha256": "0dfbbbab53c261862b0bafde6864f91f0fbfe9bf1199542f5698403ac2097eb2"
     },
     "meta.pending": {
       "path": "pending.json",
       "schema": "wem.profile-pending.v1",
-      "sha256": "93a4fb97575ba3bf049c56945dc5e64d9119b8be4f4c5dc5dfe40644f6046d99"
+      "sha256": "25bc5d2cd638d9d363fd1a1e911d776eb38caac3f601f2e657ffba6ccbe39467"
     },
     "analysis.frozen-tables": {
       "path": "analysis/frozen-tables.json",

@@ -285,6 +285,27 @@ pub enum ProfileError {
     QualityCurvesResourceMissing { profile: String },
     /// A quality curve names an unsupported override parameter.
     QualityCurveParameterUnsupported { name: String },
+    /// Quality-curves `semantics` is not an object.
+    QualityCurvesSemanticsNotObject,
+    /// Quality-curves semantics do not cover the curve names exactly.
+    QualityCurvesSemanticsIncomplete,
+    // ------------------------------------------------------------------
+    // transient record family (wem.transient-record-family.v1)
+    // ------------------------------------------------------------------
+    /// Record-family geometry (n/sample_rate) changed.
+    TransientRecordFamilyGeometryChanged,
+    /// Record-family must carry exactly six records.
+    TransientRecordFamilyRecordCount,
+    /// One record of the family is malformed.
+    TransientRecordFamilyRecord { index: usize },
+    /// A record-family f64 table is malformed.
+    TransientRecordFamilyCurve { field: &'static str },
+    /// Record-family band/stride word table malformed.
+    TransientRecordFamilyWords { field: &'static str },
+    /// Record-family window construction constants malformed.
+    TransientRecordFamilyWindowConstants,
+    /// Record-family default record index out of domain.
+    TransientRecordFamilyDefaultIndex,
     // ------------------------------------------------------------------
     // downstream algorithm errors (forwarded)
     // ------------------------------------------------------------------
@@ -422,6 +443,15 @@ impl std::fmt::Display for ProfileError {
             QualityValueNonFinite => write!(f, "quality must be a finite number"),
             QualityCurvesResourceMissing { profile } => write!(f, "profile {profile:?} has no quality-curves resource; quality interpolation is unavailable for this profile"),
             QualityCurveParameterUnsupported { name } => write!(f, "quality curve {name:?} names an unsupported parameter"),
+            QualityCurvesSemanticsNotObject => write!(f, "quality-curves must define a semantics object"),
+            QualityCurvesSemanticsIncomplete => write!(f, "quality-curves semantics must cover every curve name exactly"),
+            TransientRecordFamilyGeometryChanged => write!(f, "transient record-family geometry changed"),
+            TransientRecordFamilyRecordCount => write!(f, "transient record-family must carry six records"),
+            TransientRecordFamilyRecord { index } => write!(f, "transient record {index} is malformed"),
+            TransientRecordFamilyCurve { field } => write!(f, "transient record-family {field} is malformed"),
+            TransientRecordFamilyWords { field } => write!(f, "transient record-family {field} is malformed"),
+            TransientRecordFamilyWindowConstants => write!(f, "transient record-family window constants are malformed"),
+            TransientRecordFamilyDefaultIndex => write!(f, "transient record-family default record index is out of domain"),
             Analysis(e) => write!(f, "analysis error: {e:?}"),
             Codebook(e) => write!(f, "codebook error: {e:?}"),
             Bit(e) => write!(f, "bitstream error: {e}"),

@@ -19,9 +19,12 @@ use crate::psychoacoustics::config::load_short_seed_surface;
 use crate::psychoacoustics::long_tables::load_long_psy_tables;
 use crate::psychoacoustics::long_variants::load_long_variant;
 use crate::psychoacoustics::short_tables::load_short_psy_profiles;
-use crate::quality::{load_quality_curves, normalize_quality_factor, QualityCurves};
+use crate::quality::{
+    load_quality_curves, normalize_quality_factor, QualityCurves,
+    QUALITY_SEMANTIC_SHORT_PREFIX,
+};
 use crate::transform::load_mdct_looks;
-use crate::transient::load_transient_tables;
+use crate::transient::load_transient;
 
 /// Complete immutable codec inputs assembled from one profile manifest
 /// (Python `EncoderProfileResources`).
@@ -115,20 +118,27 @@ fn resolve_quality_curves(
 /// Return the short surface with recognized quality overrides applied
 /// (Python `_apply_short_quality_overrides`).
 ///
-/// Override points (all on the short psychoacoustic seed surface, which the
-/// short look is then rebuilt from): the `short.<field>` curve names mapped
-/// onto the same-named surface fields. The reference stores the short
-/// psychoacoustic scalars as float32, so every override is rounded through
-/// the f32 boundary here (the reference's write-time cast). Unrecognized
-/// `short.*` parameter names are rejected so a malformed curves file can
+/// v2 routing: each evaluated curve is looked up in the resource's
+/// `semantics` map; a `short.<field>` semantic writes the interpolated
+/// value onto the same-named short surface field, while the other semantic
+/// forms (`no-op`, `transient.record-index-axis`) name mechanisms that
+/// consume their curve elsewhere (the record family owns its index table)
+/// or do not consume it at runtime. Every override write goes through the
+/// f32 boundary: the short psychoacoustic scalars are stored as float32, so
+/// the interpolated f64 value is rounded exactly as the reference casts it.
+/// Unrecognized parameter names are rejected so a malformed curves file can
 /// never silently take effect.
 fn apply_short_quality_overrides(
     surface: WwisePsySeedSurface,
     values: &BTreeMap<String, f64>,
+    semantics: &std::collections::BTreeMap<String, String>,
 ) -> Result<WwisePsySeedSurface, ProfileError> {
     let mut overrides: BTreeMap<&str, f32> = BTreeMap::new();
     for (name, value) in values {
-        let Some(field) = name.strip_prefix("short.") else {
+        let Some(semantic) = semantics.get(name).map(String::as_str) else {
+            continue;
+        };
+        let Some(field) = semantic.strip_prefix(QUALITY_SEMANTIC_SHORT_PREFIX) else {
             continue;
         };
         if !SHORT_QUALITY_FIELDS.contains(&field) {
@@ -213,11 +223,18 @@ pub fn assemble_analysis_resources(
 
     let mut short_surface = short_surface;
     if let Some(values) = &quality_values {
-        short_surface = apply_short_quality_overrides(short_surface, values)?;
+        let semantics = match &resolved_quality.curves {
+            Some(curves) => curves.semantics(),
+            None => &std::collections::BTreeMap::new(),
+        };
+        short_surface = apply_short_quality_overrides(short_surface, values, semantics)?;
     }
 
     let mdct_looks = load_mdct_looks(manifest.resource("transform.mdct")?)?;
-    let transient = load_transient_tables(manifest.resource("analysis.transient")?)?;
+    // The transient resource may be a pre-materialized static table (v1, the
+    // 6ch shape) or the record family (v2-era 2ch shape): the dispatch
+    // materializes per quality only where the family is registered.
+    let transient = load_transient(manifest.resource("analysis.transient")?, quality)?;
     let short_profiles =
         load_short_psy_profiles(manifest.resource("psychoacoustics.short-profiles")?)?;
 

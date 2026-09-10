@@ -172,14 +172,37 @@ def main() -> None:
         source = work / "source"
         wheels.mkdir()
         # A stale development-tree .so must not ride into the wheel.
+        # NOTE: shutil.ignore_patterns matches path *components* (basenames),
+        # so a slashed pattern like "crates/target" never fires; match the
+        # build caches by basename and drop the top-level corpus scratch
+        # tree (not part of the wheel contract, multi-GB).
+        def _ignore(dir_path: str, names: list[str]) -> set[str]:
+            ignored = {
+                name
+                for name in names
+                if name
+                in {
+                    ".git",
+                    ".venv",
+                    "venv",
+                    "build",
+                    "dist",
+                    "target",
+                    "__pycache__",
+                    ".mypy_cache",
+                    ".ruff_cache",
+                    ".pytest_cache",
+                }
+                or name.endswith((".egg-info", ".pyc", ".so", ".dylib", ".pyd", ".whl"))
+            }
+            if Path(dir_path) == ROOT and "corpus" in names:
+                ignored.add("corpus")
+            return ignored
+
         shutil.copytree(
             ROOT,
             source,
-            ignore=shutil.ignore_patterns(
-                ".git", ".venv", "venv", "build", "dist", "crates/target",
-                "*.egg-info", "__pycache__", "*.pyc", "*.so",
-                "*.dylib", "*.pyd", "*.whl",
-            ),
+            ignore=_ignore,
         )
         try:
             subprocess.run(

@@ -5,8 +5,18 @@
 //! one configuration, and the psychoacoustic parameters vary as linear
 //! interpolants along a fixed breakpoint table. This module owns that
 //! optional resource (`analysis/quality-curves.json`, schema
-//! `wem.quality-curves.v1`), its completeness validation, the immutable
+//! `wem.quality-curves.v2`), its completeness validation, the immutable
 //! value object, and the single interpolation kernel.
+//!
+//! Schema v2 adds the per-curve `semantics` map: each descriptor curve
+//! (`descNN.<field>`, recorded exactly as captured in the paired build) is
+//! mapped onto the mechanism it drives. The recognized semantic forms are
+//! `short.<field>` (a short psychoacoustic surface override), `no-op`
+//! (recorded control points without a runtime consumer), and
+//! `transient.record-index-axis` (the curve belongs to the temporal
+//! transient record-index mechanism, owned by the record family). The
+//! override resolution in the assembly layer keys off these semantics, so
+//! the curve names stay exactly as recorded in the paired build.
 //!
 //! # Authoritative formula (spec-aligned)
 //!
@@ -32,12 +42,21 @@ use crate::error::ProfileError;
 use crate::resources::ResourceRef;
 
 /// Quality-curves resource schema (Python `QUALITY_CURVES_SCHEMA`).
-pub const QUALITY_CURVES_SCHEMA: &str = "wem.quality-curves.v1";
+pub const QUALITY_CURVES_SCHEMA: &str = "wem.quality-curves.v2";
 /// Quality-curves interpolation marker (Python `QUALITY_CURVES_INTERPOLATION`).
 pub const QUALITY_CURVES_INTERPOLATION: &str = "linear-frac";
 /// Manifest logical name for the optional quality-curves resource
 /// (Python `QUALITY_CURVES_RESOURCE`).
 pub const QUALITY_CURVES_RESOURCE: &str = "analysis.quality-curves";
+/// Per-curve semantic form: no runtime consumer (Python `QUALITY_SEMANTIC_NO_OP`).
+pub const QUALITY_SEMANTIC_NO_OP: &str = "no-op";
+/// Per-curve semantic form: the transient record-index axis, owned by the
+/// record family (Python `QUALITY_SEMANTIC_TRANSIENT_RECORD_INDEX_AXIS`).
+pub const QUALITY_SEMANTIC_TRANSIENT_RECORD_INDEX_AXIS: &str =
+    "transient.record-index-axis";
+/// Prefix of the short-psy surface override semantic form
+/// (`short.<field>`, Python `QUALITY_SEMANTIC_SHORT_PREFIX`).
+pub const QUALITY_SEMANTIC_SHORT_PREFIX: &str = "short.";
 
 /// Spec normalization addend (float64; Python `QUALITY_NORMALIZE_ADDEND`).
 pub const QUALITY_NORMALIZE_ADDEND: f64 = 1e-7;
@@ -50,13 +69,17 @@ pub const QUALITY_NORMALIZE_CLAMP: f64 = 0.9998999834060669;
 ///
 /// `breakpoints` is a strictly increasing control-point domain (the
 /// normalized quality axis). `curves` maps a stable parameter name to the
-/// value taken at each breakpoint. Both have equal length and are
+/// value taken at each breakpoint. `semantics` (v2) maps every curve name
+/// onto the semantic of the mechanism it drives; it must cover the curve
+/// names exactly, so a malformed curves file can never take partial effect.
+/// Both have equal length and are
 /// validated at construction.
 #[derive(Debug, Clone, PartialEq)]
 pub struct QualityCurves {
     schema: String,
     breakpoints: Vec<f64>,
     curves: BTreeMap<String, Vec<f64>>,
+    semantics: BTreeMap<String, String>,
 }
 
 impl QualityCurves {
@@ -65,6 +88,7 @@ impl QualityCurves {
         schema: String,
         breakpoints: Vec<f64>,
         curves: BTreeMap<String, Vec<f64>>,
+        semantics: BTreeMap<String, String>,
     ) -> Result<Self, ProfileError> {
         if schema != QUALITY_CURVES_SCHEMA {
             return Err(ProfileError::QualityCurvesSchemaUnexpected { schema });
@@ -95,10 +119,19 @@ impl QualityCurves {
                 });
             }
         }
+        if semantics.is_empty() || semantics.len() != curves.len() {
+            return Err(ProfileError::QualityCurvesSemanticsIncomplete);
+        }
+        for (name, semantic) in &semantics {
+            if semantic.is_empty() || !curves.contains_key(name) {
+                return Err(ProfileError::QualityCurvesSemanticsIncomplete);
+            }
+        }
         Ok(Self {
             schema,
             breakpoints,
             curves,
+            semantics,
         })
     }
 
@@ -117,6 +150,11 @@ impl QualityCurves {
 
     pub fn curves(&self) -> &BTreeMap<String, Vec<f64>> {
         &self.curves
+    }
+
+    /// Per-curve semantics map (v2): curve name -> mechanism semantic.
+    pub fn semantics(&self) -> &BTreeMap<String, String> {
+        &self.semantics
     }
 
     /// Interpolate every curve at `quality` and return a values map
@@ -258,10 +296,20 @@ pub fn load_quality_curves(ref_: &ResourceRef) -> Result<QualityCurves, ProfileE
             })?;
         curves.insert(name.clone(), samples);
     }
+    let semantics_raw = payload
+        .get("semantics")
+        .and_then(serde_json::Value::as_object)
+        .ok_or(ProfileError::QualityCurvesSemanticsNotObject)?;
+    let mut semantics = BTreeMap::new();
+    for (name, semantic) in semantics_raw {
+        let semantic = semantic.as_str().ok_or(ProfileError::QualityCurvesSemanticsNotObject)?;
+        semantics.insert(name.clone(), semantic.to_string());
+    }
     QualityCurves::new(
         QUALITY_CURVES_SCHEMA.to_string(),
         breakpoints,
         curves,
+        semantics,
     )
 }
 
@@ -365,6 +413,10 @@ mod tests {
                 ("desc3.psy_float".to_string(), vec![1.0, 1.0, 1.0]),
                 ("desc29.psy_int1".to_string(), vec![-100.0, -105.0, -120.0]),
             ]),
+            std::collections::BTreeMap::from([
+                ("desc3.psy_float".to_string(), "no-op".to_string()),
+                ("desc29.psy_int1".to_string(), "short.ath_offset".to_string()),
+            ]),
         )
         .expect("valid curves");
 
@@ -384,11 +436,15 @@ mod tests {
 
     #[test]
     fn curves_validation_rejects_malformed_input() {
+        fn semantics_ok() -> BTreeMap<String, String> {
+            BTreeMap::from([("a".to_string(), "no-op".to_string())])
+        }
         assert!(matches!(
             QualityCurves::new(
                 "wrong".to_string(),
                 vec![0.0, 1.0],
-                std::collections::BTreeMap::from([("a".to_string(), vec![0.0, 0.0])])
+                BTreeMap::from([("a".to_string(), vec![0.0, 0.0])]),
+                semantics_ok()
             ),
             Err(ProfileError::QualityCurvesSchemaUnexpected { .. })
         ));
@@ -396,7 +452,8 @@ mod tests {
             QualityCurves::new(
                 QUALITY_CURVES_SCHEMA.to_string(),
                 vec![1.0],
-                std::collections::BTreeMap::from([("a".to_string(), vec![0.0])])
+                BTreeMap::from([("a".to_string(), vec![0.0])]),
+                semantics_ok()
             ),
             Err(ProfileError::QualityCurvesTooFewBreakpoints)
         ));
@@ -404,7 +461,8 @@ mod tests {
             QualityCurves::new(
                 QUALITY_CURVES_SCHEMA.to_string(),
                 vec![1.0, 1.0],
-                std::collections::BTreeMap::from([("a".to_string(), vec![0.0, 0.0])])
+                BTreeMap::from([("a".to_string(), vec![0.0, 0.0])]),
+                semantics_ok()
             ),
             Err(ProfileError::QualityCurvesBreakpointsNotIncreasing)
         ));
@@ -412,7 +470,8 @@ mod tests {
             QualityCurves::new(
                 QUALITY_CURVES_SCHEMA.to_string(),
                 vec![0.0, 1.0],
-                std::collections::BTreeMap::new()
+                BTreeMap::new(),
+                semantics_ok()
             ),
             Err(ProfileError::QualityCurvesEmptyCurves)
         ));
@@ -420,7 +479,8 @@ mod tests {
             QualityCurves::new(
                 QUALITY_CURVES_SCHEMA.to_string(),
                 vec![0.0, 1.0],
-                std::collections::BTreeMap::from([("a".to_string(), vec![0.0])])
+                BTreeMap::from([("a".to_string(), vec![0.0])]),
+                semantics_ok()
             ),
             Err(ProfileError::QualityCurvesCurveLengthMismatch { .. })
         ));
@@ -428,9 +488,29 @@ mod tests {
             QualityCurves::new(
                 QUALITY_CURVES_SCHEMA.to_string(),
                 vec![0.0, 1.0],
-                std::collections::BTreeMap::from([("a".to_string(), vec![0.0, f64::NAN])])
+                BTreeMap::from([("a".to_string(), vec![0.0, f64::NAN])]),
+                semantics_ok()
             ),
             Err(ProfileError::QualityCurvesValueNonFinite { .. })
+        ));
+        // v2 semantics: must cover the curve names exactly.
+        assert!(matches!(
+            QualityCurves::new(
+                QUALITY_CURVES_SCHEMA.to_string(),
+                vec![0.0, 1.0],
+                BTreeMap::from([("a".to_string(), vec![0.0, 0.0])]),
+                BTreeMap::new()
+            ),
+            Err(ProfileError::QualityCurvesSemanticsIncomplete)
+        ));
+        assert!(matches!(
+            QualityCurves::new(
+                QUALITY_CURVES_SCHEMA.to_string(),
+                vec![0.0, 1.0],
+                BTreeMap::from([("a".to_string(), vec![0.0, 0.0])]),
+                BTreeMap::from([("b".to_string(), "no-op".to_string())])
+            ),
+            Err(ProfileError::QualityCurvesSemanticsIncomplete)
         ));
     }
 }

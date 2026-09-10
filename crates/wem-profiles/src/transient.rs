@@ -1,11 +1,25 @@
 //! Immutable window and band configuration for transient detection
 //! (Python: `profiles/transient.py`).
+//!
+//! Two resource schemas are served from the same logical manifest entry
+//! (`analysis.transient`):
+//!
+//! * `wem.transient-detector-table.v1` - a pre-materialized static detector
+//!   table (the historical shape, still used by profiles that register one);
+//! * `wem.transient-record-family.v1` - the static bias/threshold record
+//!   family from the paired encoder build. The assembly layer materializes
+//!   one detector table from it per quality value: the record-index curve on
+//!   the shared quality axis picks a (possibly fractional) record index, the
+//!   floor record supplies every field verbatim, and only upper[0..3] /
+//!   lower[0..3] are linearly interpolated between the adjacent records at
+//!   the fractional part.
 
 use wem_analysis::config::{
     CALIBRATION_SAMPLE_RATES, TransientBandConfig, TransientDetectorTables,
 };
 
 use crate::error::ProfileError;
+use crate::quality::{linear_frac, normalize_quality_factor};
 use crate::resources::ResourceRef;
 
 /// Load the checked n=128 static detector table.
@@ -144,4 +158,395 @@ fn u32_masked(value: &serde_json::Value) -> Option<u32> {
         _ => return None,
     };
     Some(v as u32)
+}
+
+// ---------------------------------------------------------------------------
+// wem.transient-record-family.v1: the static record library from the paired
+// encoder build, materialized per quality.
+//
+// Selection/interpolation mechanism (instruction-pinned by the the extraction
+// extraction, the internal record, the corresponding locations): the whole record
+// at v5 = floor(index) is copied into the runtime block first; only
+// upper[0..3] and lower[0..3] are then overwritten with a linear
+// interpolation between records v5 and v5+1 at the fractional part. So all
+// non-interpolated fields (bias, carry, marker, tail, upper[4..11],
+// lower[4..11]) come verbatim from the FLOOR record.
+// ---------------------------------------------------------------------------
+
+/// Record-family schema (Python `TRANSIENT_RECORD_FAMILY_SCHEMA`).
+pub const TRANSIENT_RECORD_FAMILY_SCHEMA: &str = "wem.transient-record-family.v1";
+/// Record count in the paired build.
+pub const TRANSIENT_RECORD_COUNT: usize = 6;
+/// Words per record (marker + upper 12 + lower 12 + carry).
+pub const TRANSIENT_RECORD_WORDS: usize = 26;
+/// Points on the shared quality axis (breakpoints / index curve).
+pub const TRANSIENT_RECORD_INDEX_POINTS: usize = 13;
+/// Detector table window length (n = 128).
+pub const TRANSIENT_WINDOW_WORDS: u64 = 128;
+/// Band count in the descriptor table.
+pub const TRANSIENT_BAND_COUNT: usize = 12;
+
+/// One stored bias/threshold record (u32 bit patterns, byte-exact)
+/// (Python `TransientRecord`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransientRecord {
+    pub file_off: String,
+    pub marker_u32: u32,
+    pub upper_u32: [u32; 12],
+    pub lower_u32: [u32; 12],
+    pub carry_u32: u32,
+    pub bias_u32: u32,
+    pub m_u32: u32,
+    pub tail_u32: u32,
+    /// All 26 words in runtime order: marker, upper[0..12), lower[0..12),
+    /// carry.
+    pub config_u32: [u32; TRANSIENT_RECORD_WORDS],
+}
+
+/// The static record library plus the construction constants
+/// (Python `TransientRecordFamily`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransientRecordFamily {
+    pub schema: &'static str,
+    pub n: u64,
+    pub sample_rate: i64,
+    /// Record index used when no quality value is given (adjudicated default:
+    /// 3.0, the High band record of the paired build).
+    pub default_record_index: f64,
+    pub records: Vec<TransientRecord>,
+    /// f64 record-index curve on the shared quality axis (13 points).
+    pub index_curve: Vec<f64>,
+    /// Shared quality-axis breakpoints (13 points, strictly increasing).
+    pub breakpoints: Vec<f64>,
+    /// Per-band word counts (12 values) for the band construction.
+    pub band_words: Vec<u32>,
+    /// Per-band stride words (12 values) for the band construction.
+    pub stride_words: Vec<u32>,
+    /// Window construction divisor f64 (127.0).
+    pub window_divisor: f64,
+    /// Window construction half addend f64 (0.5).
+    pub window_half_addend: f64,
+    /// Widened PI constant f64 (3.1415927410125732) used at runtime.
+    pub window_pi: f64,
+}
+
+/// Load and validate the record-family resource
+/// (Python `load_transient_record_family`).
+pub fn load_transient_record_family(
+    ref_: &ResourceRef,
+) -> Result<TransientRecordFamily, ProfileError> {
+    let data = ref_.read_json()?;
+    let data = match data {
+        serde_json::Value::Object(map) => map,
+        _ => return Err(ProfileError::TransientRecordFamilyGeometryChanged),
+    };
+    if data
+        .get("schema")
+        .and_then(serde_json::Value::as_str)
+        != Some(TRANSIENT_RECORD_FAMILY_SCHEMA)
+    {
+        return Err(ProfileError::TransientSchemaChanged);
+    }
+    let sample_rate = data
+        .get("sample_rate")
+        .and_then(serde_json::Value::as_i64)
+        .ok_or(ProfileError::TransientRecordFamilyGeometryChanged)?;
+    if !CALIBRATION_SAMPLE_RATES.contains(&sample_rate) {
+        return Err(ProfileError::TransientRecordFamilyGeometryChanged);
+    }
+    let n = data
+        .get("n")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or(ProfileError::TransientRecordFamilyGeometryChanged)?;
+    if n != 128 {
+        return Err(ProfileError::TransientRecordFamilyGeometryChanged);
+    }
+
+    let f64_list = |key: &'static str, length: usize| -> Result<Vec<f64>, ProfileError> {
+        let err = || ProfileError::TransientRecordFamilyCurve { field: key };
+        let block = data.get(key).and_then(serde_json::Value::as_object)
+            .ok_or_else(err)?;
+        let values = block.get("values").and_then(serde_json::Value::as_array)
+            .filter(|values| values.len() == length)
+            .ok_or_else(err)?;
+        let mut out = Vec::with_capacity(length);
+        for value in values {
+            let number = value.as_f64().filter(|v| v.is_finite())
+                .ok_or_else(err)?;
+            out.push(number);
+        }
+        Ok(out)
+    };
+
+    let family = data.get("record_family").and_then(serde_json::Value::as_object)
+        .ok_or(ProfileError::TransientRecordFamilyRecordCount)?;
+    if family.get("count").and_then(serde_json::Value::as_u64)
+        != Some(TRANSIENT_RECORD_COUNT as u64)
+    {
+        return Err(ProfileError::TransientRecordFamilyRecordCount);
+    }
+    let raw_records = family.get("records").and_then(serde_json::Value::as_array)
+        .ok_or(ProfileError::TransientRecordFamilyRecordCount)?;
+    if raw_records.len() != TRANSIENT_RECORD_COUNT {
+        return Err(ProfileError::TransientRecordFamilyRecordCount);
+    }
+    let mut records = Vec::with_capacity(TRANSIENT_RECORD_COUNT);
+    for (index, raw) in raw_records.iter().enumerate() {
+        let record_err = || ProfileError::TransientRecordFamilyRecord { index };
+        let raw_map = raw.as_object().ok_or_else(record_err)?;
+        let u32s = |key: &str, length: usize| -> Result<Vec<u32>, ProfileError> {
+            raw_map.get(key).and_then(serde_json::Value::as_array)
+                .filter(|values| values.len() == length)
+                .ok_or_else(record_err)?
+                .iter()
+                .map(|value| u32_masked(value).ok_or_else(record_err))
+                .collect()
+        };
+        let int = |key: &str| -> Result<u32, ProfileError> {
+            u32_masked(raw_map.get(key).ok_or_else(record_err)?).ok_or_else(record_err)
+        };
+        let file_off = raw_map.get("file_off").and_then(serde_json::Value::as_str)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(record_err)?
+            .to_string();
+        let upper = u32s("upper_u32", 12)?;
+        let lower = u32s("lower_u32", 12)?;
+        let config = u32s("config_u32", TRANSIENT_RECORD_WORDS)?;
+        let record = TransientRecord {
+            file_off,
+            marker_u32: int("marker_u32")?,
+            upper_u32: upper.try_into().expect("checked length"),
+            lower_u32: lower.try_into().expect("checked length"),
+            carry_u32: int("carry_u32")?,
+            bias_u32: int("bias_u32")?,
+            m_u32: int("m_u32")?,
+            tail_u32: int("tail_u32")?,
+            config_u32: config.try_into().expect("checked length"),
+        };
+        // Field consistency (marker/carry/upper/lower vs config words).
+        if record.marker_u32 != 8
+            || record.config_u32[0] != record.marker_u32
+            || record.config_u32[TRANSIENT_RECORD_WORDS - 1] != record.carry_u32
+            || record.config_u32[1..13].iter().zip(&record.upper_u32).any(|(a, b)| a != b)
+            || record.config_u32[13..25]
+                .iter()
+                .zip(&record.lower_u32)
+                .any(|(a, b)| a != b)
+        {
+            return Err(record_err());
+        }
+        records.push(record);
+    }
+
+    let index_curve = f64_list("record_index_curve", TRANSIENT_RECORD_INDEX_POINTS)?;
+    let breakpoints = f64_list("quality_axis_breakpoints", TRANSIENT_RECORD_INDEX_POINTS)?;
+    if breakpoints
+        .windows(2)
+        .any(|pair| pair[0] >= pair[1])
+    {
+        return Err(ProfileError::TransientRecordFamilyCurve {
+            field: "quality_axis_breakpoints",
+        });
+    }
+    if index_curve
+        .iter()
+        .any(|v| !v.is_finite() || *v < 0.0 || *v > (TRANSIENT_RECORD_COUNT - 1) as f64)
+    {
+        return Err(ProfileError::TransientRecordFamilyCurve {
+            field: "record_index_curve",
+        });
+    }
+
+    let band_words = strict_u32_list_from(
+        data.get("band_words").and_then(serde_json::Value::as_object),
+        "band_words",
+    )?;
+    let stride_words = strict_u32_list_from(
+        data.get("stride_words").and_then(serde_json::Value::as_object),
+        "stride_words",
+    )?;
+
+    let window_build = data.get("window_build").and_then(serde_json::Value::as_object)
+        .ok_or(ProfileError::TransientRecordFamilyWindowConstants)?;
+    let window_const = |key: &str| -> Result<f64, ProfileError> {
+        window_build.get(key).and_then(serde_json::Value::as_object)
+            .and_then(|block| block.get("value"))
+            .and_then(serde_json::Value::as_f64)
+            .filter(|v| v.is_finite())
+            .ok_or(ProfileError::TransientRecordFamilyWindowConstants)
+    };
+    let window_divisor = window_const("divisor_f64")?;
+    let window_half_addend = window_const("half_constant_f64")?;
+    let window_pi = window_const("pi_f64")?;
+    if window_divisor != (TRANSIENT_WINDOW_WORDS - 1) as f64 {
+        return Err(ProfileError::TransientRecordFamilyWindowConstants);
+    }
+
+    let default_record_index = data
+        .get("default_record_index")
+        .and_then(serde_json::Value::as_f64)
+        .filter(|v| v.is_finite())
+        .ok_or(ProfileError::TransientRecordFamilyDefaultIndex)?;
+    if default_record_index < 0.0
+        || default_record_index > (TRANSIENT_RECORD_COUNT - 1) as f64
+    {
+        return Err(ProfileError::TransientRecordFamilyDefaultIndex);
+    }
+
+    Ok(TransientRecordFamily {
+        schema: TRANSIENT_RECORD_FAMILY_SCHEMA,
+        n,
+        sample_rate,
+        default_record_index,
+        records,
+        index_curve,
+        breakpoints,
+        band_words,
+        stride_words,
+        window_divisor,
+        window_half_addend,
+        window_pi,
+    })
+}
+
+/// Materialize one detector table from the record family for one quality
+/// (Python `materialize_transient_tables`).
+///
+/// `quality` is the raw Wwise quality factor (0-10 convention) or `None`
+/// for the profile's historical default gear: `None` materializes the
+/// family's `default_record_index` record whole (the adjudicated default is
+/// record 3). A quality value is normalized onto the shared quality axis,
+/// read on the family's own record-index curve with the shared two-step
+/// linear kernel, and mapped onto the family by the pinned selection rule:
+///
+/// * `v5 = floor(index)` (clamped to the last record at the top);
+/// * every field except upper[0..3]/lower[0..3] comes verbatim from record
+///   `v5` (bias, carry, marker, tail, upper[4..11], lower[4..11]);
+/// * upper[0..3]/lower[0..3] are linearly interpolated between records
+///   `v5` and `v5+1` at the fractional part (f64 lerp, f32 rounding).
+///
+/// The window and band construction are quality-independent: the three
+/// static f64 constants of the family reproduce the paired build's runtime
+/// construction bit-for-bit (verified 128/128 against the 6ch profile's
+/// registered window, including the [127] endpoint 0x2809aded - the old 2ch
+/// materializer's forced-0 endpoint difference is intentionally corrected).
+pub fn materialize_transient_tables(
+    family: &TransientRecordFamily,
+    quality: Option<f64>,
+) -> Result<TransientDetectorTables, ProfileError> {
+    let index = match quality {
+        None => family.default_record_index,
+        Some(quality) if !quality.is_finite() => {
+            return Err(ProfileError::QualityValueNonFinite)
+        }
+        Some(quality) => {
+            let (value, _outside) = linear_frac(
+                &family.breakpoints,
+                &family.index_curve,
+                normalize_quality_factor(quality),
+            );
+            value
+        }
+    };
+    let max_index = (family.records.len() - 1) as f64;
+    let index = index.clamp(0.0, max_index);
+    let v5 = index.floor() as usize;
+    let v5 = v5.min(family.records.len() - 1);
+    let frac = if v5 >= family.records.len() - 1 {
+        0.0
+    } else {
+        index - v5 as f64
+    };
+
+    let base = &family.records[v5];
+    let mut config_words: Vec<u32> = base.config_u32.to_vec();
+    if frac > 0.0 {
+        let nxt = &family.records[v5 + 1].config_u32;
+        for j in 0..4u32 {
+            for position in [1 + j, 13 + j] {
+                let a = f32::from_bits(config_words[position as usize]) as f64;
+                let b = f32::from_bits(nxt[position as usize]) as f64;
+                let lerped = (1.0 - frac) * a + frac * b;
+                config_words[position as usize] = (lerped as f32).to_bits(); // f32 boundary
+            }
+        }
+    }
+
+    let mut window: Vec<f32> = Vec::with_capacity(TRANSIENT_WINDOW_WORDS as usize);
+    for i in 0..TRANSIENT_WINDOW_WORDS {
+        let s = (family.window_pi * i as f64 / family.window_divisor).sin();
+        let s32 = s as f32;
+        window.push((s32 as f64 * s32 as f64) as f32);
+    }
+
+    let mut bands = Vec::with_capacity(TRANSIENT_BAND_COUNT);
+    for (offset, count) in family.band_words.iter().zip(family.stride_words.iter()) {
+        let mut weights = Vec::with_capacity(*count as usize);
+        for j in 0..*count {
+            let value = (family.window_pi * (j as f64 + family.window_half_addend)
+                / *count as f64)
+                .sin();
+            weights.push(value as f32);
+        }
+        let scale = (family.window_pi / (2.0 * *count as f64)).sin() as f32;
+        bands.push(TransientBandConfig {
+            offset: *offset as i64,
+            weights,
+            scale,
+        });
+    }
+
+    Ok(TransientDetectorTables {
+        n: family.n as i64,
+        bias: f32::from_bits(base.bias_u32),
+        window,
+        config: config_words.iter().map(|bits| f32::from_bits(*bits)).collect(),
+        bands,
+    })
+}
+
+/// Dispatch on the resource schema and load/materialize the tables
+/// (Python `load_transient_resource`).
+///
+/// `wem.transient-detector-table.v1` keeps the historical path exactly
+/// (profiles that register a pre-materialized table; quality ignored);
+/// `wem.transient-record-family.v1` materializes per quality (the paired
+/// build's static mechanism).
+pub fn load_transient(
+    ref_: &ResourceRef,
+    quality: Option<f64>,
+) -> Result<TransientDetectorTables, ProfileError> {
+    let payload = ref_.read_json()?;
+    let schema = payload
+        .get("schema")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    if schema == "wem.transient-detector-table.v1" {
+        return load_transient_tables(ref_);
+    }
+    if schema == TRANSIENT_RECORD_FAMILY_SCHEMA {
+        return materialize_transient_tables(
+            &load_transient_record_family(ref_)?,
+            quality,
+        );
+    }
+    Err(ProfileError::TransientSchemaChanged)
+}
+
+/// A strict u32 word list under a `{file_off, values}` block (band/stride
+/// words), mapped onto the record-family word error.
+fn strict_u32_list_from(
+    block: Option<&serde_json::Map<String, serde_json::Value>>,
+    field: &'static str,
+) -> Result<Vec<u32>, ProfileError> {
+    let err = || ProfileError::TransientRecordFamilyWords { field };
+    let values = block
+        .and_then(|block| block.get("values"))
+        .and_then(serde_json::Value::as_array)
+        .filter(|values| values.len() == TRANSIENT_BAND_COUNT)
+        .ok_or_else(err)?;
+    values
+        .iter()
+        .map(|value| u32_masked(value).ok_or_else(err))
+        .collect()
 }

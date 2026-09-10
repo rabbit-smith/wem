@@ -5,6 +5,10 @@ the immutable value object using synthetic data only. They do not touch any
 installed profile resource, so they are independent of the 6ch calibration and
 exercise exactly the code the parallel quality-formula calibration will later
 re-target.
+
+Schema v2 adds the per-curve ``semantics`` map: every curve name must be
+routed onto the mechanism it drives (``short.<field>``, ``no-op``, or
+``transient.record-index-axis``).
 """
 from __future__ import annotations
 
@@ -16,6 +20,9 @@ from wwise_wem_reference.profiles.quality import (
     QUALITY_CURVES_SCHEMA,
     QUALITY_NORMALIZE_ADDEND,
     QUALITY_NORMALIZE_CLAMP,
+    QUALITY_SEMANTIC_NO_OP,
+    QUALITY_SEMANTIC_SHORT_PREFIX,
+    QUALITY_SEMANTIC_TRANSIENT_RECORD_INDEX_AXIS,
     QualityCurves,
     _linear_frac,
     load_quality_curves,
@@ -28,6 +35,7 @@ def _curves(breakpoints, samples):
         schema=QUALITY_CURVES_SCHEMA,
         breakpoints=breakpoints,
         curves={"short.ath_offset": samples},
+        semantics={"short.ath_offset": "short.ath_offset"},
     )
 
 
@@ -129,9 +137,15 @@ class QualityCurvesValidationTests(unittest.TestCase):
     """Schema, breakpoint, and curve completeness validation."""
 
     def test_schema_constants_are_stable(self):
-        self.assertEqual(QUALITY_CURVES_SCHEMA, "wem.quality-curves.v1")
+        self.assertEqual(QUALITY_CURVES_SCHEMA, "wem.quality-curves.v2")
         self.assertEqual(QUALITY_CURVES_INTERPOLATION, "linear-frac")
         self.assertEqual(QUALITY_CURVES_RESOURCE, "analysis.quality-curves")
+        self.assertEqual(QUALITY_SEMANTIC_NO_OP, "no-op")
+        self.assertEqual(QUALITY_SEMANTIC_SHORT_PREFIX, "short.")
+        self.assertEqual(
+            QUALITY_SEMANTIC_TRANSIENT_RECORD_INDEX_AXIS,
+            "transient.record-index-axis",
+        )
 
     def test_rejects_nan_curve_value(self):
         with self.assertRaisesRegex(ValueError, "finite"):
@@ -159,6 +173,7 @@ class QualityCurvesValidationTests(unittest.TestCase):
                 schema=QUALITY_CURVES_SCHEMA,
                 breakpoints=[0.0],
                 curves={"short.ath_offset": [10.0]},
+                semantics={"short.ath_offset": "short.ath_offset"},
             )
 
     def test_rejects_empty_curves(self):
@@ -167,6 +182,7 @@ class QualityCurvesValidationTests(unittest.TestCase):
                 schema=QUALITY_CURVES_SCHEMA,
                 breakpoints=[0.0, 4.0],
                 curves={},
+                semantics={},
             )
 
     def test_rejects_wrong_schema(self):
@@ -175,7 +191,48 @@ class QualityCurvesValidationTests(unittest.TestCase):
                 schema="wem.quality-curves.v99",
                 breakpoints=[0.0, 4.0],
                 curves={"short.ath_offset": [10.0, 20.0]},
+                semantics={"short.ath_offset": "short.ath_offset"},
             )
+
+    def test_rejects_missing_semantics_entry(self):
+        # v2: semantics must cover every curve name exactly.
+        with self.assertRaisesRegex(ValueError, "semantics"):
+            QualityCurves(
+                schema=QUALITY_CURVES_SCHEMA,
+                breakpoints=[0.0, 4.0],
+                curves={"short.ath_offset": [10.0, 20.0]},
+                semantics={},
+            )
+
+    def test_rejects_partial_semantics(self):
+        with self.assertRaisesRegex(ValueError, "semantics"):
+            QualityCurves(
+                schema=QUALITY_CURVES_SCHEMA,
+                breakpoints=[0.0, 4.0],
+                curves={
+                    "desc29.psy_int1": [10.0, 20.0],
+                    "desc3.psy_float": [0.0, 1.0],
+                },
+                semantics={"desc29.psy_int1": "short.ath_offset"},
+            )
+
+    def test_rejects_extra_semantics_entry(self):
+        with self.assertRaisesRegex(ValueError, "semantics"):
+            QualityCurves(
+                schema=QUALITY_CURVES_SCHEMA,
+                breakpoints=[0.0, 4.0],
+                curves={"desc29.psy_int1": [10.0, 20.0]},
+                semantics={
+                    "desc29.psy_int1": "short.ath_offset",
+                    "desc99.psy_ghost": "no-op",
+                },
+            )
+
+    def test_semantics_map_is_immutable(self):
+        qc = _curves([0.0, 4.0, 8.0], [10.0, 20.0, 30.0])
+        with self.assertRaises(TypeError):
+            qc.semantics["short.ath_offset"] = "no-op"  # type: ignore[index]
+        self.assertEqual(qc.semantics["short.ath_offset"], "short.ath_offset")
 
     def test_curves_are_immutable(self):
         qc = _curves([0.0, 4.0, 8.0], [10.0, 20.0, 30.0])

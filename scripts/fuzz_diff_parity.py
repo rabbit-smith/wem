@@ -87,6 +87,25 @@ _TWO_CH_48K_SEEDS = (
 PR_TWO_CH_SEEDS = _TWO_CH_48K_SEEDS[:5]
 FULL_TWO_CH_SEEDS = _TWO_CH_48K_SEEDS
 
+# 2ch/48k multi-quality parity items: pinned (seed, quality) pairs on a
+# disjoint seed family (302407xx). Quality exercises the record-family
+# materialization end to end: the oracle materializes from the static
+# record family through the Python reference, the native kernel through the
+# Rust assembly, and both must agree byte for byte. The qualities span the
+# selection mechanism: q = 1.0 lands on record 2 with a fractional index
+# (2.0000005: floor record + a 5e-7 lerp), q = 4.0 lands on record 3 with a
+# fractional index (3.0000005), and q = 7.0 lands on record 4 exactly.
+_TWO_CH_QUALITY_CASES = (
+    (30240721, 1.0),
+    (30240722, 4.0),
+    (30240723, 7.0),
+    (30240724, 1.0),
+    (30240725, 4.0),
+    (30240726, 7.0),
+)
+PR_TWO_CH_QUALITY_CASES = _TWO_CH_QUALITY_CASES[:3]
+FULL_TWO_CH_QUALITY_CASES = _TWO_CH_QUALITY_CASES
+
 
 def _sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -171,8 +190,15 @@ def _differential_case(
     channels: int,
     sample_rate: int,
     profile_name: str,
+    quality: float | None = None,
 ) -> None:
-    """Oracle one-shot vs native streaming with a random chunk split."""
+    """Oracle one-shot vs native streaming with a random chunk split.
+
+    ``quality`` (2ch/48k record-family profiles) is forwarded to both sides:
+    the oracle resolves it through the reference assembly (record-index
+    curve + floor/lerp materialization), the native kernel through the Rust
+    assembly. ``None`` keeps the historical default gear on both sides.
+    """
     from wwise_wem_reference import python_engine
     from wwise_wem_reference.container.model import ContainerPlan
 
@@ -201,7 +227,7 @@ def _differential_case(
 
     setup_sha = profile.setup_sha256
     session = native.StreamSession()
-    session.start(setup_sha, name=profile_name)
+    session.start(setup_sha, name=profile_name, quality=quality)
     for chunk in chunks:
         session.push(pcm_bytes[chunk])
     complete = session.finish()
@@ -210,7 +236,8 @@ def _differential_case(
     if oracle_bytes != native_bytes:
         raise RuntimeError(
             "differential parity failed: case={case} seed={seed} geometry="
-            "{channels}ch/{rate}Hz frames={frames} chunks={chunks} oracle={o} "
+            "{channels}ch/{rate}Hz frames={frames} chunks={chunks} "
+            "quality={quality} oracle={o} "
             "native={n}".format(
                 case=case_id,
                 seed=seed,
@@ -218,6 +245,7 @@ def _differential_case(
                 rate=sample_rate,
                 frames=frames,
                 chunks=len(chunks),
+                quality=quality,
                 o=_sha256_hex(oracle_bytes),
                 n=_sha256_hex(native_bytes),
             )
@@ -303,6 +331,9 @@ def main() -> int:
     two_ch_seeds = (
         PR_TWO_CH_SEEDS if args.pr else FULL_TWO_CH_SEEDS
     )
+    two_ch_quality_cases = (
+        PR_TWO_CH_QUALITY_CASES if args.pr else FULL_TWO_CH_QUALITY_CASES
+    )
 
     start = time.monotonic()
     _golden_case(native)
@@ -345,10 +376,33 @@ def main() -> int:
             f"case 2ch : seed={seed} ok ({elapsed:.1f}s)"
         )
 
+    # 2ch/48k multi-quality parity items: the oracle binds quality on its
+    # profile object; the native session receives the same quality. Both
+    # materialize the record-family table for that quality.
+    for seed, quality in two_ch_quality_cases:
+        started = time.monotonic()
+        _differential_case(
+            native,
+            seed,
+            seed,
+            MIN_FRAMES,
+            args.max_frames,
+            load_wem_profile(TWO_CH_PROFILE, quality=quality),
+            2,
+            TWO_CH_SAMPLE_RATE,
+            TWO_CH_PROFILE,
+            quality=quality,
+        )
+        elapsed = time.monotonic() - started
+        print(
+            f"case 2chq: seed={seed} quality={quality} ok ({elapsed:.1f}s)"
+        )
+
     total = time.monotonic() - start
     print(
         f"fuzz_diff_parity OK: golden + {args.case_count} differential + "
-        f"{len(two_ch_seeds)} 2ch cases byte-identical in {total:.0f}s"
+        f"{len(two_ch_seeds)} 2ch + {len(two_ch_quality_cases)} 2chq "
+        f"(quality) cases byte-identical in {total:.0f}s"
     )
     return 0
 

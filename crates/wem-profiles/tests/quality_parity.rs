@@ -234,13 +234,23 @@ fn bundle_with_curves(
 }
 
 fn quality_curves_json() -> String {
+    // v2 shape: descriptor curve names as recorded in the paired build, with
+    // the per-curve semantics map routing each onto its mechanism.
     r#"{
-  "schema": "wem.quality-curves.v1",
+  "schema": "wem.quality-curves.v2",
   "interpolation": "linear-frac",
   "breakpoints": [0.0, 4.0, 8.0],
   "curves": {
-    "short.ath_offset": [1.0, 2.0, 4.0],
-    "short.ath_floor": [-10.0, -20.0, -40.0]
+    "desc29.psy_int1": [1.0, 2.0, 4.0],
+    "desc30.psy_int2": [-10.0, -20.0, -40.0],
+    "desc3.psy_float": [0.0, 0.0, 0.0],
+    "desc31.psy_double": [0.0, 0.0, 0.0]
+  },
+  "semantics": {
+    "desc29.psy_int1": "short.ath_offset",
+    "desc30.psy_int2": "short.ath_floor",
+    "desc3.psy_float": "no-op",
+    "desc31.psy_double": "transient.record-index-axis"
   }
 }"#
     .to_string()

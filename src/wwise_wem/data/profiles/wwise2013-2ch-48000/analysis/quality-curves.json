@@ -1,5 +1,5 @@
 {
-  "schema": "wem.quality-curves.v1",
+  "schema": "wem.quality-curves.v2",
   "interpolation": "linear-frac",
   "source": {
     "generation": "2013.2",
@@ -8,7 +8,7 @@
       "rate_min": 45000,
       "rate_max": 50000
     },
-    "note": "Static profile-descriptor control points; normalized quality axis"
+    "note": "Static profile-descriptor control points on the shared quality axis; the per-curve semantics map each descriptor curve onto the mechanism it drives"
   },
   "breakpoints": [
     -0.2,
@@ -26,21 +26,6 @@
     1.0
   ],
   "curves": {
-    "desc3.psy_float": [
-      1.0,
-      1.0,
-      1.0,
-      1.0,
-      1.0,
-      1.0,
-      1.0,
-      1.0,
-      1.0,
-      1.0,
-      1.0,
-      1.0,
-      1.0
-    ],
     "desc29.psy_int1": [
       -100,
       -100,
@@ -55,6 +40,21 @@
       -105,
       -110,
       -120
+    ],
+    "desc3.psy_float": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
     ],
     "desc30.psy_int2": [
       -130,
@@ -86,5 +86,11 @@
       999.0,
       999.0
     ]
+  },
+  "semantics": {
+    "desc29.psy_int1": "short.ath_offset",
+    "desc3.psy_float": "no-op",
+    "desc30.psy_int2": "short.ath_floor",
+    "desc31.psy_double": "transient.record-index-axis"
   }
 }

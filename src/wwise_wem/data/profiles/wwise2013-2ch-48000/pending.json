@@ -45,13 +45,13 @@
     },
     {
       "resource": "analysis.quality-curves",
-      "status": "partial",
-      "note": "control points recorded from static data; the desc31.psy_double curve couples to the transient upper-band thresholds (behavior-confirmed); the remaining curve semantics await behavior pairing"
+      "status": "complete",
+      "note": "static descriptor control points from the paired encoder build (2013.2) on the shared quality axis; per-curve semantics: desc29 -> short.ath_offset, desc30 -> short.ath_floor, desc3 -> no-op, desc31 -> transient record-index axis; behavior-pairing verified on the 2ch/48k ATH override surface"
     },
     {
       "resource": "analysis.transient",
       "status": "complete",
-      "note": "behavior-fitted from a representative 2ch/48k stream: bias/upper/lower/carry offsets fit against the stream mode schedule (fit window 0-70s matched within 2 of 7495 blocks; full-track short rate within 1.5pp of the stream; two holdout windows deviate in opposite directions, content-dependent); window/band geometry carried from the paired 2ch setup raw; per-field provenance preserved in corpus scratch"
+      "note": "static record family from the paired encoder build (2013.2): six bias/threshold records with a shared 13-point record-index curve on the quality axis; materialized per quality (default gear = record 3, the High band of the paired build); window, band geometry, and weights built from three static constants and verified bit-for-bit against the 6ch profile's registered window and band words; behavior-pairing verified on the generalization set (six non-anchor streams within the recorded static gears); the calibration anchor is named-exempt (its export point lies outside this static family; its residual is not a mechanism gap and not a tuning target)"
     },
     {
       "field": "key.quality_setup_identity",

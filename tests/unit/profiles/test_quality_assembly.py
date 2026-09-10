@@ -59,14 +59,22 @@ def _installed_resource_bytes(name: str) -> bytes:
 
 
 def _quality_curves_payload() -> bytes:
+    # v2 shape: descriptor curve names with the semantics map routing each
+    # onto its mechanism. The synthetic descriptors stand in for the paired
+    # build's desc29/desc30; the overrides are rounded through the f32
+    # boundary (the short-surface storage type) on both implementations.
     return json.dumps(
         {
-            "schema": "wem.quality-curves.v1",
+            "schema": "wem.quality-curves.v2",
             "interpolation": "linear-frac",
             "breakpoints": [0.0, 4.0, 8.0],
             "curves": {
-                "short.ath_offset": [1.0, 2.0, 4.0],
-                "short.ath_floor": [-10.0, -20.0, -40.0],
+                "desc29.psy_int1": [1.0, 2.0, 4.0],
+                "desc30.psy_int2": [-10.0, -20.0, -40.0],
+            },
+            "semantics": {
+                "desc29.psy_int1": "short.ath_offset",
+                "desc30.psy_int2": "short.ath_floor",
             },
         },
         sort_keys=True,
@@ -159,16 +167,17 @@ class QualityAssemblyWiringTests(unittest.TestCase):
                 resources = assemble_analysis_resources(bundle, quality=2.0)
                 # The quality is normalized onto the breakpoint axis first
                 # (qnorm = 2.0/10 + 1e-7 = 0.20000010000000001), then
-                # interpolated on [0,4,8]:
-                #   ath_offset   -> (1-f)*1 + f*2, f = 0.050000025  -> 1.0500000250000001
-                #   ath_floor    -> (1-f)*(-10) + f*(-20)          -> -10.500000250000001
-                self.assertEqual(resources.short_surface.ath_offset, 1.0500000250000001)
-                self.assertEqual(resources.short_surface.ath_floor, -10.500000250000001)
+                # interpolated on [0,4,8] and rounded through the f32
+                # boundary (the short-surface storage type, shared with Rust):
+                #   ath_offset   -> (1-f)*1 + f*2, f = 0.050000025  -> 1.0500000250000001 -> f32
+                #   ath_floor    -> (1-f)*(-10) + f*(-20)           -> -10.500000250000001 -> f32
+                self.assertEqual(resources.short_surface.ath_offset, 1.0500000715255737)
+                self.assertEqual(resources.short_surface.ath_floor, -10.5)
                 self.assertEqual(resources.quality_value, 2.0)
                 self.assertFalse(resources.quality_extrapolated)
                 # The rebuilt short look carries the overrides.
-                self.assertEqual(resources.short_look.ath_offset, 1.0500000250000001)
-                self.assertEqual(resources.short_look.ath_floor, -10.500000250000001)
+                self.assertEqual(resources.short_look.ath_offset, 1.0500000715255737)
+                self.assertEqual(resources.short_look.ath_floor, -10.5)
 
                 # Below-domain quality clamps to the first control point
                 # and flags extrapolation (qnorm = -0.0999999 < 0).
@@ -196,8 +205,8 @@ class QualityAssemblyWiringTests(unittest.TestCase):
                     bundle, quality=6.0
                 )
                 # q=6 -> qnorm = 0.6000000999999999 -> f = 0.150000025:
-                #   ath_offset = (1-f)*1 + f*2 = 1.150000025
-                self.assertEqual(resources.analysis.short_surface.ath_offset, 1.150000025)
+                #   ath_offset = (1-f)*1 + f*2 = 1.150000025 -> f32 boundary
+                self.assertEqual(resources.analysis.short_surface.ath_offset, 1.149999976158142)
                 self.assertEqual(resources.analysis.quality_value, 6.0)
                 self.assertFalse(resources.analysis.quality_extrapolated)
             finally:

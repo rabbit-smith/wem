@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import struct
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
@@ -20,12 +21,13 @@ from .codebooks import load_setup_codebooks
 from .frozen import load_frozen_tables
 from .quality import (
     QUALITY_CURVES_RESOURCE,
+    QUALITY_SEMANTIC_SHORT_PREFIX,
     QualityCurves,
     load_quality_curves,
     normalize_quality_factor,
 )
 from .transform import load_mdct_looks
-from .transient import load_transient_tables
+from .transient import load_transient_resource
 from .psychoacoustics.config import load_short_seed_surface
 from .psychoacoustics.long_tables import load_long_psy_tables
 from .psychoacoustics.long_variants import load_long_variant
@@ -100,41 +102,46 @@ def _resolve_quality_curves(
 def _apply_short_quality_overrides(
     surface: WwisePsySeedSurface,
     values: Mapping[str, float],
+    semantics: Mapping[str, str],
 ) -> WwisePsySeedSurface:
     """Return the short surface with recognized quality overrides applied.
 
-    Override point list (all on the short psychoacoustic seed surface, which
-    the short look is then rebuilt from):
-      - short.ath_offset        -> surface.ath_offset
-      - short.ath_floor         -> surface.ath_floor
-      - short.seed_ceiling      -> surface.seed_ceiling
-      - short.max_curve_db      -> surface.max_curve_db
-      - short.regular_curve_bias -> surface.regular_curve_bias
-      - short.regular_curve_cap  -> surface.regular_curve_cap
-      - short.curve_offset      -> surface.curve_offset
-      - short.curve_slope       -> surface.curve_slope
-      - short.curve_offset_2    -> surface.curve_offset_2
+    v2 routing: each evaluated curve is looked up in the resource's
+    ``semantics`` map; a ``short.<field>`` semantic writes the interpolated
+    value onto the same-named short surface field, while the other semantic
+    forms (``no-op``, ``transient.record-index-axis``) name mechanisms that
+    consume their curve elsewhere (the record family owns its index table) or
+    do not consume it at runtime. Every override write goes through the f32
+    boundary: the short psychoacoustic scalars are stored as float32, so the
+    interpolated f64 value is rounded exactly as the reference casts it.
     Unrecognized parameter names are rejected so a malformed curves file can
     never silently take effect.
     """
     overrides: dict[str, float] = {}
     for name, value in values.items():
-        if not name.startswith("short."):
+        semantic = semantics.get(name)
+        if semantic is None or not semantic.startswith(QUALITY_SEMANTIC_SHORT_PREFIX):
             continue
-        field = name[len("short.") :]
+        field = semantic[len(QUALITY_SEMANTIC_SHORT_PREFIX) :]
         if field not in _SHORT_QUALITY_FIELDS:
             raise ValueError(
-                f"quality curve {name!r} names an unsupported parameter; "
-                "supported short parameters: "
+                f"quality curve {name!r} semantic {semantic!r} names an "
+                "unsupported parameter; supported short parameters: "
                 + ", ".join(sorted(_SHORT_QUALITY_FIELDS))
             )
-        overrides[field] = value
+        overrides[field] = _f32_override(value)
     if not overrides:
         return surface
-    # Every key in _SHORT_QUALITY_FIELDS is a float field of WwisePsySeedSurface,
-    # so the float values are type-correct; mypy cannot verify this through a
-    # dynamically-keyed **kwargs expansion on dataclasses.replace.
+    # Every key in _SHORT_QUALITY_FIELDS is a float field of
+    # WwisePsySeedSurface, so the float values are type-correct; mypy cannot
+    # verify this through a dynamically-keyed **kwargs expansion on
+    # dataclasses.replace.
     return dataclasses.replace(surface, **overrides)  # type: ignore[arg-type]
+
+
+def _f32_override(value: float) -> float:
+    """Round an interpolated f64 override through the f32 storage boundary."""
+    return struct.unpack("<f", struct.pack("<f", float(value)))[0]
 
 
 def assemble_analysis_resources(
@@ -165,17 +172,21 @@ def assemble_analysis_resources(
     frozen = load_frozen_tables(frozen_ref) if frozen_ref is not None else None
 
     quality_normalized = None if quality is None else float(quality)
-    _, quality_values, quality_extrapolated = _resolve_quality_curves(
+    quality_curves, quality_values, quality_extrapolated = _resolve_quality_curves(
         bundle, quality_normalized
     )
     if quality_values is not None:
         short_surface = _apply_short_quality_overrides(
-            short_surface, quality_values
+            short_surface,
+            quality_values,
+            quality_curves.semantics if quality_curves is not None else {},
         )
 
     return AnalysisProfileResources(
         mdct_looks=load_mdct_looks(manifest.resource("transform.mdct")),
-        transient=load_transient_tables(manifest.resource("analysis.transient")),
+        transient=load_transient_resource(
+            manifest.resource("analysis.transient"), quality_normalized
+        ),
         short_profiles=load_short_psy_profiles(
             manifest.resource("psychoacoustics.short-profiles")
         ),

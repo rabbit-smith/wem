@@ -3,9 +3,19 @@
 Wwise quality is not a distinct profile: the same geometry and setup share one
 configuration, and the psychoacoustic parameters vary as linear interpolants
 along a fixed breakpoint table. This module owns that optional resource
-(``analysis/quality-curves.json``, schema ``wem.quality-curves.v1``), its
+(``analysis/quality-curves.json``, schema ``wem.quality-curves.v2``), its
 completeness validation, the immutable value object, and the single
 interpolation kernel.
+
+Schema v2 adds the per-curve ``semantics`` map: each descriptor curve
+(``descNN.<field>``) is mapped onto the mechanism it drives. The three
+recognized semantic forms are ``short.<field>`` (a short psychoacoustic
+surface override), ``no-op`` (recorded control points without a runtime
+consumer), and ``transient.record-index-axis`` (the curve belongs to the
+temporal transient record-index mechanism; its recorded control points are
+kept for provenance and are not consumed by the override path). The override
+resolution in the assembly layer keys off these semantics, so the curve
+names stay exactly as recorded in the paired build.
 
 The kernel is aligned to the authoritative quality formula
 (``corpus/extracted/quality-formula-spec.md``) and is intentionally isolated in
@@ -28,11 +38,19 @@ from typing import Any, Mapping
 
 from wwise_wem.profiles.resources import ResourceRef
 
-QUALITY_CURVES_SCHEMA = "wem.quality-curves.v1"
+QUALITY_CURVES_SCHEMA = "wem.quality-curves.v2"
 QUALITY_CURVES_INTERPOLATION = "linear-frac"
 # Manifest logical name for the optional quality-curves resource. A profile
 # that does not register this resource has no quality interpolation.
 QUALITY_CURVES_RESOURCE = "analysis.quality-curves"
+
+# Per-curve semantic forms (v2). The first two are the mechanism-level
+# constants; the ``short.<field>`` form names a short psychoacoustic surface
+# override target (validated against the supported field set in the assembly
+# layer, where the field set is owned).
+QUALITY_SEMANTIC_NO_OP = "no-op"
+QUALITY_SEMANTIC_TRANSIENT_RECORD_INDEX_AXIS = "transient.record-index-axis"
+QUALITY_SEMANTIC_SHORT_PREFIX = "short."
 
 # Spec normalization constants (profile-select entry, §1):
 #   qnorm = quality / 10.0 + 1e-7, clamped to the float32 constant promoted
@@ -68,12 +86,15 @@ class QualityCurves:
     ``breakpoints`` is a strictly increasing control-point domain (the Wwise
     quality axis, already normalized). ``curves`` maps a stable parameter name
     to the value taken at each breakpoint. Both have equal length and are
-    validated at load time.
+    validated at load time. ``semantics`` maps every curve name onto the
+    semantic of the mechanism it drives (v2); it must cover the curve names
+    exactly, so a malformed curves file can never take partial effect.
     """
 
     schema: str
     breakpoints: tuple[float, ...]
     curves: Mapping[str, tuple[float, ...]]
+    semantics: Mapping[str, str]
 
     def __post_init__(self) -> None:
         if self.schema != QUALITY_CURVES_SCHEMA:
@@ -93,6 +114,22 @@ class QualityCurves:
         if not curves:
             raise ValueError("quality-curves must define at least one curve")
         object.__setattr__(self, "curves", MappingProxyType(curves))
+        if not isinstance(self.semantics, Mapping) or not all(
+            isinstance(name, str) and isinstance(semantic, str) and semantic
+            for name, semantic in self.semantics.items()
+        ):
+            raise ValueError("quality-curves semantics must be a name/semantic map")
+        known = set(self.semantics)
+        if set(curves) != known:
+            raise ValueError(
+                "quality-curves semantics must cover every curve name exactly "
+                f"(missing or extra: {sorted(set(curves) ^ known)})"
+            )
+        object.__setattr__(
+            self,
+            "semantics",
+            MappingProxyType({str(k): str(v) for k, v in self.semantics.items()}),
+        )
 
     def _evaluate_all(
         self, quality: float
@@ -175,7 +212,8 @@ def load_quality_curves(ref: ResourceRef | None) -> QualityCurves | None:
 
     ``None`` in, ``None`` out: a profile without the resource keeps the
     historical behavior exactly. A present resource is checksum-verified by
-    the manifest and fully validated here.
+    the manifest and fully validated here, including the v2 per-curve
+    semantics map.
     """
     if ref is None:
         return None
@@ -197,10 +235,14 @@ def load_quality_curves(ref: ResourceRef | None) -> QualityCurves | None:
     raw_curves = payload.get("curves")
     if not isinstance(raw_curves, dict) or not raw_curves:
         raise ValueError("quality-curves must define a non-empty curves object")
+    raw_semantics = payload.get("semantics")
+    if not isinstance(raw_semantics, dict) or not raw_semantics:
+        raise ValueError("quality-curves must define a non-empty semantics object")
     return QualityCurves(
         schema=QUALITY_CURVES_SCHEMA,
         breakpoints=breakpoints,
         curves=raw_curves,
+        semantics=raw_semantics,
     )
 
 
@@ -210,6 +252,9 @@ __all__ = [
     "QUALITY_CURVES_SCHEMA",
     "QUALITY_NORMALIZE_ADDEND",
     "QUALITY_NORMALIZE_CLAMP",
+    "QUALITY_SEMANTIC_NO_OP",
+    "QUALITY_SEMANTIC_SHORT_PREFIX",
+    "QUALITY_SEMANTIC_TRANSIENT_RECORD_INDEX_AXIS",
     "QualityCurves",
     "load_quality_curves",
     "normalize_quality_factor",
