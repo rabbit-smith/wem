@@ -21,27 +21,27 @@
     {
       "resource": "psychoacoustics.short-seed",
       "status": "complete",
-      "note": "geometry-derived for the 2ch/48k bin grid (44.1k calibration curve arrays frequency-mapped to 48k; scalars and structural rows carried from the 6ch calibration as candidate values); registered as the profile's short psychoacoustic set; per-field provenance preserved in corpus scratch"
+      "note": "static family from the paired encoder build (2013.2) on the (2,45000,50000) descriptor, whose 30-pointer family is word-identical to the 6ch record of the same build: every statically hosted array (envelope ladder, remap curve offsets and both remap extensions) is byte-verified from the paired build. The ATH, octave, mask and interval surfaces have no static host anywhere in the paired build (exhaustive full-array byte search); instruction-level evidence shows they are per-frame adaptive state driven by the streamed source PCM, not init-time materializations. Their current registered values are frequency-mapped operating-point approximations of that mechanism and are labeled provisional, pending the builder/mechanism re-derivation. Per-field classification in corpus/paired-build/the round/artifacts/replacement-diff-table.json; provenance ledger in corpus/paired-build/the round/."
     },
     {
       "resource": "psychoacoustics.short-profiles",
       "status": "complete",
-      "note": "geometry-derived for the 2ch/48k bin grid (curve arrays frequency-mapped to 48k; scalars carried from the 6ch calibration as candidate values); registered as the profile's short psychoacoustic profiles; per-field provenance preserved in corpus scratch"
+      "note": "static family from the paired encoder build (2013.2): band-limit rows and blend weights are byte-verified against the paired build's channel-family tables; the per-mode candidate trio, curve caps and the 3x128 mask-curve surfaces are per-frame adaptive state (no static host; streamed-audio-driven, per the r10 provenance evidence), and their current values are frequency-mapped operating-point approximations labeled provisional pending mechanism re-derivation."
     },
     {
       "resource": "psychoacoustics.long-base",
       "status": "complete",
-      "note": "geometry-derived for the 2ch/48k bin grid (44.1k calibration curve arrays frequency-mapped to 48k; scalars and structural words carried from the 6ch calibration as candidate values); registered as the profile's long psychoacoustic base; per-field provenance preserved in corpus scratch"
+      "note": "1024-bin curves, interval and profile words, seed curves, group labels and tone surfaces have no static host in the paired build and are per-frame adaptive state (streamed-audio-driven); current values are operating-point approximations (some shared bitwise with the 6ch registration via descriptor-pointer identity, some frequency-mapped) and are labeled provisional pending mechanism re-derivation."
     },
     {
       "resource": "psychoacoustics.long-modes",
       "status": "complete",
-      "note": "geometry-derived for the 2ch/48k bin grid (analysis surfaces for long modes 2/3 frequency-mapped to 48k); registered as the profile's long psychoacoustic variants; per-field provenance preserved in corpus scratch"
+      "note": "the long-mode 2/3 analysis surfaces have no static host in the paired build and are per-frame adaptive state; current values are operating-point approximations (frequency-mapped from the 6ch registration) labeled provisional pending mechanism re-derivation."
     },
     {
       "resource": "analysis.frozen-tables",
       "status": "complete",
-      "note": "analytic 48k-domain recording: coordinate domain derived analytically from seed-surface n and manifest sample rate; twiddle and window constants asserted equal to the 6ch profile; cross-check against a live 2ch encode awaits behavior calibration"
+      "note": "window halves are byte-verified from the paired encoder build (2013.2) (static hosts recorded in the r9 replacement ledger); the coordinate domain and the stage twiddles are init-computed (builder arithmetic sites pinned in the per-instruction ledger), registered as analysis-domain values pending the optional builder re-derivation"
     },
     {
       "resource": "analysis.quality-curves",
@@ -51,7 +51,7 @@
     {
       "resource": "analysis.transient",
       "status": "complete",
-      "note": "static record family from the paired encoder build (2013.2): six bias/threshold records with a shared 13-point record-index curve on the quality axis; materialized per quality (default gear = record 3, the High band of the paired build); window, band geometry, and weights built from three static constants and verified bit-for-bit against the 6ch profile's registered window and band words; behavior-pairing verified on the generalization set (six non-anchor streams within the recorded static gears); the calibration anchor is named-exempt (its export point lies outside this static family; its residual is not a mechanism gap and not a tuning target)"
+      "note": "static record family from the paired encoder build (2013.2): six bias/threshold records with a shared 13-point record-index curve on the quality axis; materialized per quality (default gear = record 3, the High band of the paired build); window, band geometry, and weights built from three static constants and verified bit-for-bit; the bank and the record-index curve are re-verified byte-exact against the paired build through the (2,45000,50000) descriptor (u32-level record equality, gate GD in the r9 decode artifact); the anchor sample is an unidentified foreign build, out of profile scope, kept as archival cross-check only"
     },
     {
       "field": "key.quality_setup_identity",

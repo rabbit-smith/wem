@@ -22,15 +22,19 @@ Currently installed:
   its Vorbis setup packet and codebooks (t97 floor plus the t282 residue
   table) are registered and framing-verified, and its full analysis
   resource set is registered, so it resolves by geometry/setup digest
-  and encodes. Calibration basis: representative stream / behavior
-  pairing. The psychoacoustic four-set (short seed/profiles, long
-  base/modes) is geometry-derived (representative 44.1k curve arrays
-  frequency-mapped to 48k); the transient detector is behavior-fitted
-  on a representative 2ch/48k stream; the quality-curves semantics are
-  partial (the `desc31.psy_double` curve is identified as pointing at
-  the transient upper-band thresholds, and the assembly wiring of
-  curve values into psychoacoustic fields is pending); the container
-  aux fields stay partial pending behavior pairing.
+  and encodes. Static basis: every field of the analysis resource set is
+  classified against the paired encoder build through the (2,45000,50000)
+  descriptor family (whose 30-pointer block is word-identical to the 6ch
+  record of the same build): statically hosted arrays (quality-curves,
+  transient record family, look envelopes and remap tables, frozen window
+  halves, MDCT trig blocks) are byte-verified from the paired build; the
+  remaining psychoacoustic surfaces (ATH/octave/mask/interval/1024-bin
+  curves/tone/mode variants) have no static host anywhere in the paired
+  build; instruction-level evidence identifies them as per-frame adaptive
+  state driven by the streamed source PCM, and their registered values
+  are frequency-mapped operating-point approximations labeled provisional
+  pending the mechanism (builder) re-derivation; the container aux fields
+  stay partial pending behavior pairing.
 
 ## Exact setup identity
 

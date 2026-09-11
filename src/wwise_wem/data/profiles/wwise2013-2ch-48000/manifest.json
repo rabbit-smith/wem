@@ -67,7 +67,7 @@
     "meta.pending": {
       "path": "pending.json",
       "schema": "wem.profile-pending.v1",
-      "sha256": "25bc5d2cd638d9d363fd1a1e911d776eb38caac3f601f2e657ffba6ccbe39467"
+      "sha256": "9e291d1fca71e11241da29f847e51f5b129673a17cbb5f05cc72cd891cc993b6"
     },
     "analysis.frozen-tables": {
       "path": "analysis/frozen-tables.json",

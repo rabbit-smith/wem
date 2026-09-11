@@ -9,11 +9,13 @@ content) through :func:`wwise_wem.encode_wav` and
 back to PCM with the reference decoder functions must reconstruct the
 input to a correlation of at least 0.99 per channel (steady region).
 
-The 2ch profile's psychoacoustic calibration is geometry-derived and
-behavior-pairing is still pending; the test signal therefore uses
-band-limited content (pink-style noise plus gentle decaying bursts) that
-the registered calibration demonstrably reconstructs.  Correlation is the
-reconstruction-quality bar, not a losslessness claim.
+The 2ch profile's statically hosted analysis fields are byte-verified from
+the paired encoder build; its init-computed psychoacoustic surfaces remain
+behavior-paired candidates (non-static certificates in the r9 replacement
+ledger). The test signal therefore uses band-limited content (pink-style
+noise plus gentle decaying bursts) that the registered calibration
+demonstrably reconstructs.  Correlation is the reconstruction-quality bar,
+not a losslessness claim.
 
 The reference decoder is a test asset imported by explicit file path, in
 the same spirit as ``wwise_wem_reference``: it validates the output, it is
