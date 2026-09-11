@@ -16,6 +16,7 @@ registered only after its complete setup and analysis tables pass packet and
 whole-file regression.
 
 Currently installed:
+
 - `ProfileKey(channels=6, sample_rate=44100)` — `wwise2013-6ch-44100`,
   structure and psychoacoustics complete; encodes.
 - `ProfileKey(channels=2, sample_rate=48000)` — `wwise2013-2ch-48000`,
