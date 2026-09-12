@@ -15,7 +15,10 @@ pub const SIX_F64_BITS: u64 = 0x4018000000000000; // paired_six_f64 (d940 floor)
 pub const EPS_F64_BITS: u64 = 0x3e7ad7f29abcaf48; // the build's code (ebd0 epsilon)
 
 // e2b0 interpolation axis (descriptor+0x08 table at the build's code)
-pub const AXIS: &[f32] = &[-0.2f32, -0.1f32, 0.0f32, 0.1f32, 0.2f32, 0.3f32, 0.4f32, 0.5f32, 0.6f32, 0.7f32, 0.8f32, 0.9f32, 1.0f32];
+pub const AXIS: &[f32] = &[
+    -0.2f32, -0.1f32, 0.0f32, 0.1f32, 0.2f32, 0.3f32, 0.4f32, 0.5f32, 0.6f32, 0.7f32, 0.8f32,
+    0.9f32, 1.0f32,
+];
 
 // paired_ath_source_curve: ATH source curve, 88 f32 bit patterns (the build's code + entry*4)
 pub const paired_ath_source_curve: &[u32] = &[
@@ -120,4 +123,3 @@ pub const MASK_POOL: &[u32] = &[
     0x00000004, 0x00000006, 0x00000003, 0x00000007, 0x00000002, 0x00000008, 0x00000001, 0x00000009,
     0x00000000, 0x0000000a,
 ];
-

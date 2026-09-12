@@ -306,4 +306,3 @@ fn mask_curves_parity() {
         assert_eq!(g2[i], MCV_48000[i], "mcv2 {i}");
     }
 }
-

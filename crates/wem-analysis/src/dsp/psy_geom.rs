@@ -129,7 +129,10 @@ pub fn interval_table(a4: u32, a5: u32, a2_120: i64, a2_124: i64) -> Vec<u32> {
 
     #[inline]
     fn fi(x: i64) -> F80 {
-        debug_assert!(x.unsigned_abs() < (1u64 << 53), "int must be exact in binary64");
+        debug_assert!(
+            x.unsigned_abs() < (1u64 << 53),
+            "int must be exact in binary64"
+        );
         F80::from_f64(x as f64)
     }
 
@@ -220,7 +223,7 @@ pub fn interval_table(a4: u32, a5: u32, a2_120: i64, a2_124: i64) -> Vec<u32> {
 pub fn default_quality_index() -> f64 {
     use super::x87::{add80, F80};
     const EPS: f64 = f64::from_bits(EPS_F64_BITS); // the build's code
-    // the build's code: 4.0f; 10008933: /10; 893b/893f: f32 store before ebd0
+                                                   // the build's code: 4.0f; 10008933: /10; 893b/893f: f32 store before ebd0
     let q = f32_round(4.0 / 10.0);
     // the build's code/ebd9/ebe4: double epsilon add at x87 width, then fstps
     let q = f32_round(add80(F80::from_f64(q), F80::from_f64(EPS)).to_f64());
@@ -239,11 +242,7 @@ pub fn default_quality_index() -> f64 {
     // the build's code..e41f: exact-rational divide at 80-bit, fstps, integer add
     let fraction = exact_div80(q - lo, hi - lo);
     let gi = g as i64;
-    add80(
-        F80::from_f64(gi as f64),
-        F80::from_f64(f32_round(fraction)),
-    )
-    .to_f64()
+    add80(F80::from_f64(gi as f64), F80::from_f64(f32_round(fraction))).to_f64()
 }
 
 /// Exact `Fraction(a)/Fraction(b)` then `_round80`-equivalent single round:
@@ -279,11 +278,7 @@ pub fn mask_knots(raw: &[u32], index: f64) -> [Vec<f64>; 3] {
             let right = (raw[at + 51] as i32) as i64;
             // d9d6..da98: fildl; separate fmuls; faddp; fstps
             values.push(f32_round(
-                add80(
-                    mul80(fi(left), complement),
-                    mul80(fi(right), frac),
-                )
-                .to_f64(),
+                add80(mul80(fi(left), complement), mul80(fi(right), frac)).to_f64(),
             ));
         }
         // dac9/dad6/dad8: floor = f32(first + 6.0)
@@ -305,44 +300,74 @@ pub fn mask_knots(raw: &[u32], index: f64) -> [Vec<f64>; 3] {
 
 /// Bin-center position and three knot lerps — the build's code..the build's code.
 pub fn mask_curves_knots(a4: u32, a5: u32, knots: &[Vec<f64>; 3]) -> [Vec<f64>; 3] {
-    use super::x87::{add80, mul80, F80};
     let mut rows: [Vec<f64>; 3] = [Vec::new(), Vec::new(), Vec::new()];
     for r in rows.iter_mut() {
         r.reserve(a4 as usize);
     }
     for i in 0..a4 {
-        // 1001681f..82d: (i+0.5)*rate/(2*n), _CIlog
-        let logarithm = cilog((f64::from(i) + HALF) * f64::from(a5) / f64::from(2 * a4));
-        // 10016832..840: LOG2E, PSYCHO, *2 (register chain), fstps
-        let position = f32_round(
-            mul80(
-                add80(
-                    mul80(F80::from_f64(logarithm), F80::from_f64(LOG2E)),
-                    F80::from_f64(-PSYCHO),
-                ),
-                F80::from_f64(2.0),
-            )
-            .to_f64(),
-        );
-        // 10016844..8d2: clamp [0, 16]
-        let position = position.clamp(0.0, 16.0);
-        let g = position as usize; // 100168d6 ftol2 of an already-clamped value
-        debug_assert!((g as f64) <= position, "trunc toward zero expected");
-        let frac = f32_round(add80(F80::from_f64(position), F80::from_f64(-(g as f64))).to_f64());
-        let complement = add80(F80::from_f64(1.0), F80::from_f64(-frac));
+        let (g, frac, complement) = pos_frac(a4, a5, i);
         for (row, out) in knots.iter().zip(rows.iter_mut()) {
-            // 100168fb..1696e; endpoint's following load has zero weight
-            let right = if g < 16 { row[g + 1] } else { 0.0 };
-            out.push(f32_round(
-                add80(
-                    mul80(F80::from_f64(right), F80::from_f64(frac)),
-                    mul80(F80::from_f64(row[g]), complement),
-                )
-                .to_f64(),
-            ));
+            out.push(lerp_row(row, g, frac, complement));
         }
     }
     rows
+}
+
+/// Alias for the LONG wrappers: three-row lerp over given knots.
+pub fn curve_rows(a4: u32, a5: u32, knots: &[Vec<f64>; 3]) -> [Vec<f64>; 3] {
+    mask_curves_knots(a4, a5, knots)
+}
+
+/// Single-row variant (field_18-knot path the build's code..the build's code, where the
+/// Python reference passes one row through the same lerp3 loop).
+pub fn curve_row1(a4: u32, a5: u32, row: &[f64]) -> Vec<f64> {
+    (0..a4)
+        .map(|i| {
+            let (g, frac, complement) = pos_frac(a4, a5, i);
+            lerp_row(row, g, frac, complement)
+        })
+        .collect()
+}
+
+/// Bin-center position and knot weights — the build's code..the build's code, shared by
+/// every consumer of the materializer's final loop.
+fn pos_frac(a4: u32, a5: u32, i: u32) -> (usize, f64, super::x87::F80) {
+    use super::x87::{add80, mul80, F80};
+    // 1001681f..82d: (i+0.5)*rate/(2*n), _CIlog
+    let logarithm = cilog((f64::from(i) + HALF) * f64::from(a5) / f64::from(2 * a4));
+    // 10016832..840: LOG2E, PSYCHO, *2 (register chain), fstps
+    let position = f32_round(
+        mul80(
+            add80(
+                mul80(F80::from_f64(logarithm), F80::from_f64(LOG2E)),
+                F80::from_f64(-PSYCHO),
+            ),
+            F80::from_f64(2.0),
+        )
+        .to_f64(),
+    );
+    // 10016844..8d2: clamp [0, 16]
+    let position = position.clamp(0.0, 16.0);
+    let g = position as usize; // 100168d6 ftol2 of an already-clamped value
+    debug_assert!((g as f64) <= position, "trunc toward zero expected");
+    let frac = f32_round(add80(F80::from_f64(position), F80::from_f64(-(g as f64))).to_f64());
+    let complement = add80(F80::from_f64(1.0), F80::from_f64(-frac));
+    (g, frac, complement)
+}
+
+/// One knot-pair lerp — 100168fb..1696e (endpoint's following load has zero
+/// weight, matching the reference's `g < 16` guard).
+#[inline]
+fn lerp_row(row: &[f64], g: usize, frac: f64, complement: super::x87::F80) -> f64 {
+    use super::x87::{add80, mul80, F80};
+    let right = if g < 16 { row[g + 1] } else { 0.0 };
+    f32_round(
+        add80(
+            mul80(F80::from_f64(right), F80::from_f64(frac)),
+            mul80(F80::from_f64(row[g]), complement),
+        )
+        .to_f64(),
+    )
 }
 
 /// `a1[3]` — the three mask-curve rows flattened to 384 f32 bit patterns

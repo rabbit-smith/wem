@@ -267,7 +267,11 @@ pub fn cmp_f64(a: F80, b: f64) -> std::cmp::Ordering {
         Equal => a.man.cmp(&bb.man),
         e => e, // exponent lead decides for normalized mantissas
     };
-    if a.neg { mag.reverse() } else { mag }
+    if a.neg {
+        mag.reverse()
+    } else {
+        mag
+    }
 }
 
 /// `a >= b` at full register width (ordered comparison semantics of `fcom`).

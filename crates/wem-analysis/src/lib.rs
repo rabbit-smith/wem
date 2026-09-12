@@ -22,6 +22,10 @@ pub mod dsp {
     /// `octave`; constants in `psy_geom_data`, parity via tests).
     pub mod psy_geom;
     pub mod psy_geom_data;
+    /// LONG (1024-bin) materializer outputs reusing the SHORT engine with
+    /// mode-selected banks (parity: tests/psy_geom_long_parity.rs).
+    pub mod psy_geom_long;
+    pub mod psy_geom_long_data;
     pub mod spectrum;
     pub mod transform;
     /// x87 register model of the paired 2013.2 build (port of the builder
