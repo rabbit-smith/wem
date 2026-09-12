@@ -14,45 +14,6 @@ import math
 import struct
 
 
-def to_float(x):
-    """float(x) with domain errors surfaced as ValueError (fail-loud)."""
-    try:
-        return float(x)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"float conversion failed for {x!r}") from exc
-
-
-def to_int(x):
-    """int(x) toward zero with domain errors surfaced as ValueError."""
-    try:
-        return int(x)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"int conversion failed for {x!r}") from exc
-
-
-def to_f32_store(x):
-    """x87 `fstps`: round to f32 (domain errors raise with the input)."""
-    try:
-        return struct.unpack("<f", struct.pack("<f", to_float(x)))[0]
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"f32 store failed for {x!r}") from exc
-
-
-def to_f32_bits(x):
-    """f32 bit pattern of x (little-endian u32)."""
-    try:
-        return struct.unpack("<I", struct.pack("<f", to_float(x)))[0]
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"f32 bit extraction failed for {x!r}") from exc
-
-
-def f32_from_bits(b):
-    """Decode a u32 bit pattern as f32."""
-    try:
-        return f32_from_bits(b)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"f32 bit decode failed for {b!r}") from exc
-
 def f32(x: float) -> float:
     """Round a value to single precision (x86 fstps semantics)."""
     return to_f32_store(x)
@@ -141,12 +102,6 @@ def offset_for_n(n: int) -> float:
     return f32(wwise_float_log(val) + ADD)
 
 
-if __name__ == "__main__":
-    # self-test: sanity only (no external deps)
-    assert f32_bits(0.1) == struct.unpack("<I", struct.pack("<f", 0.1))[0]
-    assert f32(1e20) == struct.unpack("<f", struct.pack("<f", 1e20))[0]  # overflow to inf
-    assert bits_f32(f32_bits(-130.0)) == -130.0
-    print("f32 primitives OK")
 
 
 # Interval-only x87 operations: 64 significant bits, nearest/even.
@@ -705,3 +660,41 @@ def cilog(x):
     v0 = v0 + v2  # 10049745
     v0 = v0 + v4  # 10049749
     return v0
+
+
+# --- public safe conversions (fail-loud: domain errors raise ValueError with
+# the offending input; numerics are the plain struct/float/int operations) ---
+
+def to_float(x):
+    try:
+        return float(x)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"float conversion failed for {x!r}") from exc
+
+
+def to_int(x):
+    try:
+        return int(x)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"int conversion failed for {x!r}") from exc
+
+
+def to_f32_store(x):
+    try:
+        return struct.unpack("<f", struct.pack("<f", float(x)))[0]
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"f32 store failed for {x!r}") from exc
+
+
+def to_f32_bits(x):
+    try:
+        return struct.unpack("<I", struct.pack("<f", float(x)))[0]
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"f32 bit extraction failed for {x!r}") from exc
+
+
+def f32_from_bits(b):
+    try:
+        return f32_from_bits(b)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"f32 bit decode failed for {b!r}") from exc

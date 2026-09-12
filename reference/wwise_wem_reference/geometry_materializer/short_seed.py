@@ -306,9 +306,3 @@ def build(d, key, geo):
     return out
 
 
-if __name__ == "__main__":
-    d = family.load()
-    for name, key, geo in family.list_profiles():
-        r = build(d, key, geo)
-        n_oct = len(r["octave"])
-        print(f"{name}: octave[{n_oct}] ath[{len(r['ath'])}]")
