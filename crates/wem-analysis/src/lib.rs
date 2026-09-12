@@ -13,6 +13,10 @@
 pub mod config;
 
 pub mod dsp {
+    /// Value-semantics ports of the CRT carrier's _CIatan/_CIexp/_CIlog
+    /// (binary64 SSE2 callees; carrier tables in `crt90_data`).
+    pub mod crt90;
+    pub mod crt90_data;
     pub mod lpc;
     pub mod spectrum;
     pub mod transform;
