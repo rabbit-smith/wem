@@ -37,6 +37,15 @@ impl PartialEq for F80 {
 }
 
 impl F80 {
+    /// Sign flip at register width (x87 `fchs`).
+    #[inline]
+    pub fn neg(self) -> F80 {
+        F80 {
+            neg: !self.neg,
+            ..self
+        }
+    }
+
     /// Exact 80-bit form of a finite f64 (normal and subnormal).
     pub fn from_f64(x: f64) -> F80 {
         assert!(x.is_finite(), "F80::from_f64: non-finite input");
@@ -235,6 +244,39 @@ pub fn add80(a: F80, b: F80) -> F80 {
 #[inline]
 pub fn f32_round(x: f64) -> f64 {
     (x as f32) as f64
+}
+
+/// Exact x87 `fcom` comparison of a register value against an f64 (the
+/// reference compares its exact rational against full-width floats; going
+/// through `to_f64` first would double-round and can flip near-ties).
+/// Normal-form mantissas in [2^63, 2^64) make an exponent lead decisive.
+#[inline]
+pub fn cmp_f64(a: F80, b: f64) -> std::cmp::Ordering {
+    use std::cmp::Ordering::*;
+    let bb = F80::from_f64(b);
+    match (a.man == 0, bb.man == 0) {
+        (true, true) => return Equal,
+        (true, false) => return if bb.neg { Greater } else { Less },
+        (false, true) => return if a.neg { Less } else { Greater },
+        (false, false) => {}
+    }
+    if a.neg != bb.neg {
+        return if a.neg { Less } else { Greater };
+    }
+    let mag = match a.exp.cmp(&bb.exp) {
+        Equal => a.man.cmp(&bb.man),
+        e => e, // exponent lead decides for normalized mantissas
+    };
+    if a.neg { mag.reverse() } else { mag }
+}
+
+/// `a >= b` at full register width (ordered comparison semantics of `fcom`).
+#[inline]
+pub fn ge_f64(a: F80, b: f64) -> bool {
+    matches!(
+        cmp_f64(a, b),
+        std::cmp::Ordering::Greater | std::cmp::Ordering::Equal
+    )
 }
 
 /// Python `f32_bits(x)`.

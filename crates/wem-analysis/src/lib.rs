@@ -17,11 +17,11 @@ pub mod dsp {
     /// (binary64 SSE2 callees; carrier tables in `crt90_data`).
     pub mod crt90;
     pub mod crt90_data;
+    pub mod lpc;
     /// Geometry-materializer surfaces (analysis_geometry_builder ports of `ath` and
     /// `octave`; constants in `psy_geom_data`, parity via tests).
     pub mod psy_geom;
     pub mod psy_geom_data;
-    pub mod lpc;
     pub mod spectrum;
     pub mod transform;
     /// x87 register model of the paired 2013.2 build (port of the builder
