@@ -16,6 +16,11 @@ pub mod dsp {
     pub mod lpc;
     pub mod spectrum;
     pub mod transform;
+    /// x87 register model of the paired 2013.2 build (port of the builder
+    /// reference `f32.py`): finite normal-range mul80/add80 with ties-to-even
+    /// single rounding, plus f32 store helpers. Parity-locked to the Python
+    /// reference via `tests/x87_parity.rs`.
+    pub mod x87;
 }
 
 /// LPC-padded detector input and window materialization
