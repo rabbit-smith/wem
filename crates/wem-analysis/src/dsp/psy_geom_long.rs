@@ -74,7 +74,7 @@ pub fn base_curve() -> Vec<u32> {
 pub fn group_labels() -> Vec<u32> {
     octave(A4, A5, 5)
         .iter()
-        .map(|v| ((*v as u32)))
+        .map(|v| *v as u32)
         .collect()
 }
 
