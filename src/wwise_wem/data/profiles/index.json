@@ -8,7 +8,7 @@
     },
     "wwise2013-2ch-48000": {
       "manifest": "wwise2013-2ch-48000/manifest.json",
-      "sha256": "84717d5c85acfcfbcc2043fd67c7326aafe16eb12388aacb6dfec96e3b2f6f1b"
+      "sha256": "ed33a565fec0a622d647fc8517c82d65fa0d06eee7300241bd0ca6b1e5cc522c"
     }
   }
 }

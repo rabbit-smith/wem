@@ -33,7 +33,7 @@ Currently installed:
   curves/tone/mode variants) have no static host anywhere in the paired
   build: they are init-time materializations of deterministic geometry
   produced by the paired build's geometry materializer
-  (plugins/the paired build), reproduced byte-exact on the 6ch gates
+  (the build's conversion plug-in image), reproduced byte-exact on the 6ch gates
   for the five short surfaces by a per-instruction port, with the twelve
   long surfaces awaiting the same mechanism re-derivation; the registered
   2ch values stay frequency-mapped operating-point approximations labeled
