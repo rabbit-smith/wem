@@ -201,9 +201,7 @@ pub fn rebase_history(
     history: &[f64],
 ) -> Result<Vec<f64>, AnalysisError> {
     if state.len() as i64 != inputs.bins || history.len() as i64 != inputs.bins {
-        return Err(AnalysisError::RebaseLengthMismatch {
-            want: inputs.bins,
-        });
+        return Err(AnalysisError::RebaseLengthMismatch { want: inputs.bins });
     }
     if result.active == 0 || result.update_state == 0 {
         return Ok(history.to_vec());
@@ -215,7 +213,11 @@ pub fn rebase_history(
     } else {
         return Ok(history.to_vec());
     };
-    let source = if inputs.previous_transition != 0 { state } else { history };
+    let source = if inputs.previous_transition != 0 {
+        state
+    } else {
+        history
+    };
     Ok(source.iter().map(|value| f32_of(*value - delta)).collect())
 }
 
@@ -309,9 +311,10 @@ pub fn update_short_history(
         if candidate < cap
             && state[index] < cap
             && out[index] + result.state_bias < raw[index]
-            && result.update_state != 0 {
-                out[index] = f32_of(raw[index]);
-            }
+            && result.update_state != 0
+        {
+            out[index] = f32_of(raw[index]);
+        }
     }
     Ok(out)
 }

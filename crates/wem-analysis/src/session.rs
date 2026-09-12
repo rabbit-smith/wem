@@ -8,9 +8,7 @@
 use crate::config::{AnalysisError, AnalysisProfileResources};
 use crate::model::{PsyFrame, SpectrumFrame};
 use crate::preprocessing::detector_input::iter_detector_quanta;
-use crate::preprocessing::windowing::{
-    iter_pcm_windows, iter_planned_pcm_windows, WindowedFrame,
-};
+use crate::preprocessing::windowing::{iter_pcm_windows, iter_planned_pcm_windows, WindowedFrame};
 use crate::psychoacoustics::pipeline::{analyze_long_frame, analyze_short_frame};
 use crate::psychoacoustics::seed::SpectrumPeakState;
 use crate::psychoacoustics::short::ShortPsyAnalyzer;
@@ -20,9 +18,7 @@ use wem_scheduling::{plan_mode_sequence, ModeSelector, SelectorError};
 fn selector_err(e: SelectorError) -> AnalysisError {
     use AnalysisError::*;
     match e {
-        SelectorError::HopCapacityNonPositive => SessionChannelsNonPositive {
-            channels: 0,
-        },
+        SelectorError::HopCapacityNonPositive => SessionChannelsNonPositive { channels: 0 },
         SelectorError::QueueSlotOutOfRange { .. } => AnalysisFrameNotContiguous {
             expected: 0,
             got: 0,
@@ -78,17 +74,14 @@ impl AnalysisSession {
         .map_err(|_| UnsupportedGeometry {
             reason: "transient detector geometry",
         })?;
-        let mode_selector = ModeSelector::new(64, 128, 0, 0, 0, 1024, vec![0; 128])
-            .map_err(selector_err)?;
-        let short_psy_analyzer = ShortPsyAnalyzer::new(
-            channels,
-            resources.short_profiles.clone(),
-            None,
-            None,
-        )
-        .map_err(|_| UnsupportedGeometry {
-            reason: "short psychoacoustic analyzer geometry",
-        })?;
+        let mode_selector =
+            ModeSelector::new(64, 128, 0, 0, 0, 1024, vec![0; 128]).map_err(selector_err)?;
+        let short_psy_analyzer =
+            ShortPsyAnalyzer::new(channels, resources.short_profiles.clone(), None, None).map_err(
+                |_| UnsupportedGeometry {
+                    reason: "short psychoacoustic analyzer geometry",
+                },
+            )?;
         let mut session = Self {
             channels,
             sample_rate,
@@ -293,23 +286,10 @@ impl AnalysisSession {
             return Err(ModeSelectionNotFresh);
         }
         let source_len = pcm.first().map(|channel| channel.len() as i64).unwrap_or(0);
-        if source_len < 4096
-            || pcm
-                .iter()
-                .any(|channel| channel.len() as i64 != source_len)
-        {
-            return Err(ModeSelectionPcmInvalid {
-                frames: source_len,
-            });
+        if source_len < 4096 || pcm.iter().any(|channel| channel.len() as i64 != source_len) {
+            return Err(ModeSelectionPcmInvalid { frames: source_len });
         }
-        let quanta = iter_detector_quanta(
-            pcm,
-            64,
-            128,
-            None,
-            8192,
-            &self.blocksizes,
-        )?;
+        let quanta = iter_detector_quanta(pcm, 64, 128, None, 8192, &self.blocksizes)?;
         for quantum in quanta {
             self.ingest_transient_quantum(&quantum)?;
         }
@@ -323,8 +303,8 @@ impl AnalysisSession {
             let status = self.mode_selection_status(center + prefix, current)?;
             let following = if status < 0 { 0 } else { status };
             modes.push(current);
-            center += self.blocksizes[current as usize] / 4
-                + self.blocksizes[following as usize] / 4;
+            center +=
+                self.blocksizes[current as usize] / 4 + self.blocksizes[following as usize] / 4;
             current = following;
         }
         Ok(modes)
@@ -370,13 +350,7 @@ impl AnalysisSession {
             });
         }
         self.consume_analysis_window(&window)?;
-        self.analyze_short_inner(
-            window,
-            short_variant,
-            q,
-            update_gate,
-            groups,
-        )
+        self.analyze_short_inner(window, short_variant, q, update_gate, groups)
     }
 
     fn analyze_short_inner(

@@ -38,8 +38,7 @@ pub fn detector_pcm_streams(
     let mut result = Vec::with_capacity(pcm.len());
     for source in pcm {
         let channel: Vec<f64> = source.iter().map(|v| f32_of(*v)).collect();
-        let prefix =
-            wwise_first_frame_lpc_prime(&channel, prefix_samples, 4096, 16)?;
+        let prefix = wwise_first_frame_lpc_prime(&channel, prefix_samples, 4096, 16)?;
         let len = channel.len();
         let coeffs = wwise_lpc_from_data(&channel[len - 4096..], 32)?;
         let tail = wwise_lpc_predict(&coeffs, &channel[len - 32..], terminal_samples)?;
@@ -64,12 +63,7 @@ pub fn iter_detector_quanta(
     if hop <= 0 || window <= 0 {
         return Err(AnalysisError::DetectorHopWindowInvalid { hop, window });
     }
-    let streams = detector_pcm_streams(
-        pcm,
-        None,
-        terminal_samples,
-        blocksizes,
-    )?;
+    let streams = detector_pcm_streams(pcm, None, terminal_samples, blocksizes)?;
     let available = (streams[0].len() as i64 - window) / hop + 1;
     let count = match count {
         Some(c) => c,
@@ -99,15 +93,18 @@ mod tests {
 
     fn pcm(channels: usize, frames: usize) -> Vec<Vec<f64>> {
         (0..channels)
-            .map(|_| (0..frames).map(|i| (i as f64) * 0.001).collect::<Vec<f64>>())
+            .map(|_| {
+                (0..frames)
+                    .map(|i| (i as f64) * 0.001)
+                    .collect::<Vec<f64>>()
+            })
             .collect()
     }
 
     #[test]
     fn detector_streams_lengths() {
         let p = pcm(2, 5000);
-        let streams =
-            detector_pcm_streams(&p, None, 8192, &[256, 2048]).expect("streams");
+        let streams = detector_pcm_streams(&p, None, 8192, &[256, 2048]).expect("streams");
         // 1024 prefix + 5000 + 8192 tail
         assert_eq!(streams[0].len() as i64, 1024 + 5000 + 8192);
     }
@@ -115,8 +112,7 @@ mod tests {
     #[test]
     fn detector_quanta_available() {
         let p = pcm(2, 5000);
-        let quanta =
-            iter_detector_quanta(&p, 64, 128, None, 8192, &[256, 2048]).expect("quanta");
+        let quanta = iter_detector_quanta(&p, 64, 128, None, 8192, &[256, 2048]).expect("quanta");
         // (len - 128) // 64 + 1
         let stream_len = 1024 + 5000 + 8192;
         let available = (stream_len - 128) / 64 + 1;

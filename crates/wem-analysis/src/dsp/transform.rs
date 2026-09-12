@@ -46,11 +46,9 @@ pub fn make_mdct_look(n: i64, static_trig: Option<&[f32]>) -> Result<MdctLook, A
                 trig[2 * i as usize + 1] =
                     (-(std::f64::consts::PI / n as f64 * (4 * i) as f64)).sin() as f32;
                 trig[n as usize / 2 + 2 * i as usize] =
-                    (std::f64::consts::PI / (2.0 * n as f64) * ((2 * i) as f64 + 1.0)).cos()
-                        as f32;
+                    (std::f64::consts::PI / (2.0 * n as f64) * ((2 * i) as f64 + 1.0)).cos() as f32;
                 trig[n as usize / 2 + 2 * i as usize + 1] =
-                    (std::f64::consts::PI / (2.0 * n as f64) * ((2 * i) as f64 + 1.0)).sin()
-                        as f32;
+                    (std::f64::consts::PI / (2.0 * n as f64) * ((2 * i) as f64 + 1.0)).sin() as f32;
             }
             for i in 0..(n / 8) {
                 trig[n as usize + 2 * i as usize] =
@@ -222,13 +220,7 @@ fn mdct_first(trig: &[f32], x: &mut [f64], points: i64) {
     }
 }
 
-fn mdct_generic(
-    trig: &[f32],
-    x: &mut [f64],
-    base: i64,
-    points: i64,
-    stride: i64,
-) {
+fn mdct_generic(trig: &[f32], x: &mut [f64], base: i64, points: i64, stride: i64) {
     let mut x1 = base + points - 8;
     let mut x2 = base + (points >> 1) - 8;
     let mut t = 0i64;
@@ -266,13 +258,7 @@ fn mdct_butterflies(look: &MdctLook, x: &mut [f64], points: i64) {
             break;
         }
         for j in 0..(1i64 << i) {
-            mdct_generic(
-                &look.trig,
-                x,
-                (points >> i) * j,
-                points >> i,
-                4 << i,
-            );
+            mdct_generic(&look.trig, x, (points >> i) * j, points >> i, 4 << i);
         }
         i += 1;
     }
@@ -327,10 +313,7 @@ fn mdct_bitreverse(look: &MdctLook, x: &mut [f64]) {
 
 /// Return the normalized `n/2` MDCT spectrum for one `n`-sample block
 /// (Python `mdct_forward`).
-pub fn mdct_forward(
-    look: &MdctLook,
-    samples: &[f64],
-) -> Result<Vec<f64>, AnalysisError> {
+pub fn mdct_forward(look: &MdctLook, samples: &[f64]) -> Result<Vec<f64>, AnalysisError> {
     let n = look.n as usize;
     if samples.len() < n {
         return Err(AnalysisError::SamplesShort {
@@ -355,12 +338,8 @@ pub fn mdct_forward(
         // butterfly stage.
         let r0 = f32_of(samples[x0 + 2] + samples[x1]);
         let r1 = f32_of(samples[x0] + samples[x1 + 2]);
-        w[w2 + i] = f32_of(
-            r1 * (look.trig[t + 1] as f64) + r0 * (look.trig[t] as f64),
-        );
-        w[w2 + i + 1] = f32_of(
-            r1 * (look.trig[t] as f64) - r0 * (look.trig[t + 1] as f64),
-        );
+        w[w2 + i] = f32_of(r1 * (look.trig[t + 1] as f64) + r0 * (look.trig[t] as f64));
+        w[w2 + i + 1] = f32_of(r1 * (look.trig[t] as f64) - r0 * (look.trig[t + 1] as f64));
         x1 += 4;
         i += 2;
     }
@@ -371,12 +350,8 @@ pub fn mdct_forward(
         x0 -= 4;
         let r0 = f32_of(samples[x0 + 2] - samples[x1]);
         let r1 = f32_of(samples[x0] - samples[x1 + 2]);
-        w[w2 + i] = f32_of(
-            r1 * (look.trig[t + 1] as f64) + r0 * (look.trig[t] as f64),
-        );
-        w[w2 + i + 1] = f32_of(
-            r1 * (look.trig[t] as f64) - r0 * (look.trig[t + 1] as f64),
-        );
+        w[w2 + i] = f32_of(r1 * (look.trig[t + 1] as f64) + r0 * (look.trig[t] as f64));
+        w[w2 + i + 1] = f32_of(r1 * (look.trig[t] as f64) - r0 * (look.trig[t + 1] as f64));
         x1 += 4;
         i += 2;
     }
@@ -387,12 +362,8 @@ pub fn mdct_forward(
         x0 -= 4;
         let r0 = f32_of(-samples[x0 + 2] - samples[x1]);
         let r1 = f32_of(-samples[x0] - samples[x1 + 2]);
-        w[w2 + i] = f32_of(
-            r1 * (look.trig[t + 1] as f64) + r0 * (look.trig[t] as f64),
-        );
-        w[w2 + i + 1] = f32_of(
-            r1 * (look.trig[t] as f64) - r0 * (look.trig[t + 1] as f64),
-        );
+        w[w2 + i] = f32_of(r1 * (look.trig[t + 1] as f64) + r0 * (look.trig[t] as f64));
+        w[w2 + i + 1] = f32_of(r1 * (look.trig[t] as f64) - r0 * (look.trig[t + 1] as f64));
         x1 += 4;
         i += 2;
     }
@@ -411,8 +382,7 @@ pub fn mdct_forward(
     for i in 0..n4 {
         x0 -= 1;
         out[i] = f32_of(
-            (w[2 * i] * (look.trig[t] as f64)
-                + w[2 * i + 1] * (look.trig[t + 1] as f64))
+            (w[2 * i] * (look.trig[t] as f64) + w[2 * i + 1] * (look.trig[t + 1] as f64))
                 * (look.scale as f64),
         );
         out[x0] = f32_of(
@@ -481,10 +451,7 @@ pub fn wwise_psy_mdct(
 ) -> Result<Vec<f64>, AnalysisError> {
     let n = samples.len() as i64;
     if look.n != n {
-        return Err(AnalysisError::TransientMdctGeometry {
-            look_n: look.n,
-            n,
-        });
+        return Err(AnalysisError::TransientMdctGeometry { look_n: look.n, n });
     }
     let window = wwise_psy_window(n, tables)?;
     let windowed: Vec<f64> = samples
@@ -514,10 +481,7 @@ pub fn apply_vorbis_window(
             got: samples.len() as i64,
         });
     }
-    if blocksizes
-        .iter()
-        .any(|size| *size < 2 || *size & 1 != 0)
-    {
+    if blocksizes.iter().any(|size| *size < 2 || *size & 1 != 0) {
         return Err(AnalysisError::WindowBlockSizeInvalid);
     }
     for index in [previous, current, following] {
@@ -530,8 +494,7 @@ pub fn apply_vorbis_window(
     let left_end = left_begin + left_n / 2;
     let right_begin = n / 2 + n / 4 - right_n / 4;
     let right_end = right_begin + right_n / 2;
-    if !(0
-        <= left_begin
+    if !(0 <= left_begin
         && left_begin <= left_end
         && left_end <= right_begin
         && right_begin <= right_end
@@ -540,13 +503,20 @@ pub fn apply_vorbis_window(
         return Err(AnalysisError::WindowIntervalsIncompatible);
     }
 
-    let frozen = frozen_windows
-        .ok_or(AnalysisError::FrozenWindowDomainMiss { size: n })?;
+    let frozen = frozen_windows.ok_or(AnalysisError::FrozenWindowDomainMiss { size: n })?;
     let get_window = |size: i64| -> Result<Vec<f64>, AnalysisError> {
         let half = frozen
             .get(&size)
             .ok_or(AnalysisError::FrozenWindowDomainMiss { size })?;
-        vorbis_window(size, Some(half.iter().map(|v| *v as f64).collect::<Vec<_>>().as_slice()))
+        vorbis_window(
+            size,
+            Some(
+                half.iter()
+                    .map(|v| *v as f64)
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+            ),
+        )
     };
     let left_window = get_window(left_n)?;
     let right_window = get_window(right_n)?;
@@ -559,10 +529,8 @@ pub fn apply_vorbis_window(
         out[i as usize] = f32_of(out[i as usize] * left_window[(i - left_begin) as usize]);
     }
     for i in right_begin..right_end {
-        out[i as usize] = f32_of(
-            out[i as usize]
-                * right_window[(right_n / 2 - 1 - (i - right_begin)) as usize],
-        );
+        out[i as usize] =
+            f32_of(out[i as usize] * right_window[(right_n / 2 - 1 - (i - right_begin)) as usize]);
     }
     for i in right_end..n {
         out[i as usize] = 0.0;
@@ -578,9 +546,7 @@ pub fn extract_analysis_block(
     current_size: i64,
 ) -> Result<Vec<f64>, AnalysisError> {
     if current_size < 2 || current_size & 1 != 0 {
-        return Err(AnalysisError::BlockSizeInvalid {
-            n: current_size,
-        });
+        return Err(AnalysisError::BlockSizeInvalid { n: current_size });
     }
     let start = cursor - current_size / 2;
     let end = start + current_size;

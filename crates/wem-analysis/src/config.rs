@@ -164,21 +164,15 @@ pub enum AnalysisError {
     /// "sample rate must be positive"
     SessionSampleRateNonPositive { sample_rate: i64 },
     /// "the checked stream state expects 256/2048 blocks"
-    SessionBlockSizeMismatch {
-        got: [i64; 2],
-    },
+    SessionBlockSizeMismatch { got: [i64; 2] },
     /// "analysis frames must be contiguous: expected index {}, got {}"
     AnalysisFrameNotContiguous { expected: i64, got: i64 },
     /// "adjacent analysis frame modes differ"
     AdjacentAnalysisFrameModesDiffer,
     /// "short analysis expects a 256-sample scheduled window"
-    ShortAnalysisWindowGeometry {
-        want: i64,
-    },
+    ShortAnalysisWindowGeometry { want: i64 },
     /// "long analysis expects a 2048-sample scheduled window"
-    LongAnalysisWindowGeometry {
-        want: i64,
-    },
+    LongAnalysisWindowGeometry { want: i64 },
     /// "analysis window samples differ from its scheduled mode"
     AnalysisWindowSamplesMismatch,
     /// "manual transient ingestion cannot be mixed with mode generation"
@@ -204,15 +198,11 @@ pub enum AnalysisError {
     /// "short psychoacoustic channel state has wrong geometry"
     ShortChannelStateGeometry,
     /// "short psychoacoustic analyzer needs at least one channel"
-    ShortAnalyzerChannelsNonPositive {
-        channels: i64,
-    },
+    ShortAnalyzerChannelsNonPositive { channels: i64 },
     /// "short psychoacoustic analyzer needs exactly two profiles"
     ShortAnalyzerProfiles { want: i64, got: i64 },
     /// "short psychoacoustic channel-state count differs"
-    ShortAnalyzerChannelStateCount {
-        want: i64,
-    },
+    ShortAnalyzerChannelStateCount { want: i64 },
     /// "long psychoacoustic variant must be 0 or 1"
     LongVariantInvalid { variant: i64 },
     /// "long analysis needs at least one channel frame"
@@ -222,13 +212,9 @@ pub enum AnalysisError {
     /// "long analysis table must have 1024 output bins"
     LongAnalysisTableBins { want: i64 },
     /// "long analysis scratch count must equal channel count"
-    LongAnalysisScratchCount {
-        want: i64,
-    },
+    LongAnalysisScratchCount { want: i64 },
     /// "long analysis stream channel count differs from frames"
-    LongAnalysisStreamChannels {
-        want: i64,
-    },
+    LongAnalysisStreamChannels { want: i64 },
     /// "long MDCT look differs from analysis geometry"
     LongMdctLookGeometry { want: i64 },
     /// "long analysis accepts either scratch or shared stream, not both"
@@ -236,15 +222,11 @@ pub enum AnalysisError {
     /// "short analysis needs at least one channel frame"
     ShortAnalysisEmpty,
     /// "short analysis channel count differs from state owner"
-    ShortAnalysisChannelCount {
-        want: i64,
-    },
+    ShortAnalysisChannelCount { want: i64 },
     /// "short analysis expects 256-sample windowed frames"
     ShortAnalysisFrameSize { want: i64 },
     /// "short analysis group-work count differs from channels"
-    ShortAnalysisGroupWorkCount {
-        want: i64,
-    },
+    ShortAnalysisGroupWorkCount { want: i64 },
     /// "short MDCT look differs from analysis geometry"
     ShortMdctLookGeometry { want: i64 },
     /// "long state bridge needs one 1024-bin raw curve per channel"
@@ -252,22 +234,15 @@ pub enum AnalysisError {
     /// "long state bridge needs one 1024-bin raw curve per channel" (count)
     LongStateBridgeCount { want: i64 },
     /// "long-to-short floor reduction expects 1024 bins"
-    LongToShortHistoryLength {
-        want_raw: i64,
-        want_state: i64,
-    },
+    LongToShortHistoryLength { want_raw: i64, want_state: i64 },
     /// "short-to-long floor expansion expects 128 bins"
     ShortToLongHistoryLength { want: i64 },
     /// "floor-envelope stage scratch length must be positive"
     FloorEnvelopeScratchNonPositive { n: i64 },
     /// "floor-envelope stage curves must have equal lengths"
-    FloorEnvelopeCurveLengthMismatch {
-        n: i64,
-    },
+    FloorEnvelopeCurveLengthMismatch { n: i64 },
     /// "floor-envelope stage source curve must have equal length"
-    FloorEnvelopeSourceLengthMismatch {
-        n: i64,
-    },
+    FloorEnvelopeSourceLengthMismatch { n: i64 },
     /// "floor-envelope stage regular port currently targets the regular branch"
     FloorEnvelopeModeUnsupported { mode: i64 },
     /// "first regular floor-envelope stage buffers must share one length"
@@ -275,9 +250,7 @@ pub enum AnalysisError {
     /// "first regular floor-envelope stage call entered peak branch"
     FirstFloorEnvelopePeakBranch,
     /// "long regular floor-envelope stage needs 1024 state bins and 128-or-1024 history bins"
-    LongFloorEnvelopeGeometry {
-        n: i64,
-    },
+    LongFloorEnvelopeGeometry { n: i64 },
     /// "fresh long regular floor-envelope stage call entered peak branch"
     LongFloorEnvelopePeakBranch,
     /// "cleared first regular floor-envelope stage call entered peak branch"
@@ -311,18 +284,11 @@ pub enum AnalysisError {
     /// "tone-curve band bank is shorter than 17"
     ToneCurveBandBankShort { want: i64, got: i64 },
     /// "seed-loop inputs must have equal bin counts"
-    SeedLoopInputLengthMismatch {
-        want: i64,
-    },
+    SeedLoopInputLengthMismatch { want: i64 },
     /// "seed position falls outside total octave lines"
-    SeedPositionOutOfRange {
-        pos: i64,
-        total: i64,
-    },
+    SeedPositionOutOfRange { pos: i64, total: i64 },
     /// "seed surface is shorter than total octave lines"
-    SeedSurfaceShort {
-        want: i64,
-    },
+    SeedSurfaceShort { want: i64 },
     /// "octave and floor curves must have equal bin counts"
     OctaveFloorLengthMismatch,
     /// "history width table contains a nonpositive value"
@@ -344,9 +310,7 @@ pub enum AnalysisError {
     /// "long psycho table has an invalid mode-2 active span"
     LongActiveSpanInvalid { active: i64 },
     /// "long psycho table has no 40-entry remap LUT"
-    LongRemapLutShort {
-        got: i64,
-    },
+    LongRemapLutShort { got: i64 },
     /// "long psychoacoustic remap expects 1024 bins" (variant builder)
     LongRemapVariantBins { want: i64 },
     /// "long analysis variant must be 0 or 1"
@@ -378,19 +342,12 @@ pub enum AnalysisError {
     /// "short analysis cannot apply a long transition code"
     ShortAnalysisCannotApplyLongTransition { transition: i64 },
     /// "stream feeder push channels differ from the profile"
-    StreamFeederChannelsMismatch {
-        want: i64,
-        got: i64,
-    },
+    StreamFeederChannelsMismatch { want: i64, got: i64 },
     /// "stream feeder source is shorter than the LPC boundary batch"
     StreamFeederSourceShort { frames: i64 },
     /// "stream frame window references samples not yet retained"
-    StreamFeederWindowNotReady {
-        want_from: i64,
-        want_to: i64,
-    },
+    StreamFeederWindowNotReady { want_from: i64, want_to: i64 },
 }
-
 
 // ---------------------------------------------------------------------------
 // MDCT and transient typed models
@@ -769,9 +726,7 @@ pub fn make_wwise_long_seed_look(
 ) -> Result<WwisePsyLongSeedLook, AnalysisError> {
     let outer = &table.seed_outer_u32;
     let profile = &table.seed_profile_u32;
-    if table.n != 1024
-        || !CALIBRATION_SAMPLE_RATES.contains(&table.sample_rate)
-    {
+    if table.n != 1024 || !CALIBRATION_SAMPLE_RATES.contains(&table.sample_rate) {
         return Err(AnalysisError::LongSeedGeometry);
     }
     if outer[0] as i64 != table.n || outer[11] as i64 != table.sample_rate {

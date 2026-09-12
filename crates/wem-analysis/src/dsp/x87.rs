@@ -46,13 +46,25 @@ impl F80 {
         let frac = bits & ((1u64 << 52) - 1);
         if biased == 0 {
             if frac == 0 {
-                return F80 { neg, exp: 0, man: 0 };
+                return F80 {
+                    neg,
+                    exp: 0,
+                    man: 0,
+                };
             }
             let lz = frac.leading_zeros(); // 12..=63 for subnormals
-            // value = frac * 2^-1074 = (frac << lz) * 2^(-1074 - lz)
-            F80 { neg, exp: -1011 - lz as i32, man: frac << lz }
+                                           // value = frac * 2^-1074 = (frac << lz) * 2^(-1074 - lz)
+            F80 {
+                neg,
+                exp: -1011 - lz as i32,
+                man: frac << lz,
+            }
         } else {
-            F80 { neg, exp: biased - 1023, man: (1u64 << 63) | (frac << 11) }
+            F80 {
+                neg,
+                exp: biased - 1023,
+                man: (1u64 << 63) | (frac << 11),
+            }
         }
     }
 
@@ -73,7 +85,10 @@ impl F80 {
             }
         }
         let biased = exp + 1023;
-        assert!(biased < 2047, "F80::to_f64: f64 overflow (reference raises here too)");
+        assert!(
+            biased < 2047,
+            "F80::to_f64: f64 overflow (reference raises here too)"
+        );
         if biased <= 0 {
             // subnormal exit: value = q * 2^(exp - 52)
             let shift = (1 - biased) as u32; // > 0
@@ -102,7 +117,11 @@ fn round64(value: u128, scale: i32, sticky: bool) -> F80 {
         // window fits entirely; a sticky residue can only exist when drop>0,
         // which cannot happen here (callers pass sticky=false on this path)
         debug_assert!(!sticky);
-        return F80 { neg: false, exp: scale + pos, man: (value << (63 - pos)) as u64 };
+        return F80 {
+            neg: false,
+            exp: scale + pos,
+            man: (value << (63 - pos)) as u64,
+        };
     }
     let drop = (pos - 63) as u32; // 1..=64
     let mask = (1u128 << drop) - 1;
@@ -112,17 +131,29 @@ fn round64(value: u128, scale: i32, sticky: bool) -> F80 {
     if r > half || (r == half && (sticky || (man & 1) == 1)) {
         // rounding up from the all-ones window lands on a fresh power of two
         if man == u64::MAX {
-            return F80 { neg: false, exp: scale + pos + 1, man: 1u64 << 63 };
+            return F80 {
+                neg: false,
+                exp: scale + pos + 1,
+                man: 1u64 << 63,
+            };
         }
         man += 1;
     }
-    F80 { neg: false, exp: scale + pos, man }
+    F80 {
+        neg: false,
+        exp: scale + pos,
+        man,
+    }
 }
 
 /// Python `mul80`: exact product, one round to 64 significant bits.
 pub fn mul80(a: F80, b: F80) -> F80 {
     if a.man == 0 || b.man == 0 {
-        return F80 { neg: false, exp: 0, man: 0 };
+        return F80 {
+            neg: false,
+            exp: 0,
+            man: 0,
+        };
     }
     let product = (a.man as u128) * (b.man as u128); // 2^126 .. 2^128-2^65+1
     let mut out = round64(product, a.exp + b.exp - 126, false);
@@ -153,7 +184,11 @@ pub fn add80(a: F80, b: F80) -> F80 {
             return out;
         }
         match hi_w.cmp(&lo_w) {
-            std::cmp::Ordering::Equal => F80 { neg: false, exp: 0, man: 0 },
+            std::cmp::Ordering::Equal => F80 {
+                neg: false,
+                exp: 0,
+                man: 0,
+            },
             std::cmp::Ordering::Greater => {
                 let mut out = round64(hi_w - lo_w, scale0, false);
                 out.neg = hi.neg;
@@ -220,7 +255,7 @@ pub fn bits_f32(b: u32) -> f64 {
 pub fn wwise_float_log(x: f64) -> f64 {
     const LOG_L: f64 = 7.177114298428933e-07;
     const LOG_M: f64 = 764.6162109375;
-    let bits = ((f32_bits(x) & 0x7FFF_FFFF)) as f64; // <= 2^31: exact in f64
+    let bits = (f32_bits(x) & 0x7FFF_FFFF) as f64; // <= 2^31: exact in f64
     f32_round(bits * LOG_L - LOG_M)
 }
 
@@ -237,7 +272,16 @@ mod tests {
 
     #[test]
     fn f64_roundtrip() {
-        for x in [1.0f64, 0.5, 2.25, 1e-3, 12345.6789, -42.0, 3.1415927410125732, 5.96e-8] {
+        for x in [
+            1.0f64,
+            0.5,
+            2.25,
+            1e-3,
+            12345.6789,
+            -42.0,
+            3.1415927410125732,
+            5.96e-8,
+        ] {
             assert_eq!(F80::from_f64(x).to_f64(), x, "roundtrip {x}");
         }
     }

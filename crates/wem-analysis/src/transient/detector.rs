@@ -76,10 +76,8 @@ fn wwise_psy_band_update(
     for (band, descriptor) in tables.bands.iter().enumerate() {
         let mut accumulator = 0.0f64;
         for (index, weight) in descriptor.weights.iter().enumerate() {
-            accumulator = f32_of(
-                accumulator
-                    + mask[descriptor.offset as usize + index] * (*weight as f64),
-            );
+            accumulator =
+                f32_of(accumulator + mask[descriptor.offset as usize + index] * (*weight as f64));
         }
         let current = f32_of(accumulator * (descriptor.scale as f64));
         let ring = &mut history.band_rings[band];
@@ -136,11 +134,7 @@ pub fn wwise_psy_mask(
         });
     }
     let bias = bias.unwrap_or(tables.bias as f64);
-    let config_row_owned: Vec<f64> = tables
-        .config
-        .iter()
-        .map(|v| *v as f64)
-        .collect();
+    let config_row_owned: Vec<f64> = tables.config.iter().map(|v| *v as f64).collect();
     let config_row: &[f64] = match config_row {
         Some(row) => row,
         None => &config_row_owned,
@@ -177,10 +171,8 @@ pub fn wwise_psy_mask(
     let mut descending_floor = f32_of(0.5 * wwise_float_log(avg.abs()) - 15.0);
     let mut out = Vec::with_capacity(spectrum.len() / 2);
     for i in 0..(spectrum.len() / 2) {
-        let power = f32_of(
-            spectrum[2 * i] * spectrum[2 * i]
-                + spectrum[2 * i + 1] * spectrum[2 * i + 1],
-        );
+        let power =
+            f32_of(spectrum[2 * i] * spectrum[2 * i] + spectrum[2 * i + 1] * spectrum[2 * i + 1]);
         let curve = f32_of(0.5 * wwise_float_log(power.abs()));
         let value = descending_floor.max(curve).max(bias);
         out.push(f32_of(value));
@@ -259,15 +251,10 @@ impl TransientDetector {
             .iter()
             .any(|row| row.len() as i64 != self.bins)
         {
-            return Err(AnalysisError::DetectorQuantumSamplesMismatch {
-                want: self.bins,
-            });
+            return Err(AnalysisError::DetectorQuantumSamplesMismatch { want: self.bins });
         }
         let mut flags = 0i64;
-        for (samples, history) in pcm_by_channel
-            .iter()
-            .zip(self.histories.iter_mut())
-        {
+        for (samples, history) in pcm_by_channel.iter().zip(self.histories.iter_mut()) {
             wwise_psy_mask(
                 samples,
                 &self.tables,
@@ -294,11 +281,14 @@ mod tests {
             bias: -60.0,
             window: vec![0.5f32; 128],
             config: vec![1.0f32; 26],
-            bands: vec![crate::config::TransientBandConfig {
-                offset: 0,
-                weights: vec![1.0f32, 1.0],
-                scale: 1.0,
-            }; 12],
+            bands: vec![
+                crate::config::TransientBandConfig {
+                    offset: 0,
+                    weights: vec![1.0f32, 1.0],
+                    scale: 1.0,
+                };
+                12
+            ],
         }
     }
 
@@ -318,8 +308,7 @@ mod tests {
         let mut h = WwisePsyHistory::new();
         // 128 samples for the n=128 MDCT look.
         let samples: Vec<f64> = (0..128).map(|i| ((i as f64) % 7.0) - 3.0).collect();
-        let mask =
-            wwise_psy_mask(&samples, &tables, &look, &mut h, None, 1, None).expect("mask");
+        let mask = wwise_psy_mask(&samples, &tables, &look, &mut h, None, 1, None).expect("mask");
         assert_eq!(mask.len(), 32);
     }
 }

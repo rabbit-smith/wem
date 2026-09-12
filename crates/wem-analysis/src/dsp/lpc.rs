@@ -43,7 +43,8 @@ pub fn wwise_lpc_from_data(
         }
         let mut reflection = -autocorrelation[tap as usize + 1];
         for previous in 0..tap {
-            reflection -= coefficients[previous as usize] * autocorrelation[(tap - previous) as usize];
+            reflection -=
+                coefficients[previous as usize] * autocorrelation[(tap - previous) as usize];
         }
         reflection /= error;
         coefficients[tap as usize] = reflection;
@@ -137,10 +138,7 @@ pub fn wwise_first_frame_lpc_prime(
     }
     reversed_buffer.reverse();
 
-    let coefficients = wwise_lpc_from_data(
-        &reversed_buffer[..batch as usize],
-        order,
-    )?;
+    let coefficients = wwise_lpc_from_data(&reversed_buffer[..batch as usize], order)?;
     let predicted_reversed = wwise_lpc_predict(
         &coefficients,
         &reversed_buffer[(batch - order) as usize..batch as usize],

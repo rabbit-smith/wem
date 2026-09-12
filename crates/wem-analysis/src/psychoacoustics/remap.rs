@@ -4,7 +4,7 @@
 //! float32 storage boundary is a `f32_of` call; line-fit and peak-suppression
 //! ordering is preserved verbatim.
 
-use crate::config::{f32_of, u32_to_f32, AnalysisError, WwisePsyLook, WwisePsyLongTables};
+use crate::config::{f32_of, u32_to_f32, AnalysisError, WwisePsyLongTables, WwisePsyLook};
 
 const LONG_PSY_N: i64 = 1024;
 
@@ -66,7 +66,13 @@ fn wwise_psy_prefix_moments(
         // half-weight endpoint, then advances to integer coordinates.
         s1 = f32_of(s1 + if i == 0 { weighted } else { i as f64 * x2 });
         // Keep the source expression order w*x*x.
-        s2 = f32_of(s2 + if i == 0 { 0.0 } else { x2 * i as f64 * i as f64 });
+        s2 = f32_of(
+            s2 + if i == 0 {
+                0.0
+            } else {
+                x2 * i as f64 * i as f64
+            },
+        );
         t0 = f32_of(t0 + weighted * x);
         // The source does not add w*y to tXY in its special i=0 setup.
         t1 = f32_of(t1 + if i == 0 { 0.0 } else { x2 * i as f64 * x });
@@ -97,11 +103,7 @@ fn fit_interval(
     denominator: f64,
 ) -> Result<(f64, f64, f64), AnalysisError> {
     if !(start >= 0 && start < n && end >= 0 && end < n) {
-        return Err(AnalysisError::PsyIntervalEndpointOutOfRange {
-            start,
-            end,
-            n,
-        });
+        return Err(AnalysisError::PsyIntervalEndpointOutOfRange { start, end, n });
     }
     let (a, b, c, y, xy) = if crossing_zero {
         (
@@ -126,11 +128,7 @@ fn fit_interval(
         return Ok((slope_num, intercept_num, denominator));
     }
     // slope=(A*XY-B*Y)/den, intercept=(C*Y-B*XY)/den
-    Ok((
-        f32_of(a * xy - b * y),
-        f32_of(c * y - b * xy),
-        den,
-    ))
+    Ok((f32_of(a * xy - b * y), f32_of(c * y - b * xy), den))
 }
 
 /// Port the first, active reference smoothing pass
@@ -176,9 +174,18 @@ pub fn wwise_psy_curve_smooth(
             break;
         }
         (slope_num, intercept_num, denominator) = fit_interval(
-            &p0, &p1, &p2, &q0, &q1,
-            start, end, crossing_zero, n,
-            slope_num, intercept_num, denominator,
+            &p0,
+            &p1,
+            &p2,
+            &q0,
+            &q1,
+            start,
+            end,
+            crossing_zero,
+            n,
+            slope_num,
+            intercept_num,
+            denominator,
         )?;
         let mut fitted = f32_of((xcoord * slope_num + intercept_num) / denominator);
         fitted = fitted.max(0.0);
@@ -210,9 +217,18 @@ pub fn wwise_psy_curve_smooth(
             break;
         }
         (slope_num, intercept_num, denominator) = fit_interval(
-            &p0, &p1, &p2, &q0, &q1,
-            -start, end, true, n,
-            slope_num, intercept_num, denominator,
+            &p0,
+            &p1,
+            &p2,
+            &q0,
+            &q1,
+            -start,
+            end,
+            true,
+            n,
+            slope_num,
+            intercept_num,
+            denominator,
         )?;
         let candidate =
             f32_of(f32_of((xcoord * slope_num + intercept_num) / denominator) - f32_of(offset));
@@ -231,9 +247,18 @@ pub fn wwise_psy_curve_smooth(
             break;
         }
         (slope_num, intercept_num, denominator) = fit_interval(
-            &p0, &p1, &p2, &q0, &q1,
-            start, end, false, n,
-            slope_num, intercept_num, denominator,
+            &p0,
+            &p1,
+            &p2,
+            &q0,
+            &q1,
+            start,
+            end,
+            false,
+            n,
+            slope_num,
+            intercept_num,
+            denominator,
         )?;
         let candidate =
             f32_of(f32_of((xcoord * slope_num + intercept_num) / denominator) - f32_of(offset));
@@ -292,9 +317,7 @@ pub fn wwise_psy_peak_suppress(
     let threshold = if (n as i64) != 256 { 9.0 } else { 15.0 };
     let mut center = 4usize;
     while (center as i64) < (limit as i64) {
-        if !(original[center - 1] < original[center]
-            && original[center + 1] < original[center])
-        {
+        if !(original[center - 1] < original[center] && original[center + 1] < original[center]) {
             center += 1;
             continue;
         }
@@ -312,8 +335,7 @@ pub fn wwise_psy_peak_suppress(
         }
         right -= 1;
 
-        let mut delta = (smooth[center] - smooth[left])
-            .max(smooth[center] - smooth[right]);
+        let mut delta = (smooth[center] - smooth[left]).max(smooth[center] - smooth[right]);
         if delta <= threshold {
             center = right + 1;
             continue;
@@ -335,8 +357,7 @@ pub fn wwise_psy_peak_suppress(
     let mut out: Vec<f64> = difference.iter().map(|v| f32_of(*v)).collect();
     for i in 3..limit {
         let cap = (look.envelope[i] as f64)
-            .min(look.second_envelope[i] as f64
-                + (look.second_envelope[0] as f64).abs());
+            .min(look.second_envelope[i] as f64 + (look.second_envelope[0] as f64).abs());
         if cap < peak_floor[i] {
             peak_floor[i] = cap;
         }
@@ -353,9 +374,7 @@ pub fn wwise_psy_peak_suppress_long_mode2(
     tables: &WwisePsyLongTables,
 ) -> Result<Vec<f64>, AnalysisError> {
     if base_curve.len() as i64 != LONG_PSY_N || tables.n != LONG_PSY_N {
-        return Err(AnalysisError::LongRemapMode2Bins {
-            want: LONG_PSY_N,
-        });
+        return Err(AnalysisError::LongRemapMode2Bins { want: LONG_PSY_N });
     }
     // In the stored long look this is exactly the active-bin field in peak
     // suppression (the shared long-look word at index 23).
@@ -419,7 +438,11 @@ pub fn build_long_psy_remap_variant(
     let original: Vec<f64> = raw.iter().map(|v| f32_of(*v)).collect();
     let first = wwise_psy_curve_smooth(
         &original,
-        &table.analysis_interval_u32.iter().map(|v| *v as i64).collect::<Vec<i64>>(),
+        &table
+            .analysis_interval_u32
+            .iter()
+            .map(|v| *v as i64)
+            .collect::<Vec<i64>>(),
         140.0,
         -1,
     )?;
@@ -430,7 +453,11 @@ pub fn build_long_psy_remap_variant(
         .collect();
     let selector = wwise_psy_curve_smooth(
         &residual,
-        &table.analysis_interval_u32.iter().map(|v| *v as i64).collect::<Vec<i64>>(),
+        &table
+            .analysis_interval_u32
+            .iter()
+            .map(|v| *v as i64)
+            .collect::<Vec<i64>>(),
         0.0,
         100,
     )?;

@@ -32,7 +32,9 @@ impl ShortPsyKernel {
     /// Build from six stored words (Python `from_words`).
     pub fn from_words(words: &[u32]) -> Result<Self, AnalysisError> {
         if words.len() != 6 {
-            return Err(AnalysisError::ShortKernelWords { got: words.len() as i64 });
+            return Err(AnalysisError::ShortKernelWords {
+                got: words.len() as i64,
+            });
         }
         Ok(Self {
             active: words[0] as i64,
@@ -76,14 +78,12 @@ impl PsyChannelState {
 
 /// Previous transition, equal-run count, and saturating tail count
 /// (Python `PsyTemporalState`).
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct PsyTemporalState {
     pub previous_transition: i64,
     pub run_count: i64,
     pub tail_count: i64,
 }
-
 
 /// Scheduler-derived controls used for one short six-channel group
 /// (Python `PsyFrameControls`).
@@ -134,7 +134,9 @@ impl ShortPsyAnalyzer {
         }
         let channels = match channels {
             Some(channels) => channels,
-            None => (0..channel_count).map(|_| PsyChannelState::fresh()).collect(),
+            None => (0..channel_count)
+                .map(|_| PsyChannelState::fresh())
+                .collect(),
         };
         if channels.len() as i64 != channel_count {
             return Err(AnalysisError::ShortAnalyzerChannelStateCount {
@@ -155,7 +157,11 @@ impl ShortPsyAnalyzer {
     }
 
     /// Derive frame controls for a short variant (Python `_frame_controls`).
-    fn frame_controls(&self, short_variant: i64, following_mode: i64) -> Result<PsyFrameControls, AnalysisError> {
+    fn frame_controls(
+        &self,
+        short_variant: i64,
+        following_mode: i64,
+    ) -> Result<PsyFrameControls, AnalysisError> {
         if !(0..=1).contains(&short_variant) {
             return Err(AnalysisError::ShortVariantInvalid {
                 variant: short_variant,
@@ -389,7 +395,11 @@ fn prepare_history(
     if kernel.active == 0 || kernel.update_history == 0 {
         return Ok(history.iter().map(|value| f32_of(*value)).collect());
     }
-    let source = if previous_transition != 0 { state } else { history };
+    let source = if previous_transition != 0 {
+        state
+    } else {
+        history
+    };
     let rebased: Vec<f64> = source.iter().map(|value| f32_of(*value - 5.0)).collect();
     relax_short_history(&rebased, raw)
 }
@@ -442,8 +452,7 @@ pub fn shape_short_floor_envelope(
     }
 
     // Prepare history before the envelope loop.
-    let mut history_out =
-        prepare_history(raw, state, history, kernel, previous_transition)?;
+    let mut history_out = prepare_history(raw, state, history, kernel, previous_transition)?;
     let mut post = vec![0.0f64; N as usize];
     let mut side_out: Vec<f64> = side.iter().map(|value| f32_of(*value)).collect();
     let mut groups_out: Vec<f64> = groups.iter().map(|value| f32_of(*value)).collect();
@@ -511,7 +520,14 @@ pub fn shape_short_floor_envelope(
             // The nesting matters: bins 8 and 9 use width 20.
             let width = if index as i64 <= low_band {
                 if index as i64 <= middle_band {
-                    weight = f32_of(weight * (if index as i64 <= fine_band { F64_0_3 } else { 0.5 }));
+                    weight = f32_of(
+                        weight
+                            * (if index as i64 <= fine_band {
+                                F64_0_3
+                            } else {
+                                0.5
+                            }),
+                    );
                     10.0
                 } else {
                     20.0
@@ -526,7 +542,11 @@ pub fn shape_short_floor_envelope(
                 gap = width + (gap - width) * F64_0_1;
             }
             let ceiling = f32_of(cap - f32_of(gap * weight));
-            let mut value_local = if state[index] >= ceiling { state[index] } else { ceiling };
+            let mut value_local = if state[index] >= ceiling {
+                state[index]
+            } else {
+                ceiling
+            };
 
             // Peak marks restrain a curve more than 20 dB above the state curve.
             if marked_peak {
@@ -561,9 +581,7 @@ pub fn shape_short_floor_envelope(
                 if raw[index] >= value {
                     output = f32_of(raw[index]);
                 } else {
-                    output = f32_of(
-                        candidate - f32_of(candidate - value) * profile.blend_weight,
-                    );
+                    output = f32_of(candidate - f32_of(candidate - value) * profile.blend_weight);
                 }
             } else {
                 output = candidate;

@@ -5,7 +5,7 @@
 //! the reference encoder's arithmetic order.
 
 use crate::config::{
-    f32_of, AnalysisError, LongFloorEnvelopeLook, WwisePsyLook, WwisePsyLongTables,
+    f32_of, AnalysisError, LongFloorEnvelopeLook, WwisePsyLongTables, WwisePsyLook,
 };
 
 /// Per-channel floor-envelope scratch (Python `FloorEnvelopeScratch`).
@@ -75,9 +75,15 @@ pub fn shape_floor_envelope(
     source_curve: Option<&[f64]>,
 ) -> Result<(Vec<f64>, Vec<f64>, Option<i64>), AnalysisError> {
     let n = target_curve.len();
-    if [psycho_curve, previous_curve, base_curve, side_curve, mask_curve]
-        .iter()
-        .any(|values| values.len() != n)
+    if [
+        psycho_curve,
+        previous_curve,
+        base_curve,
+        side_curve,
+        mask_curve,
+    ]
+    .iter()
+    .any(|values| values.len() != n)
     {
         return Err(AnalysisError::EnvelopeStageLengthMismatch { want: n as i64 });
     }
@@ -104,8 +110,7 @@ pub fn shape_floor_envelope(
 
     for index in 0..n {
         // remap delta scratch is a float buffer.
-        let floor_value =
-            f32_of(mask_curve[index] + base_curve[index]).min(curve_cap);
+        let floor_value = f32_of(mask_curve[index] + base_curve[index]).min(curve_cap);
         let mut target = target_curve[index] + curve_bias;
         if index as i64 <= stop {
             target -= subtract;
@@ -163,7 +168,10 @@ pub fn shape_floor_envelope(
 /// (Python `prepare_short_to_long_history`).
 pub fn prepare_short_to_long_history(raw_short: &[f64]) -> Result<Vec<f64>, AnalysisError> {
     if raw_short.len() != 128 {
-        return Err(AnalysisError::FloorTransitionBins { want: 128, got: raw_short.len() as i64 });
+        return Err(AnalysisError::FloorTransitionBins {
+            want: 128,
+            got: raw_short.len() as i64,
+        });
     }
     let mut out = Vec::with_capacity(1024);
     for value in raw_short {

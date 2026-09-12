@@ -4,9 +4,9 @@
 //! storage boundaries are `f32_of`; chase/clamp ordering is preserved.
 
 use crate::config::{
-    f32_of, AnalysisError, TONE_BAND_COUNT, TONE_LEVEL_COUNT, WwisePsyLongSeedLook,
-    WwisePsyLongTables, NEGATIVE_INFINITY_DB, SPECTRUM_PEAK_DECAY_DB_PER_SECOND,
-    EHMER_OFFSET, TONE_REFERENCE_LEVEL_DB, WwisePsyLook,
+    f32_of, AnalysisError, WwisePsyLongSeedLook, WwisePsyLongTables, WwisePsyLook, EHMER_OFFSET,
+    NEGATIVE_INFINITY_DB, SPECTRUM_PEAK_DECAY_DB_PER_SECOND, TONE_BAND_COUNT, TONE_LEVEL_COUNT,
+    TONE_REFERENCE_LEVEL_DB,
 };
 
 /// Persisted cross-frame spectrum-peak state
@@ -42,8 +42,7 @@ fn wwise_seed_curve(
     eighth_octave_lines: i64,
     db_offset: f64,
 ) -> Result<(), AnalysisError> {
-    let mut choice =
-        ((amp + db_offset - TONE_REFERENCE_LEVEL_DB as f64) * 0.1) as i64;
+    let mut choice = ((amp + db_offset - TONE_REFERENCE_LEVEL_DB as f64) * 0.1) as i64;
     choice = choice.clamp(0, TONE_LEVEL_COUNT - 1);
     if (choice as usize) >= curves.len() {
         return Err(AnalysisError::ToneCurveBankShort {
@@ -101,13 +100,13 @@ fn wwise_seed_chase(seeds: &mut [f64], eighth_octave_lines: i64, total_octave_li
             let prev_pos = positions[positions.len() - 1];
             if i_i64 < prev_pos + eighth_octave_lines
                 && positions.len() > 1
-                    && amplitudes[amplitudes.len() - 1] <= amplitudes[amplitudes.len() - 2]
-                    && i_i64 < positions[positions.len() - 2] + eighth_octave_lines
-                {
-                    positions.pop();
-                    amplitudes.pop();
-                    continue;
-                }
+                && amplitudes[amplitudes.len() - 1] <= amplitudes[amplitudes.len() - 2]
+                && i_i64 < positions[positions.len() - 2] + eighth_octave_lines
+            {
+                positions.pop();
+                amplitudes.pop();
+                continue;
+            }
             positions.push(i as i64);
             amplitudes.push(value);
             break;
@@ -163,7 +162,8 @@ fn wwise_apply_max_seed_floor(
             });
         }
         let mut min_value = seed[pos as usize];
-        let mut end = ((octave[linpos as usize] + octave[(linpos + 1) as usize]) >> 1) - first_octave;
+        let mut end =
+            ((octave[linpos as usize] + octave[(linpos + 1) as usize]) >> 1) - first_octave;
         if min_value > seed_ceiling {
             min_value = seed_ceiling;
         }
@@ -236,9 +236,7 @@ fn wwise_seed_loop(
 ) -> Result<(), AnalysisError> {
     let n = spectrum.len();
     if floor_curve.len() != n || octave.len() != n {
-        return Err(AnalysisError::SeedLoopInputLengthMismatch {
-            want: n as i64,
-        });
+        return Err(AnalysisError::SeedLoopInputLengthMismatch { want: n as i64 });
     }
     let mut i = 0;
     while i < n {
@@ -286,9 +284,7 @@ pub fn compute_spectrum_peak(
         if curve.is_empty() {
             return Err(AnalysisError::FftCurveEmpty);
         }
-        let local = f32_of(
-            0.0f64.min(curve.iter().fold(f64::NEG_INFINITY, |a, b| a.max(*b))),
-        );
+        let local = f32_of(0.0f64.min(curve.iter().fold(f64::NEG_INFINITY, |a, b| a.max(*b))));
         local_maxima.push(local);
         if local > global_max {
             global_max = local;
@@ -320,7 +316,6 @@ pub fn update_frame_spectrum_peak(
     Ok((local, global_max))
 }
 
-
 /// Build the floor seed from a long seed look
 /// (Python `build_long_floor_seed_from_look`).
 pub fn build_long_floor_seed_from_look(
@@ -335,8 +330,7 @@ pub fn build_long_floor_seed_from_look(
             got: logfft.len() as i64,
         });
     }
-    let ath_shift =
-        ((look.ath_offset as f64) + channel_specmax).max(look.ath_floor as f64);
+    let ath_shift = ((look.ath_offset as f64) + channel_specmax).max(look.ath_floor as f64);
     let initial: Vec<f64> = look
         .base_curve
         .iter()
@@ -439,8 +433,7 @@ fn wwise_seed_initial_curve(
     if look.ath.len() as i64 != look.n {
         return Err(AnalysisError::LongSeedGeometry);
     }
-    let ath_shift =
-        ((look.ath_offset as f64) + channel_specmax).max(look.ath_floor as f64);
+    let ath_shift = ((look.ath_offset as f64) + channel_specmax).max(look.ath_floor as f64);
     Ok(look
         .ath
         .iter()
@@ -493,10 +486,7 @@ mod tests {
 
     #[test]
     fn compute_spectrum_peak_basic() {
-        let curves = vec![
-            vec![1.0f64, 2.0, -5.0],
-            vec![3.0, 4.0],
-        ];
+        let curves = vec![vec![1.0f64, 2.0, -5.0], vec![3.0, 4.0]];
         let (local, global) = compute_spectrum_peak(&curves, 0.0).unwrap();
         assert_eq!(local.len(), 2);
         // min(0, max(...)) then f32

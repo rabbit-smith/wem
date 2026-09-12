@@ -35,9 +35,7 @@ pub fn wwise_fft_packed(
 ) -> Result<Vec<f64>, AnalysisError> {
     let n = samples.len();
     if n < 2 || (n & (n - 1)) != 0 || n & 1 != 0 {
-        return Err(AnalysisError::FftSizeInvalid {
-            n: n as i64,
-        });
+        return Err(AnalysisError::FftSizeInvalid { n: n as i64 });
     }
 
     let mut real: Vec<f64> = samples.iter().map(|v| f32_of(*v)).collect();
@@ -60,12 +58,11 @@ pub fn wwise_fft_packed(
     let mut length = 2usize;
     while length <= n {
         let half = length >> 1;
-        let entry = twiddles
-            .fft_twiddles
-            .get(&(length as i64))
-            .ok_or(AnalysisError::FrozenTwiddlesMissing {
+        let entry = twiddles.fft_twiddles.get(&(length as i64)).ok_or(
+            AnalysisError::FrozenTwiddlesMissing {
                 length: length as i64,
-            })?;
+            },
+        )?;
         let step_re = f32_of(entry.0);
         let step_im = f32_of(entry.1);
         for start in (0..n).step_by(length) {
@@ -113,11 +110,10 @@ pub fn wwise_log_curve(
     let offset = f32_of(wwise_float_log(4.0 / n as f64) + WWISE_LOG_ADD);
     let mut out = vec![f32_of(wwise_float_log(packed[0]) + offset + WWISE_LOG_ADD)];
     for index in (1..n - 1).step_by(2) {
-        let power = f32_of(
-            packed[index] * packed[index]
-                + packed[index + 1] * packed[index + 1],
-        );
-        out.push(f32_of(0.5 * wwise_float_log(power) + offset + WWISE_LOG_ADD));
+        let power = f32_of(packed[index] * packed[index] + packed[index + 1] * packed[index + 1]);
+        out.push(f32_of(
+            0.5 * wwise_float_log(power) + offset + WWISE_LOG_ADD,
+        ));
     }
     Ok(out)
 }

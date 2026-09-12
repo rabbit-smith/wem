@@ -6,9 +6,9 @@ use std::collections::HashMap;
 
 use wem_scheduling::{plan_mode_sequence, validate_modes, FramePlan};
 
+use crate::config::f32_of;
 use crate::config::AnalysisError;
 use crate::dsp::lpc::{wwise_first_frame_lpc_prime, wwise_lpc_from_data, wwise_lpc_predict};
-use crate::config::f32_of;
 use crate::dsp::transform::apply_vorbis_window;
 
 /// One scheduler-planned, channel-major PCM window (Python `WindowedFrame`).
@@ -50,11 +50,8 @@ pub fn iter_planned_pcm_windows(
         return Ok(Vec::new());
     }
     for (index, plan) in plans.iter().enumerate() {
-        validate_modes(
-            blocksizes,
-            &[plan.previous, plan.current, plan.following],
-        )
-        .map_err(|_| AnalysisError::FramePlansNotContiguous)?;
+        validate_modes(blocksizes, &[plan.previous, plan.current, plan.following])
+            .map_err(|_| AnalysisError::FramePlansNotContiguous)?;
         if plan.index != index as i64 {
             return Err(AnalysisError::FramePlansNotContiguous);
         }
@@ -76,10 +73,7 @@ pub fn iter_planned_pcm_windows(
     if source_len < 4096 {
         return Err(AnalysisError::PcmFeederShort { frames: source_len });
     }
-    if pcm
-        .iter()
-        .any(|channel| channel.len() as i64 != source_len)
-    {
+    if pcm.iter().any(|channel| channel.len() as i64 != source_len) {
         return Err(AnalysisError::PcmChannelsUnequal {
             want: source_len,
             got: 0,
@@ -87,10 +81,10 @@ pub fn iter_planned_pcm_windows(
     }
 
     // LPC priming before packet zero.
-    let channels: Vec<Vec<f64>> =
-        pcm.iter()
-            .map(|channel| channel.iter().map(|v| f32_of(*v)).collect())
-            .collect();
+    let channels: Vec<Vec<f64>> = pcm
+        .iter()
+        .map(|channel| channel.iter().map(|v| f32_of(*v)).collect())
+        .collect();
     let primes: Vec<Vec<f64>> = channels
         .iter()
         .map(|channel| {
@@ -182,11 +176,10 @@ pub fn iter_pcm_windows(
     terminal_following: i64,
     frozen_windows: Option<&HashMap<i64, Vec<f32>>>,
 ) -> Result<Vec<WindowedFrame>, AnalysisError> {
-    let plans = plan_mode_sequence(modes, blocksizes, terminal_following)
-        .map_err(|e| match e {
-            wem_scheduling::PlannerError::BlockSizeCount => AnalysisError::WindowBlockSizeInvalid,
-            _ => AnalysisError::FramePlanIntervalMismatch,
-        })?;
+    let plans = plan_mode_sequence(modes, blocksizes, terminal_following).map_err(|e| match e {
+        wem_scheduling::PlannerError::BlockSizeCount => AnalysisError::WindowBlockSizeInvalid,
+        _ => AnalysisError::FramePlanIntervalMismatch,
+    })?;
     iter_planned_pcm_windows(pcm, &plans, blocksizes, frozen_windows)
 }
 
@@ -197,16 +190,14 @@ mod tests {
     #[test]
     fn rejects_empty_plans_and_pcm() {
         assert!(iter_planned_pcm_windows(&[], &[], &[256, 2048], None).is_ok());
-        let plans =
-            wem_scheduling::plan_mode_sequence(&[0], &[256, 2048], 1).expect("plan");
+        let plans = wem_scheduling::plan_mode_sequence(&[0], &[256, 2048], 1).expect("plan");
         assert!(iter_planned_pcm_windows(&[], &plans, &[256, 2048], None).is_err());
     }
 
     #[test]
     fn rejects_short_pcm() {
         let pcm: Vec<Vec<f64>> = vec![vec![0.0f64; 100]];
-        let plans =
-            wem_scheduling::plan_mode_sequence(&[0], &[256, 2048], 1).expect("plan");
+        let plans = wem_scheduling::plan_mode_sequence(&[0], &[256, 2048], 1).expect("plan");
         assert!(iter_planned_pcm_windows(&pcm, &plans, &[256, 2048], None).is_err());
     }
 }
