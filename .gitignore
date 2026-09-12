@@ -29,3 +29,4 @@ corpus/
 
 # the round paired-corpus tooling outputs (scratch templates; not contract assets).
 rs_corpus_*.xml
+.claude/settings.local.json
