@@ -3,7 +3,9 @@
 This page defines the supported user-facing contract for the 0.x encoder.
 Implementation modules may be reorganized without preserving their current
 functions or classes. Only the API and CLI described here are compatibility
-targets.
+targets. The vendored geometry materializer under `reference/` and the kernel
+`dsp::x87` / `dsp::crt90` / `dsp::psy_geom*` modules are development/test
+parity surfaces, not compatibility targets.
 
 ## Supported Python API
 

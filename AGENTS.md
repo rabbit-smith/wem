@@ -12,6 +12,7 @@ file first; subtree rules live in the child `AGENTS.md` files listed below.
 | 205-frame per-frame hash contract | `make frame-contract` |
 | Per-frame × per-stage pipeline hashes + representative raw dumps | `make stage-contract` (`tests/data/stage-golden/`) |
 | Package-root public exports (see `docs/public-interface.md`) | distribution + wheel smoke |
+| Geometry-materializer parity: ported builder == registered 6ch surfaces == kernel `psy_geom*` | `tests/contract/test_geometry_materializer_contract.py` + `cargo test -p wem-analysis` parity suites |
 | Profile data digest chain: payload → manifest SHA → index SHA | `bundle.verify_all`, wheel smoke |
 
 Any refactor is valid only while every gate above still passes unchanged.

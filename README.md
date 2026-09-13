@@ -1,14 +1,17 @@
 # Wwise WEM encoder
 
-Standalone Python implementation of Wwise Vorbis WAV-to-WEM encoding. Runtime
+Standalone implementation of Wwise Vorbis WAV→WEM encoding: a Rust kernel
+behind a Python facade, with the C ABI as the canonical core surface. Runtime
 code uses PCM plus immutable packaged profile tables. The first exact profile
-targets Wwise 2013.2; further generations can be added as additional profiles.
+targets Wwise 2013.2 6ch/44.1kHz; a second profile covers the 2ch/48k paired-build
+generation; further generations can be added as additional profiles.
 
 ## Supported exact profile
 
 | Wwise | PCM | Channels | Rate | Blocks | Status |
 |---|---|---:|---:|---:|---|
 | 2013.2 | signed 16-bit | 6 (5.1) | 44100 Hz | 256/2048 | bit-exact |
+| 2013.2 | signed 16-bit | 2 | 48000 Hz | 256/2048 | encodes; surfaces mechanism-materialized, provisional calibration pending real-hardware revalidation (see below) |
 
 The profile registry is keyed by `(channels, sample_rate)`. Further channel
 layouts and rates can be added without changing the stream encoder API.
@@ -90,6 +93,30 @@ SHA-256:
 
 It is byte-identical to the Wwise reference.
 
+## 2ch/48k profile (paired-build generation)
+
+The 2ch/48k profile encodes stream-compatible WEMs. Its psychoacoustic
+surfaces were proven to be init-time materialized geometry of the paired
+build — not streamed-audio adaptive state — and a per-instruction port of
+the build's geometry materializer reproduces every registered 6ch surface
+byte-for-byte. Parity is locked on three surfaces: the ported builder
+(`reference/wwise_wem_reference/geometry_materializer/`), the registered
+profile bytes (`tests/contract/test_geometry_materializer_contract.py`), and
+the kernel mirror (`crates/wem-analysis` `dsp::x87/crt90/psy_geom*`, generated
+parity suites). The registered 2ch values remain provisional operating points
+until real-Windows revalidation of the calibration chain; re-registration
+switches them to mechanism-generated values in one gated window. Calibration
+provenance per field: [`docs/profiles.md`](docs/profiles.md).
+
+## Integration surface
+
+The canonical interface is the C ABI core surface (`include/wem.h`,
+implemented by `crates/wem-capi`): the Init -> chunk* -> Finish lifecycle,
+reply framing (seq 0 is the setup packet, then audio packets), and error
+codes are pinned there. Every language binding is a thin parallel shell over
+the kernel — PyO3 (`wwise_wem._core`), Node/wasm (`js/`), Go cgo
+(`examples/go-cgo`) — and owns no numerics of its own.
+
 ## Tests
 
 ```bash
@@ -97,12 +124,17 @@ python3 -m unittest discover -s tests -v
 ```
 
 The suite checks packaged-table integrity, profile resolution, automatic and
-explicit selection, CLI output, and whole-file golden identity.
+explicit selection, CLI output, whole-file golden identity, and geometry-
+materializer parity (ported builder == registered surfaces). The contract
+layers run from the Makefile (`make golden`, `make frame-contract`,
+`make stage-contract`); the Rust workspace gates run with `cargo test
+--workspace` (kernel-side materializer parity suites included).
 
 ## Project boundary
 
 - `src/wwise_wem/`: distribution facade (root API, CLI, adapters, profile metadata) and its DTOs; the single execution path is the in-package native extension `wwise_wem._core`.
-- `reference/wwise_wem_reference/`: bit-exact pure-Python reference implementation (development tree only, not in the wheel; a test-time oracle the suites import directly).
+- `crates/`: the Rust kernel workspace (scheduling, analysis, vorbis, container, profiles, core) plus the C ABI (`wem-capi`) and language shells (`wem-python`, `wem-wasm`); `include/wem.h` is the normative cross-language contract.
+- `reference/wwise_wem_reference/`: bit-exact pure-Python reference implementation (development tree only, not in the wheel; a test-time oracle the suites import directly), including the vendored geometry materializer.
 - `src/wwise_wem/data/`: immutable setup, psychoacoustic and codebook tables.
 - `tests/fixtures/`: one PCM input and its bit-exact acceptance WEM.
 - `tests/data/frame-contract/`: checked per-frame hashes for the exact profile.

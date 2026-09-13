@@ -107,6 +107,26 @@ The manifest's `resources` object maps stable logical names (for example
 defaults). Runtime tables are loaded only through that profile's installed
 bundle; there is no separate global runtime-manifest gate.
 
+## Geometry materializer parity
+
+Psychoacoustic surfaces are init-time materialized geometry of the paired
+build (2013.2 conversion plug-in, geometry materializer at module offset
+0x15ee0). The port lives on three surfaces that must stay byte-identical:
+
+- reference builder: `reference/wwise_wem_reference/geometry_materializer/`
+  (per-instruction port; development/test asset, never a runtime path);
+- profile data: `src/wwise_wem/data/profiles/*/psychoacoustics/*` (registered
+  bytes on the manifest/index digest chain);
+- kernel: `wem-analysis::dsp::{x87, crt90, psy_geom, psy_geom_long}`.
+
+Locks: `tests/contract/test_geometry_materializer_contract.py` asserts
+builder == registered bytes on the 6ch authority, and the generated Rust
+suites (`crates/wem-analysis/tests/*_parity.rs`) assert kernel == builder bit
+for bit on both geometries. 2ch registered values are provisional operating
+points: they may change only together with real-hardware revalidation and a
+regenerated contract in one window. Provenance detail lives in
+docs/profiles.md and the corpus adjudication ledger.
+
 ## Acceptance boundaries
 
 Structural changes must preserve:
