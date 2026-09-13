@@ -106,9 +106,7 @@ pub fn build_packet_stream(
     out.extend_from_slice(seek_table);
     for packet in packets {
         if packet.len() > u16::MAX as usize {
-            return Err(ContainerError::PacketTooLarge {
-                len: packet.len(),
-            });
+            return Err(ContainerError::PacketTooLarge { len: packet.len() });
         }
         endian.push_u16(&mut out, packet.len() as u16);
         out.extend_from_slice(packet);
@@ -181,11 +179,7 @@ mod tests {
         let setup = b"setup";
         let audio = b"packet";
         let seek = b"seekseek";
-        recompute_vorbis_fmt_sizes(
-            &mut fields,
-            &[setup.as_ref(), audio.as_ref()],
-            seek,
-        );
+        recompute_vorbis_fmt_sizes(&mut fields, &[setup.as_ref(), audio.as_ref()], seek);
         // data = 8 + (2+5) + (2+6) = 23
         assert_eq!(fields.dw_seek_table_size, 8);
         assert_eq!(fields.dw_data_payload_size, 23);

@@ -286,7 +286,10 @@ impl ProfileBundle {
             Ok(ref_) => Some(ref_.clone()),
             Err(_) => None, // draft profile: setup pending
         };
-        let setup_sha = setup_ref.as_ref().map(|ref_| ref_.sha256().to_string()).unwrap_or_default();
+        let setup_sha = setup_ref
+            .as_ref()
+            .map(|ref_| ref_.sha256().to_string())
+            .unwrap_or_default();
         crate::model::EncoderProfile::new(
             self.name.clone(),
             self.key.clone(),
@@ -556,8 +559,8 @@ fn load_profile_bundle_with(
         .get("resources")
         .and_then(Value::as_object)
         .is_some_and(|resources| resources.contains_key("vorbis.setup"));
-    let pending_reason = strict_string(payload.get("pending_reason").unwrap_or(&Value::Null))
-        .map(str::to_string);
+    let pending_reason =
+        strict_string(payload.get("pending_reason").unwrap_or(&Value::Null)).map(str::to_string);
 
     let bundle = ProfileBundle::new(
         name,

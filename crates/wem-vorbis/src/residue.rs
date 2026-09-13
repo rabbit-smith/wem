@@ -557,23 +557,23 @@ pub fn pack_residue_type2(
                             target[j] = 0.0;
                         }
                     }
-                    let entry = book.best_vq(&target).map_err(|_| {
-                        ResidueError::BookIndexOutOfRange {
-                            book_id,
-                            books: books.len(),
-                        }
-                    })?;
+                    let entry =
+                        book.best_vq(&target)
+                            .map_err(|_| ResidueError::BookIndexOutOfRange {
+                                book_id,
+                                books: books.len(),
+                            })?;
                     book.encode(op, entry)
                         .map_err(|_| ResidueError::BookIndexOutOfRange {
                             book_id,
                             books: books.len(),
                         })?;
-                    let vq_vec = book.borrow_vq(entry).map_err(|_| {
-                        ResidueError::BookIndexOutOfRange {
-                            book_id,
-                            books: books.len(),
-                        }
-                    })?;
+                    let vq_vec =
+                        book.borrow_vq(entry)
+                            .map_err(|_| ResidueError::BookIndexOutOfRange {
+                                book_id,
+                                books: books.len(),
+                            })?;
                     for ((bin_idx, ch_idx), &val) in slots.iter().zip(vq_vec.iter()) {
                         if *ch_idx < work.len() && *bin_idx < work[*ch_idx].len() {
                             work[*ch_idx][*bin_idx] -= val;

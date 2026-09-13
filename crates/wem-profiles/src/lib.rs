@@ -49,7 +49,7 @@ pub use frozen::load_frozen_tables;
 pub use key::{ProfileKey, WWISE2013_6CH_44100_SETUP_IDENTITY, WWISE_GENERATION};
 pub use model::{ContainerMetadata, EncoderProfile, ProfileManifestView};
 pub use quality::{
-    load_quality_curves, linear_frac, normalize_quality_factor, QualityCurves,
+    linear_frac, load_quality_curves, normalize_quality_factor, QualityCurves,
     QUALITY_CURVES_INTERPOLATION, QUALITY_CURVES_RESOURCE, QUALITY_CURVES_SCHEMA,
 };
 pub use registry::{

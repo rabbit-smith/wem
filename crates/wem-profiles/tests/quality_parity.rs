@@ -16,7 +16,7 @@
 #![allow(clippy::excessive_precision)]
 
 use wem_profiles::{
-    assemble_encoder_profile_resources, load_profile_bundle_from_bytes, linear_frac,
+    assemble_encoder_profile_resources, linear_frac, load_profile_bundle_from_bytes,
     normalize_quality_factor, ProfileError,
 };
 
@@ -31,16 +31,15 @@ const DRAFT_DESC3: [f64; 13] = [
     1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
 ];
 const DRAFT_DESC29: [f64; 13] = [
-    -100.0, -100.0, -100.0, -100.0, -100.0, -100.0, -100.0, -105.0, -105.0,
-    -105.0, -105.0, -110.0, -120.0,
+    -100.0, -100.0, -100.0, -100.0, -100.0, -100.0, -100.0, -105.0, -105.0, -105.0, -105.0, -110.0,
+    -120.0,
 ];
 const DRAFT_DESC30: [f64; 13] = [
-    -130.0, -130.0, -130.0, -130.0, -130.0, -135.0, -140.0, -140.0, -140.0,
-    -140.0, -140.0, -140.0, -150.0,
+    -130.0, -130.0, -130.0, -130.0, -130.0, -135.0, -140.0, -140.0, -140.0, -140.0, -140.0, -140.0,
+    -150.0,
 ];
 const DRAFT_DESC31: [f64; 13] = [
-    12.9, 13.8, 14.7, 15.6, 16.5, 17.1, 18.0, 19.5, 48.0, 999.0, 999.0,
-    999.0, 999.0,
+    12.9, 13.8, 14.7, 15.6, 16.5, 17.1, 18.0, 19.5, 48.0, 999.0, 999.0, 999.0, 999.0,
 ];
 
 #[test]
@@ -166,9 +165,7 @@ fn installed_6ch_bytes() -> (Vec<u8>, Vec<(String, Vec<u8>)>) {
 
 /// Repackage the installed 6ch bytes with a synthetic quality-curves
 /// resource registered in the manifest and index (in-memory only).
-fn bundle_with_curves(
-    curves_json: &str,
-) -> (wem_profiles::ProfileBundle, String) {
+fn bundle_with_curves(curves_json: &str) -> (wem_profiles::ProfileBundle, String) {
     let (mut index_bytes, mut files) = installed_6ch_bytes();
 
     let curves_bytes = curves_json.as_bytes().to_vec();
@@ -262,8 +259,8 @@ fn quality_none_keeps_the_historical_surface() {
     let bundle = load_profile_bundle_from_bytes(&index_bytes, files, None, true)
         .expect("6ch bytes bundle loads");
     let setup = bundle.setup_packet().expect("setup packet");
-    let resources = assemble_encoder_profile_resources(&bundle, Some(&setup), None)
-        .expect("assembly succeeds");
+    let resources =
+        assemble_encoder_profile_resources(&bundle, Some(&setup), None).expect("assembly succeeds");
     // Historical surface (no quality resource at all, no quality value).
     assert_eq!(
         resources.analysis.short_surface.ath_offset,
@@ -284,9 +281,12 @@ fn quality_value_applies_the_interpolated_overrides() {
     // q = 2.0 -> qnorm = 0.20000010000000001 -> f = 0.050000025:
     //   ath_offset = (1-f)*1 + f*2 = 1.0500000250000001 -> f32 boundary
     //   ath_floor  = (1-f)*(-10) + f*(-20) = -10.500000250000001 -> f32 boundary
-    let quality =
-        assemble_encoder_profile_resources(&bundle, Some(&setup), Some(2.0)).expect("quality assembly");
-    assert_eq!(quality.analysis.short_surface.ath_offset, 1.0500000715255737_f32);
+    let quality = assemble_encoder_profile_resources(&bundle, Some(&setup), Some(2.0))
+        .expect("quality assembly");
+    assert_eq!(
+        quality.analysis.short_surface.ath_offset,
+        1.0500000715255737_f32
+    );
     assert_eq!(quality.analysis.short_surface.ath_floor, -10.5_f32);
     assert_eq!(quality.analysis.quality_value, Some(2.0));
     assert!(!quality.analysis.quality_extrapolated);

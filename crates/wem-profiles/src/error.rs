@@ -272,7 +272,11 @@ pub enum ProfileError {
     /// Quality-curves breakpoints are not strictly increasing.
     QualityCurvesBreakpointsNotIncreasing,
     /// A quality curve's length differs from the breakpoint count.
-    QualityCurvesCurveLengthMismatch { name: String, want: usize, got: usize },
+    QualityCurvesCurveLengthMismatch {
+        name: String,
+        want: usize,
+        got: usize,
+    },
     /// A quality curve carries a non-finite value.
     QualityCurvesValueNonFinite { name: String },
     /// Quality-curves carries no curves.

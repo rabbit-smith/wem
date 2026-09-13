@@ -20,8 +20,7 @@ use crate::psychoacoustics::long_tables::load_long_psy_tables;
 use crate::psychoacoustics::long_variants::load_long_variant;
 use crate::psychoacoustics::short_tables::load_short_psy_profiles;
 use crate::quality::{
-    load_quality_curves, normalize_quality_factor, QualityCurves,
-    QUALITY_SEMANTIC_SHORT_PREFIX,
+    load_quality_curves, normalize_quality_factor, QualityCurves, QUALITY_SEMANTIC_SHORT_PREFIX,
 };
 use crate::transform::load_mdct_looks;
 use crate::transient::load_transient;
@@ -142,9 +141,7 @@ fn apply_short_quality_overrides(
             continue;
         };
         if !SHORT_QUALITY_FIELDS.contains(&field) {
-            return Err(ProfileError::QualityCurveParameterUnsupported {
-                name: name.clone(),
-            });
+            return Err(ProfileError::QualityCurveParameterUnsupported { name: name.clone() });
         }
         // f32 boundary: the reference casts the interpolated value to
         // float32 when writing the short surface field.
@@ -154,8 +151,14 @@ fn apply_short_quality_overrides(
         return Ok(surface);
     }
     Ok(WwisePsySeedSurface {
-        ath_offset: overrides.get("ath_offset").copied().unwrap_or(surface.ath_offset),
-        ath_floor: overrides.get("ath_floor").copied().unwrap_or(surface.ath_floor),
+        ath_offset: overrides
+            .get("ath_offset")
+            .copied()
+            .unwrap_or(surface.ath_offset),
+        ath_floor: overrides
+            .get("ath_floor")
+            .copied()
+            .unwrap_or(surface.ath_floor),
         seed_ceiling: overrides
             .get("seed_ceiling")
             .copied()

@@ -228,13 +228,14 @@ pub fn load_wem_profile_quality(
         .map(|p| p.name().to_string())
         .collect::<Vec<_>>()
         .join(",");
-    let profile = registry
-        .get_by_name(name)
-        .cloned()
-        .ok_or_else(|| ProfileError::UnknownProfile {
-            name: name.to_string(),
-            available,
-        })?;
+    let profile =
+        registry
+            .get_by_name(name)
+            .cloned()
+            .ok_or_else(|| ProfileError::UnknownProfile {
+                name: name.to_string(),
+                available,
+            })?;
     match quality {
         None => Ok(profile),
         Some(quality) => profile.with_quality(quality),

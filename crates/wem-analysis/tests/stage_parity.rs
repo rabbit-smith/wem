@@ -62,16 +62,17 @@ fn read_pcm16(path: &Path) -> (Vec<Vec<f64>>, i64, i64) {
     let mut sample_rate = 0i64;
     let (data_off, data_size) = loop {
         let chunk_id = &bytes[off..off + 4];
-        let chunk_size = u32::from_le_bytes(bytes[off + 4..off + 8].try_into().unwrap())
-            as usize;
+        let chunk_size = u32::from_le_bytes(bytes[off + 4..off + 8].try_into().unwrap()) as usize;
         off += 8;
         if chunk_id == b"fmt " {
-            let audio_format =
-                u16::from_le_bytes(bytes[off..off + 2].try_into().unwrap());
+            let audio_format = u16::from_le_bytes(bytes[off..off + 2].try_into().unwrap());
             assert_eq!(audio_format, 1, "PCM format");
-            channels = i64::from(u16::from_le_bytes(bytes[off + 2..off + 4].try_into().unwrap()));
-            sample_rate =
-                i64::from(u32::from_le_bytes(bytes[off + 4..off + 8].try_into().unwrap()));
+            channels = i64::from(u16::from_le_bytes(
+                bytes[off + 2..off + 4].try_into().unwrap(),
+            ));
+            sample_rate = i64::from(u32::from_le_bytes(
+                bytes[off + 4..off + 8].try_into().unwrap(),
+            ));
             let bits = u16::from_le_bytes(bytes[off + 14..off + 16].try_into().unwrap());
             assert_eq!(bits, 16, "16-bit PCM");
             off += chunk_size;
@@ -83,8 +84,7 @@ fn read_pcm16(path: &Path) -> (Vec<Vec<f64>>, i64, i64) {
     };
     assert!(channels > 0 && sample_rate > 0, "valid WAV geometry");
     let frames = data_size / (channels as usize * 2);
-    let mut chans: Vec<Vec<f64>> =
-        (0..channels).map(|_| Vec::with_capacity(frames)).collect();
+    let mut chans: Vec<Vec<f64>> = (0..channels).map(|_| Vec::with_capacity(frames)).collect();
     for frame in 0..frames {
         for channel in 0..channels as usize {
             let i = data_off + frame * (channels as usize * 2) + channel * 2;
@@ -140,25 +140,21 @@ fn stage_parity_all_frames() {
         .collect();
 
     // Load PCM + profile.
-    let (pcm, channels, sample_rate) =
-        read_pcm16(&repo_root().join("tests/fixtures/input.wav"));
+    let (pcm, channels, sample_rate) = read_pcm16(&repo_root().join("tests/fixtures/input.wav"));
     assert_eq!(channels, 6, "6 channels");
     assert_eq!(sample_rate, 44100, "44.1 kHz");
 
-    let data_dir = wem_profiles::DataDir::from_profiles_dir(
-        repo_root().join("src/wwise_wem/data/profiles"),
-    );
-    let bundle = wem_profiles::load_profile_bundle(&data_dir, None, false)
-        .expect("installed profile loads");
+    let data_dir =
+        wem_profiles::DataDir::from_profiles_dir(repo_root().join("src/wwise_wem/data/profiles"));
+    let bundle =
+        wem_profiles::load_profile_bundle(&data_dir, None, false).expect("installed profile loads");
     let resources = wem_profiles::assemble_analysis_resources(&bundle, None)
         .expect("analysis resources assemble");
 
     // Create the session and select modes + windows.
     let mut session = AnalysisSession::new(channels, sample_rate, [256, 2048], resources)
         .expect("session constructs");
-    let (modes, windows) = session
-        .selected_windows(&pcm)
-        .expect("modes + windows");
+    let (modes, windows) = session.selected_windows(&pcm).expect("modes + windows");
 
     assert_eq!(
         windows.len() as i64,
@@ -198,7 +194,9 @@ fn stage_parity_all_frames() {
     }
     let mut checked = 0usize;
     for (i, window) in windows.iter().enumerate() {
-        let psy = session.analyze_window(window.clone(), None).expect("analyze frame");
+        let psy = session
+            .analyze_window(window.clone(), None)
+            .expect("analyze frame");
         if rep_set.contains(&i) {
             for stage in FLOAT_STAGES {
                 let rows = get_stage(&psy, stage, &window.samples);
@@ -207,14 +205,14 @@ fn stage_parity_all_frames() {
                 let golden_path = stage_dir().join("frames").join(&golden_name);
                 let golden = std::fs::read(&golden_path)
                     .unwrap_or_else(|_| panic!("golden dump reads: {golden_name}"));
-                assert_eq!(
-                    packed, golden,
-                    "frame {} stage {stage} byte parity",
-                    i
-                );
+                assert_eq!(packed, golden, "frame {} stage {stage} byte parity", i);
             }
             checked += 1;
         }
     }
-    assert_eq!(checked, representatives.len(), "all representatives checked");
+    assert_eq!(
+        checked,
+        representatives.len(),
+        "all representatives checked"
+    );
 }

@@ -11,8 +11,8 @@ mod selector;
 
 pub use model::{FramePlan, SchedulerState, DEFAULT_BLOCKSIZES};
 pub use planner::{
-    append_samples, emit_block, initial_state, plan_mode_sequence,
-    plan_mode_sequence_default, required_samples, validate_modes, PlannerError,
+    append_samples, emit_block, initial_state, plan_mode_sequence, plan_mode_sequence_default,
+    required_samples, validate_modes, PlannerError,
 };
 pub use selector::{ModeSelector, SelectorError};
 
@@ -64,17 +64,11 @@ mod parity {
         assert_eq!(frames.len(), 205, "golden index records 205 frames");
 
         let modes: Vec<i64> = frames.iter().map(|f| int_field(f, "mode")).collect();
-        let plans =
-            plan_mode_sequence(&modes, &DEFAULT_BLOCKSIZES, 1).expect("plans build");
+        let plans = plan_mode_sequence(&modes, &DEFAULT_BLOCKSIZES, 1).expect("plans build");
         assert_eq!(plans.len(), 205);
         for (plan, frame) in plans.iter().zip(frames.iter()) {
             assert_eq!(
-                (
-                    plan.index,
-                    plan.previous,
-                    plan.current,
-                    plan.following,
-                ),
+                (plan.index, plan.previous, plan.current, plan.following,),
                 (
                     int_field(frame, "index"),
                     int_field(frame, "previous"),
@@ -86,8 +80,7 @@ mod parity {
             );
             // Window centre = (sample_start - long_half) + block_size / 2.
             let block_size = DEFAULT_BLOCKSIZES[plan.current as usize];
-            let center = plan.sample_start - DEFAULT_BLOCKSIZES[1] / 2
-                + block_size / 2;
+            let center = plan.sample_start - DEFAULT_BLOCKSIZES[1] / 2 + block_size / 2;
             assert_eq!(
                 center,
                 int_field(frame, "window_center"),

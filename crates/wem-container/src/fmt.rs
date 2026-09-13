@@ -120,16 +120,10 @@ impl VorbisFmtFields {
     /// Parse a 66-byte Wwise Vorbis fmt payload (Python `parse_vorbis_fmt`).
     pub fn parse(payload: &[u8]) -> Result<Self, ContainerError> {
         if payload.len() < WWISE_VORBIS_FMT_SIZE {
-            return Err(ContainerError::FmtTooShort {
-                got: payload.len(),
-            });
+            return Err(ContainerError::FmtTooShort { got: payload.len() });
         }
-        let u16 = |off: usize| {
-            u16::from_le_bytes(payload[off..off + 2].try_into().unwrap())
-        };
-        let u32 = |off: usize| {
-            u32::from_le_bytes(payload[off..off + 4].try_into().unwrap())
-        };
+        let u16 = |off: usize| u16::from_le_bytes(payload[off..off + 2].try_into().unwrap());
+        let u32 = |off: usize| u32::from_le_bytes(payload[off..off + 4].try_into().unwrap());
         Ok(Self {
             w_format_tag: u16(0x00),
             n_channels: u16(0x02),

@@ -78,9 +78,7 @@ pub fn validate_modes(blocksizes: &[i64], modes: &[i64]) -> Result<(), PlannerEr
 
 /// Return the overlap state before the first PCM append
 /// (Python `initial_state`).
-pub fn initial_state(
-    blocksizes: &[i64],
-) -> Result<SchedulerState, PlannerError> {
+pub fn initial_state(blocksizes: &[i64]) -> Result<SchedulerState, PlannerError> {
     validate_modes(blocksizes, &[0, 0])?;
     let long_half = blocksizes[1] / 2;
     Ok(SchedulerState::new(0, 0, long_half, long_half))
@@ -93,16 +91,10 @@ pub fn required_samples(
     following: i64,
     blocksizes: &[i64],
 ) -> Result<i64, PlannerError> {
-    validate_modes(
-        blocksizes,
-        &[state.previous, state.current, following],
-    )?;
+    validate_modes(blocksizes, &[state.previous, state.current, following])?;
     let current_size = blocksizes[state.current as usize];
     let following_size = blocksizes[following as usize];
-    Ok(state.cursor
-        + following_size / 4
-        + current_size / 4
-        + following_size / 2)
+    Ok(state.cursor + following_size / 4 + current_size / 4 + following_size / 2)
 }
 
 /// Emit one frame plan and return the post-slide state
@@ -112,10 +104,7 @@ pub fn emit_block(
     following: i64,
     blocksizes: &[i64],
 ) -> Result<(FramePlan, SchedulerState), PlannerError> {
-    validate_modes(
-        blocksizes,
-        &[state.previous, state.current, following],
-    )?;
+    validate_modes(blocksizes, &[state.previous, state.current, following])?;
     let required = required_samples(state, following, blocksizes)?;
     if state.filled < required {
         return Err(PlannerError::InsufficientSamples {
@@ -158,10 +147,7 @@ pub fn emit_block(
 
 /// Return the same state after the feeder appends `count` samples
 /// (Python `append_samples`).
-pub fn append_samples(
-    state: &SchedulerState,
-    count: i64,
-) -> Result<SchedulerState, PlannerError> {
+pub fn append_samples(state: &SchedulerState, count: i64) -> Result<SchedulerState, PlannerError> {
     if count < 0 {
         return Err(PlannerError::AppendCountNegative);
     }
@@ -249,12 +235,10 @@ mod tests {
             plan_mode_sequence(&[0, 1], &DEFAULT_BLOCKSIZES, 9).unwrap_err(),
             PlannerError::ModeNotBit
         ));
-        assert!(plan_mode_sequence(&[], &DEFAULT_BLOCKSIZES, 1).unwrap().is_empty());
-        assert!(append_samples(
-            &SchedulerState::new(0, 0, 0, 0),
-            -1,
-        )
-        .is_err());
+        assert!(plan_mode_sequence(&[], &DEFAULT_BLOCKSIZES, 1)
+            .unwrap()
+            .is_empty());
+        assert!(append_samples(&SchedulerState::new(0, 0, 0, 0), -1,).is_err());
     }
 
     #[test]
@@ -276,8 +260,7 @@ mod tests {
     fn plan_short_sequence_geometry() {
         // Two short blocks then a long terminal; scheduler timeline origin
         // precedes PCM sample zero by one long half-block (oracle values).
-        let plans = plan_mode_sequence(&[0, 0, 1], &DEFAULT_BLOCKSIZES, 1)
-            .expect("plans");
+        let plans = plan_mode_sequence(&[0, 0, 1], &DEFAULT_BLOCKSIZES, 1).expect("plans");
         assert_eq!(plans.len(), 3);
         assert_eq!(
             (plans[0].previous, plans[0].current, plans[0].following),

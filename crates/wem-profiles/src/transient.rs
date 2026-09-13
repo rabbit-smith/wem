@@ -15,7 +15,7 @@
 //!   the fractional part.
 
 use wem_analysis::config::{
-    CALIBRATION_SAMPLE_RATES, TransientBandConfig, TransientDetectorTables,
+    TransientBandConfig, TransientDetectorTables, CALIBRATION_SAMPLE_RATES,
 };
 
 use crate::error::ProfileError;
@@ -240,9 +240,7 @@ pub fn load_transient_record_family(
         serde_json::Value::Object(map) => map,
         _ => return Err(ProfileError::TransientRecordFamilyGeometryChanged),
     };
-    if data
-        .get("schema")
-        .and_then(serde_json::Value::as_str)
+    if data.get("schema").and_then(serde_json::Value::as_str)
         != Some(TRANSIENT_RECORD_FAMILY_SCHEMA)
     {
         return Err(ProfileError::TransientSchemaChanged);
@@ -264,28 +262,35 @@ pub fn load_transient_record_family(
 
     let f64_list = |key: &'static str, length: usize| -> Result<Vec<f64>, ProfileError> {
         let err = || ProfileError::TransientRecordFamilyCurve { field: key };
-        let block = data.get(key).and_then(serde_json::Value::as_object)
+        let block = data
+            .get(key)
+            .and_then(serde_json::Value::as_object)
             .ok_or_else(err)?;
-        let values = block.get("values").and_then(serde_json::Value::as_array)
+        let values = block
+            .get("values")
+            .and_then(serde_json::Value::as_array)
             .filter(|values| values.len() == length)
             .ok_or_else(err)?;
         let mut out = Vec::with_capacity(length);
         for value in values {
-            let number = value.as_f64().filter(|v| v.is_finite())
-                .ok_or_else(err)?;
+            let number = value.as_f64().filter(|v| v.is_finite()).ok_or_else(err)?;
             out.push(number);
         }
         Ok(out)
     };
 
-    let family = data.get("record_family").and_then(serde_json::Value::as_object)
+    let family = data
+        .get("record_family")
+        .and_then(serde_json::Value::as_object)
         .ok_or(ProfileError::TransientRecordFamilyRecordCount)?;
     if family.get("count").and_then(serde_json::Value::as_u64)
         != Some(TRANSIENT_RECORD_COUNT as u64)
     {
         return Err(ProfileError::TransientRecordFamilyRecordCount);
     }
-    let raw_records = family.get("records").and_then(serde_json::Value::as_array)
+    let raw_records = family
+        .get("records")
+        .and_then(serde_json::Value::as_array)
         .ok_or(ProfileError::TransientRecordFamilyRecordCount)?;
     if raw_records.len() != TRANSIENT_RECORD_COUNT {
         return Err(ProfileError::TransientRecordFamilyRecordCount);
@@ -295,7 +300,9 @@ pub fn load_transient_record_family(
         let record_err = || ProfileError::TransientRecordFamilyRecord { index };
         let raw_map = raw.as_object().ok_or_else(record_err)?;
         let u32s = |key: &str, length: usize| -> Result<Vec<u32>, ProfileError> {
-            raw_map.get(key).and_then(serde_json::Value::as_array)
+            raw_map
+                .get(key)
+                .and_then(serde_json::Value::as_array)
                 .filter(|values| values.len() == length)
                 .ok_or_else(record_err)?
                 .iter()
@@ -305,7 +312,9 @@ pub fn load_transient_record_family(
         let int = |key: &str| -> Result<u32, ProfileError> {
             u32_masked(raw_map.get(key).ok_or_else(record_err)?).ok_or_else(record_err)
         };
-        let file_off = raw_map.get("file_off").and_then(serde_json::Value::as_str)
+        let file_off = raw_map
+            .get("file_off")
+            .and_then(serde_json::Value::as_str)
             .filter(|s| !s.is_empty())
             .ok_or_else(record_err)?
             .to_string();
@@ -327,7 +336,10 @@ pub fn load_transient_record_family(
         if record.marker_u32 != 8
             || record.config_u32[0] != record.marker_u32
             || record.config_u32[TRANSIENT_RECORD_WORDS - 1] != record.carry_u32
-            || record.config_u32[1..13].iter().zip(&record.upper_u32).any(|(a, b)| a != b)
+            || record.config_u32[1..13]
+                .iter()
+                .zip(&record.upper_u32)
+                .any(|(a, b)| a != b)
             || record.config_u32[13..25]
                 .iter()
                 .zip(&record.lower_u32)
@@ -340,10 +352,7 @@ pub fn load_transient_record_family(
 
     let index_curve = f64_list("record_index_curve", TRANSIENT_RECORD_INDEX_POINTS)?;
     let breakpoints = f64_list("quality_axis_breakpoints", TRANSIENT_RECORD_INDEX_POINTS)?;
-    if breakpoints
-        .windows(2)
-        .any(|pair| pair[0] >= pair[1])
-    {
+    if breakpoints.windows(2).any(|pair| pair[0] >= pair[1]) {
         return Err(ProfileError::TransientRecordFamilyCurve {
             field: "quality_axis_breakpoints",
         });
@@ -358,18 +367,24 @@ pub fn load_transient_record_family(
     }
 
     let band_words = strict_u32_list_from(
-        data.get("band_words").and_then(serde_json::Value::as_object),
+        data.get("band_words")
+            .and_then(serde_json::Value::as_object),
         "band_words",
     )?;
     let stride_words = strict_u32_list_from(
-        data.get("stride_words").and_then(serde_json::Value::as_object),
+        data.get("stride_words")
+            .and_then(serde_json::Value::as_object),
         "stride_words",
     )?;
 
-    let window_build = data.get("window_build").and_then(serde_json::Value::as_object)
+    let window_build = data
+        .get("window_build")
+        .and_then(serde_json::Value::as_object)
         .ok_or(ProfileError::TransientRecordFamilyWindowConstants)?;
     let window_const = |key: &str| -> Result<f64, ProfileError> {
-        window_build.get(key).and_then(serde_json::Value::as_object)
+        window_build
+            .get(key)
+            .and_then(serde_json::Value::as_object)
             .and_then(|block| block.get("value"))
             .and_then(serde_json::Value::as_f64)
             .filter(|v| v.is_finite())
@@ -387,9 +402,7 @@ pub fn load_transient_record_family(
         .and_then(serde_json::Value::as_f64)
         .filter(|v| v.is_finite())
         .ok_or(ProfileError::TransientRecordFamilyDefaultIndex)?;
-    if default_record_index < 0.0
-        || default_record_index > (TRANSIENT_RECORD_COUNT - 1) as f64
-    {
+    if default_record_index < 0.0 || default_record_index > (TRANSIENT_RECORD_COUNT - 1) as f64 {
         return Err(ProfileError::TransientRecordFamilyDefaultIndex);
     }
 
@@ -436,9 +449,7 @@ pub fn materialize_transient_tables(
 ) -> Result<TransientDetectorTables, ProfileError> {
     let index = match quality {
         None => family.default_record_index,
-        Some(quality) if !quality.is_finite() => {
-            return Err(ProfileError::QualityValueNonFinite)
-        }
+        Some(quality) if !quality.is_finite() => return Err(ProfileError::QualityValueNonFinite),
         Some(quality) => {
             let (value, _outside) = linear_frac(
                 &family.breakpoints,
@@ -483,9 +494,8 @@ pub fn materialize_transient_tables(
     for (offset, count) in family.band_words.iter().zip(family.stride_words.iter()) {
         let mut weights = Vec::with_capacity(*count as usize);
         for j in 0..*count {
-            let value = (family.window_pi * (j as f64 + family.window_half_addend)
-                / *count as f64)
-                .sin();
+            let value =
+                (family.window_pi * (j as f64 + family.window_half_addend) / *count as f64).sin();
             weights.push(value as f32);
         }
         let scale = (family.window_pi / (2.0 * *count as f64)).sin() as f32;
@@ -500,7 +510,10 @@ pub fn materialize_transient_tables(
         n: family.n as i64,
         bias: f32::from_bits(base.bias_u32),
         window,
-        config: config_words.iter().map(|bits| f32::from_bits(*bits)).collect(),
+        config: config_words
+            .iter()
+            .map(|bits| f32::from_bits(*bits))
+            .collect(),
         bands,
     })
 }
@@ -525,10 +538,7 @@ pub fn load_transient(
         return load_transient_tables(ref_);
     }
     if schema == TRANSIENT_RECORD_FAMILY_SCHEMA {
-        return materialize_transient_tables(
-            &load_transient_record_family(ref_)?,
-            quality,
-        );
+        return materialize_transient_tables(&load_transient_record_family(ref_)?, quality);
     }
     Err(ProfileError::TransientSchemaChanged)
 }

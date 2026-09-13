@@ -84,8 +84,11 @@ fn record_index_curve_pins_match_the_python_reference() {
         (10.0, 5.0),
     ];
     for (quality, expected) in pins {
-        let (value, _outside) =
-            linear_frac(&fam.breakpoints, &fam.index_curve, normalize_quality_factor(*quality));
+        let (value, _outside) = linear_frac(
+            &fam.breakpoints,
+            &fam.index_curve,
+            normalize_quality_factor(*quality),
+        );
         assert_eq!(
             value, *expected,
             "record index at q={quality} differs from the Python pin"
@@ -103,11 +106,7 @@ fn default_quality_materializes_record_three_whole() {
     let rec3 = &fam.records[3];
     assert_eq!(f32_bits(&tables.bias), rec3.bias_u32);
     assert_eq!(
-        tables
-            .config
-            .iter()
-            .map(f32_bits)
-            .collect::<Vec<_>>(),
+        tables.config.iter().map(f32_bits).collect::<Vec<_>>(),
         rec3.config_u32.to_vec()
     );
 }
@@ -170,7 +169,10 @@ fn fractional_index_20_interpolates_between_records_two_and_three() {
     let a = f32::from_bits(rec2.config_u32[1]) as f64;
     let b = f32::from_bits(rec3.config_u32[1]) as f64;
     let got = f32::from_bits(f32_bits(&t.config[1])) as f64;
-    assert!(got < a && got > b, "expected an interior lerp: {got} in ({b}, {a})");
+    assert!(
+        got < a && got > b,
+        "expected an interior lerp: {got} in ({b}, {a})"
+    );
 }
 
 #[test]
@@ -196,7 +198,10 @@ fn materialized_window_matches_the_six_ch_registered_window() {
         .iter()
         .zip(&t6.window)
         .all(|(a, b)| a.to_bits() == b.to_bits());
-    assert!(same, "2ch materialized window != 6ch registered window bit-for-bit");
+    assert!(
+        same,
+        "2ch materialized window != 6ch registered window bit-for-bit"
+    );
     // And the endpoint pin.
     assert_eq!(f32_bits(&t2.window[127]), 0x2809aded);
 }
@@ -223,4 +228,3 @@ fn load_transient_tables_from(
 ) -> Result<wem_analysis::config::TransientDetectorTables, wem_profiles::ProfileError> {
     wem_profiles::transient::materialize_transient_tables(fam, quality)
 }
-

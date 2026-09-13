@@ -1,7 +1,7 @@
 //! Short seed-surface loader (Python: `profiles/psychoacoustics/config.py`).
 
 use wem_analysis::config::{
-    CALIBRATION_SAMPLE_RATES, TONE_BAND_COUNT, TONE_LEVEL_COUNT, WwisePsySeedSurface,
+    WwisePsySeedSurface, CALIBRATION_SAMPLE_RATES, TONE_BAND_COUNT, TONE_LEVEL_COUNT,
 };
 
 use super::{json_f32, json_int};

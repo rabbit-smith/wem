@@ -56,15 +56,19 @@ fn format_digest_hex(digest: &[u8]) -> String {
 /// Read one stage dump; verify its bytes against the index entry.
 fn read_dump(stages: &Path, entry: &Value, key: &str) -> Vec<u8> {
     let path = stages.join(entry["path"].as_str().unwrap());
-    let bytes = std::fs::read(&path)
-        .unwrap_or_else(|e| panic!("read dump {}: {e}", path.display()));
+    let bytes =
+        std::fs::read(&path).unwrap_or_else(|e| panic!("read dump {}: {e}", path.display()));
     let digest = sha256_hex(&bytes);
     assert_eq!(
         digest,
         entry["sha256"].as_str().unwrap(),
         "dump {key} bytes differ from index.json"
     );
-    assert_eq!(bytes.len(), entry["size"].as_u64().unwrap() as usize, "dump {key} size");
+    assert_eq!(
+        bytes.len(),
+        entry["size"].as_u64().unwrap() as usize,
+        "dump {key} size"
+    );
     bytes
 }
 
@@ -82,9 +86,7 @@ fn f32_rows(bytes: &[u8], channels: usize) -> Vec<Vec<f32>> {
             (0..per_channel)
                 .map(|i| {
                     let off = (ch * per_channel + i) * 4;
-                    f32::from_bits(u32::from_le_bytes(
-                        bytes[off..off + 4].try_into().unwrap(),
-                    ))
+                    f32::from_bits(u32::from_le_bytes(bytes[off..off + 4].try_into().unwrap()))
                 })
                 .collect()
         })
@@ -92,7 +94,13 @@ fn f32_rows(bytes: &[u8], channels: usize) -> Vec<Vec<f32>> {
 }
 
 /// f32le dump → the (channel-major) rows for a named stage of one frame.
-fn stage_rows(index: &Value, stages: &Path, frame_index: usize, stage: &str, channels: usize) -> Vec<Vec<f32>> {
+fn stage_rows(
+    index: &Value,
+    stages: &Path,
+    frame_index: usize,
+    stage: &str,
+    channels: usize,
+) -> Vec<Vec<f32>> {
     let key = format!("f{frame_index:03}.{stage}");
     let entry = index["dumps"]
         .get(&key)
@@ -222,8 +230,7 @@ fn stage_frames_packet_parity_all_28_representatives() {
         let expected_packet_sha = frame["packet_sha256"].as_str().unwrap().to_string();
         let expected_packet_size = frame["packet_size"].as_u64().unwrap() as usize;
 
-        let (packet, posts, quantized_residue) =
-            pack_frame(&res, &index, &stages, frame, channels);
+        let (packet, posts, quantized_residue) = pack_frame(&res, &index, &stages, frame, channels);
 
         assert_eq!(
             packet.len(),
@@ -248,8 +255,10 @@ fn stage_frames_packet_parity_all_28_representatives() {
 
         // residue_q parity (Python `_hash_int_rows` encoding, rows never None).
         let expected_residue_sha = frame["residue_q_after_sha256"].as_str().unwrap();
-        let residue_for_hash: Vec<Option<Vec<i64>>> =
-            quantized_residue.iter().map(|row| Some(row.clone())).collect();
+        let residue_for_hash: Vec<Option<Vec<i64>>> = quantized_residue
+            .iter()
+            .map(|row| Some(row.clone()))
+            .collect();
         assert_eq!(
             hash_int_rows(&residue_for_hash),
             expected_residue_sha,

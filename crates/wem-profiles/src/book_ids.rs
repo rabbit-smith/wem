@@ -192,11 +192,7 @@ pub struct BookTables {
 
 impl BookTables {
     pub fn new(t97: BookTable, t219: Option<BookTable>, t282: Option<BookTable>) -> Self {
-        Self {
-            t97,
-            t219,
-            t282,
-        }
+        Self { t97, t219, t282 }
     }
 
     /// Fetch a table by its name.

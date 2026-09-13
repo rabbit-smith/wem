@@ -791,10 +791,7 @@ mod coupling_round_trip {
         for step in coupling.iter().rev() {
             let (mag, ang) = (step.mag as usize, step.ang as usize);
             for j in 0..8 {
-                let (mag_stored, ang_stored) = (
-                    residuals[mag][j],
-                    residuals[ang][j],
-                );
+                let (mag_stored, ang_stored) = (residuals[mag][j], residuals[ang][j]);
                 let (mag_rec, ang_rec) = decode_branches(mag_stored, ang_stored);
                 residuals[mag][j] = mag_rec;
                 residuals[ang][j] = ang_rec;

@@ -11,7 +11,9 @@
 //! Parity: `tests/psy_geom_long_parity.rs`; the export cross-checks all 13
 //! fields against the registered 6ch JSONs before emitting.
 
-use super::psy_geom::{ath, curve_row1, curve_rows, default_quality_index, interval_table, mask_knots, octave};
+use super::psy_geom::{
+    ath, curve_row1, curve_rows, default_quality_index, interval_table, mask_knots, octave,
+};
 use super::psy_geom_long_data::{
     FIELD_KNOTS, MASK_BANK_MODE_2, MASK_BANK_MODE_3, SCALAR_AXIS_MODE2, SCALAR_AXIS_MODE3,
 };
@@ -49,7 +51,10 @@ pub fn curves(mode: u32) -> [Vec<u32>; 3] {
 /// pair table (18 words: the extra endpoint is never read with nonzero
 /// weight, matching the Python "<18f" load).
 pub fn field_19(_mode: u32) -> Vec<u32> {
-    let row: Vec<f64> = FIELD_KNOTS.iter().map(|b| f32::from_bits(*b) as f64).collect();
+    let row: Vec<f64> = FIELD_KNOTS
+        .iter()
+        .map(|b| f32::from_bits(*b) as f64)
+        .collect();
     curve_row1(A4, A5, &row)
         .iter()
         .map(|&v| f32bits(v))
@@ -72,10 +77,7 @@ pub fn base_curve() -> Vec<u32> {
 /// `seed.group_labels_u32` — bin log-coordinate ladder at 1024 bins
 /// (the build's code..the build's code), truncated toward zero like the reference.
 pub fn group_labels() -> Vec<u32> {
-    octave(A4, A5, 5)
-        .iter()
-        .map(|v| *v as u32)
-        .collect()
+    octave(A4, A5, 5).iter().map(|v| *v as u32).collect()
 }
 
 #[inline]

@@ -413,12 +413,12 @@ impl EncoderProfile {
     /// Defined for filesystem-backed profiles only; a profile assembled
     /// from an in-memory bytes bundle has no installed tree to view.
     pub fn runtime_manifest(&self) -> Result<ProfileManifestView, ProfileError> {
-        let setup_path = self
-            .setup_path
-            .as_ref()
-            .ok_or_else(|| ProfileError::InstalledBundleMismatch {
-                profile: self.name.clone(),
-            })?;
+        let setup_path =
+            self.setup_path
+                .as_ref()
+                .ok_or_else(|| ProfileError::InstalledBundleMismatch {
+                    profile: self.name.clone(),
+                })?;
         let bundle = match setup_path.backend() {
             ResourceBackend::Fs(data) => load_profile_bundle(data, Some(&self.name), false),
             ResourceBackend::Bytes { .. } => {

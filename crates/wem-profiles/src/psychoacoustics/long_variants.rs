@@ -1,7 +1,7 @@
 //! Pure loader and runtime adapter for long analysis mode 2/mode 3
 //! (Python: `profiles/psychoacoustics/long_variants.py`).
 
-use wem_analysis::config::{CALIBRATION_SAMPLE_RATES, WwisePsyLongTables};
+use wem_analysis::config::{WwisePsyLongTables, CALIBRATION_SAMPLE_RATES};
 
 use crate::error::ProfileError;
 use crate::resources::ResourceRef;

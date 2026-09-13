@@ -8,8 +8,7 @@ use wem_profiles::{load_profile_bundle, load_quality_curves, normalize_quality_f
 
 const DRAFT_NAME: &str = "wwise2013-2ch-48000";
 /// Setup packet SHA-256 (215-byte 2ch/48k setup extracted from the corpus WEM).
-const DRAFT_SETUP_SHA: &str =
-    "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc";
+const DRAFT_SETUP_SHA: &str = "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc";
 
 fn data_dir() -> DataDir {
     DataDir::from_profiles_dir(

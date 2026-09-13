@@ -124,7 +124,10 @@ fn twenty_two_ch_profile_resolves_t282_books() {
     // Every book the setup references must attribute to an installed table.
     let setup = parse_setup(&b.setup_packet().unwrap(), 2).unwrap();
     for &book_id in setup.book_ids.iter() {
-        assert!(resolve_book_id(book_id as i64, &tables).is_ok(), "book {book_id} resolves");
+        assert!(
+            resolve_book_id(book_id as i64, &tables).is_ok(),
+            "book {book_id} resolves"
+        );
     }
 }
 
@@ -978,11 +981,13 @@ fn installed_registry_resolutions() {
 
     // Quality-bound lookups are additive copies (the registry instance is
     // never mutated).
-    let bound =
-        wem_profiles::load_wem_profile_quality(name, Some(4.0)).expect("quality copy");
+    let bound = wem_profiles::load_wem_profile_quality(name, Some(4.0)).expect("quality copy");
     assert_eq!(bound.quality(), Some(4.0));
     let registry = wem_profiles::installed_registry(&data_dir()).expect("registry");
-    assert_eq!(registry.get_by_name(name).expect("original").quality(), None);
+    assert_eq!(
+        registry.get_by_name(name).expect("original").quality(),
+        None
+    );
     assert!(wem_profiles::load_wem_profile_quality(name, Some(f64::NAN)).is_err());
     let draft_by_name =
         wem_profiles::load_wem_profile_quality("wwise2013-2ch-48000", None).expect("2ch profile");

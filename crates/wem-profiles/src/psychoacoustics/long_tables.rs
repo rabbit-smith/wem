@@ -2,7 +2,7 @@
 //! (Python: `profiles/psychoacoustics/long_tables.py`).
 
 use wem_analysis::config::{
-    CALIBRATION_SAMPLE_RATES, TONE_BAND_COUNT, TONE_LEVEL_COUNT, WwisePsyLongTables,
+    WwisePsyLongTables, CALIBRATION_SAMPLE_RATES, TONE_BAND_COUNT, TONE_LEVEL_COUNT,
 };
 
 use crate::error::ProfileError;

@@ -23,8 +23,7 @@ fn resolve_wem_profile_quality_returns_additive_copies() {
     assert!(base.setup_available());
     assert_eq!(base.quality(), None);
 
-    let bound =
-        resolve_wem_profile_quality(6, 44100, Some(4.0)).expect("quality-bound copy");
+    let bound = resolve_wem_profile_quality(6, 44100, Some(4.0)).expect("quality-bound copy");
     assert_eq!(bound.quality(), Some(4.0));
     assert!(bound.setup_available());
 
@@ -34,8 +33,7 @@ fn resolve_wem_profile_quality_returns_additive_copies() {
 
 #[test]
 fn quality_none_encode_bytes_match_the_golden_sha() {
-    let profile =
-        resolve_wem_profile_quality(6, 44100, None).expect("6ch profile resolves");
+    let profile = resolve_wem_profile_quality(6, 44100, None).expect("6ch profile resolves");
     let encoder = Encoder::from_profile_model(&profile, None).expect("encoder builds");
     let wav = read_pcm16(&fixtures_dir().join("input.wav")).expect("input.wav reads");
     let pcm = wav.to_pcm16().expect("wav converts to Pcm16");

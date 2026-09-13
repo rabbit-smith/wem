@@ -186,10 +186,8 @@ impl ModeSelector {
         if blocksizes.len() != 2 || (current_mode != 0 && current_mode != 1) {
             return Err(SelectorError::GenerationGeometry);
         }
-        let boundary = blocksizes[current_mode as usize] / 4
-            + center
-            + blocksizes[1] / 2
-            + blocksizes[0] / 4;
+        let boundary =
+            blocksizes[current_mode as usize] / 4 + center + blocksizes[1] / 2 + blocksizes[0] / 4;
         let limit = self.generated - self.hop;
         let mut position = self.scan_cursor;
         if position >= limit {
@@ -320,7 +318,10 @@ mod tests {
     fn queue_slot_rejection() {
         let mut sel = ModeSelector::new(64, 4, 0, 0, 0, 0, vec![0; 4]).expect("ok");
         let err = sel.finish_quantum(2, 1).unwrap_err();
-        assert!(matches!(err, SelectorError::QueueSlotOutOfRange { slot: 4 }));
+        assert!(matches!(
+            err,
+            SelectorError::QueueSlotOutOfRange { slot: 4 }
+        ));
     }
 
     #[test]
@@ -331,7 +332,7 @@ mod tests {
         assert_eq!(written, 6);
         assert_eq!(sel.generated, 384);
         assert_eq!(sel.capacity, 12); // target + 6
-        // filled = 1280 -> target = 16; start = 384/64 = 6 -> 10 rows.
+                                      // filled = 1280 -> target = 16; start = 384/64 = 6 -> 10 rows.
         let rows: Vec<i64> = (0..10).map(|i| i + 1).collect();
         let written = sel.generate(1280, &rows).expect("ok");
         assert_eq!(written, 10);
@@ -354,8 +355,7 @@ mod tests {
     #[test]
     fn scan_decisions() {
         let bs = [256, 2048];
-        let mut sel =
-            ModeSelector::new(64, 32, 0, 1024, 0, 0, vec![0; 32]).expect("ok");
+        let mut sel = ModeSelector::new(64, 32, 0, 1024, 0, 0, vec![0; 32]).expect("ok");
         // No queue entry yet beyond the cursor.
         assert_eq!(sel.scan(0, 0, &bs).expect("ok"), -1);
         assert_eq!(sel.scan_cursor, 896);
@@ -373,17 +373,8 @@ mod tests {
         // Fresh selector with no transients: short blocks invert an empty
         // window (no transient -> code 1) and long blocks combine.
         let sel = ModeSelector::new(64, 8, 0, 0, 0, 2048, vec![0; 8]).expect("ok");
-        assert_eq!(
-            sel.transition_code(1024, 0, 0, 0, &bs).expect("ok"),
-            1
-        );
-        assert_eq!(
-            sel.transition_code(1024, 1, 1, 1, &bs).expect("ok"),
-            3
-        );
-        assert_eq!(
-            sel.transition_code(1024, 1, 1, 0, &bs).expect("ok"),
-            2
-        );
+        assert_eq!(sel.transition_code(1024, 0, 0, 0, &bs).expect("ok"), 1);
+        assert_eq!(sel.transition_code(1024, 1, 1, 1, &bs).expect("ok"), 3);
+        assert_eq!(sel.transition_code(1024, 1, 1, 0, &bs).expect("ok"), 2);
     }
 }

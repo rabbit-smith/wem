@@ -3,7 +3,9 @@
 
 use crate::error::ContainerError;
 use crate::fmt::{VorbisFmtFields, WWISE_VORBIS_FMT_SIZE, WWISE_VORBIS_FORMAT_TAG};
-use crate::packets::{build_packet_stream, extract_packets, recompute_vorbis_fmt_sizes, PacketWalk};
+use crate::packets::{
+    build_packet_stream, extract_packets, recompute_vorbis_fmt_sizes, PacketWalk,
+};
 use crate::riff::{build_riff, parse_chunks, Endian};
 
 /// A (fourcc, payload) chunk to embed in the RIFF container.

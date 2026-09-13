@@ -163,12 +163,7 @@ fn accumulate_fit(
 
 /// Fit a line using the exact weighted least-squares accumulator
 /// (Python `_fit_line`).
-fn fit_line(
-    fits: &[FloorFitAcc],
-    y0: i64,
-    y1: i64,
-    params: &FloorFitParams,
-) -> (i64, i64, bool) {
+fn fit_line(fits: &[FloorFitAcc], y0: i64, y1: i64, params: &FloorFitParams) -> (i64, i64, bool) {
     if fits.is_empty() {
         return (0, 0, true);
     }
@@ -182,8 +177,7 @@ fn fit_line(
     let mut y2b = 0.0f64;
     for acc in fits {
         // Weight the primary bucket using its sample-count denominator.
-        let weight = ((acc.bn + acc.an) as f64) * params.twofitweight / ((acc.an + 1) as f64)
-            + 1.0;
+        let weight = ((acc.bn + acc.an) as f64) * params.twofitweight / ((acc.an + 1) as f64) + 1.0;
         xb += acc.xb as f64 + acc.xa as f64 * weight;
         yb += acc.yb as f64 + acc.ya as f64 * weight;
         x2b += acc.x2b as f64 + acc.x2a as f64 * weight;
@@ -255,10 +249,8 @@ fn inspect_error(
     let d0 = y - val;
     let mut mse = d0 * d0;
     let mut count = 1i64;
-    if (quantized_curve[x as usize] as f64)
-        <= (floor_curve[x as usize] as f64) + params.twofitatten
-        && ((y as f64) + params.maxover < val as f64
-            || (y as f64) - params.maxunder > val as f64)
+    if (quantized_curve[x as usize] as f64) <= (floor_curve[x as usize] as f64) + params.twofitatten
+        && ((y as f64) + params.maxover < val as f64 || (y as f64) - params.maxunder > val as f64)
     {
         return true;
     }
@@ -343,10 +335,7 @@ pub fn floor1_fit_wwise(
     }
     let spectrum_n = n.unwrap_or(1usize << floor.rangebits);
     let required = spectrum_n.min(postlist[1] as usize);
-    if spectrum_n == 0
-        || raw_mdct_curve.len() < required
-        || fitted_floor_curve.len() < required
-    {
+    if spectrum_n == 0 || raw_mdct_curve.len() < required || fitted_floor_curve.len() < required {
         return Err(FloorFitError::CurvesTooShort);
     }
     let params = if (spectrum_n, posts) == (1024, 29) {
@@ -406,27 +395,9 @@ pub fn floor1_fit_wwise(
         let hx = postlist[hn];
         let ly = post_y(&fit_a, &fit_b, ln);
         let hy = post_y(&fit_a, &fit_b, hn);
-        if inspect_error(
-            lx,
-            hx,
-            ly,
-            hy,
-            fitted_floor_curve,
-            raw_mdct_curve,
-            &params,
-        ) {
-            let (mut ly0, mut ly1, ret0) = fit_line(
-                &fits[lsortpos..sortpos],
-                -200,
-                -200,
-                &params,
-            );
-            let (mut hy0, mut hy1, ret1) = fit_line(
-                &fits[sortpos..hsortpos],
-                -200,
-                -200,
-                &params,
-            );
+        if inspect_error(lx, hx, ly, hy, fitted_floor_curve, raw_mdct_curve, &params) {
+            let (mut ly0, mut ly1, ret0) = fit_line(&fits[lsortpos..sortpos], -200, -200, &params);
+            let (mut hy0, mut hy1, ret1) = fit_line(&fits[sortpos..hsortpos], -200, -200, &params);
             if ret0 {
                 ly0 = ly;
                 ly1 = hy0;
@@ -502,9 +473,7 @@ pub fn floor1_quantize_posts(
             2 => value >>= 3,
             3 => value /= 12,
             4 => value >>= 4,
-            _ => {
-                return Err(crate::floor::Floor1Error::InvalidMultiplier { multiplier })
-            }
+            _ => return Err(crate::floor::Floor1Error::InvalidMultiplier { multiplier }),
         }
         out.push(value | (post & 0x8000));
     }

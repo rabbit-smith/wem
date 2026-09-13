@@ -52,8 +52,7 @@ pub const QUALITY_CURVES_RESOURCE: &str = "analysis.quality-curves";
 pub const QUALITY_SEMANTIC_NO_OP: &str = "no-op";
 /// Per-curve semantic form: the transient record-index axis, owned by the
 /// record family (Python `QUALITY_SEMANTIC_TRANSIENT_RECORD_INDEX_AXIS`).
-pub const QUALITY_SEMANTIC_TRANSIENT_RECORD_INDEX_AXIS: &str =
-    "transient.record-index-axis";
+pub const QUALITY_SEMANTIC_TRANSIENT_RECORD_INDEX_AXIS: &str = "transient.record-index-axis";
 /// Prefix of the short-psy surface override semantic form
 /// (`short.<field>`, Python `QUALITY_SEMANTIC_SHORT_PREFIX`).
 pub const QUALITY_SEMANTIC_SHORT_PREFIX: &str = "short.";
@@ -96,10 +95,7 @@ impl QualityCurves {
         if breakpoints.len() < 2 {
             return Err(ProfileError::QualityCurvesTooFewBreakpoints);
         }
-        if breakpoints
-            .windows(2)
-            .any(|pair| pair[0] >= pair[1])
-        {
+        if breakpoints.windows(2).any(|pair| pair[0] >= pair[1]) {
             return Err(ProfileError::QualityCurvesBreakpointsNotIncreasing);
         }
         if curves.is_empty() {
@@ -114,9 +110,7 @@ impl QualityCurves {
                 });
             }
             if values.iter().any(|value| !value.is_finite()) {
-                return Err(ProfileError::QualityCurvesValueNonFinite {
-                    name: name.clone(),
-                });
+                return Err(ProfileError::QualityCurvesValueNonFinite { name: name.clone() });
             }
         }
         if semantics.is_empty() || semantics.len() != curves.len() {
@@ -291,9 +285,7 @@ pub fn load_quality_curves(ref_: &ResourceRef) -> Result<QualityCurves, ProfileE
             .iter()
             .map(finite_f64)
             .collect::<Result<Vec<f64>, _>>()
-            .map_err(|_| ProfileError::QualityCurvesValueNonFinite {
-                name: name.clone(),
-            })?;
+            .map_err(|_| ProfileError::QualityCurvesValueNonFinite { name: name.clone() })?;
         curves.insert(name.clone(), samples);
     }
     let semantics_raw = payload
@@ -302,7 +294,9 @@ pub fn load_quality_curves(ref_: &ResourceRef) -> Result<QualityCurves, ProfileE
         .ok_or(ProfileError::QualityCurvesSemanticsNotObject)?;
     let mut semantics = BTreeMap::new();
     for (name, semantic) in semantics_raw {
-        let semantic = semantic.as_str().ok_or(ProfileError::QualityCurvesSemanticsNotObject)?;
+        let semantic = semantic
+            .as_str()
+            .ok_or(ProfileError::QualityCurvesSemanticsNotObject)?;
         semantics.insert(name.clone(), semantic.to_string());
     }
     QualityCurves::new(
@@ -314,9 +308,11 @@ pub fn load_quality_curves(ref_: &ResourceRef) -> Result<QualityCurves, ProfileE
 }
 
 fn finite_f64(value: &serde_json::Value) -> Result<f64, ProfileError> {
-    let number = value.as_f64().ok_or_else(|| ProfileError::QualityCurvesValueNonFinite {
-        name: String::new(),
-    })?;
+    let number = value
+        .as_f64()
+        .ok_or_else(|| ProfileError::QualityCurvesValueNonFinite {
+            name: String::new(),
+        })?;
     if number.is_finite() {
         Ok(number)
     } else {
@@ -325,7 +321,6 @@ fn finite_f64(value: &serde_json::Value) -> Result<f64, ProfileError> {
         })
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -365,10 +360,7 @@ mod tests {
         assert_eq!(linear_frac(&bp, &s, 4.0), (20.0, false));
         assert_eq!(linear_frac(&bp, &s, 0.0), (10.0, false));
         // At the last breakpoint the 0.001 clamp formula applies.
-        assert_eq!(
-            linear_frac(&bp, &s, 8.0),
-            (29.990000000000002, false)
-        );
+        assert_eq!(linear_frac(&bp, &s, 8.0), (29.990000000000002, false));
     }
 
     #[test]
@@ -415,7 +407,10 @@ mod tests {
             ]),
             std::collections::BTreeMap::from([
                 ("desc3.psy_float".to_string(), "no-op".to_string()),
-                ("desc29.psy_int1".to_string(), "short.ath_offset".to_string()),
+                (
+                    "desc29.psy_int1".to_string(),
+                    "short.ath_offset".to_string(),
+                ),
             ]),
         )
         .expect("valid curves");

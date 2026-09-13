@@ -17,9 +17,7 @@ use std::process::{Command, Output};
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use wem_container::{
-    build_vorbis_wem, load_wem_parts_bytes, Endian, VorbisFmtFields,
-};
+use wem_container::{build_vorbis_wem, load_wem_parts_bytes, Endian, VorbisFmtFields};
 
 fn repo_root() -> PathBuf {
     // crates/wem-container -> repo root (two levels up from the manifest
@@ -149,8 +147,7 @@ fn b64_decode(value: &Value) -> Vec<u8> {
 fn base64_decode(text: &str) -> Vec<u8> {
     // Compact base64 decoder (the only dependency-free way to read the
     // capture output; mirrors the alphabet of Python's standard encoder).
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = Vec::new();
     let mut buf: u32 = 0;
     let mut nbits = 0u32;
@@ -211,7 +208,11 @@ fn container_contract_matches_stage_golden() {
 
     // Build VorbisFmtFields from the captured (pre-recompute) fields.
     let ff = &captured["fmt_fields"];
-    let i64f = |key: &str| -> u64 { ff[key].as_u64().unwrap_or_else(|| panic!("fmt field {key}")) };
+    let i64f = |key: &str| -> u64 {
+        ff[key]
+            .as_u64()
+            .unwrap_or_else(|| panic!("fmt field {key}"))
+    };
     let fields = VorbisFmtFields {
         w_format_tag: i64f("wFormatTag") as u16,
         n_channels: i64f("nChannels") as u16,
@@ -301,10 +302,7 @@ fn container_contract_matches_stage_golden() {
         parts.fmt.dw_first_audio_packet_offset,
         seek_table.len() as u32 + 2 + packets[0].len() as u32
     );
-    assert_eq!(
-        parts.fmt.dw_data_payload_size,
-        built.data_raw.len() as u32
-    );
+    assert_eq!(parts.fmt.dw_data_payload_size, built.data_raw.len() as u32);
     assert_eq!(
         parts.fmt.u_max_packet_size,
         packets.iter().map(|p| p.len()).max().unwrap() as u16
