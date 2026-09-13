@@ -8,6 +8,7 @@ round-to-nearest-even), matching the x86 default.
 
 No clocks, no randomness. Pure functions.
 """
+
 from __future__ import annotations
 
 import math
@@ -39,33 +40,33 @@ def f64(x: float) -> float:
 # file=VA-the build's code for the read-only data region (verified against 127.0/0.5/pi).
 # VA              -> (file_off, value, label)
 F64_C = {
-    "C_127":        (0x25168, 127.0),                  # the build's code
-    "PI_PREC":      (0x193bc0, 3.1415927410125732),    # the build's code  "Vorbis pi" (f32 pi as f64)
-    "HALF":         (0x25180, 0.5),                    # the build's code
-    "LOG_L":        (0x193bb8, 7.177114298428933e-07), # the build's code  wwise_float_log L
-    "LOG_M":        (0x193bb0, 764.6162109375),        # the build's code  wwise_float_log M
-    "WWISE_LOG_ADD":(0x19bda8, 0.345),                 # the build's code
-    "FOUR":         (0x189c68, 4.0),                   # the build's code
-    "F15":          (0x25170, 15.0),                   # the build's code
-    "F00625":       (0x25190, 0.0625),                 # the build's code
-    "F8":           (0x25148, 8.0),                    # the build's code
-    "F2":           (0x25160, 2.0),                    # the build's code
-    "F02":          (0x189c80, 0.2),                   # the build's code  (fmull in the build's code)
-    "F07":          (0x189c98, 0.7),                   # the build's code  (fmull in the build's code)
+    "C_127": (0x25168, 127.0),  # the build's code
+    "PI_PREC": (0x193BC0, 3.1415927410125732),  # the build's code  "Vorbis pi" (f32 pi as f64)
+    "HALF": (0x25180, 0.5),  # the build's code
+    "LOG_L": (0x193BB8, 7.177114298428933e-07),  # the build's code  wwise_float_log L
+    "LOG_M": (0x193BB0, 764.6162109375),  # the build's code  wwise_float_log M
+    "WWISE_LOG_ADD": (0x19BDA8, 0.345),  # the build's code
+    "FOUR": (0x189C68, 4.0),  # the build's code
+    "F15": (0x25170, 15.0),  # the build's code
+    "F00625": (0x25190, 0.0625),  # the build's code
+    "F8": (0x25148, 8.0),  # the build's code
+    "F2": (0x25160, 2.0),  # the build's code
+    "F02": (0x189C80, 0.2),  # the build's code  (fmull in the build's code)
+    "F07": (0x189C98, 0.7),  # the build's code  (fmull in the build's code)
 }
 
 # f32 constants
 F32_C = {
-    "NEG130":  -130.0,   # f32@the build's code (peak floor, specmax builder the build's code)
-    "POS140":   140.0,   # f32@the build's code (seed curve level distance)
-    "DECAY045":  0.45,   # f64@the build's code (specmax decay)
-    "HALF_F32":  0.5,    # f32@the build's code
-    "NEG1":     -1.0,    # f32@the build's code
+    "NEG130": -130.0,  # f32@the build's code (peak floor, specmax builder the build's code)
+    "POS140": 140.0,  # f32@the build's code (seed curve level distance)
+    "DECAY045": 0.45,  # f64@the build's code (specmax decay)
+    "HALF_F32": 0.5,  # f32@the build's code
+    "NEG1": -1.0,  # f32@the build's code
 }
 
 # Static sub-band geometry LUTs (read as u32 by the build's code; stored into ctx+0x28..)
-LUT50 = [2, 4, 6, 9, 13, 17, 22, 12, 8, 3, 2, 1]   # @ the build's code (12 u32)
-LUT80 = [4, 5, 6, 8, 8, 8, 8, 4, 4, 3, 2, 4]       # @ the build's code (12 u32), sum=64=n/2
+LUT50 = [2, 4, 6, 9, 13, 17, 22, 12, 8, 3, 2, 1]  # @ the build's code (12 u32)
+LUT80 = [4, 5, 6, 8, 8, 8, 8, 4, 4, 3, 2, 4]  # @ the build's code (12 u32), sum=64=n/2
 
 
 # NOTE (the round beat 3, verified against r6-d990-master §S3/§S6 + disasm):
@@ -102,12 +103,11 @@ def offset_for_n(n: int) -> float:
     return f32(wwise_float_log(val) + ADD)
 
 
-
-
 # Interval-only x87 operations: 64 significant bits, nearest/even.
 # Fractions retain register precision until the caller's explicit fstp store.
 def _round80(value):
     from fractions import Fraction
+
     value = Fraction(value)
     if not value:
         return value
@@ -121,9 +121,7 @@ def _round80(value):
     quantum = Fraction(2) ** (exponent - 63)
     units = value / quantum
     whole, remainder = divmod(units.numerator, units.denominator)
-    if 2 * remainder > units.denominator or (
-        2 * remainder == units.denominator and whole & 1
-    ):
+    if 2 * remainder > units.denominator or (2 * remainder == units.denominator and whole & 1):
         whole += 1
     return sign * whole * quantum
 
@@ -131,12 +129,14 @@ def _round80(value):
 def mul80(left, right):
     """Finite normal-range x87 multiply; returns an exact register value."""
     from fractions import Fraction
+
     return _round80(Fraction(left) * Fraction(right))
 
 
 def add80(left, right):
     """Finite normal-range x87 add; returns an exact register value."""
     from fractions import Fraction
+
     return _round80(Fraction(left) + Fraction(right))
 
 
@@ -163,25 +163,25 @@ def ciatan(x):
     This is the supplied DLL implementation, not proof of another CRT version.
     """
     x = to_float(x)  # the build's code: wrapper fstpl.
-    bits = struct.unpack('<Q', struct.pack('<d', x))[0]
-    high = (bits >> 32) & 0x7fffffff
+    bits = struct.unpack("<Q", struct.pack("<d", x))[0]
+    high = (bits >> 32) & 0x7FFFFFFF
     negative = bits >> 63
 
     def c(va):
-        return struct.unpack_from('<d', _CIATAN_DATA, va - the build's code)[0]
+        return struct.unpack_from("<d", _CIATAN_DATA, va - the build's code)[0]
 
     # the build's code..100393ee / 10039538..100395f1: large, NaN, tiny.
-    if high > 0x440fffff:
-        if (bits & 0x7fffffffffffffff) > 0x7ff0000000000000:
+    if high > 0x440FFFFF:
+        if (bits & 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000:
             return x
         return c(the build's code if negative else the build's code)
-    if high <= 0x3e3fffff:
+    if high <= 0x3E3FFFFF:
         return x
     region = -1
-    if high > 0x3fdbffff:
+    if high > 0x3FDBFFFF:
         x = abs(x)  # the build's code..100394f3: fabs and fstpl.
-        if high <= 0x3ff2ffff:
-            if high <= 0x3fe5ffff:
+        if high <= 0x3FF2FFFF:
+            if high <= 0x3FE5FFFF:
                 # the build's code..1003952b, preserve each SSE2 operation.
                 numerator = x + x
                 denominator = x + c(the build's code)
@@ -192,7 +192,7 @@ def ciatan(x):
                 # the build's code..1003963d.
                 x = (x - c(the build's code)) / (x + c(the build's code))
                 region = 1
-        elif high <= 0x40037fff:
+        elif high <= 0x40037FFF:
             # the build's code..100395a1.
             denominator = x * c(the build's code)
             numerator = x - c(the build's code)
@@ -444,11 +444,11 @@ _CIEXP_DATA = bytes.fromhex(
 
 
 def _bits64(x):
-    return struct.unpack('<Q', struct.pack('<d', x))[0]
+    return struct.unpack("<Q", struct.pack("<d", x))[0]
 
 
 def _from_bits64(bits):
-    return struct.unpack('<d', struct.pack('<Q', bits & 0xffffffffffffffff))[0]
+    return struct.unpack("<d", struct.pack("<Q", bits & 0xFFFFFFFFFFFFFFFF))[0]
 
 
 def ciexp(x):
@@ -460,20 +460,20 @@ def ciexp(x):
     """
     x = to_float(x)  # 1000c23a; return store is 1000c264.
     bits = _bits64(x)
-    exponent = (bits >> 52) & 0x7ff
+    exponent = (bits >> 52) & 0x7FF
 
     def c(va):
-        return struct.unpack_from('<d', _CIEXP_DATA, va - the build's code)[0]
+        return struct.unpack_from("<d", _CIEXP_DATA, va - the build's code)[0]
 
-    if (bits & 0x7fffffffffffffff) > 0x7ff0000000000000:
+    if (bits & 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000:
         # 15ce0 class 2; fcc0 default callback returns argument, fld quiets it.
         return _from_bits64(bits | 0x8000000000000)
-    if exponent < 0x3c9:  # 1000fe38: 1+x, including both zeros/subnormals
+    if exponent < 0x3C9:  # 1000fe38: 1+x, including both zeros/subnormals
         return x + c(the build's code)
     if exponent > 0x408:
-        if bits == 0xfff0000000000000:  # 1000fd0c..fd16: fldz
+        if bits == 0xFFF0000000000000:  # 1000fd0c..fd16: fldz
             return 0.0
-        if exponent == 0x7ff:  # +inf -> 1000fe38
+        if exponent == 0x7FF:  # +inf -> 1000fe38
             return x + c(the build's code)
         # fd2f/ff0b: default error result from overflow/underflow multiply.
         huge_or_tiny = c(the build's code if bits >> 63 else the build's code)
@@ -481,7 +481,7 @@ def ciexp(x):
     # fbc8 -> 5a770: bitwise round to nearest, ties AWAY from zero.
     scaled = x * c(the build's code)
     scaled_bits = _bits64(scaled)
-    e = ((scaled_bits >> 52) & 0x7ff) - 0x3ff
+    e = ((scaled_bits >> 52) & 0x7FF) - 0x3FF
     if e < -1:
         rounded = scaled * 0.0
     elif e == -1:
@@ -502,7 +502,7 @@ def ciexp(x):
     v1 = v1 + c(the build's code)
     v2 = v0 * v0
     table_bits = _bits64(c(the build's code + (j + 15) * 8))
-    scale_bits = (table_bits + ((k & 0xffffffff) << 45)) & 0xffffffffffffffff
+    scale_bits = (table_bits + ((k & 0xFFFFFFFF) << 45)) & 0xFFFFFFFFFFFFFFFF
     v3 = c(the build's code + (j + 14) * 8)
     v1 = v1 * v2
     v3 = v3 + v0
@@ -517,12 +517,12 @@ def ciexp(x):
         v1 = v1 * scale
         return v1 + scale
     if k >= 0:  # fde0..fe28: split overflow scaling
-        scale = _from_bits64(scale_bits - (0x3f100000 << 32))
+        scale = _from_bits64(scale_bits - (0x3F100000 << 32))
         v1 = v1 * scale
         v1 = v1 + scale
         return v1 * c(the build's code)
     # fd88..fdca: split underflow scaling; fe58 compensates before store.
-    scale = _from_bits64(scale_bits + (0x3fe00000 << 32))
+    scale = _from_bits64(scale_bits + (0x3FE00000 << 32))
     one = c(the build's code)
     v1 = v1 * scale
     v0 = scale + v1
@@ -550,10 +550,10 @@ def cilog(x):
     high = bits >> 32
 
     def c(va):
-        return struct.unpack_from('<d', _CILOG_DATA, va - the build's code)[0]
+        return struct.unpack_from("<d", _CILOG_DATA, va - the build's code)[0]
 
-    if ((high - 0x3fee0000) & 0xffffffff) <= 0x308ff:
-        if bits == 0x3ff0000000000000:  # 10049998: fldz
+    if ((high - 0x3FEE0000) & 0xFFFFFFFF) <= 0x308FF:
+        if bits == 0x3FF0000000000000:  # 10049998: fldz
             return 0.0
         v0 = x  # 1004977a
         v0 = v0 - c(the build's code)  # 1004977f
@@ -610,24 +610,24 @@ def cilog(x):
         v3 = v3 + v0  # 1004987f
         return v3
     # 10049898..100499d6: classify before normalizing subnormals.
-    absolute = bits & 0x7fffffffffffffff
+    absolute = bits & 0x7FFFFFFFFFFFFFFF
     if absolute == 0:
         return -math.inf  # +/-0: signed reciprocal, default error return
-    if absolute > 0x7ff0000000000000:
+    if absolute > 0x7FF0000000000000:
         return _from_bits64(bits | 0x8000000000000)  # fld/fst quiets sNaN
-    if bits == 0x7ff0000000000000:
+    if bits == 0x7FF0000000000000:
         return x
     if bits >> 63:
-        return _from_bits64(0xfff8000000000000)  # SSE invalid indefinite
+        return _from_bits64(0xFFF8000000000000)  # SSE invalid indefinite
     if high < 0x100000:
-        bits = (_bits64(x * c(the build's code)) + (0xfcc00000 << 32)) & 0xffffffffffffffff
+        bits = (_bits64(x * c(the build's code)) + (0xFCC00000 << 32)) & 0xFFFFFFFFFFFFFFFF
         high = bits >> 32
     # 10049651..100496e9: integer exponent/index and split table reduction.
-    delta = (high - 0x3fe60000) & 0xffffffff
-    index = (delta >> 13) & 0x7f
+    delta = (high - 0x3FE60000) & 0xFFFFFFFF
+    index = (delta >> 13) & 0x7F
     signed = delta if delta < 0x80000000 else delta - 0x100000000
     v2 = to_float(signed >> 20)
-    v1 = _from_bits64(bits - ((delta & 0xfff00000) << 32))
+    v1 = _from_bits64(bits - ((delta & 0xFFF00000) << 32))
     v0 = c(the build's code)
     v3 = c(the build's code)
     v6 = c(the build's code)
@@ -664,6 +664,7 @@ def cilog(x):
 
 # --- public safe conversions (fail-loud: domain errors raise ValueError with
 # the offending input; numerics are the plain struct/float/int operations) ---
+
 
 def to_float(x):
     try:

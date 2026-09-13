@@ -12,6 +12,7 @@ re-registration with real-Windows revalidation (the round); they are deliberatel
 not asserted here, and nothing in this file may start asserting them as
 authority before that gate.
 """
+
 from __future__ import annotations
 
 import json
@@ -73,7 +74,11 @@ class GeometryMaterializerContract(unittest.TestCase):
         )
         self.assertEqual(
             out["mask_curves"],
-            [f32_bits(v) for row in self.short_profiles_reg["profiles"][0]["mask_curves"] for v in row],
+            [
+                f32_bits(v)
+                for row in self.short_profiles_reg["profiles"][0]["mask_curves"]
+                for v in row
+            ],
         )
 
     def test_long_base_surfaces(self) -> None:
@@ -108,8 +113,13 @@ class GeometryMaterializerContract(unittest.TestCase):
                 out[f"variants[{mode}].interval_u32"],
                 [u32(x) for x in v["interval_u32"]],
             )
-        self.assertEqual(out["seed.base_curve"], [f32_bits(v) for v in self.long_base_reg["seed"]["base_curve"]])
-        self.assertEqual(out["seed.group_labels_u32"], [u32(v) for v in self.long_base_reg["seed"]["group_labels_u32"]])
+        self.assertEqual(
+            out["seed.base_curve"], [f32_bits(v) for v in self.long_base_reg["seed"]["base_curve"]]
+        )
+        self.assertEqual(
+            out["seed.group_labels_u32"],
+            [u32(v) for v in self.long_base_reg["seed"]["group_labels_u32"]],
+        )
 
     def test_mask_curve_alias_identity(self) -> None:
         # root-verified identity: short-seed look.mask_curve == mask_curves row 1

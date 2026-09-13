@@ -2,6 +2,7 @@
 
 Registered surfaces are read exclusively by gate_runner, never this builder.
 """
+
 from __future__ import annotations
 
 import struct
@@ -32,8 +33,9 @@ def build_mode(d, key, geo, mode):
     knots = short_seed.mask_knots(words, short_seed.default_quality_index())
     # 1001681b..1001696e: same loop as SHORT, explicit LONG a4=1024.
     rows = short_seed.mask_curves(1024, 44100, knots)
-    out = {f"analysis.curves[{i}]": [short_seed.f32_bits(v) for v in row]
-           for i, row in enumerate(rows)}
+    out = {
+        f"analysis.curves[{i}]": [short_seed.f32_bits(v) for v in row] for i, row in enumerate(rows)
+    }
     # 10016972..1001698f: same position/weights, DLL knots instead of a2.
     # The 18th source word is present for the zero-weight endpoint load.
     field_knots = struct.unpack("<18f", constant_bytes("paired_analysis_field_knots"))
@@ -44,5 +46,6 @@ def build_mode(d, key, geo, mode):
     # d450 1000d4a4..d4ab copies common seed; +112/+116 retain 0.5f.
     lower, upper = struct.unpack_from("<2i", constant_bytes("d940_scalar_axis"), mode * 12)
     out["analysis.interval_u32"] = short_seed.interval_table(
-        1024, 44100, a2_120=lower, a2_124=upper)
+        1024, 44100, a2_120=lower, a2_124=upper
+    )
     return out

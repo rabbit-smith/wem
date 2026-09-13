@@ -8,17 +8,22 @@ locked against the registered profile by tests/contract/
 test_geometry_materializer_contract.py. Keep numerics byte-identical to
 the corpus; regenerate, do not retype.
 """
+
 import json
 from pathlib import Path
 
 try:
-    _DATA = json.loads((Path(__file__).resolve().parent / "data" / "materializer_inputs.json").read_text())
+    _DATA = json.loads(
+        (Path(__file__).resolve().parent / "data" / "materializer_inputs.json").read_text()
+    )
 except (OSError, ValueError) as exc:  # package data is a build artifact: fail loud, never silent
-    raise RuntimeError("materializer_inputs.json missing/corrupt; regenerate via corpus gen_r20") from exc
+    raise RuntimeError(
+        "materializer_inputs.json missing/corrupt; regenerate via corpus gen_r20"
+    ) from exc
 
 
 def _s32(x: int) -> int:
-    return x - 2 ** 32 if x >= 2 ** 31 else x
+    return x - 2**32 if x >= 2**31 else x
 
 
 def load(decode_path=None):

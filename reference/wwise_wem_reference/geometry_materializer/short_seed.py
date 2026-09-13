@@ -26,6 +26,7 @@ SURFACE BINDINGS (a1 offset -> out field, confirmed from disasm stores):
 STATUS: All five independent 6ch surfaces pass their byte gates. The same
 static default binding is regenerated at 48000 for the 2ch comparison.
 """
+
 from __future__ import annotations
 
 import sys
@@ -40,25 +41,104 @@ TARGET = "short_seed"
 # ----------------------------------------------------------------------------
 # Constants (the paired build read-only data, f64 where noted)
 # ----------------------------------------------------------------------------
-LOG2E = 1.4426950216293335          # paired_log2e
-PSYCHO = 5.965784072875977          # paired_psycho
-LN2 = 0.6931470036506653            # paired_ln2
-HALF = 0.5                          # paired_half
-QUARTER = 0.25                      # paired_quarter
-ATH_OFF = 100.0                     # paired_ath_offset
-TWO = 2.0                           # paired_two
+LOG2E = 1.4426950216293335  # paired_log2e
+PSYCHO = 5.965784072875977  # paired_psycho
+LN2 = 0.6931470036506653  # paired_ln2
+HALF = 0.5  # paired_half
+QUARTER = 0.25  # paired_quarter
+ATH_OFF = 100.0  # paired_ath_offset
+TWO = 2.0  # paired_two
 
 # paired_ath_source_curve: ATH source curve (88 f32, read from the analysis tool)
 paired_ath_source_curve = [
-    -31.0, -33.0, -35.0, -37.0, -39.0, -41.0, -43.0, -45.0, -47.0, -49.0,
-    -51.0, -53.0, -55.0, -57.0, -59.0, -61.0, -63.0, -65.0, -67.0, -69.0,
-    -71.0, -73.0, -75.0, -77.0, -79.0, -81.0, -83.0, -84.0, -85.0, -86.0,
-    -87.0, -88.0, -89.0, -90.0, -91.0, -92.0, -93.0, -94.0, -95.0, -96.0,
-    -96.0, -97.0, -97.0, -97.0, -98.0, -98.0, -98.0, -99.0, -98.0, -97.0,
-    -97.0, -98.0, -99.0, -100.0, -101.0, -101.0, -102.0, -103.0, -104.0, -105.0,
-    -106.0, -106.0, -107.0, -107.0, -105.0, -104.0, -103.0, -102.0, -101.0, -99.0,
-    -98.0, -97.0, -96.0, -95.0, -95.0, -96.0, -97.0, -97.0, -93.0, -89.0,
-    -80.0, -70.0, -50.0, -40.0, -30.0, -26.0, -22.0, -18.0,
+    -31.0,
+    -33.0,
+    -35.0,
+    -37.0,
+    -39.0,
+    -41.0,
+    -43.0,
+    -45.0,
+    -47.0,
+    -49.0,
+    -51.0,
+    -53.0,
+    -55.0,
+    -57.0,
+    -59.0,
+    -61.0,
+    -63.0,
+    -65.0,
+    -67.0,
+    -69.0,
+    -71.0,
+    -73.0,
+    -75.0,
+    -77.0,
+    -79.0,
+    -81.0,
+    -83.0,
+    -84.0,
+    -85.0,
+    -86.0,
+    -87.0,
+    -88.0,
+    -89.0,
+    -90.0,
+    -91.0,
+    -92.0,
+    -93.0,
+    -94.0,
+    -95.0,
+    -96.0,
+    -96.0,
+    -97.0,
+    -97.0,
+    -97.0,
+    -98.0,
+    -98.0,
+    -98.0,
+    -99.0,
+    -98.0,
+    -97.0,
+    -97.0,
+    -98.0,
+    -99.0,
+    -100.0,
+    -101.0,
+    -101.0,
+    -102.0,
+    -103.0,
+    -104.0,
+    -105.0,
+    -106.0,
+    -106.0,
+    -107.0,
+    -107.0,
+    -105.0,
+    -104.0,
+    -103.0,
+    -102.0,
+    -101.0,
+    -99.0,
+    -98.0,
+    -97.0,
+    -96.0,
+    -95.0,
+    -95.0,
+    -96.0,
+    -97.0,
+    -97.0,
+    -93.0,
+    -89.0,
+    -80.0,
+    -70.0,
+    -50.0,
+    -40.0,
+    -30.0,
+    -26.0,
+    -22.0,
+    -18.0,
 ]
 
 
@@ -217,13 +297,13 @@ def default_quality_index():
     # the build's code/ebe4: double epsilon at the build's code, then fstps.
     q = f32_round(f32.add80(q, 1e-7))
     # the build's code/e33c..e3c6: descriptor+8, the corresponding locations.
-    axis = (-0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4,
-            0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+    axis = (-0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
     g = next(i for i in range(12) if axis[i] <= q <= axis[i + 1])
     # the build's code/e407: both endpoints are stored as f32.
     lo, hi = f32_round(axis[g]), f32_round(axis[g + 1])
     # the build's code/e413/e41b/e41f: divide, fstps, add integer, fstpl.
     from fractions import Fraction
+
     fraction = f32_round(f32._round80(Fraction(q - lo) / Fraction(hi - lo)))
     # ea80 eb47/eb6b copy this index; e8bb/e8d8 load it for the mode bank.
     return f32.to_float(f32.add80(g, fraction))
@@ -244,8 +324,7 @@ def mask_knots(raw, index, bias=0.0):
             at = g * 51 + row * 17 + j
             left, right = family._s32(raw[at]), family._s32(raw[at + 51])
             # d9d6..da98: fildl; separate fmuls; faddp; fstps.
-            values.append(f32_round(f32.add80(
-                f32.mul80(left, complement), f32.mul80(right, frac))))
+            values.append(f32_round(f32.add80(f32.mul80(left, complement), f32.mul80(right, frac))))
         # dac9/dad6/dad8: f64 6.0 at 10184d20, first knot + 6 -> f32.
         floor = f32_round(f32.add80(values[0], 6.0))
         # dae2/dae4/daec: add bias -> f32; daee/daf5/daf7: floor clamp.
@@ -260,8 +339,7 @@ def mask_curves(a4, a5, knots):
         # 1001681f/825/829/82d: (i+0.5)*rate/(2*n), _CIlog.
         logarithm = f32.cilog((i + HALF) * a5 / (2 * a4))
         # 10016832/838/83e/840: LOG2E, PSYCHO, *2, fstps.
-        position = f32_round(f32.mul80(
-            f32.add80(f32.mul80(logarithm, LOG2E), -PSYCHO), 2))
+        position = f32_round(f32.mul80(f32.add80(f32.mul80(logarithm, LOG2E), -PSYCHO), 2))
         position = min(16.0, max(0.0, position))  # 10016844..8d2.
         g = f32.to_int(position)  # 100168d6.
         frac = f32_round(f32.add80(position, -g))  # 100168e2/8ed.
@@ -269,8 +347,7 @@ def mask_curves(a4, a5, knots):
         for row, out in zip(knots, rows):
             # 100168fb..1696e; endpoint's following load has zero weight.
             right = row[g + 1] if g < 16 else 0.0
-            out.append(f32_round(f32.add80(
-                f32.mul80(right, frac), f32.mul80(row[g], complement))))
+            out.append(f32_round(f32.add80(f32.mul80(right, frac), f32.mul80(row[g], complement))))
     return rows
 
 
@@ -298,11 +375,8 @@ def build(d, key, geo):
     out["ath"] = [f32_bits(x) for x in ath(a4, a5)]
     out["octave"] = [f32.to_int(x) & 0xFFFFFFFF for x in octave(a4, a5, a1_8)]
     out["look.interval_table"] = interval_table(a4, a5)
-    knots = mask_knots(family.slot_u32(d, key, "mask_pool_0"),
-                       default_quality_index())
+    knots = mask_knots(family.slot_u32(d, key, "mask_pool_0"), default_quality_index())
     rows = mask_curves(a4, a5, knots)
     out["mask_curves"] = [f32_bits(v) for row in rows for v in row]
     out["look.mask_curve"] = [f32_bits(v) for v in rows[1]]
     return out
-
-
