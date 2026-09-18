@@ -52,7 +52,16 @@ FRAMES = 16384
 # Steady-region guard: the first 1024 decoded samples overlap the MDCT
 # onset of the stream and are excluded from the correlation window.
 STEADY_OFFSET = 1024
-CORRELATION_FLOOR = 0.99
+# Reconstruction bar for the synthetic stereo stream.  The original 0.99 was
+# calibrated against a behaviour-fitted type-2 residue classifier; the encoder now
+# uses the reference classifier transcribed from the paired implementation (two
+# peak metrics against the class metric tables), which allocates bits the way the
+# reference converter does instead of maximising this stream's correlation.  The
+# real rule costs 0.00004 correlation here (0.989959) while removing ~78% of the
+# payload gap on the 2ch/48k representative stream, so the floor records the
+# honest bar rather than the fitted one.  Bit closure and strict closure are
+# asserted separately above and remain exact.
+CORRELATION_FLOOR = 0.9895
 
 _SPEC = importlib.util.spec_from_file_location(
     "decode_cdlc_wem", ROOT / "scripts" / "decode_wem.py"
