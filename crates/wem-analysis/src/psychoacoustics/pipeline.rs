@@ -331,7 +331,13 @@ pub fn analyze_short_frame(
     // its exact order; it reads only the completed fft rows).
     let (channel_specmax, global_specmax) = match specmax_state {
         None => compute_spectrum_peak(&fft, carried_global_specmax)?,
-        Some(state) => update_frame_spectrum_peak(&fft, 128, 44100, state)?,
+        // The short look's own rate, not a literal: this frame's decay feeds the
+        // persistent cross-frame peak, so a hardcoded rate silently corrupts
+        // every later frame (and breaks parity with the reference port, which
+        // reads ``resources.short_look.sample_rate`` here).
+        Some(state) => {
+            update_frame_spectrum_peak(&fft, 128, resources.short_look.sample_rate, state)?
+        }
     };
     let look = &resources.short_look;
     let remap: Vec<Vec<f64>> = raw_mdct
