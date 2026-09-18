@@ -120,6 +120,15 @@ pub fn build_packet_stream(
 /// The typed struct mirrors the Python dict with all keys present, so the
 /// Python `fields.get("wFormatTag", default)` pass-through is a no-op here;
 /// the tag is preserved exactly.
+///
+/// `nAvgBytesPerSec` is *derived*, not carried: Wwise writes
+/// `floor(data_payload_bytes * nSamplesPerSec / dwTotalPCMFrames)`. Verified
+/// against six reference WEMs emitted by the paired 2013.2 build (6ch/44.1k
+/// fixture 108677 B / 139398 frames / 44100 Hz -> 34381, plus five 2ch/48k
+/// files); the 96000-frame sample whose exact quotient is 18600.5 pins the
+/// operator to truncation (rounding would give 18601). Deriving it also keeps
+/// the 6ch golden byte-identical, since that registration already equals the
+/// computed value.
 pub fn recompute_vorbis_fmt_sizes(
     fields: &mut VorbisFmtFields,
     packets: &[&[u8]],
@@ -132,8 +141,16 @@ pub fn recompute_vorbis_fmt_sizes(
     fields.dw_data_payload_size = data_size as u32;
     fields.dw_first_audio_packet_offset = first_in_data as u32;
     fields.dw_vorbis_data_offset = first_in_data as u32;
-    if let Some(max) = packets.iter().map(|p| p.len()).max() {
+    // ``uMaxPacketSize`` is the largest *audio* packet.  Verified against the
+    // paired build: an all-silent 2ch/48k stream has a 215-byte setup packet and
+    // 1-byte audio packets, and the build writes 1, not 215.  Including the setup
+    // packet only ever changes the field when the setup is the largest packet.
+    if let Some(max) = packets.iter().skip(1).map(|p| p.len()).max() {
         fields.u_max_packet_size = max as u16;
+    }
+    if fields.dw_total_pcm_frames != 0 && fields.n_samples_per_sec != 0 {
+        fields.n_avg_bytes_per_sec = ((data_size as u64 * fields.n_samples_per_sec as u64)
+            / fields.dw_total_pcm_frames as u64) as u32;
     }
 }
 
@@ -186,5 +203,16 @@ mod tests {
         assert_eq!(fields.dw_first_audio_packet_offset, 8 + 2 + 5);
         assert_eq!(fields.dw_vorbis_data_offset, 8 + 2 + 5);
         assert_eq!(fields.u_max_packet_size, 6);
+    }
+
+    #[test]
+    fn max_packet_size_counts_audio_packets_only() {
+        // The setup packet is excluded: the paired build writes 1 for an
+        // all-silent 2ch/48k stream whose setup packet is 215 bytes.
+        let mut fields = VorbisFmtFields::DEFAULTS;
+        let setup = b"setup-packet";
+        let audio = b"a";
+        recompute_vorbis_fmt_sizes(&mut fields, &[setup.as_ref(), audio.as_ref()], b"");
+        assert_eq!(fields.u_max_packet_size, 1);
     }
 }

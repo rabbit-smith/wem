@@ -8,8 +8,9 @@ import tempfile
 import unittest
 import wave
 from pathlib import Path
+from typing import ClassVar, TypedDict
 
-from wwise_wem import encode_wav
+from wwise_wem import EncodeResult, encode_wav
 from wwise_wem_reference.container.wem import load_wem_parts_bytes
 from wwise_wem.application.compat import read_pcm16_wav
 from wwise_wem.model import PcmBuffer
@@ -27,11 +28,7 @@ def _sample(frame: int, channel: int) -> int:
 
 
 def _write_pcm16(path: Path, frames: int) -> None:
-    values = [
-        _sample(frame, channel)
-        for frame in range(frames)
-        for channel in range(CHANNELS)
-    ]
+    values = [_sample(frame, channel) for frame in range(frames) for channel in range(CHANNELS)]
     with wave.open(str(path), "wb") as target:
         target.setnchannels(CHANNELS)
         target.setsampwidth(2)
@@ -39,35 +36,73 @@ def _write_pcm16(path: Path, frames: int) -> None:
         target.writeframes(struct.pack(f"<{len(values)}h", *values))
 
 
+class _Case(TypedDict):
+    """Locked expectations for one frame count."""
+
+    audio_packets: int
+    short_packets: int
+    long_packets: int
+    bytes: int
+    sha256: str
+
+
 class PcmLengthEncodeContractTests(unittest.TestCase):
-    EXPECTED = {
+    # NOTE (the round, 2026): the three ``sha256`` digests below were re-locked when
+    # ``nAvgBytesPerSec`` stopped being carried from the profile and started
+    # being derived as ``floor(data_payload_bytes * nSamplesPerSec /
+    # dwTotalPCMFrames)`` (see ``container.packets.recompute_vorbis_fmt_sizes``).
+    # The previously locked digests encoded the profile constant 34381 -- which
+    # is only correct for the 139398-frame golden fixture -- so every other
+    # input length carried a wrong header field. Verified mechanically: writing
+    # 34381 back into the ``avg`` slot of each new file reproduces the old
+    # digest byte-for-byte, i.e. only that 4-byte field moved; ``bytes``,
+    # packet counts and every audio packet are unchanged. The whole-file golden
+    # digest (6ch fixture) is unaffected and still passes untouched.
+    #
+    # NOTE (2026): every entry below was re-locked a second time, together with
+    # the packet counts, when the mode-selection tail rule was corrected. The
+    # paired build emits a frame while the *previous* frame's center still lies
+    # inside the PCM, so the plan ends exactly on the source length; the previous
+    # ``center < source_len + prefix`` bound overshot by a fixed amount and
+    # emitted trailing frames the build does not. Verified mechanically on all
+    # three lengths: the new stream's packets are an exact prefix of the old
+    # stream's (2, 1 and 2 trailing packets removed respectively), every other
+    # packet is byte-identical, and the new plan's last frame starts exactly at
+    # the source length (4096 -> 4096, 8192 -> 8192) with its predecessor still
+    # inside the PCM. That end-on-the-source-length signature is what all six
+    # measured reference streams show (both conversion routes), and the 6ch
+    # fixture golden digest is unaffected.
+    EXPECTED: dict[int, _Case] = {
         4096: {
-            "audio_packets": 35,
-            "short_packets": 34,
-            "long_packets": 1,
-            "bytes": 11002,
-            "sha256": "95dd9c2ef83b28c0c36868b75a9f5c9a82a34d9e12ae502ea1a5c096b572cd56",
+            "audio_packets": 33,
+            "short_packets": 33,
+            "long_packets": 0,
+            "bytes": 10795,
+            "sha256": "483fad7a759aaa3483dee1b766b8dc24189a7060be42b16bb2dbf231ba23773a",
         },
         4097: {
-            "audio_packets": 35,
+            "audio_packets": 34,
             "short_packets": 34,
-            "long_packets": 1,
-            "bytes": 11171,
-            "sha256": "9800cfb68948783333a3389c0b9734df9862bcc0275dc1185c0ba37325315e47",
+            "long_packets": 0,
+            "bytes": 11168,
+            "sha256": "0f9c5d440fddbb398608878013e15cf7baaea263f7e6d5da825309eb2b9b7a25",
         },
         8192: {
-            "audio_packets": 67,
-            "short_packets": 66,
-            "long_packets": 1,
-            "bytes": 21353,
-            "sha256": "681dc8ce2767bf887ced6059f1ae0f145832159851ebde8f28b3723a237173bf",
+            "audio_packets": 65,
+            "short_packets": 65,
+            "long_packets": 0,
+            "bytes": 21141,
+            "sha256": "135c9beaef2fcd275df5c69bd777ddad2bf20ade0ee40289efff68928cd8330e",
         },
     }
+
+    _directory: ClassVar[tempfile.TemporaryDirectory]
+    results: ClassVar[dict[int, EncodeResult]]
 
     @classmethod
     def setUpClass(cls) -> None:
         cls._directory = tempfile.TemporaryDirectory()
-        cls.results: dict[int, object] = {}
+        cls.results = {}
         for frame_count in cls.EXPECTED:
             path = Path(cls._directory.name) / f"edge-{frame_count}.wav"
             _write_pcm16(path, frame_count)
@@ -93,7 +128,7 @@ class PcmLengthEncodeContractTests(unittest.TestCase):
                 audio_packets = load_wem_parts_bytes(result.data)["packets"][1:]
                 modes = tuple(packet[0] & 1 for packet in audio_packets)
                 self.assertEqual(len(modes), expected["audio_packets"])
-                self.assertEqual(modes, (0,) * expected["short_packets"] + (1,))
+                self.assertEqual(modes, (0,) * expected["short_packets"] + (1,) * expected["long_packets"])
 
 
 class PcmInputAdapterContractTests(unittest.TestCase):
@@ -177,9 +212,9 @@ class PcmBufferEdgeContractTests(unittest.TestCase):
                     PcmBuffer(SAMPLE_RATE, channels)
 
     def test_signed_boundaries_are_normalized_to_immutable_floats(self) -> None:
-        source = [[-1, 0, 1], [-0.5, 0.5, 32767 / 32768]]
-        pcm = PcmBuffer(SAMPLE_RATE, source)
-        source[0][0] = 99
+        source: list[list[float]] = [[-1.0, 0.0, 1.0], [-0.5, 0.5, 32767 / 32768]]
+        pcm = PcmBuffer(SAMPLE_RATE, tuple(tuple(row) for row in source))
+        source[0][0] = 99.0
 
         self.assertEqual(
             pcm.channels,

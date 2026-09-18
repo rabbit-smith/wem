@@ -27,10 +27,16 @@ def _s32(x: int) -> int:
 
 
 def load(decode_path=None):
-    """Corpus-API shim: descriptor dict backed by the extracted bundle."""
-    pool = _DATA["mask_pool_0_u32"]
-    slot = {"raw_u32": pool}
-    rec = {"slots": {"mask_pool_0": slot}}
+    """Corpus-API shim: descriptor dict backed by the extracted bundle.
+
+    Both descriptor copies of the paired build carry byte-identical mask
+    pools, so one record serves every geometry key.
+    """
+    slots = {
+        "mask_pool_0": {"raw_u32": _DATA["mask_pool_0_u32"]},
+        "mask_pool_1": {"raw_u32": _DATA["mask_pool_1_u32"]},
+    }
+    rec = {"slots": slots}
     return {"descriptor_6ch": rec, "descriptor_2ch": rec}
 
 

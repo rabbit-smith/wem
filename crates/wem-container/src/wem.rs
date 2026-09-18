@@ -65,7 +65,9 @@ pub fn build_vorbis_wem(
         let setup_offset = seek_table.len() + packets.first().map(|p| 2 + p.len()).unwrap_or(0);
         write_le_u32(&mut fmt_payload, 0x1C, setup_offset as u32);
         write_le_u32(&mut fmt_payload, 0x2C, setup_offset as u32);
-        if let Some(max) = packets.iter().map(|p| p.len()).max() {
+        // larger *audio* packet only: the setup packet is not counted (see
+        // ``recompute_vorbis_fmt_sizes``).
+        if let Some(max) = packets.iter().skip(1).map(|p| p.len()).max() {
             write_le_u16(&mut fmt_payload, 0x30, max as u16);
         }
     }
@@ -203,7 +205,8 @@ mod tests {
         assert_eq!(parts.fmt.dw_data_payload_size, 35);
         assert_eq!(parts.fmt.dw_first_audio_packet_offset, 20);
         assert_eq!(parts.fmt.dw_vorbis_data_offset, 20);
-        assert_eq!(parts.fmt.u_max_packet_size, 10);
+        // largest *audio* packet (4 and 7), not the 10-byte setup packet
+        assert_eq!(parts.fmt.u_max_packet_size, 7);
         assert_eq!(parts.fmt.w_format_tag, WWISE_VORBIS_FORMAT_TAG);
 
         // WAVE body: RIFF(8) + WAVE(4) + fmt(8+66) + data(8+35)
@@ -257,6 +260,8 @@ mod tests {
         );
         assert_eq!(parts.fmt.dw_data_payload_size, 2 + setup.len() as u32);
         assert_eq!(parts.fmt.dw_seek_table_size, 0);
-        assert_eq!(parts.fmt.u_max_packet_size, setup.len() as u16);
+        // no audio packets: the field keeps its incoming value, mirroring the
+        // Python contract's named "preserve existing max" case
+        assert_eq!(parts.fmt.u_max_packet_size, 0xEEEE);
     }
 }

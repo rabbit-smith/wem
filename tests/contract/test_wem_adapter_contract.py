@@ -152,7 +152,9 @@ class WemAdapterContractTests(unittest.TestCase):
             self.assertEqual(fmt["dwDataPayloadSize"], len(parts["data_raw"]))
             self.assertEqual(fmt["dwFirstAudioPacketOffset"], expected_first_audio)
             self.assertEqual(fmt["dwVorbisDataOffset"], expected_first_audio)
-            self.assertEqual(fmt["uMaxPacketSize"], max(map(len, packets)))
+            # largest *audio* packet: the paired build writes 1 for an all-silent
+            # stream whose setup packet is 215 bytes, so the setup is not counted
+            self.assertEqual(fmt["uMaxPacketSize"], max(map(len, packets[1:])))
 
             rebuilt = build_vorbis_wem(
                 fmt,

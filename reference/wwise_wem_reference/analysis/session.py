@@ -62,7 +62,9 @@ class AnalysisSession:
             raise ValueError("sample rate must be positive")
         if not isinstance(self.resources, AnalysisProfileResources):
             raise TypeError("analysis resources must be AnalysisProfileResources")
-        blocksizes = tuple(int(value) for value in self.blocksizes)
+        if len(self.blocksizes) != 2:
+            raise ValueError("the checked stream state expects 256/2048 blocks")
+        blocksizes = (int(self.blocksizes[0]), int(self.blocksizes[1]))
         if blocksizes != (256, 2048):
             raise ValueError("the checked stream state expects 256/2048 blocks")
         self.blocksizes = blocksizes
@@ -218,11 +220,18 @@ class AnalysisSession:
             self.ingest_transient_quantum(quantum)
 
         prefix = self.blocksizes[1] // 2
-        stop_center = source_len + prefix
         center = 0
         current = 0
+        previous = -1
         modes: list[int] = []
-        while center < stop_center:
+        # Emit the frame at ``center`` while the *previous* frame's center is
+        # still inside the PCM.  The final frame therefore runs one hop past
+        # the source length, and that hop is the frame's own: a long tail
+        # overshoots by a long hop, a short tail by a short hop.  A plain
+        # ``center < source_len + prefix`` bound overshoots by a fixed amount
+        # instead and emits trailing frames the paired build does not (verified
+        # against six reference streams and the 6ch golden).
+        while previous < 0 or previous < source_len:
             status = self.mode_selection_status(
                 center=center + prefix, current_mode=current
             )
@@ -231,6 +240,7 @@ class AnalysisSession:
             # at status 0/1 through its final emitted block.
             following = 0 if status < 0 else status
             modes.append(current)
+            previous = center
             center += (
                 self.blocksizes[current] // 4
                 + self.blocksizes[following] // 4

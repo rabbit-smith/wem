@@ -11,7 +11,7 @@ generation; further generations can be added as additional profiles.
 | Wwise | PCM | Channels | Rate | Blocks | Status |
 |---|---|---:|---:|---:|---|
 | 2013.2 | signed 16-bit | 6 (5.1) | 44100 Hz | 256/2048 | bit-exact |
-| 2013.2 | signed 16-bit | 2 | 48000 Hz | 256/2048 | encodes; surfaces mechanism-materialized, provisional calibration pending real-hardware revalidation (see below) |
+| 2013.2 | signed 16-bit | 2 | 48000 Hz | 256/2048 | encodes; all psychoacoustic surfaces mechanism-materialized or read-verified (see below) |
 
 The profile registry is keyed by `(channels, sample_rate)`. Further channel
 layouts and rates can be added without changing the stream encoder API.
@@ -103,10 +103,14 @@ byte-for-byte. Parity is locked on three surfaces: the ported builder
 (`reference/wwise_wem_reference/geometry_materializer/`), the registered
 profile bytes (`tests/contract/test_geometry_materializer_contract.py`), and
 the kernel mirror (`crates/wem-analysis` `dsp::x87/crt90/psy_geom*`, generated
-parity suites). The registered 2ch values remain provisional operating points
-until real-Windows revalidation of the calibration chain; re-registration
-switches them to mechanism-generated values in one gated window. Calibration
-provenance per field: [`docs/profiles.md`](docs/profiles.md).
+parity suites). The 2ch short surfaces are among those mechanism-generated
+values: `geometry.first_octave` was read from the paired build running at
+48000 Hz and all five short surfaces were re-registered from the ported
+builder — including both per-profile row sets, each read from its own knot
+bank — locked by the same contract. The twelve LONG surfaces were then promoted
+the same way and are read-verified against the running build too. Roadmap:
+[`docs/roadmap.md`](docs/roadmap.md). Calibration provenance per field:
+[`docs/profiles.md`](docs/profiles.md).
 
 ## Integration surface
 

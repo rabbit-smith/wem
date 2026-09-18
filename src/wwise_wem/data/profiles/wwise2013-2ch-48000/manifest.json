@@ -31,9 +31,9 @@
     "dwVorbisDataOffset": 0,
     "uMaxPacketSize": 0,
     "uUnknown_0x32": 0,
-    "dwUnknown_0x34": 0,
-    "dwUnknown_0x38": 0,
-    "dwUnknown_0x3C": 0,
+    "dwUnknown_0x34": 16080,
+    "dwUnknown_0x38": 16560,
+    "dwUnknown_0x3C": 3966356248,
     "uBlocksize0Pow": 8,
     "uBlocksize1Pow": 11
   },
@@ -67,7 +67,7 @@
     "meta.pending": {
       "path": "pending.json",
       "schema": "wem.profile-pending.v1",
-      "sha256": "d2a1e44c76218e6416ac7c2c07cc422792c1dd0f474d2e38d4990d2946d65cd5"
+      "sha256": "57b19a4ada04cc4ef61d940acc80aed299df4a5f1c22f17d4f9fb1aa083ca572"
     },
     "analysis.frozen-tables": {
       "path": "analysis/frozen-tables.json",
@@ -77,22 +77,22 @@
     "psychoacoustics.short-seed": {
       "path": "psychoacoustics/short-seed.json",
       "schema": "wem.seed-surface.v6",
-      "sha256": "22cf8684a4ce76422ea1291569348a81fa768b3ad4d4ccf20ea6a08609c7326d"
+      "sha256": "919d948b76079ef957488ccff05fb3942ceaa0e7728829293949b4acfb86d56e"
     },
     "psychoacoustics.short-profiles": {
       "path": "psychoacoustics/short-profiles.json",
       "schema": "wem.short-psy-profiles.v1",
-      "sha256": "167b4796c3b1c809a2f53eda5b374286f274917436aed7ef0e2de739bed3bb69"
+      "sha256": "985f6a8bf4318db4f38885df4658b22603201d2121f18dfe83f92c76220d65bb"
     },
     "psychoacoustics.long-base": {
       "path": "psychoacoustics/long-base.json",
       "schema": "wem.psy-long-static.v1",
-      "sha256": "01f4ec3d01bc8b13e7663f05100cc4b2f6c21e87552d54bf12579ecedb3dd577"
+      "sha256": "a4d7a90aeacf3c0c2390b38906e67c11399cc236330ee7182fc645eec0cbd174"
     },
     "psychoacoustics.long-modes": {
       "path": "psychoacoustics/long-modes.json",
       "schema": "wem.psy-long-analysis-variants.v1",
-      "sha256": "235b2248522ed847ede9a1214eeea825274088cb8cb2291bdcce40789c774f0e"
+      "sha256": "3e53578480ca2379a7e0fe56f9278888c3a98901bb31f0d56012cb7249fedd82"
     }
   }
 }

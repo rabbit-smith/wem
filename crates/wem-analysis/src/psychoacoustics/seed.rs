@@ -169,6 +169,17 @@ fn wwise_apply_max_seed_floor(
         }
         while pos < end {
             pos += 1;
+            // Same bound as the loop head above: the inner walk can step past
+            // ``total_octave_lines`` before the next outer check, so guard here
+            // as well. Fail loudly (as the loop head does) rather than indexing
+            // out of bounds -- the paired build only avoids this because its
+            // geometry keeps ``end`` inside the grid.
+            if !(pos >= 0 && pos < total_octave_lines) {
+                return Err(AnalysisError::SeedCursorOutOfRange {
+                    cursor: pos,
+                    total: total_octave_lines,
+                });
+            }
             let s = seed[pos as usize];
             if (s > NEGATIVE_INFINITY_DB as f64 && s < min_value)
                 || min_value == NEGATIVE_INFINITY_DB as f64
@@ -491,5 +502,23 @@ mod tests {
         assert_eq!(local.len(), 2);
         // min(0, max(...)) then f32
         assert!(global >= 0.0);
+    }
+
+    #[test]
+    fn max_seed_floor_reports_out_of_range_cursor_instead_of_panicking() {
+        // The octave pair drives ``end`` to 15 while the seed surface only has
+        // 10 slots, so the inner walk must stop at the same bound the loop head
+        // enforces. Regression: this used to panic with an index out of bounds.
+        let mut seed = vec![NEGATIVE_INFINITY_DB as f64; 10];
+        let mut floor_curve = vec![0.0f64; 2];
+        let err = wwise_apply_max_seed_floor(&mut seed, &mut floor_curve, &[0, 30], 0, 0, 10, 0.0)
+            .expect_err("out-of-range cursor must be reported");
+        assert!(matches!(
+            err,
+            AnalysisError::SeedCursorOutOfRange {
+                cursor: 10,
+                total: 10
+            }
+        ));
     }
 }

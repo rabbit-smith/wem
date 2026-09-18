@@ -198,6 +198,18 @@ class VorbisFmtSizeContractTests(unittest.TestCase):
         self.assertEqual(result["dwVorbisDataOffset"], 6)
         self.assertEqual(result["uMaxPacketSize"], 5)
 
+    def test_max_packet_size_counts_audio_packets_only(self) -> None:
+        """The setup packet is excluded from the maximum.
+
+        Evidence: the paired build writes 1 for an all-silent 2ch/48k stream
+        whose setup packet is 215 bytes and whose audio packets are all 1 byte.
+        Counting the setup packet only ever changes the field when it happens to
+        be the largest one.
+        """
+        result = recompute_vorbis_fmt_sizes({}, [b"setup-packet", b"a", b"bb"], b"")
+
+        self.assertEqual(result["uMaxPacketSize"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

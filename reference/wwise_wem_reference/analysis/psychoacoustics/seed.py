@@ -268,6 +268,13 @@ def wwise_apply_max_seed_floor(
             min_value = float(seed_ceiling)
         while pos + 1 <= end:
             pos += 1
+            # Same bound as the loop head above: the inner walk can step past
+            # ``total_octave_lines`` before the next outer check, so guard here
+            # as well. The paired build only avoids this because its geometry
+            # keeps ``end`` inside the grid. Fail loudly (as the loop head does)
+            # rather than raising an index error from the array access.
+            if not 0 <= pos < total_octave_lines:
+                raise ValueError("seed position falls outside total octave lines")
             if (
                 (float(seed[pos]) > NEGATIVE_INFINITY_DB and float(seed[pos]) < min_value)
                 or min_value == NEGATIVE_INFINITY_DB

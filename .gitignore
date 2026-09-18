@@ -27,6 +27,9 @@ js/pkg-node/.gitignore
 # Nothing under corpus/ is a trusted contract asset until verified and moved.
 corpus/
 
+# macOS Finder metadata (generated noise, never an intentional artifact).
+.DS_Store
+
 # the round paired-corpus tooling outputs (scratch templates; not contract assets).
 rs_corpus_*.xml
 .claude/settings.local.json

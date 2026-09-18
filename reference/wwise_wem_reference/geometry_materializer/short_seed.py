@@ -360,12 +360,11 @@ def build(d, key, geo):
       look.mask_curve     -> f32 bits (config-dependent; a1[3][1] / mask_curves[1])
       look.interval_table -> u32 of i32 (config-dependent; a1[6])
 
-    6ch (44100): all five surfaces are byte-exact. The 2ch (48000)
-    regeneration is the round pending verification, without byte authority.
+    Both geometries (44100 and 48000) are byte-exact. The per-profile rows
+    live in :func:`profile_mask_curves`; the seed surfaces above are shared.
     """
     a4 = 128
-    # the build's code/10010b82: a5 is explicit geometry input, not a surface read.
-    a5 = {(6, 40000, 70000): 44100, (2, 45000, 50000): 48000}[tuple(key)]
+    a5 = _sample_rate(key)
     if tuple(geo) != tuple(key):
         raise ValueError("descriptor geometry does not match requested key")
     # a1[8] is the derived exponent, NOT *a3; the latter remains unresolved.
@@ -375,8 +374,42 @@ def build(d, key, geo):
     out["ath"] = [f32_bits(x) for x in ath(a4, a5)]
     out["octave"] = [f32.to_int(x) & 0xFFFFFFFF for x in octave(a4, a5, a1_8)]
     out["look.interval_table"] = interval_table(a4, a5)
-    knots = mask_knots(family.slot_u32(d, key, "mask_pool_0"), default_quality_index())
+    knots = profile_knots(d, key, PROFILE_POOLS[0], a5)
     rows = mask_curves(a4, a5, knots)
     out["mask_curves"] = [f32_bits(v) for row in rows for v in row]
     out["look.mask_curve"] = [f32_bits(v) for v in rows[1]]
     return out
+
+
+#: SHORT profile index -> descriptor knot-pool slot. Profile 0 hosts
+#: ``look.mask_curve``/``mask_curves`` and profile 1 the second curve row set;
+#: both pools are byte-identical in the paired build's two descriptor copies.
+PROFILE_POOLS = ("mask_pool_0", "mask_pool_1")
+
+
+def profile_knots(d, key, slot, a5):
+    """Three knot rows for one SHORT profile: pool lerp at the default quality."""
+    if a5 not in (44100, 48000):
+        raise ValueError("unsupported geometry sample rate")
+    return mask_knots(family.slot_u32(d, key, slot), default_quality_index())
+
+
+def profile_mask_curves(d, key, geo, profile_index):
+    """Registered per-profile SHORT floor rows as f32 bits (3 x 128).
+
+    Profile 0 reads ``mask_pool_0``, profile 1 ``mask_pool_1``; both use the
+    same default quality index and zero bias, and both reproduce the
+    registered 6ch authority byte-for-byte.
+    """
+    if tuple(geo) != tuple(key):
+        raise ValueError("descriptor geometry does not match requested key")
+    if not 0 <= profile_index < len(PROFILE_POOLS):
+        raise ValueError("short profile index is outside the pool table")
+    a5 = _sample_rate(key)
+    rows = mask_curves(128, a5, profile_knots(d, key, PROFILE_POOLS[profile_index], a5))
+    return [f32_bits(v) for row in rows for v in row]
+
+
+def _sample_rate(key):
+    """the build's code/10010b82: a5 is an explicit geometry input, not a surface read."""
+    return {(6, 40000, 70000): 44100, (2, 45000, 50000): 48000}[tuple(key)]

@@ -295,14 +295,22 @@ impl AnalysisSession {
         }
 
         let prefix = self.blocksizes[1] / 2;
-        let stop_center = source_len + prefix;
         let mut center = 0;
         let mut current = 0;
+        let mut previous = -1;
         let mut modes: Vec<i64> = Vec::new();
-        while center < stop_center {
+        // Emit the frame at ``center`` while the *previous* frame's center is
+        // still inside the PCM.  The final frame therefore runs one hop past
+        // the source length, and that hop is the frame's own: a long tail
+        // overshoots by a long hop, a short tail by a short hop.  A fixed
+        // ``center < source_len + prefix`` bound overshoots by a constant
+        // instead and emits trailing frames the paired build does not
+        // (verified against six reference streams and the 6ch golden).
+        while previous < 0 || previous < source_len {
             let status = self.mode_selection_status(center + prefix, current)?;
             let following = if status < 0 { 0 } else { status };
             modes.push(current);
+            previous = center;
             center +=
                 self.blocksizes[current as usize] / 4 + self.blocksizes[following as usize] / 4;
             current = following;

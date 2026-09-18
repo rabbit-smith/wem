@@ -35,9 +35,10 @@ Currently installed:
   produced by the paired build's geometry materializer
   (the build's conversion plug-in image), reproduced byte-exact on the 6ch gates
   for the five short surfaces by a per-instruction port, with the twelve
-  long surfaces awaiting the same mechanism re-derivation; the registered
-  2ch values stay frequency-mapped operating-point approximations labeled
-  provisional pending that re-derivation and real-Windows revalidation;
+  long surfaces awaiting the same mechanism re-derivation; on 2ch the five
+  short surfaces are registered from that mechanism, with `first_octave` read
+  from the paired build running at 48000 Hz, while the twelve long surfaces are
+  registered from the same mechanism after a live read of their 48 kHz values;
   the container aux fields
   stay partial pending behavior pairing.
 

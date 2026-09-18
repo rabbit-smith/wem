@@ -126,8 +126,10 @@ def build_vorbis_wem(
         setup_offset = len(seek_table) + (2 + len(packets[0]) if packets else 0)
         struct.pack_into("<I", fmt_buf, 0x1C, setup_offset)
         struct.pack_into("<I", fmt_buf, 0x2C, setup_offset)
-        if packets:
-            struct.pack_into("<H", fmt_buf, 0x30, max(len(packet) for packet in packets))
+        # largest *audio* packet: the paired build writes 1 for an all-silent
+        # stream whose setup packet is 215 bytes, so the setup is not counted
+        if len(packets) > 1:
+            struct.pack_into("<H", fmt_buf, 0x30, max(len(packet) for packet in packets[1:]))
         fmt_payload = bytes(fmt_buf)
     chunks: list[tuple[bytes, bytes]] = [(b"fmt ", fmt_payload)]
     if extra_chunks:
