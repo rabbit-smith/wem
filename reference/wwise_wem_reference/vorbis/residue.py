@@ -390,39 +390,60 @@ def _vv_add_slots(offset: int, part: int, n_channels: int, dim: int):
         yield slots
 
 
-def _classify_partition_type2(
-    samples_flat: Sequence[float], nclass: int, long_block: bool
-) -> int:
-    """Classify one type-2 partition (magnitude class across all channels).
+#: Encoder-only class metrics for the type-2 (flat-domain) residue template,
+#: read from the paired build `.data`: the type-2 configuration record at
+#: the build's code carries its magnitude metrics at the build's code and its angle
+#: metrics at the build's code (the golden's type-1 pair sits the same way at
+#: the build's code / the build's code relative to the build's code).  A negative angle metric
+#: disables that class's angle gate, the same convention as the validated
+#: type-1 metric table.
+WWISE_RESIDUE_TYPE2_CLASS_METRICS: tuple[tuple[int, ...], tuple[int, ...]] = (
+    (0, 1, 1, 2, 2, 4, 4, 16, 60),
+    (-1, 30, -1, 50, -1, 80, -1, -1, -1),
+)
 
-    Behavior-fitted from the 2ch/48k representative stream: the reference
-    class assignment tracks the quantized partition peak on the integer
-    book scale, with power-of-2 boundaries for high peaks and a
-    block-length-dependent split for peak 2. Deterministic.
+#: Channel count of the type-2 flat classification domain. The reference
+#: classifier de-interleaves ``bin * channels + channel``; every installed
+#: profile is stereo.
+_TYPE2_CLASSIFY_CHANNELS = 2
+
+
+def _classify_partition_type2(
+    samples_flat: Sequence[float],
+    nclass: int,
+    channels: int = _TYPE2_CLASSIFY_CHANNELS,
+    long_block: bool = False,
+) -> int:
+    """Classify one type-2 partition (reference ``_2class``).
+
+    The reference classifier takes two peaks over the partition's flat
+    ``(bin * channels + channel)`` domain: the maximum absolute coefficient of
+    channel 0, and the maximum over every other channel.  It scans the class
+    metrics in order and takes the first class whose magnitude and angle gates
+    both hold, otherwise the last class.  ``long_block`` is unused.
     """
-    if not samples_flat:
+    del long_block  # the reference type-2 classifier has no block dependence
+    if not samples_flat or channels <= 0:
         return 0
-    peak = 0.0
-    for s in samples_flat:
-        a = abs(float(s))
-        if a > peak:
-            peak = a
-    q = int(peak + 0.5)
-    if q <= 0:
-        return 0
-    if q <= 1:
-        return 1
-    if q == 2:
-        return 4 if long_block else 3
-    if q <= 4:
-        return 5
-    if q <= 8:
-        return 6
-    if q <= 16:
-        return 7
-    if q <= 32:
-        return 8
-    return 9
+    values = [quantize_residue_value(sample) for sample in samples_flat]
+    magnitude_peak = 0
+    angle_peak = 0
+    for index, value in enumerate(values):
+        magnitude = abs(value)
+        if index % channels == 0:
+            if magnitude > magnitude_peak:
+                magnitude_peak = magnitude
+        elif magnitude > angle_peak:
+            angle_peak = magnitude
+    max_metrics, angle_metrics = WWISE_RESIDUE_TYPE2_CLASS_METRICS
+    for classification, (max_metric, angle_metric) in enumerate(
+        zip(max_metrics, angle_metrics)
+    ):
+        if magnitude_peak <= max_metric and (
+            angle_metric < 0 or angle_peak <= angle_metric
+        ):
+            return classification
+    return nclass - 1
 
 
 def _pack_classbook_entry_type2(
@@ -513,7 +534,9 @@ def pack_residue_type2(
                 ch_idx = f % n_channels
                 if ch_used[ch_idx] and bin_idx < len(work[ch_idx]):
                     flat.append(work[ch_idx][bin_idx])
-            partword[lw][k] = _classify_partition_type2(flat, nclass, long_block)
+            partword[lw][k] = _classify_partition_type2(
+                flat, nclass, n_channels, long_block
+            )
 
     vq_count = 0
     for s in range(8):

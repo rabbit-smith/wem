@@ -343,51 +343,53 @@ pub fn pack_residue_vq(
     Ok(())
 }
 
-/// Classify one type-2 partition (magnitude class across all channels)
+/// Class metrics for the type-2 (flat-domain) residue template, read from the
+/// reference converter's data segment: the type-2 configuration record carries
+/// its magnitude metrics and its angle metrics as these two tables. A negative
+/// angle metric disables that class's angle gate, the same convention as the
+/// validated type-1 metric table.
+/// (Python `WWISE_RESIDUE_TYPE2_CLASS_METRICS`.)
+const TYPE2_CLASS_MAGNITUDE_METRICS: [i64; 9] = [0, 1, 1, 2, 2, 4, 4, 16, 60];
+const TYPE2_CLASS_ANGLE_METRICS: [i64; 9] = [-1, 30, -1, 50, -1, 80, -1, -1, -1];
+
+/// Classify one type-2 partition (reference `_2class`)
 /// (Python `_classify_partition_type2`).
 ///
-/// Behavior-fitted from the 2ch/48k representative stream: the reference
-/// class assignment tracks the quantized partition peak on the integer
-/// book scale, with power-of-2 boundaries for high peaks and a
-/// block-length-dependent split for peak 2. Deterministic.
+/// The reference classifier takes two peaks over the partition's flat
+/// `(bin * channels + channel)` domain: the maximum absolute coefficient of
+/// channel 0, and the maximum over every other channel. It scans the class
+/// metrics in order and takes the first class whose magnitude and angle gates
+/// both hold, otherwise the last class. `long_block` is unused by the
+/// reference classifier.
 pub fn classify_partition_type2(
     samples_flat: &[f64],
     #[allow(unused_variables)] nclass: u64,
-    long_block: bool,
+    channels: usize,
+    #[allow(unused_variables)] long_block: bool,
 ) -> i64 {
-    if samples_flat.is_empty() {
+    if samples_flat.is_empty() || channels == 0 {
         return 0;
     }
-    let mut peak = 0.0;
-    for s in samples_flat {
-        let a = s.abs();
-        if a > peak {
-            peak = a;
+    let mut magnitude_peak = 0i64;
+    let mut angle_peak = 0i64;
+    for (index, sample) in samples_flat.iter().enumerate() {
+        let magnitude = quantize_residue_value(*sample).abs();
+        if index % channels == 0 {
+            if magnitude > magnitude_peak {
+                magnitude_peak = magnitude;
+            }
+        } else if magnitude > angle_peak {
+            angle_peak = magnitude;
         }
     }
-    let q = (peak + 0.5) as i64;
-    if q <= 0 {
-        return 0;
+    for classification in 0..TYPE2_CLASS_MAGNITUDE_METRICS.len() {
+        let max_metric = TYPE2_CLASS_MAGNITUDE_METRICS[classification];
+        let angle_metric = TYPE2_CLASS_ANGLE_METRICS[classification];
+        if magnitude_peak <= max_metric && (angle_metric < 0 || angle_peak <= angle_metric) {
+            return classification as i64;
+        }
     }
-    if q <= 1 {
-        return 1;
-    }
-    if q == 2 {
-        return if long_block { 4 } else { 3 };
-    }
-    if q <= 4 {
-        return 5;
-    }
-    if q <= 8 {
-        return 6;
-    }
-    if q <= 16 {
-        return 7;
-    }
-    if q <= 32 {
-        return 8;
-    }
-    9
+    nclass as i64 - 1
 }
 
 /// Mixed-radix classbook entry for the type-2 phrasebook
@@ -502,7 +504,7 @@ pub fn pack_residue_type2(
                     flat.push(work[ch_idx][bin_idx]);
                 }
             }
-            partword[lw][k] = classify_partition_type2(&flat, nclass, long_block);
+            partword[lw][k] = classify_partition_type2(&flat, nclass, n_channels, long_block);
         }
     }
 
