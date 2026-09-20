@@ -1,86 +1,94 @@
-//! LONG (2048-block / 1024-bin) materializer outputs of analysis_geometry_builder.
+//! Long-block (2048 sample / 1024 bin) psychoacoustic geometry.
 //!
-//! Kernel-side mirror of `builders/long_base.py` + `long_variants.py`: the
-//! same geometry materializer engine (`psy_geom`) at `a4 = 1024`, with the
-//! mode-selected mask banks (the build's code mode 2 → descriptor+48;
-//! the build's code mode 3 → descriptor+4c) and the descriptor+3c scalar-axis
-//! pairs feeding the interval cursors (the build's code..d9ac). Registered only
-//! for the 6ch geometry, exactly like the Python builder (`build_mode`
-//! rejects other keys); 2ch long regeneration stays an the round/the round question.
-//!
-//! Parity: `tests/psy_geom_long_parity.rs`; the export cross-checks all 13
-//! fields against the registered 6ch JSONs before emitting.
+//! Both long modes share one materializer and select their mask bank and
+//! interval spans from profile-derived constants. Bit parity is pinned by
+//! `tests/psy_geom_long_parity.rs`.
 
 use super::psy_geom::{
     ath, curve_row1, curve_rows, default_quality_index, interval_table, mask_knots, octave,
 };
 use super::psy_geom_long_data::{
-    FIELD_KNOTS, MASK_BANK_MODE_2, MASK_BANK_MODE_3, SCALAR_AXIS_MODE2, SCALAR_AXIS_MODE3,
+    FIELD_KNOTS as AUXILIARY_KNOTS, MASK_BANK_MODE_2, MASK_BANK_MODE_3, SCALAR_AXIS_MODE2,
+    SCALAR_AXIS_MODE3,
 };
+use crate::config::AnalysisError;
 
-/// LONG geometry: 1024 bins at the 6ch sample rate (call the build's code).
-const A4: u32 = 1024;
-const A5: u32 = 44100;
+const SPECTRUM_BINS: u32 = 1024;
+const SAMPLE_RATE: u32 = 44100;
 
-fn bank(mode: u32) -> &'static [u32] {
+fn bank(mode: u32) -> Result<&'static [u32], AnalysisError> {
     match mode {
-        2 => MASK_BANK_MODE_2,
-        3 => MASK_BANK_MODE_3,
-        _ => panic!("LONG mode must be 2 or 3 (descriptor+3c/+48/+4c wiring)"),
+        2 => Ok(MASK_BANK_MODE_2),
+        3 => Ok(MASK_BANK_MODE_3),
+        _ => Err(AnalysisError::UnsupportedGeometry {
+            reason: "long geometry mode must be 2 or 3",
+        }),
     }
 }
 
-fn axis(mode: u32) -> (i64, i64) {
+fn axis(mode: u32) -> Result<(i64, i64), AnalysisError> {
     let (lo, hi) = match mode {
         2 => SCALAR_AXIS_MODE2,
         3 => SCALAR_AXIS_MODE3,
-        _ => panic!("LONG mode must be 2 or 3"),
+        _ => {
+            return Err(AnalysisError::UnsupportedGeometry {
+                reason: "long geometry mode must be 2 or 3",
+            })
+        }
     };
-    (lo as i64, hi as i64)
+    Ok((lo as i64, hi as i64))
 }
 
-/// `analysis.curves[0..3]` (and mode-3 `variants[3].curves`): three 1024-
-/// element rows from the mode bank through the mode bank + the bin-center lerps.
-pub fn curves(mode: u32) -> [Vec<u32>; 3] {
-    let knots = mask_knots(bank(mode), default_quality_index());
-    let rows = curve_rows(A4, A5, &knots);
-    rows.map(|r| r.iter().map(|&v| f32bits(v)).collect())
+/// Three 1024-element mask rows for the selected long mode.
+pub fn curves(mode: u32) -> Result<[Vec<u32>; 3], AnalysisError> {
+    let knots = mask_knots(bank(mode)?, default_quality_index())?;
+    let rows = curve_rows(SPECTRUM_BINS, SAMPLE_RATE, &knots)?;
+    Ok(rows.map(|r| r.iter().map(|&v| f32bits(v)).collect()))
 }
 
-/// `analysis.field_19_curve` — the build's code..the build's code over the DLL knot
-/// pair table (18 words: the extra endpoint is never read with nonzero
-/// weight, matching the Python "<18f" load).
-pub fn field_19(_mode: u32) -> Vec<u32> {
-    let row: Vec<f64> = FIELD_KNOTS
+/// Auxiliary long-mode curve from the shared 18-knot table.
+pub fn auxiliary_curve() -> Result<Vec<u32>, AnalysisError> {
+    let row: Vec<f64> = AUXILIARY_KNOTS
         .iter()
         .map(|b| f32::from_bits(*b) as f64)
         .collect();
-    curve_row1(A4, A5, &row)
+    Ok(curve_row1(SPECTRUM_BINS, SAMPLE_RATE, &row)?
         .iter()
         .map(|&v| f32bits(v))
-        .collect()
+        .collect())
 }
 
-/// `analysis.interval_u32` — interval engine at 1024 bins with the mode's
-/// descriptor+3c scalar pair as the mode-bank cursor integers.
-pub fn interval(mode: u32) -> Vec<u32> {
-    let (lo, hi) = axis(mode);
-    interval_table(A4, A5, lo, hi)
+/// Packed smoothing intervals for the selected long mode.
+pub fn interval(mode: u32) -> Result<Vec<u32>, AnalysisError> {
+    let (lo, hi) = axis(mode)?;
+    interval_table(SPECTRUM_BINS, SAMPLE_RATE, lo, hi)
 }
 
-/// `seed.base_curve` — same 87-segment ATH writer at 1024 bins
-/// (the build's code..the build's code).
-pub fn base_curve() -> Vec<u32> {
-    ath(A4, A5)
+/// Absolute hearing threshold curve for long blocks.
+pub fn base_curve() -> Result<Vec<u32>, AnalysisError> {
+    ath(SPECTRUM_BINS, SAMPLE_RATE)
 }
 
-/// `seed.group_labels_u32` — bin log-coordinate ladder at 1024 bins
-/// (the build's code..the build's code), truncated toward zero like the reference.
-pub fn group_labels() -> Vec<u32> {
-    octave(A4, A5, 5).iter().map(|v| *v as u32).collect()
+/// Log-frequency group labels for long blocks.
+pub fn group_labels() -> Result<Vec<u32>, AnalysisError> {
+    Ok(octave(SPECTRUM_BINS, SAMPLE_RATE, 5)?
+        .iter()
+        .map(|v| *v as u32)
+        .collect())
 }
 
 #[inline]
 fn f32bits(x: f64) -> u32 {
     (x as f32).to_bits()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{curves, interval};
+
+    #[test]
+    fn rejects_unknown_long_mode() {
+        assert!(curves(1).is_err());
+        assert!(interval(4).is_err());
+    }
 }

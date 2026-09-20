@@ -18,8 +18,8 @@ pub mod dsp {
     pub mod crt90;
     pub mod crt90_data;
     pub mod lpc;
-    /// Geometry-materializer surfaces (analysis_geometry_builder ports of `ath` and
-    /// `octave`; constants in `psy_geom_data`, parity via tests).
+    /// Geometry materializers for `ath`, `octave`, smoothing intervals, and
+    /// mask curves; constants live in `psy_geom_data`, with parity tests.
     pub mod psy_geom;
     pub mod psy_geom_data;
     /// LONG (1024-bin) materializer outputs reusing the SHORT engine with

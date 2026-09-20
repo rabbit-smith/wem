@@ -259,8 +259,8 @@ const MCV_48000: &[u32; 384] = &[
 
 #[test]
 fn ath_parity() {
-    let a6 = ath(128, 44100);
-    let a2 = ath(128, 48000);
+    let a6 = ath(128, 44100).unwrap();
+    let a2 = ath(128, 48000).unwrap();
     for i in 0..128 {
         assert_eq!(a6[i], ATH_44100[i], "ath6 {i}");
         assert_eq!(a2[i], ATH_48000[i], "ath2 {i}");
@@ -269,8 +269,8 @@ fn ath_parity() {
 
 #[test]
 fn octave_parity() {
-    let o6 = octave(128, 44100, 5);
-    let o2 = octave(128, 48000, 5);
+    let o6 = octave(128, 44100, 5).unwrap();
+    let o2 = octave(128, 48000, 5).unwrap();
     for i in 0..128 {
         assert_eq!(o6[i] as u32, OCT_44100[i], "oct6 {i}");
         assert_eq!(o2[i] as u32, OCT_48000[i], "oct2 {i}");
@@ -279,8 +279,8 @@ fn octave_parity() {
 
 #[test]
 fn interval_parity() {
-    let v6 = interval_table(128, 44100, 3, 3);
-    let v2 = interval_table(128, 48000, 3, 3);
+    let v6 = interval_table(128, 44100, 3, 3).unwrap();
+    let v2 = interval_table(128, 48000, 3, 3).unwrap();
     for i in 0..128 {
         assert_eq!(v6[i], IV_44100[i], "iv6 {i}");
         assert_eq!(v2[i], IV_48000[i], "iv2 {i}");
@@ -289,8 +289,8 @@ fn interval_parity() {
 
 #[test]
 fn mask_curve_parity() {
-    let m6 = mask_curve(128, 44100);
-    let m2 = mask_curve(128, 48000);
+    let m6 = mask_curve(128, 44100).unwrap();
+    let m2 = mask_curve(128, 48000).unwrap();
     for i in 0..128 {
         assert_eq!(m6[i], MC_44100[i], "mc6 {i}");
         assert_eq!(m2[i], MC_48000[i], "mc2 {i}");
@@ -299,8 +299,8 @@ fn mask_curve_parity() {
 
 #[test]
 fn mask_curves_parity() {
-    let g6 = mask_curves(128, 44100);
-    let g2 = mask_curves(128, 48000);
+    let g6 = mask_curves(128, 44100).unwrap();
+    let g2 = mask_curves(128, 48000).unwrap();
     for i in 0..384 {
         assert_eq!(g6[i], MCV_44100[i], "mcv6 {i}");
         assert_eq!(g2[i], MCV_48000[i], "mcv2 {i}");

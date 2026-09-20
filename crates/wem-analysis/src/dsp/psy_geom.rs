@@ -1,10 +1,9 @@
-//! Geometry-materializer surfaces `ath` and `octave` of analysis_geometry_builder.
+//! Deterministic psychoacoustic geometry materializer.
 //!
-//! Kernel-side port of the Python builder reference
-//! (`corpus/paired-build/the round/src/builders/short_seed.py`); parity is
-//! locked bit-for-bit by `tests/psy_geom_parity.rs` (oracle: the Python
-//! builder, itself cross-checked against the registered 6ch bytes at export
-//! time). VA annotations follow the reference.
+//! These builders preserve reference x87 rounding and comparison boundaries;
+//! their output is locked bit-for-bit by `tests/psy_geom_parity.rs`. Function
+//! and local names describe the data being built so disassembly vocabulary
+//! stays out of callers.
 
 use super::crt90::{ciatan, ciexp, cilog};
 use super::psy_geom_data::{
@@ -12,6 +11,7 @@ use super::psy_geom_data::{
     MASK_POOL, PSYCHO_BITS, QUARTER_BITS, SIX_F64_BITS, TWO_BITS,
 };
 use super::x87::{f32_bits, f32_round};
+use crate::config::AnalysisError;
 
 #[inline]
 const fn d(bits: u64) -> f64 {
@@ -49,76 +49,90 @@ fn floor_integer(x: f64) -> i64 {
     }
 }
 
-/// `a1[5]` — the build's code..the build's code (VERIFIED 128/128 on the corpus gate).
-///
-/// x87 loop per bin i: `trunc( ((cilog(((i+0.25)*0.5*r)) * LOG2E - PSYCHO) * S + 0.5) )`
-/// with `r = a5/a4` (both fild'd as integers), `S = 1 << (a1[8]+1)`.
-pub fn octave(a4: u32, a5: u32, a1_8: u32) -> Vec<i32> {
-    let s = (1i64 << (a1_8 + 1)) as f64; // shl of 1 by a1[8]+1
-    let r = (a5 as f64) / (a4 as f64); // var_18 / var_20 (exact int/uint division)
-    (0..a4)
-        .map(|i| {
-            let arg = ((f64::from(i) + QUARTER) * 0.5) * r;
-            let v = ((cilog(arg) * LOG2E) - PSYCHO) * s + HALF;
-            trunc_zero(v) as i32
+/// Materialize the logarithmic group label for every spectrum bin.
+/// Arithmetic order and truncation are part of the byte contract.
+pub fn octave(
+    spectrum_bins: u32,
+    sample_rate: u32,
+    octave_shift: u32,
+) -> Result<Vec<i32>, AnalysisError> {
+    validate_geometry(spectrum_bins, sample_rate)?;
+    let shift = octave_shift
+        .checked_add(1)
+        .ok_or(AnalysisError::UnsupportedGeometry {
+            reason: "octave shift is too large",
+        })?;
+    let scale = 1i64
+        .checked_shl(shift)
+        .ok_or(AnalysisError::UnsupportedGeometry {
+            reason: "octave shift is too large",
+        })? as f64;
+    let bin_width = (sample_rate as f64) / (spectrum_bins as f64);
+    Ok((0..spectrum_bins)
+        .map(|bin| {
+            let frequency = ((f64::from(bin) + QUARTER) * 0.5) * bin_width;
+            let label = ((cilog(frequency) * LOG2E) - PSYCHO) * scale + HALF;
+            trunc_zero(label) as i32
         })
-        .collect()
+        .collect())
 }
 
-/// `a1[4]` — the build's code..the build's code, supplied CRT exp value path.
-///
-/// 87 source segments (v42 = 0..=86; the build's code compares the incremented
-/// index with 0x57), each filled with the f32-stepped ramp
-/// `paired_ath_source_curve[v42] + 100 + k*slope`, plus the tail extrapolation at
-/// the build's code..the build's code. Returns the f32 bit patterns as stored.
-pub fn ath(a4: u32, a5: u32) -> Vec<u32> {
-    let a4i = a4 as i64;
-    let a5f = a5 as f64;
-    let mut buf: Vec<f64> = vec![0.0; a4 as usize];
-    let mut v11: i64 = 0;
-    for v42 in 0..87i64 {
-        // the build's code: v12 = exp(((v42+1)*0.125 - 2 + PSYCHO) * LN2)
-        let inner = ((((v42 as f64) + 1.0) * EIGHTH) - TWO) + PSYCHO;
-        let v12 = ciexp(inner * LN2);
-        // v13 = floor(2*v12*a4/a5 + 0.5) (full value, may exceed a4)
-        let t = ((2.0f64 * v12) * (a4i as f64) / a5f) + HALF;
-        let v13 = floor_integer(t);
-        let v46 = f32_round(e60(v42 as usize));
-        if v11 < v13 {
-            // slope over the FULL segment length even when stores clamp to a4
-            let slope = f32_round((e60(v42 as usize + 1) - v46) / ((v13 - v11) as f64));
-            let mut run = v46;
-            let n = if v13 < a4i { v13 } else { a4i };
-            while v11 < n {
-                buf[v11 as usize] = f32_round(run + ATH_OFF);
-                run = f32_round(run + slope);
-                v11 += 1;
+/// Materialize the absolute hearing threshold curve as stored f32 bits.
+/// Each of the 87 source segments uses a separately rounded f32 ramp; the
+/// final segment is extrapolated with the last stored delta.
+pub fn ath(spectrum_bins: u32, sample_rate: u32) -> Result<Vec<u32>, AnalysisError> {
+    validate_geometry(spectrum_bins, sample_rate)?;
+    let bin_count = spectrum_bins as i64;
+    let sample_rate = sample_rate as f64;
+    let mut curve = vec![0.0; spectrum_bins as usize];
+    let mut cursor = 0i64;
+    for segment in 0..87i64 {
+        let exponent = ((((segment as f64) + 1.0) * EIGHTH) - TWO) + PSYCHO;
+        let frequency = ciexp(exponent * LN2);
+        let segment_end =
+            floor_integer(((2.0f64 * frequency) * (bin_count as f64) / sample_rate) + HALF);
+        let segment_value = f32_round(e60(segment as usize));
+        if cursor < segment_end {
+            // The slope uses the full segment even when writes stop at the
+            // spectrum boundary.
+            let slope = f32_round(
+                (e60(segment as usize + 1) - segment_value) / ((segment_end - cursor) as f64),
+            );
+            let mut value = segment_value;
+            let write_end = segment_end.min(bin_count);
+            while cursor < write_end {
+                curve[cursor as usize] = f32_round(value + ATH_OFF);
+                value = f32_round(value + slope);
+                cursor += 1;
             }
         }
     }
-    // the build's code..the build's code: repeat last stored value, advance by last diff,
-    // f32 store/reload at every addition.
-    if v11 < a4i {
-        assert!(v11 >= 2, "ATH tail requires two materialized bins");
-        let mut run = buf[(v11 - 1) as usize];
-        let slope = f32_round(run - buf[(v11 - 2) as usize]);
-        for i in v11..a4i {
-            buf[i as usize] = run;
-            run = f32_round(run + slope);
+    if cursor < bin_count {
+        if cursor < 2 {
+            return Err(AnalysisError::UnsupportedGeometry {
+                reason: "ATH tail requires two materialized bins",
+            });
+        }
+        let mut value = curve[(cursor - 1) as usize];
+        let slope = f32_round(value - curve[(cursor - 2) as usize]);
+        for bin in cursor..bin_count {
+            curve[bin as usize] = value;
+            value = f32_round(value + slope);
         }
     }
-    buf.iter().map(|x| f32_bits(*x)).collect()
+    Ok(curve.iter().map(|value| f32_bits(*value)).collect())
 }
 
-/// `a1[6]` — the build's code..the build's code, packed interval endpoints.
-///
-/// `((v57 << 16) + v28 - 65537)` per bin; cursors persist across bins;
-/// thresholds ride the exact-register `mapped()` chain (x87 mul80/add80 +
-/// carrier `_CIatan`). `a2_112/a2_116` = 0.5f static-seed pair (r7 byte
-/// proof, fixed here as HALF), `a2_120/a2_124` = setter-chain conditional
-/// 3/3 adjudicated by the 6ch byte gate (R-R6 structural selection —
-/// explicit parameters, no fitting).
-pub fn interval_table(a4: u32, a5: u32, a2_120: i64, a2_124: i64) -> Vec<u32> {
+/// Materialize the packed lower and upper smoothing endpoints for every bin.
+/// The two cursors persist across bins because the mapped frequency is
+/// monotonic. Extended-precision helpers preserve the reference comparisons.
+pub fn interval_table(
+    spectrum_bins: u32,
+    sample_rate: u32,
+    lower_span: i64,
+    upper_span: i64,
+) -> Result<Vec<u32>, AnalysisError> {
+    validate_geometry(spectrum_bins, sample_rate)?;
     use super::x87::{add80, cmp_f64, ge_f64, mul80, F80};
     // mapped() constants: paired_tail_end/F0/E8/E0/D8 (constants.json, root-verified)
     const K_SQ: f64 = 1.8499999754340024e-08;
@@ -141,7 +155,6 @@ pub fn interval_table(a4: u32, a5: u32, a2_120: i64, a2_124: i64) -> Vec<u32> {
         mul80(a, F80::from_f64(b))
     }
 
-    // the build's code..the build's code (repeated at 1001657d..100165e3, 10016658..100166bf)
     #[inline]
     fn mapped(linear: i64, squared: i64) -> F80 {
         let x = F80::from_f64(f32_round(linear as f64));
@@ -155,94 +168,107 @@ pub fn interval_table(a4: u32, a5: u32, a2_120: i64, a2_124: i64) -> Vec<u32> {
         )
     }
 
-    let a4i = a4 as i64;
-    let mut v57: i64 = -99; // the build's code persistent cursors
-    let mut v58: i64 = 1;
-    let v26 = (a5 as i64) / (2 * a4i); // the build's code.. signed integer division
-    let v55 = v26 * v26;
-    let mut v68: i64 = 0;
-    let mut v65: i64 = 0;
-    let mut out = Vec::with_capacity(a4 as usize);
-    for v43 in 0..a4i {
-        // the build's code: fstp f32 store of the mapped value
-        let v92 = f32_round(mapped(v68, v43 * v65).to_f64());
-        if a2_120 + v57 < v43 {
-            // the build's code / the build's code
-            let mut v75 = a2_120 + v57;
-            let mut v63 = v57 * v26;
-            let mut v60 = v57 * v55;
+    let bin_count = spectrum_bins as i64;
+    let mut lower_cursor = -99i64;
+    let mut upper_cursor = 1i64;
+    let integer_bin_width = (sample_rate as i64) / (2 * bin_count);
+    let bin_width_squared = integer_bin_width * integer_bin_width;
+    let mut linear_frequency = 0i64;
+    let mut squared_frequency_step = 0i64;
+    let mut intervals = Vec::with_capacity(spectrum_bins as usize);
+    for bin in 0..bin_count {
+        let center = f32_round(mapped(linear_frequency, bin * squared_frequency_step).to_f64());
+        if lower_span + lower_cursor < bin {
+            let mut bounded_cursor = lower_span + lower_cursor;
+            let mut cursor_frequency = lower_cursor * integer_bin_width;
+            let mut cursor_squared_step = lower_cursor * bin_width_squared;
             loop {
-                // the build's code fsub threshold (exact binary64); 100165ec ordered >=
-                if ge_f64(mapped(v63, v57 * v60), v92 - 0.5) {
+                if ge_f64(
+                    mapped(cursor_frequency, lower_cursor * cursor_squared_step),
+                    center - 0.5,
+                ) {
                     break;
                 }
-                v60 += v55;
-                v57 += 1;
-                v63 += v26;
-                v75 += 1;
-                if v75 >= v43 {
-                    break; // the build's code strict < continues
+                cursor_squared_step += bin_width_squared;
+                lower_cursor += 1;
+                cursor_frequency += integer_bin_width;
+                bounded_cursor += 1;
+                if bounded_cursor >= bin {
+                    break;
                 }
             }
         }
-        let mut v28 = v58; // the build's code: v58 persists past the upper bound
-        if v58 <= a4i {
-            let mut v61 = v58 * v26;
-            let mut v64 = v58 * v55;
+        let mut upper_endpoint = upper_cursor;
+        if upper_cursor <= bin_count {
+            let mut cursor_frequency = upper_cursor * integer_bin_width;
+            let mut cursor_squared_step = upper_cursor * bin_width_squared;
             loop {
-                if v28 >= v43 + a2_124 {
-                    // the build's code..100166d3: 0.5 + v92 <= mapped (ordered)
-                    if matches!(
-                        cmp_f64(mapped(v61, v58 * v64), 0.5 + v92),
+                if upper_endpoint >= bin + upper_span
+                    && matches!(
+                        cmp_f64(
+                            mapped(cursor_frequency, upper_cursor * cursor_squared_step),
+                            0.5 + center,
+                        ),
                         std::cmp::Ordering::Greater | std::cmp::Ordering::Equal
-                    ) {
-                        break;
-                    }
+                    )
+                {
+                    break;
                 }
-                v64 += v55;
-                v61 += v26;
-                v28 += 1;
-                v58 = v28;
-                if v28 > a4i {
-                    break; // the build's code inclusive <= continues
+                cursor_squared_step += bin_width_squared;
+                cursor_frequency += integer_bin_width;
+                upper_endpoint += 1;
+                upper_cursor = upper_endpoint;
+                if upper_endpoint > bin_count {
+                    break;
                 }
             }
         }
-        // the build's code..10016719: packed subtraction borrows across halves
-        v68 += v26;
-        out.push(((v57 << 16) + v28 - 65537) as u32);
-        v65 += v55;
+        linear_frequency += integer_bin_width;
+        intervals.push(((lower_cursor << 16) + upper_endpoint - 65537) as u32);
+        squared_frequency_step += bin_width_squared;
     }
-    out
+    Ok(intervals)
 }
 
-/// Default gear index through the VBR chain ebd0 -> e2b0 -> ea80
-/// (the build's code.., the build's code/ebd9/ebe4, the build's code..e41f). Reference value
-/// 6.000000894.. (g = 6, fraction ≈ 2^-20 — not an endpoint hit; the
-/// interpolation below is load-bearing).
+fn validate_geometry(spectrum_bins: u32, sample_rate: u32) -> Result<(), AnalysisError> {
+    if spectrum_bins < 2 {
+        return Err(AnalysisError::UnsupportedGeometry {
+            reason: "psychoacoustic geometry needs at least two spectrum bins",
+        });
+    }
+    if sample_rate == 0 {
+        return Err(AnalysisError::UnsupportedGeometry {
+            reason: "psychoacoustic geometry needs a positive sample rate",
+        });
+    }
+    Ok(())
+}
+
+/// Default fractional quality index used by the geometry profile.
+/// The reference value is approximately 6.000000894, so interpolation is
+/// required even though it is very close to row 6.
 pub fn default_quality_index() -> f64 {
     use super::x87::{add80, F80};
-    const EPS: f64 = f64::from_bits(EPS_F64_BITS); // the build's code
-                                                   // the build's code: 4.0f; 10008933: /10; 893b/893f: f32 store before ebd0
+    const EPS: f64 = f64::from_bits(EPS_F64_BITS);
     let q = f32_round(4.0 / 10.0);
-    // the build's code/ebd9/ebe4: double epsilon add at x87 width, then fstps
     let q = f32_round(add80(F80::from_f64(q), F80::from_f64(EPS)).to_f64());
-    // the build's code/e33c..e3c6: segment select over the descriptor axis
-    let mut g = 0usize;
-    while g < 12 {
-        if AXIS[g] as f64 <= q && q <= AXIS[g + 1] as f64 {
+    let mut segment = 0usize;
+    while segment < 12 {
+        if AXIS[segment] as f64 <= q && q <= AXIS[segment + 1] as f64 {
             break;
         }
-        g += 1;
+        segment += 1;
     }
-    assert!(g < 12, "e2b0: q outside axis");
-    // the build's code/e407: both endpoints stored as f32
-    let lo = AXIS[g] as f64;
-    let hi = AXIS[g + 1] as f64;
-    // the build's code..e41f: exact-rational divide at 80-bit, fstps, integer add
+    assert!(segment < 12, "quality outside interpolation axis");
+    let lo = AXIS[segment] as f64;
+    let hi = AXIS[segment + 1] as f64;
     let fraction = exact_div80(q - lo, hi - lo);
-    let gi = g as i64;
-    add80(F80::from_f64(gi as f64), F80::from_f64(f32_round(fraction))).to_f64()
+    let segment = segment as i64;
+    add80(
+        F80::from_f64(segment as f64),
+        F80::from_f64(f32_round(fraction)),
+    )
+    .to_f64()
 }
 
 /// Exact `Fraction(a)/Fraction(b)` then `_round80`-equivalent single round:
@@ -255,33 +281,40 @@ fn exact_div80(a: f64, b: f64) -> f64 {
     a / b
 }
 
-/// `a2+132..+332` knot rows — the build's code setter: adjacent quality-row
-/// interpolation (g/g+1), per-element f32 store, `first+6` floor clamp.
-/// `raw` is the mask_pool_0 word array; returns three f64 rows (f32 grid).
-pub fn mask_knots(raw: &[u32], index: f64) -> [Vec<f64>; 3] {
+/// Interpolate three adjacent quality rows and apply the first-value-plus-six
+/// floor clamp. The returned f64 values lie exactly on the f32 grid.
+pub(crate) fn mask_knots(raw: &[u32], index: f64) -> Result<[Vec<f64>; 3], AnalysisError> {
     use super::x87::{add80, mul80, F80};
-    const SIX: f64 = f64::from_bits(SIX_F64_BITS); // paired_six_f64
-    let g = index as i64; // 1000d94c __ftol2_sse (integral-domain input)
-    debug_assert!((g as f64) <= index, "ftol2 floor semantics expected");
-    let fi = |x: i64| F80::from_f64(x as f64);
-    // 1000d967: fisubl keeps x87 precision
-    let frac = add80(F80::from_f64(index), fi(-g));
-    // 1000d974/976: complement = 1 - frac (register width)
-    let complement = add80(F80::from_f64(1.0), -frac);
+    const SIX: f64 = f64::from_bits(SIX_F64_BITS);
+    if !index.is_finite() || index < 0.0 || index > raw.len() as f64 {
+        return Err(AnalysisError::MalformedField {
+            reason: "mask quality index must be finite and non-negative",
+        });
+    }
+    let quality_row = index as i64;
+    debug_assert!((quality_row as f64) <= index, "floor semantics expected");
+    let integer = |x: i64| F80::from_f64(x as f64);
+    let fraction = add80(F80::from_f64(index), integer(-quality_row));
+    let complement = add80(F80::from_f64(1.0), -fraction);
     let mut rows = [Vec::new(), Vec::new(), Vec::new()];
     for (row, output) in rows.iter_mut().enumerate() {
         let mut values = Vec::with_capacity(17);
         for j in 0..17 {
-            // 1000d96e/d9bc: quality stride 0xcc = 51 words; row stride 0x44
-            let at = (g * 51 + row as i64 * 17 + j as i64) as usize;
-            let left = (raw[at] as i32) as i64;
-            let right = (raw[at + 51] as i32) as i64;
-            // d9d6..da98: fildl; separate fmuls; faddp; fstps
+            let offset = (quality_row * 51 + row as i64 * 17 + j as i64) as usize;
+            let left = (*raw.get(offset).ok_or(AnalysisError::MalformedField {
+                reason: "mask bank is shorter than the selected quality rows",
+            })? as i32) as i64;
+            let right = (*raw.get(offset + 51).ok_or(AnalysisError::MalformedField {
+                reason: "mask bank is shorter than the selected quality rows",
+            })? as i32) as i64;
             values.push(f32_round(
-                add80(mul80(fi(left), complement), mul80(fi(right), frac)).to_f64(),
+                add80(
+                    mul80(integer(left), complement),
+                    mul80(integer(right), fraction),
+                )
+                .to_f64(),
             ));
         }
-        // dac9/dad6/dad8: floor = f32(first + 6.0)
         let floor = f32_round(add80(F80::from_f64(values[0]), F80::from_f64(SIX)).to_f64());
         *output = values
             .iter()
@@ -295,47 +328,72 @@ pub fn mask_knots(raw: &[u32], index: f64) -> [Vec<f64>; 3] {
             })
             .collect();
     }
-    rows
+    Ok(rows)
 }
 
-/// Bin-center position and three knot lerps — the build's code..the build's code.
-pub fn mask_curves_knots(a4: u32, a5: u32, knots: &[Vec<f64>; 3]) -> [Vec<f64>; 3] {
+/// Interpolate three knot rows at each spectrum-bin center.
+pub(crate) fn mask_curves_knots(
+    spectrum_bins: u32,
+    sample_rate: u32,
+    knots: &[Vec<f64>; 3],
+) -> Result<[Vec<f64>; 3], AnalysisError> {
+    validate_geometry(spectrum_bins, sample_rate)?;
+    if knots.iter().any(|row| row.len() < 17) {
+        return Err(AnalysisError::MalformedField {
+            reason: "mask curve needs seventeen knots per row",
+        });
+    }
     let mut rows: [Vec<f64>; 3] = [Vec::new(), Vec::new(), Vec::new()];
     for r in rows.iter_mut() {
-        r.reserve(a4 as usize);
+        r.reserve(spectrum_bins as usize);
     }
-    for i in 0..a4 {
-        let (g, frac, complement) = pos_frac(a4, a5, i);
+    for bin in 0..spectrum_bins {
+        let (knot, fraction, complement) = bin_knot_position(spectrum_bins, sample_rate, bin);
         for (row, out) in knots.iter().zip(rows.iter_mut()) {
-            out.push(lerp_row(row, g, frac, complement));
+            out.push(interpolate_knot(row, knot, fraction, complement));
         }
     }
-    rows
+    Ok(rows)
 }
 
 /// Alias for the LONG wrappers: three-row lerp over given knots.
-pub fn curve_rows(a4: u32, a5: u32, knots: &[Vec<f64>; 3]) -> [Vec<f64>; 3] {
-    mask_curves_knots(a4, a5, knots)
+pub(crate) fn curve_rows(
+    spectrum_bins: u32,
+    sample_rate: u32,
+    knots: &[Vec<f64>; 3],
+) -> Result<[Vec<f64>; 3], AnalysisError> {
+    mask_curves_knots(spectrum_bins, sample_rate, knots)
 }
 
-/// Single-row variant (field_18-knot path the build's code..the build's code, where the
-/// Python reference passes one row through the same lerp3 loop).
-pub fn curve_row1(a4: u32, a5: u32, row: &[f64]) -> Vec<f64> {
-    (0..a4)
-        .map(|i| {
-            let (g, frac, complement) = pos_frac(a4, a5, i);
-            lerp_row(row, g, frac, complement)
+/// Single-row variant of the same bin-center interpolation.
+pub(crate) fn curve_row1(
+    spectrum_bins: u32,
+    sample_rate: u32,
+    row: &[f64],
+) -> Result<Vec<f64>, AnalysisError> {
+    validate_geometry(spectrum_bins, sample_rate)?;
+    if row.len() < 17 {
+        return Err(AnalysisError::MalformedField {
+            reason: "mask curve needs seventeen knots",
+        });
+    }
+    Ok((0..spectrum_bins)
+        .map(|bin| {
+            let (knot, fraction, complement) = bin_knot_position(spectrum_bins, sample_rate, bin);
+            interpolate_knot(row, knot, fraction, complement)
         })
-        .collect()
+        .collect())
 }
 
-/// Bin-center position and knot weights — the build's code..the build's code, shared by
-/// every consumer of the materializer's final loop.
-fn pos_frac(a4: u32, a5: u32, i: u32) -> (usize, f64, super::x87::F80) {
+/// Bin-center position and knot weights shared by every curve materializer.
+fn bin_knot_position(
+    spectrum_bins: u32,
+    sample_rate: u32,
+    bin: u32,
+) -> (usize, f64, super::x87::F80) {
     use super::x87::{add80, mul80, F80};
-    // 1001681f..82d: (i+0.5)*rate/(2*n), _CIlog
-    let logarithm = cilog((f64::from(i) + HALF) * f64::from(a5) / f64::from(2 * a4));
-    // 10016832..840: LOG2E, PSYCHO, *2 (register chain), fstps
+    let logarithm =
+        cilog((f64::from(bin) + HALF) * f64::from(sample_rate) / f64::from(2 * spectrum_bins));
     let position = f32_round(
         mul80(
             add80(
@@ -346,51 +404,47 @@ fn pos_frac(a4: u32, a5: u32, i: u32) -> (usize, f64, super::x87::F80) {
         )
         .to_f64(),
     );
-    // 10016844..8d2: clamp [0, 16]
     let position = position.clamp(0.0, 16.0);
-    let g = position as usize; // 100168d6 ftol2 of an already-clamped value
-    debug_assert!((g as f64) <= position, "trunc toward zero expected");
-    let frac = f32_round(add80(F80::from_f64(position), F80::from_f64(-(g as f64))).to_f64());
-    let complement = add80(F80::from_f64(1.0), F80::from_f64(-frac));
-    (g, frac, complement)
+    let knot = position as usize;
+    debug_assert!((knot as f64) <= position, "trunc toward zero expected");
+    let fraction =
+        f32_round(add80(F80::from_f64(position), F80::from_f64(-(knot as f64))).to_f64());
+    let complement = add80(F80::from_f64(1.0), F80::from_f64(-fraction));
+    (knot, fraction, complement)
 }
 
-/// One knot-pair lerp — 100168fb..1696e (endpoint's following load has zero
-/// weight, matching the reference's `g < 16` guard).
+/// Interpolate one knot pair. The final knot has no following value and its
+/// fraction is zero, so the zero fallback is never observable.
 #[inline]
-fn lerp_row(row: &[f64], g: usize, frac: f64, complement: super::x87::F80) -> f64 {
+fn interpolate_knot(row: &[f64], knot: usize, fraction: f64, complement: super::x87::F80) -> f64 {
     use super::x87::{add80, mul80, F80};
-    let right = if g < 16 { row[g + 1] } else { 0.0 };
+    let right = if knot < 16 { row[knot + 1] } else { 0.0 };
     f32_round(
         add80(
-            mul80(F80::from_f64(right), F80::from_f64(frac)),
-            mul80(F80::from_f64(row[g]), complement),
+            mul80(F80::from_f64(right), F80::from_f64(fraction)),
+            mul80(F80::from_f64(row[knot]), complement),
         )
         .to_f64(),
     )
 }
 
-/// `a1[3]` — the three mask-curve rows flattened to 384 f32 bit patterns
-/// (gate ordering). `mask_pool_0` is the family slot array; the export
-/// asserted the 6ch and 2ch descriptor copies are identical, so the one
-/// generated table serves both geometries.
-pub fn mask_curves(a4: u32, a5: u32) -> Vec<u32> {
-    let knots = mask_knots(MASK_POOL, default_quality_index());
-    mask_curves_knots(a4, a5, &knots)
+/// Three mask rows flattened in row-major order as f32 bit patterns.
+pub fn mask_curves(spectrum_bins: u32, sample_rate: u32) -> Result<Vec<u32>, AnalysisError> {
+    let knots = mask_knots(MASK_POOL, default_quality_index())?;
+    Ok(mask_curves_knots(spectrum_bins, sample_rate, &knots)?
         .iter()
         .flatten()
         .map(|v| f32_bits(*v))
-        .collect()
+        .collect())
 }
 
-/// `look.mask_curve` — row 1 of `mask_curves` (root-verified byte identity
-/// with the registered `short-seed.look.mask_curve`).
-pub fn mask_curve(a4: u32, a5: u32) -> Vec<u32> {
-    let knots = mask_knots(MASK_POOL, default_quality_index());
-    mask_curves_knots(a4, a5, &knots)[1]
+/// Middle mask row as f32 bit patterns.
+pub fn mask_curve(spectrum_bins: u32, sample_rate: u32) -> Result<Vec<u32>, AnalysisError> {
+    let knots = mask_knots(MASK_POOL, default_quality_index())?;
+    Ok(mask_curves_knots(spectrum_bins, sample_rate, &knots)?[1]
         .iter()
         .map(|v| f32_bits(*v))
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
@@ -399,19 +453,27 @@ mod tests {
 
     #[test]
     fn tail_guard_and_shape() {
-        let v = ath(128, 44100);
+        let v = ath(128, 44100).unwrap();
         assert_eq!(v.len(), 128);
-        let o = octave(128, 44100, 5);
+        let o = octave(128, 44100, 5).unwrap();
         assert_eq!(o.len(), 128);
         assert!(o.iter().all(|&x| (-64..=1024).contains(&x)));
-        let iv = interval_table(128, 44100, 3, 3);
+        let iv = interval_table(128, 44100, 3, 3).unwrap();
         assert_eq!(iv.len(), 128);
     }
 
     #[test]
     fn mask_chain_shapes() {
         assert!((default_quality_index() - 6.000000894).abs() < 1e-6);
-        assert_eq!(mask_curve(128, 44100).len(), 128);
-        assert_eq!(mask_curves(128, 48000).len(), 384);
+        assert_eq!(mask_curve(128, 44100).unwrap().len(), 128);
+        assert_eq!(mask_curves(128, 48000).unwrap().len(), 384);
+    }
+
+    #[test]
+    fn rejects_invalid_public_geometry() {
+        assert!(ath(0, 44100).is_err());
+        assert!(octave(128, 0, 5).is_err());
+        assert!(interval_table(1, 44100, 3, 3).is_err());
+        assert!(mask_curve(128, 0).is_err());
     }
 }
