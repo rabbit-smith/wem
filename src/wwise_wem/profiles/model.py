@@ -5,12 +5,10 @@ import hashlib
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from types import MappingProxyType
-from typing import Any, Mapping
 
 from ..model import ContainerMetadata
 from .resources import ResourceRef
-from .bundle import ProfileKey, load_profile_bundle
+from .bundle import ProfileKey
 
 
 def _read_profile_source(
@@ -93,13 +91,6 @@ class EncoderProfile:
     def sample_rate(self) -> int:
         return self.key.sample_rate
 
-    @property
-    def fmt(self) -> dict[str, int]:
-        """Return a fresh legacy fmt dictionary for compatibility adapters."""
-        return self.container_metadata.to_fmt_dict(
-            frame_count=self.container_metadata.dwTotalPCMFrames
-        )
-
     def setup_packet(self) -> bytes:
         return _read_profile_source(
             self.setup_path,
@@ -107,42 +98,3 @@ class EncoderProfile:
             profile_name=self.name,
             label="setup",
         )
-
-    def runtime_manifest(self) -> Mapping[str, Any]:
-        """Return the installed profile manifest for this profile identity."""
-        bundle = load_profile_bundle(profile=self.name, verify_all=False)
-        if bundle.key != self.key:
-            raise ValueError(
-                f"profile {self.name} differs from installed profile bundle"
-            )
-        if self.setup_sha256 != bundle.setup.sha256:
-            raise ValueError(
-                f"profile {self.name} setup differs from installed profile bundle"
-            )
-        manifest = bundle.runtime_manifest
-        files = {
-            ref.path.relative_to(manifest.ref.path.parent).as_posix(): ref.sha256
-            for ref in manifest.resources.values()
-        }
-        return MappingProxyType(
-            {
-                "schema": manifest.schema,
-                "resources": MappingProxyType(
-                    {
-                        name: MappingProxyType(
-                            {
-                                "path": ref.path.relative_to(
-                                    manifest.ref.path.parent
-                                ).as_posix(),
-                                "sha256": ref.sha256,
-                            }
-                        )
-                        for name, ref in manifest.resources.items()
-                    }
-                ),
-                "files": MappingProxyType(dict(files)),
-            }
-        )
-
-
-WwiseVorbisProfile = EncoderProfile

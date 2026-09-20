@@ -218,7 +218,7 @@ impl ProfileBundle {
                 return Err(ProfileError::BundleMissingVorbisSetup);
             };
             let setup_sha = setup_ref.sha256().to_string();
-            if key.quality_setup_identity() != Some(format!("sha256:{setup_sha}").as_str()) {
+            if key.quality_setup_identity() != format!("sha256:{setup_sha}") {
                 return Err(ProfileError::BundleSetupIdentityMismatch);
             }
         }
@@ -360,12 +360,12 @@ fn build_bundle_fields(
         )
         .ok_or_else(|| "key.quality_setup_identity must be non-empty text".to_string())?
         .to_string();
-        let key = ProfileKey::with_identity(
+        let key = ProfileKey::new(
             channels,
             sample_rate,
-            Some(generation),
-            Some(channel_layout),
-            Some(quality_setup_identity),
+            generation,
+            channel_layout,
+            quality_setup_identity,
         )
         .map_err(|e| e.to_string())?;
 

@@ -9,9 +9,8 @@ use wem_profiles::psychoacoustics::{
 };
 use wem_profiles::{
     assemble_encoder_profile_resources, load_book_table, load_frozen_tables, load_mdct_looks,
-    load_profile_bundle, load_transient_tables, normalize_resource_path, resolve_book_id,
-    ContainerMetadata, DataDir, ProfileError, ProfileKey, ResourceRef, T219_COUNT, T282_COUNT,
-    T97_COUNT,
+    load_profile_bundle, load_transient_tables, normalize_resource_path, resolve_book_id, DataDir,
+    ProfileError, ProfileKey, ResourceRef, T219_COUNT, T282_COUNT, T97_COUNT,
 };
 use wem_vorbis::setup::{pack_setup, parse_setup};
 
@@ -467,7 +466,7 @@ fn long_tables_golden_oracle() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn container_metadata_golden_and_rejections() {
+fn container_metadata_matches_profile() {
     let b = bundle();
     let cm = b.container_metadata();
     assert_eq!(cm.w_format_tag, 65535);
@@ -475,23 +474,6 @@ fn container_metadata_golden_and_rejections() {
     assert_eq!(cm.n_samples_per_sec, 44100);
     assert_eq!(cm.u_blocksize0_pow, 8);
     assert_eq!(cm.u_blocksize1_pow, 11);
-
-    // Boolean is not an integer (Python rejects bools).
-    let mut map = cm.to_fmt_map(0);
-    *map.get_mut("nChannels").unwrap() = serde_json::Value::Bool(true);
-    assert!(ContainerMetadata::from_fmt_map(&map).is_err());
-    // Negative value rejected.
-    let mut map = cm.to_fmt_map(0);
-    *map.get_mut("wFormatTag").unwrap() = serde_json::Value::from(-1);
-    assert!(ContainerMetadata::from_fmt_map(&map).is_err());
-    // Missing field rejected.
-    let mut map = cm.to_fmt_map(0);
-    map.remove("uMaxPacketSize");
-    assert!(ContainerMetadata::from_fmt_map(&map).is_err());
-    // Non-positive geometry rejected.
-    let mut map = cm.to_fmt_map(0);
-    *map.get_mut("nChannels").unwrap() = serde_json::Value::from(0);
-    assert!(ContainerMetadata::from_fmt_map(&map).is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -499,18 +481,23 @@ fn container_metadata_golden_and_rejections() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn profile_key_default_identity_and_rejections() {
-    let key = ProfileKey::new(6, 44100).expect("default identity fills");
-    assert_eq!(key.generation(), Some("2013.2"));
-    assert_eq!(key.channel_layout(), Some("5.1"));
+fn profile_key_requires_complete_identity() {
+    let key = ProfileKey::new(
+        6,
+        44100,
+        "2013.2".into(),
+        "5.1".into(),
+        wem_profiles::WWISE2013_6CH_44100_SETUP_IDENTITY.into(),
+    )
+    .expect("complete identity");
+    assert_eq!(key.generation(), "2013.2");
+    assert_eq!(key.channel_layout(), "5.1");
     assert_eq!(
         key.quality_setup_identity(),
-        Some(wem_profiles::WWISE2013_6CH_44100_SETUP_IDENTITY)
+        wem_profiles::WWISE2013_6CH_44100_SETUP_IDENTITY
     );
-    // Other geometry without a full identity is rejected.
-    assert!(ProfileKey::new(2, 48000).is_err());
     // Non-positive geometry rejected.
-    assert!(ProfileKey::new(0, 44100).is_err());
+    assert!(ProfileKey::new(0, 44100, "2013.2".into(), "5.1".into(), "sha256:x".into(),).is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -938,12 +925,12 @@ fn installed_registry_resolutions() {
     assert!(stereo.pending_reason().is_none());
 
     // Unknown key rejected.
-    let unknown = ProfileKey::with_identity(
+    let unknown = ProfileKey::new(
         2,
         48000,
-        Some("2013.2".into()),
-        Some("stereo".into()),
-        Some("sha256:0".into()),
+        "2013.2".into(),
+        "stereo".into(),
+        "sha256:0".into(),
     )
     .expect("full identity");
     assert!(registry.resolve_key(&unknown).is_err());
@@ -1001,8 +988,6 @@ fn encoder_profile_model_checks() {
     assert_eq!(profile.block_sizes(), [256, 2048]);
     assert_eq!(profile.channels(), 6);
     assert_eq!(profile.sample_rate(), 44100);
-    let fmt = profile.fmt();
-    assert_eq!(fmt.get("nChannels").and_then(|v| v.as_i64()), Some(6));
     assert_eq!(profile.setup_packet().expect("packet").len(), 201);
     let view = profile.runtime_manifest().expect("manifest view");
     assert_eq!(view.resources.len(), 10);

@@ -36,8 +36,8 @@ import os, sys
 for path_entry in os.environ["WEM_SRC"].split(os.pathsep):
     sys.path.insert(0, path_entry)
 from pathlib import Path
-from wwise_wem import encode_wav
-result = encode_wav(Path(os.environ["WEM_INPUT"]))
+from wwise_wem import encode
+result = encode(Path(os.environ["WEM_INPUT"]))
 from wwise_wem_reference._tmath import write_recording
 counts = write_recording()
 print(",".join(f"{k}={v}" for k, v in sorted(counts.items())))

@@ -157,42 +157,6 @@ impl ContainerMetadata {
             u_blocksize1_pow,
         })
     }
-
-    /// Fresh legacy fmt dictionary for compatibility adapters
-    /// (Python `to_fmt_dict`).
-    pub fn to_fmt_map(&self, frame_count: i64) -> Map<String, Value> {
-        let mut out = Map::new();
-        let put = |map: &mut Map<String, Value>, key: &str, value: i64| {
-            map.insert(key.into(), Value::from(value));
-        };
-        put(&mut out, "wFormatTag", self.w_format_tag);
-        put(&mut out, "nChannels", self.n_channels);
-        put(&mut out, "nSamplesPerSec", self.n_samples_per_sec);
-        put(&mut out, "nAvgBytesPerSec", self.n_avg_bytes_per_sec);
-        put(&mut out, "nBlockAlign", self.n_block_align);
-        put(&mut out, "wBitsPerSample", self.w_bits_per_sample);
-        put(&mut out, "cbSize", self.cb_size);
-        put(&mut out, "wReserved0", self.w_reserved0);
-        put(&mut out, "dwChannelMask", self.dw_channel_mask);
-        put(&mut out, "dwTotalPCMFrames", frame_count);
-        put(
-            &mut out,
-            "dwFirstAudioPacketOffset",
-            self.dw_first_audio_packet_offset,
-        );
-        put(&mut out, "dwDataPayloadSize", self.dw_data_payload_size);
-        put(&mut out, "dwUnknown_0x24", self.dw_unknown_0x24);
-        put(&mut out, "dwSeekTableSize", self.dw_seek_table_size);
-        put(&mut out, "dwVorbisDataOffset", self.dw_vorbis_data_offset);
-        put(&mut out, "uMaxPacketSize", self.u_max_packet_size);
-        put(&mut out, "uUnknown_0x32", self.u_unknown_0x32);
-        put(&mut out, "dwUnknown_0x34", self.dw_unknown_0x34);
-        put(&mut out, "dwUnknown_0x38", self.dw_unknown_0x38);
-        put(&mut out, "dwUnknown_0x3C", self.dw_unknown_0x3c);
-        put(&mut out, "uBlocksize0Pow", self.u_blocksize0_pow);
-        put(&mut out, "uBlocksize1Pow", self.u_blocksize1_pow);
-        out
-    }
 }
 
 /// Read-only view of the installed manifest for one profile identity
@@ -266,7 +230,7 @@ impl EncoderProfile {
         }
         match setup.as_ref() {
             Some(_) => {
-                if key.quality_setup_identity() != Some(format!("sha256:{setup_sha256}").as_str()) {
+                if key.quality_setup_identity() != format!("sha256:{setup_sha256}") {
                     return Err(ProfileError::ProfileSetupIdentityMismatch);
                 }
             }
@@ -381,12 +345,6 @@ impl EncoderProfile {
     /// Extra RIFF chunks carried by the profile (Python `extra_chunks`).
     pub fn extra_chunks(&self) -> &[(Vec<u8>, Vec<u8>)] {
         &self.extra_chunks
-    }
-
-    /// Fresh legacy fmt dictionary (Python `fmt` property).
-    pub fn fmt(&self) -> Map<String, Value> {
-        self.container_metadata
-            .to_fmt_map(self.container_metadata.dw_total_pcm_frames)
     }
 
     /// Verified setup packet bytes (Python `setup_packet()`).

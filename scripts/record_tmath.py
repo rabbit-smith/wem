@@ -28,7 +28,7 @@ OUT_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "tests/data/stage-g
 os.environ["WEM_TMATH_RECORD"] = str(OUT_DIR)
 sys.path.insert(0, str(ROOT / "src"))
 
-from wwise_wem import encode_wav  # noqa: E402
+from wwise_wem import encode  # noqa: E402
 from wwise_wem_reference._tmath import write_recording  # noqa: E402
 
 
@@ -49,7 +49,7 @@ def read_pairs(path: Path) -> list[tuple[float, float]]:
 
 
 def main() -> int:
-    result = encode_wav(ROOT / "tests/fixtures/input.wav")
+    result = encode(ROOT / "tests/fixtures/input.wav")
     counts = write_recording()
 
     stats: dict[str, dict[str, object]] = {}

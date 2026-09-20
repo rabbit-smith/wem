@@ -43,7 +43,7 @@ Currently installed:
 ## Exact setup identity
 
 Profile resolution is exact. A channel-count/sample-rate key selects one
-installed `WwiseVorbisProfile`; it is not a request to synthesize or approximate
+installed `EncoderProfile`; it is not a request to synthesize or approximate
 configuration. The profile's packaged setup packet is checked against its
 declared SHA-256 whenever it is loaded. Missing geometry, an unknown profile
 name, or a packaged setup checksum mismatch is an error.

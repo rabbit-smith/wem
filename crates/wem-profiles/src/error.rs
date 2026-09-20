@@ -94,7 +94,6 @@ pub enum ProfileError {
     /// channels/sample_rate non-positive.
     ProfileKeyNonPositive,
     /// Non-default geometry with only a partial identity triple.
-    ProfileKeyIdentityIncomplete,
     /// Generation / layout / identity field is empty.
     ProfileKeyFieldEmpty { field: &'static str },
     // ------------------------------------------------------------------
@@ -359,7 +358,6 @@ impl std::fmt::Display for ProfileError {
             BundleSetupIdentityMismatch => write!(f, "profile bundle setup identity differs from setup SHA-256"),
             IndexNameMismatch { selected, name } => write!(f, "profile index name {selected:?} differs from profile manifest {name:?}"),
             ProfileKeyNonPositive => write!(f, "profile channels and sample rate must be positive"),
-            ProfileKeyIdentityIncomplete => write!(f, "non-default profile geometry requires explicit generation, channel layout, and quality/setup identity"),
             ProfileKeyFieldEmpty { field } => write!(f, "profile {field} must not be empty"),
             ContainerFieldMissing { field } => write!(f, "container metadata field missing: {field}"),
             ContainerFieldNotInteger { field } => write!(f, "container metadata field must be an integer: {field}"),

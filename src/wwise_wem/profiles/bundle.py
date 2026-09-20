@@ -19,45 +19,21 @@ INDEX_SCHEMA = "wwise-wem.profile-index.v1"
 BUNDLE_SCHEMA = "wwise-wem.profile-manifest.v1"
 MANIFEST_SCHEMA = BUNDLE_SCHEMA
 WWISE_GENERATION = "2013.2"
-WWISE2013_6CH_44100_SETUP_IDENTITY = (
-    "sha256:3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3"
-)
 
 
 @dataclass(frozen=True, order=True)
 class ProfileKey:
-    """Exact encoder identity with a legacy two-argument geometry adapter."""
+    """Complete encoder profile identity."""
 
     channels: int
     sample_rate: int
-    generation: str | None = None
-    channel_layout: str | None = None
-    quality_setup_identity: str | None = None
+    generation: str
+    channel_layout: str
+    quality_setup_identity: str
 
     def __post_init__(self) -> None:
         if self.channels <= 0 or self.sample_rate <= 0:
             raise ValueError("profile channels and sample rate must be positive")
-        identity = (
-            self.generation,
-            self.channel_layout,
-            self.quality_setup_identity,
-        )
-        if identity == (None, None, None) and (self.channels, self.sample_rate) == (
-            6,
-            44100,
-        ):
-            object.__setattr__(self, "generation", WWISE_GENERATION)
-            object.__setattr__(self, "channel_layout", "5.1")
-            object.__setattr__(
-                self,
-                "quality_setup_identity",
-                WWISE2013_6CH_44100_SETUP_IDENTITY,
-            )
-        elif any(value is None for value in identity):
-            raise ValueError(
-                "non-default profile geometry requires explicit generation, "
-                "channel layout, and quality/setup identity"
-            )
         if not self.generation:
             raise ValueError("profile generation must not be empty")
         if not self.channel_layout:
