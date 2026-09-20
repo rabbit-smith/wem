@@ -9,8 +9,9 @@ from pathlib import Path
 
 from tests.contract.wem_byte_contract import assert_wem_equal
 from tests.two_channel_corpus_support import render_wav
-from wwise_wem import Encoder, load_wem_profile
-from wwise_wem.adapters.wav import read_pcm16
+from wwise_wem.application.encoder import Encoder
+from wwise_wem.profiles.registry import load_wem_profile
+from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem_reference.container.wem import load_wem_parts_bytes
 
 
@@ -29,7 +30,7 @@ class TwoChannelReferenceCorpusTests(unittest.TestCase):
                 input_path = CORPUS / case["input"]
                 input_bytes = input_path.read_bytes()
                 reference = (CORPUS / case["reference"]).read_bytes()
-                pcm = read_pcm16(input_path)
+                pcm = read_pcm_wav(input_path)
                 encoded = Encoder(profile).encode_pcm(pcm)
 
                 self.assertEqual(input_bytes, render_wav(input_path.stem))

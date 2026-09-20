@@ -452,8 +452,8 @@ def wwise_psy_residual_core(
     original: Sequence[float],
     look: WwisePsyLook,
     cap_curve: Sequence[float],
-) -> tuple[list[float], list[float], list[float]]:
-    """Stage the psychoacoustic remap as ``(first_smooth, selector, base)``.
+) -> tuple[list[float], list[float]]:
+    """Stage the psychoacoustic remap as ``(selector, base)``.
 
     The second ``smoothing`` result is a selector for the later 40-entry lookup;
     it is not subtracted from the base curve.  The reference encoder instead reconstructs
@@ -475,86 +475,19 @@ def wwise_psy_residual_core(
     )
     base = [_f32(a - b) for a, b in zip(original, difference)]
     base = wwise_psy_peak_suppress(original, base, look, cap_curve)
-    return first, selector, base
-
-
-def wwise_psy_apply_q_extension(
-    base_curve: Sequence[float],
-    selector_curve: Sequence[float],
-    q: float,
-    *,
-    low_extension: float | Sequence[float],
-    high_extension: float | Sequence[float],
-) -> list[float]:
-    """Apply the ``psychoacoustic remap`` q-row extension remap.
-
-    ``selector_curve`` chooses the row-table entry; ``base_curve`` supplies
-    the value added to it.  The q interpolation is applied only to the first
-    ``n//3`` bins, exactly as the reference encoder's first loop does.
-    """
-    if len(base_curve) != len(selector_curve):
-        raise ValueError("psycho base and selector curves must have the same length")
-    low_table: tuple[float, ...] | None = None
-    high_table: tuple[float, ...] | None = None
-    low_scalar = 0.0
-    high_scalar = 0.0
-    if isinstance(low_extension, (int, float)):
-        low_scalar = float(low_extension)
-    else:
-        low_table = tuple(float(value) for value in low_extension)
-    if isinstance(high_extension, (int, float)):
-        high_scalar = float(high_extension)
-    else:
-        high_table = tuple(float(value) for value in high_extension)
-    if low_table is not None and len(low_table) < 40:
-        raise ValueError("low q-extension table needs 40 entries")
-    if high_table is not None and len(high_table) < 40:
-        raise ValueError("high q-extension table needs 40 entries")
-    output = []
-    q_limit = len(base_curve) // 3
-    for i, (base, selector) in enumerate(zip(base_curve, selector_curve)):
-        index = max(0, min(39, int(float(selector) + 0.5)))
-        low = low_table[index] if low_table is not None else low_scalar
-        high = (
-            high_table[index]
-            if high_table is not None
-            else high_scalar
-        )
-        if float(q) > 0.0 and i < q_limit:
-            output.append(_f32(low + float(base) - (low - high) * float(q)))
-        else:
-            output.append(_f32(low + float(base)))
-    return output
+    return selector, base
 
 
 def build_psy_remap(
     original: Sequence[float],
-    q: float,
     look: WwisePsyLook,
     *,
     cap_curve: Sequence[float],
-    low_extension: float | Sequence[float] | None = None,
-    high_extension: float | Sequence[float] | None = None,
     curve_offsets: Sequence[int],
-) -> tuple[list[float], list[float], list[float], list[float], list[float]]:
-    """Run the confirmed ``psychoacoustic remap`` front half for one short curve.
-
-    The tuple is ``(first_smooth, selector_smooth, base, noise_mask,
-    noise_mask)``.  The fourth item is the buffer passed as ``remapped spectrum``.
-    It is the completed noise mask: ``base + noisecompand[selector]``.
-
-    The v4 runtime profile binds ``remapped spectrum`` to this companded result, not
-    to the profile q-extension scratch.  Keep the duplicated fifth result for
-    compatibility with earlier diagnostic callers which named it
-    ``offset_curve``.
-    """
-    first, selector, base = wwise_psy_residual_core(original, look, cap_curve)
-    # ``q`` and the extension fields are retained in this public signature
-    # because their separate scratch role is still modelled by
-    # ``wwise_psy_apply_q_extension``.  They do not select remapped spectrum.
-    del q, low_extension, high_extension
-    noise_mask = wwise_psy_row3_curve(base, selector, curve_offsets)
-    return first, selector, base, noise_mask, noise_mask
+) -> list[float]:
+    """Build the short-block remapped spectrum for one channel."""
+    selector, base = wwise_psy_residual_core(original, look, cap_curve)
+    return wwise_psy_row3_curve(base, selector, curve_offsets)
 
 
 def build_long_psy_remap_variant(

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Mapping
 
 
 def _require_int(value: int, label: str, *, positive: bool = False) -> int:
@@ -39,19 +38,8 @@ class EncodeStats:
         if not isinstance(self.metadata_source, str) or not self.metadata_source:
             raise ValueError("metadata_source must be a non-empty string")
 
-    @classmethod
-    def from_legacy_dict(cls, values: Mapping[str, int | str]) -> "EncodeStats":
-        return cls(
-            pcm_frames=int(values["pcm_frames"]),
-            channels=int(values["channels"]),
-            audio_packets=int(values["audio_packets"]),
-            short_packets=int(values["short_packets"]),
-            long_packets=int(values["long_packets"]),
-            bytes=int(values["bytes"]),
-            metadata_source=str(values["metadata_source"]),
-        )
-
-    def to_legacy_dict(self) -> dict[str, int | str]:
+    def to_dict(self) -> dict[str, int | str]:
+        """Return the stable, JSON-ready statistics fields."""
         return {
             "pcm_frames": self.pcm_frames,
             "channels": self.channels,
@@ -61,9 +49,6 @@ class EncodeStats:
             "bytes": self.bytes,
             "metadata_source": self.metadata_source,
         }
-
-    from_legacy = from_legacy_dict
-    to_legacy = to_legacy_dict
 
 
 @dataclass(frozen=True)

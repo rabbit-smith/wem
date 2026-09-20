@@ -36,7 +36,7 @@ import wwise_wem_reference.python_engine as reference_engine_module
 from wwise_wem_reference.analysis.session import AnalysisSession
 from wwise_wem_reference.container.model import ContainerPlan
 from wwise_wem_reference.container.wem import load_wem_parts_bytes
-from wwise_wem.adapters.wav import read_pcm16
+from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem.profiles.registry import load_wem_profile, resolve_wem_profile
 
 
@@ -377,7 +377,7 @@ def build_stage_golden(
 ) -> tuple[dict[str, Any], dict[str, bytes]]:
     """Run the reference oracle and return (stage index, raw dump blobs)."""
     wav = Path(wav)
-    pcm = read_pcm16(wav)
+    pcm = read_pcm_wav(wav)
     profile_obj = (
         load_wem_profile(profile)
         if profile is not None

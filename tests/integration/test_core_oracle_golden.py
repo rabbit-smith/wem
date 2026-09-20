@@ -21,9 +21,10 @@ import hashlib
 import unittest
 from pathlib import Path
 
-from wwise_wem import Encoder, load_wem_profile
+from wwise_wem.application.encoder import Encoder
+from wwise_wem.profiles.registry import load_wem_profile
 from wwise_wem import _core as core_module
-from wwise_wem.adapters.wav import read_pcm16
+from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem.model import PcmBuffer
 from wwise_wem_reference import python_engine
 from wwise_wem_reference.container.model import ContainerPlan
@@ -54,7 +55,7 @@ BOUNDARY_FRAME_COUNTS = (
 
 
 def _rows_from_pcm(pcm: PcmBuffer) -> list[list[int]]:
-    """Kernel-form rows for in-domain PCM (read_pcm16 output is in-domain)."""
+    """Kernel-form rows for in-domain PCM (read_pcm_wav output is in-domain)."""
     return [[int(sample * 32768.0) for sample in row] for row in pcm.channels]
 
 
@@ -94,7 +95,7 @@ def _synthetic_stereo_pcm(frames: int = 16384) -> PcmBuffer:
 
 class CoreOracleGoldenTests(unittest.TestCase):
     def test_reference_input_matches_golden_on_facade_and_oracle(self):
-        pcm = read_pcm16(INPUT)
+        pcm = read_pcm_wav(INPUT)
         profile = load_wem_profile(PROFILE_NAME)
         golden = REFERENCE.read_bytes()
 
@@ -116,10 +117,10 @@ class CoreOracleGoldenTests(unittest.TestCase):
         self.assertEqual(direct_core.sha256(), EXPECTED_SHA256)
         self.assertEqual(facade.sha256, direct_core.sha256())
         # One execution path: the stats surface carries no provenance tag.
-        self.assertNotIn("engine", facade.stats.to_legacy_dict())
+        self.assertNotIn("engine", facade.stats.to_dict())
         self.assertEqual(
-            facade.stats.to_legacy_dict(),
-            oracle_result.stats.to_legacy_dict(),
+            facade.stats.to_dict(),
+            oracle_result.stats.to_dict(),
         )
 
     def test_boundary_length_inputs_are_byte_identical_between_facade_and_oracle(
@@ -138,8 +139,8 @@ class CoreOracleGoldenTests(unittest.TestCase):
                 self.assertGreater(len(oracle.data), 0)
                 self.assertEqual(oracle.stats.pcm_frames, frames)
                 self.assertEqual(
-                    oracle.stats.to_legacy_dict(),
-                    native.stats.to_legacy_dict(),
+                    oracle.stats.to_dict(),
+                    native.stats.to_dict(),
                 )
 
     def test_stereo_profile_has_a_pinned_native_oracle_byte_contract(self):

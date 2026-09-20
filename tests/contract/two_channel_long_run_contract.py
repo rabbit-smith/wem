@@ -9,8 +9,12 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import tempfile
 import unittest
+import wave
+from pathlib import Path
 
+import wwise_wem as W
 from scripts.generate_2ch_long_program import (
     CHANNELS,
     FRAME_COUNT,
@@ -18,7 +22,8 @@ from scripts.generate_2ch_long_program import (
     render_pcm16le,
 )
 from tests.contract.wem_byte_contract import assert_wem_equal
-from wwise_wem import Encoder, _core, load_wem_profile
+from wwise_wem import _core
+from wwise_wem.profiles.registry import load_wem_profile
 from wwise_wem.adapters.raw import read_raw_pcm
 from wwise_wem_reference.container.wem import load_wem_parts_bytes
 from wwise_wem_reference.python_engine import ContainerPlan, encode_pcm_python
@@ -55,7 +60,7 @@ class TwoChannelLongRunContract(unittest.TestCase):
             channels=CHANNELS,
             bits_per_sample=16,
         )
-        native_result = Encoder(profile).encode_pcm(pcm)
+        native_result = W.encode(W.RawPcm(raw, SAMPLE_RATE, CHANNELS, "s16le"))
         native = bytes(native_result.data)
         oracle = bytes(
             encode_pcm_python(
@@ -76,6 +81,16 @@ class TwoChannelLongRunContract(unittest.TestCase):
         self.assertEqual(modes.count(0), SHORT_PACKETS)
         self.assertEqual(modes.count(1), LONG_PACKETS)
         assert_wem_equal(self, native, oracle, "Python oracle")
+
+        with tempfile.TemporaryDirectory() as directory:
+            wav_path = Path(directory) / "long-program.bin"
+            with wave.open(str(wav_path), "wb") as target:
+                target.setnchannels(CHANNELS)
+                target.setsampwidth(2)
+                target.setframerate(SAMPLE_RATE)
+                target.writeframes(raw)
+            from_path = W.encode(wav_path)
+        assert_wem_equal(self, native, from_path.data, "public WAV path")
 
         for label, pattern in (
             ("single chunk", (FRAME_COUNT,)),

@@ -3,8 +3,8 @@
 Closes the last 2ch/48k lane end to end against the repository's own
 reference ground-truth decoder (``scripts/decode_wem.py``): the facade
 encodes a deterministic 2ch/48k stream (>= 4096 frames, with transient
-content) through :func:`wwise_wem.encode_wav` and
-:func:`wwise_wem.encode_pcm_wav`, the produced WEM must carry the correct
+content) through :func:`wwise_wem.encode` and
+:func:`wwise_wem.encode`, the produced WEM must carry the correct
 2ch/48k container geometry and profile setup packet, and decoding the WEM
 back to PCM with the reference decoder functions must reconstruct the
 profile-conditioned input to a correlation of at least 0.98 per channel
@@ -34,14 +34,11 @@ from pathlib import Path
 
 import numpy as np
 
-from wwise_wem import (
-    WwiseVorbisProfile,
-    encode_pcm_wav,
-    encode_wav,
-    load_wem_profile,
-    resolve_wem_profile,
-)
+from wwise_wem import encode
+from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem.profiles.bundle import load_profile_bundle
+from wwise_wem.profiles.model import EncoderProfile
+from wwise_wem.profiles.registry import load_wem_profile, resolve_wem_profile
 from wwise_wem_reference.analysis.preprocessing.conditioner import InputConditioner
 from wwise_wem_reference.profiles.assembly import assemble_analysis_resources
 
@@ -137,7 +134,7 @@ class TwoChannelResolutionTests(unittest.TestCase):
 
     def test_geometry_resolution_returns_the_registered_profile(self) -> None:
         profile = resolve_wem_profile(CHANNELS, SAMPLE_RATE)
-        self.assertIsInstance(profile, WwiseVorbisProfile)
+        self.assertIsInstance(profile, EncoderProfile)
         self.assertEqual(profile.name, PROFILE_NAME)
         self.assertEqual(profile.key.channels, CHANNELS)
         self.assertEqual(profile.key.sample_rate, SAMPLE_RATE)
@@ -178,7 +175,7 @@ class TwoChannelEncodeGeometryTests(unittest.TestCase):
         cls._tmp = TemporaryDirectory()
         cls.directory = Path(cls._tmp.name)
         cls.wav_path = _write_wav(cls.directory / "two_ch.wav", ch0, ch1)
-        cls.result = encode_wav(cls.wav_path)
+        cls.result = encode(cls.wav_path)
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -218,8 +215,8 @@ class TwoChannelEncodeGeometryTests(unittest.TestCase):
         self.assertEqual(2**meta.uBlocksize0Pow, 256)
         self.assertEqual(2**meta.uBlocksize1Pow, 2048)
 
-    def test_encode_pcm_wav_is_byte_identical_to_encode_wav(self) -> None:
-        converted = encode_pcm_wav(self.wav_path)
+    def test_path_and_pcm_buffer_inputs_are_byte_identical(self) -> None:
+        converted = encode(read_pcm_wav(self.wav_path))
         self.assertEqual(bytes(converted.data), bytes(self.result.data))
         self.assertEqual(converted.stats, self.result.stats)
 
@@ -245,7 +242,7 @@ class TwoChannelRoundTripTests(unittest.TestCase):
 
         with TemporaryDirectory() as directory:
             wav_path = _write_wav(Path(directory) / "two_ch.wav", ch0, ch1)
-            cls.result = encode_wav(wav_path)
+            cls.result = encode(wav_path)
         _float_pcm, info = _decode_wem_int16(bytes(cls.result.data))
         cls.decoded_int16 = _to_int16_domain(_float_pcm)
         cls.decode_info = info

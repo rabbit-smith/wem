@@ -19,7 +19,7 @@ import hashlib
 import unittest
 from pathlib import Path
 
-from wwise_wem.adapters.wav import read_pcm16
+from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem.application.encoder import Encoder
 from wwise_wem.profiles.registry import load_wem_profile, resolve_wem_profile
 from wwise_wem_reference.profiles.quality import (
@@ -63,7 +63,7 @@ class QualityCrossImplementationTests(unittest.TestCase):
         # assembly — a kernel that ignores quality would encode instead).
         profile = load_wem_profile(_PROFILE_NAME, quality=4.0)
         self.assertEqual(profile.quality, 4.0)
-        pcm = read_pcm16(_FIXTURE_WAV)
+        pcm = read_pcm_wav(_FIXTURE_WAV)
         encoder = Encoder(profile)
         with self.assertRaisesRegex(ValueError, "quality-curves"):
             encoder.encode_pcm(pcm)
@@ -71,7 +71,7 @@ class QualityCrossImplementationTests(unittest.TestCase):
     def test_facade_quality_none_keeps_the_golden_bytes(self):
         profile = load_wem_profile(_PROFILE_NAME)
         self.assertIsNone(profile.quality)
-        pcm = read_pcm16(_FIXTURE_WAV)
+        pcm = read_pcm_wav(_FIXTURE_WAV)
         result = Encoder(profile).encode_pcm(pcm)
         self.assertEqual(
             hashlib.sha256(result.data).hexdigest(), _GOLDEN_WEM_SHA256

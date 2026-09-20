@@ -1,7 +1,7 @@
 """The facade's execution path is the native kernel — byte-for-byte.
 
 Executable definition of the single execution path: the facade's
-byte-producing calls (``Encoder.encode_pcm``, ``encode_wav``) run on the
+byte-producing calls (``Encoder.encode_pcm``, ``encode``) run on the
 in-package native extension ``wwise_wem._core`` and must produce
 byte-identical WEM output to the raw kernel binding and to the reference
 oracle (``wwise_wem_reference``, imported directly as a test asset — it
@@ -21,9 +21,10 @@ import hashlib
 import unittest
 from pathlib import Path
 
-from wwise_wem import Encoder, load_wem_profile
+from wwise_wem.application.encoder import Encoder
+from wwise_wem.profiles.registry import load_wem_profile
 from wwise_wem import _core as core_module
-from wwise_wem.adapters.wav import read_pcm16
+from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem.application.models import EncodeResult, EncodeStats
 from wwise_wem.model import PcmBuffer
 
@@ -47,7 +48,7 @@ EXPECTED_STATS = {
 
 
 def _rows_from_pcm(pcm: PcmBuffer) -> list[list[int]]:
-    """Kernel-form rows for in-domain PCM (read_pcm16 output is in-domain)."""
+    """Kernel-form rows for in-domain PCM (read_pcm_wav output is in-domain)."""
     return [[int(sample * 32768.0) for sample in row] for row in pcm.channels]
 
 
@@ -55,7 +56,7 @@ class FacadeIsCoreTests(unittest.TestCase):
     """The facade is the core: one execution path, identical bytes."""
 
     def test_facade_bytes_match_the_raw_core_binding_and_golden(self):
-        pcm = read_pcm16(INPUT)
+        pcm = read_pcm_wav(INPUT)
         profile = load_wem_profile(PROFILE_NAME)
         reference = REFERENCE.read_bytes()
 
@@ -69,7 +70,7 @@ class FacadeIsCoreTests(unittest.TestCase):
             hashlib.sha256(result.data).hexdigest(), EXPECTED_SHA256
         )
         self.assertEqual(result.sha256, EXPECTED_SHA256)
-        self.assertEqual(result.stats.to_legacy_dict(), EXPECTED_STATS)
+        self.assertEqual(result.stats.to_dict(), EXPECTED_STATS)
         self.assertEqual(bytes(direct.data), reference)
         self.assertEqual(direct.sha256(), EXPECTED_SHA256)
         # The facade output is what the in-package core binding produces:
@@ -88,11 +89,11 @@ class FacadeIsCoreTests(unittest.TestCase):
         # The single execution path needs no provenance tag: the result
         # stats expose only encoding facts.
         profile = load_wem_profile(PROFILE_NAME)
-        result = Encoder(profile).encode_pcm(read_pcm16(INPUT))
+        result = Encoder(profile).encode_pcm(read_pcm_wav(INPUT))
         self.assertIsInstance(result, EncodeResult)
         self.assertIsInstance(result.stats, EncodeStats)
         self.assertFalse(hasattr(result.stats, "engine"))
-        self.assertNotIn("engine", result.stats.to_legacy_dict())
+        self.assertNotIn("engine", result.stats.to_dict())
 
     def test_error_paths_are_facade_invariants(self):
         profile = load_wem_profile(PROFILE_NAME)

@@ -97,7 +97,7 @@ class AnalysisSession:
 
     @property
     def transient_quanta(self) -> int:
-        """Compatibility view of the detector quantum counter."""
+        """Number of detector quanta processed in this session."""
         return self._transient_detector.quanta
 
     def reset(self) -> None:

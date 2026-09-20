@@ -29,7 +29,7 @@ def _zip_package(path: Path, package: str, mutate=None) -> None:
             "channel_layout": "5.1", "quality_setup_identity": f"sha256:{_sha(setup)}",
         },
         "block_sizes": [256, 2048],
-        "container_metadata": installed.fmt,
+        "container_metadata": installed.container_metadata.to_fmt_dict(),
         "resources": {
             "vorbis.setup": {"path": "vorbis/setup.bin", "sha256": _sha(setup)},
         },

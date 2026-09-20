@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from wwise_wem.application.models import EncodeResult, EncodeStats
+from wwise_wem.model import PcmBuffer
 
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
@@ -28,6 +29,10 @@ def _result() -> EncodeResult:
             metadata_source="profile:wwise2013-6ch-44100",
         ),
     )
+
+
+def _pcm() -> PcmBuffer:
+    return PcmBuffer(44100, ((0.0,),) * 6)
 
 
 class CliTests(unittest.TestCase):
@@ -52,6 +57,7 @@ class CliTests(unittest.TestCase):
 
     def test_cli_calls_typed_api_and_writes_result(self) -> None:
         result = _result()
+        pcm = _pcm()
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "nested" / "output.wem"
             argv = [
@@ -70,11 +76,8 @@ class CliTests(unittest.TestCase):
             ]
             with (
                 patch("sys.argv", argv),
-                patch(
-                    "wwise_wem.cli.read_wav_geometry",
-                    return_value=(6, 44100),
-                ),
-                patch("wwise_wem.cli.encode_wav", return_value=result) as encode,
+                patch("wwise_wem.cli.read_pcm_wav", return_value=pcm),
+                patch("wwise_wem.cli.encode", return_value=result) as encode,
                 patch("builtins.print") as printed,
             ):
                 from wwise_wem.cli import main
@@ -83,7 +86,7 @@ class CliTests(unittest.TestCase):
 
             self.assertEqual(output.read_bytes(), result.data)
         encode.assert_called_once_with(
-            Path("input.wav"),
+            pcm,
             profile="wwise2013-6ch-44100",
             quality=None,
         )
@@ -96,6 +99,7 @@ class CliTests(unittest.TestCase):
 
     def test_cli_quality_is_passed_through(self) -> None:
         result = _result()
+        pcm = _pcm()
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output.wem"
             argv = [
@@ -110,11 +114,8 @@ class CliTests(unittest.TestCase):
             ]
             with (
                 patch("sys.argv", argv),
-                patch(
-                    "wwise_wem.cli.read_wav_geometry",
-                    return_value=(6, 44100),
-                ),
-                patch("wwise_wem.cli.encode_wav", return_value=result) as encode,
+                patch("wwise_wem.cli.read_pcm_wav", return_value=pcm),
+                patch("wwise_wem.cli.encode", return_value=result) as encode,
                 patch("builtins.print"),
             ):
                 from wwise_wem.cli import main
@@ -122,7 +123,7 @@ class CliTests(unittest.TestCase):
                 main()
             self.assertEqual(output.read_bytes(), result.data)
         encode.assert_called_once_with(
-            Path("input.wav"), profile="wwise2013-6ch-44100", quality=6.0
+            pcm, profile="wwise2013-6ch-44100", quality=6.0
         )
 
     def test_hash_failure_does_not_create_output(self) -> None:
@@ -140,11 +141,8 @@ class CliTests(unittest.TestCase):
                         "0" * 64,
                     ],
                 ),
-                patch(
-                    "wwise_wem.cli.read_wav_geometry",
-                    return_value=(6, 44100),
-                ),
-                patch("wwise_wem.cli.encode_wav", return_value=_result()),
+                patch("wwise_wem.cli.read_pcm_wav", return_value=_pcm()),
+                patch("wwise_wem.cli.encode", return_value=_result()),
             ):
                 from wwise_wem.cli import main
 

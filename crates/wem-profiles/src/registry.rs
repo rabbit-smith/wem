@@ -1,9 +1,7 @@
 //! Installed Wwise Vorbis encoder profiles and exact profile registry
 //! (Python: `profiles/registry.py`).
 //!
-//! Python builds one module-level registry from the installed default
-//! profile at import time; the Rust equivalent is built lazily by
-//! [`installed_registry`] on the caller's [`DataDir`].
+//! Rust callers build the registry lazily from a caller-provided [`DataDir`].
 
 use crate::bundle::load_profile_bundle;
 use crate::data::DataDir;
@@ -19,8 +17,7 @@ pub struct ProfileRegistry {
 }
 
 impl ProfileRegistry {
-    /// Build the registry (Python `ProfileRegistry.__init__`): duplicate
-    /// keys or names are rejected.
+    /// Build a registry, rejecting duplicate keys or names.
     pub fn new(profiles: Vec<EncoderProfile>) -> Result<Self, ProfileError> {
         let mut by_key: Vec<(ProfileKey, EncoderProfile)> = Vec::new();
         let mut by_name: Vec<(String, EncoderProfile)> = Vec::new();
@@ -171,8 +168,7 @@ impl ProfileRegistry {
     }
 }
 
-/// Build the registry from every profile registered in the package index
-/// (Python module-level `PROFILE_REGISTRY`).
+/// Build the registry from every profile registered in the package index.
 ///
 /// Complete profiles and draft profiles (setup pending corpus export) are
 /// both listed; draft entries carry `setup_available == false` plus the

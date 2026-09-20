@@ -9,7 +9,7 @@ import wave
 from pathlib import Path
 
 from wwise_wem.adapters.sample_conversion import sample24_to_int16
-from wwise_wem.adapters.wav import read_pcm16, read_pcm_wav
+from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem.model import PcmBuffer
 
 
@@ -48,7 +48,7 @@ class ReadPcmWavFormatTests(unittest.TestCase):
     def _tmp(self, name: str) -> Path:
         return Path(tempfile.mkdtemp()) / name
 
-    def test_int16_matches_the_legacy_reader(self):
+    def test_int16_preserves_channel_order_and_normalization(self):
         values = (-32768, 32767, -1, 1, 0, -16384)
         path = self._tmp("a16.wav")
         with wave.open(str(path), "wb") as target:
@@ -58,7 +58,6 @@ class ReadPcmWavFormatTests(unittest.TestCase):
             target.writeframes(_int16_bytes(*values))
         pcm = read_pcm_wav(path)
         self.assertIsInstance(pcm, PcmBuffer)
-        self.assertEqual(pcm, read_pcm16(path))
         self.assertEqual(
             pcm.channels,
             ((-1.0, -1 / 32768.0, 0.0), (32767 / 32768.0, 1 / 32768.0, -0.5)),
@@ -176,7 +175,7 @@ class ReadPcmWavRejectionTests(unittest.TestCase):
         fmt_bytes = struct.pack("<HHIIHH", 1, 1, 44100, 88200, 2, 16)
         with open(path, "wb") as handle:
             handle.write(b"RIFF")
-            handle.write(struct.pack("<I", 24))
+            handle.write(struct.pack("<I", 28))
             handle.write(b"WAVE")
             handle.write(b"fmt ")
             handle.write(struct.pack("<I", len(fmt_bytes)))
@@ -198,12 +197,23 @@ class ReadPcmWavRejectionTests(unittest.TestCase):
         path = self._tmp("shortfmt.wav")
         with open(path, "wb") as handle:
             handle.write(b"RIFF")
-            handle.write(struct.pack("<I", 20))
+            handle.write(struct.pack("<I", 18))
             handle.write(b"WAVE")
             handle.write(b"fmt ")
             handle.write(struct.pack("<I", 16))
             handle.write(bytes([1, 0, 0, 0, 1, 0]))
         with self.assertRaisesRegex(ValueError, "fmt chunk"):
+            read_pcm_wav(path)
+
+    def test_huge_declared_chunk_is_rejected_before_reading_payload(self):
+        path = self._tmp("huge-data.wav")
+        path.write_bytes(
+            b"RIFF"
+            + struct.pack("<I", 12)
+            + b"WAVEdata"
+            + struct.pack("<I", 0xFFFF_FFFF)
+        )
+        with self.assertRaisesRegex(ValueError, "data chunk is truncated"):
             read_pcm_wav(path)
 
     def test_float32_nan_sample_is_rejected(self):

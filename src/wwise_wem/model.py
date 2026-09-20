@@ -1,11 +1,9 @@
-"""Immutable value models for the encoder's public adapter boundary."""
+"""Immutable value models for encoder inputs and profile metadata."""
 
 from __future__ import annotations
 
-import hashlib
-from dataclasses import dataclass, field
-from types import MappingProxyType
-from typing import Any, Mapping
+from dataclasses import dataclass
+from typing import Literal, Mapping
 
 
 def _require_int(value: int, label: str, *, positive: bool = False) -> int:
@@ -18,19 +16,6 @@ def _require_int(value: int, label: str, *, positive: bool = False) -> int:
     return value
 
 
-def _freeze(value: Any) -> Any:
-    """Copy common containers into recursively read-only equivalents."""
-    if isinstance(value, Mapping):
-        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
-    if isinstance(value, (list, tuple)):
-        return tuple(_freeze(item) for item in value)
-    if isinstance(value, (set, frozenset)):
-        return frozenset(_freeze(item) for item in value)
-    if isinstance(value, bytearray):
-        return bytes(value)
-    return value
-
-
 @dataclass(frozen=True)
 class PcmBuffer:
     sample_rate: int
@@ -38,7 +23,9 @@ class PcmBuffer:
 
     def __post_init__(self) -> None:
         _require_int(self.sample_rate, "sample_rate", positive=True)
-        normalized = tuple(tuple(float(sample) for sample in row) for row in self.channels)
+        normalized = tuple(
+            tuple(float(sample) for sample in row) for row in self.channels
+        )
         if not normalized:
             raise ValueError("PCM buffer needs at least one channel")
         if not normalized[0]:
@@ -55,6 +42,28 @@ class PcmBuffer:
     @property
     def frame_count(self) -> int:
         return len(self.channels[0])
+
+
+RawPcmFormat = Literal["s16le", "s24le", "f32le"]
+
+
+@dataclass(frozen=True)
+class RawPcm:
+    """Unframed PCM bytes with the geometry needed to decode them safely."""
+
+    data: bytes
+    sample_rate: int
+    channels: int
+    sample_format: RawPcmFormat
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.data, (bytes, bytearray, memoryview)):
+            raise TypeError("data must be bytes-like")
+        _require_int(self.sample_rate, "sample_rate", positive=True)
+        _require_int(self.channels, "channels", positive=True)
+        if self.sample_format not in ("s16le", "s24le", "f32le"):
+            raise ValueError("sample_format must be 's16le', 's24le', or 'f32le'")
+        object.__setattr__(self, "data", bytes(self.data))
 
 
 @dataclass(frozen=True)
@@ -120,53 +129,3 @@ class ContainerMetadata:
             "uBlocksize0Pow": self.uBlocksize0Pow,
             "uBlocksize1Pow": self.uBlocksize1Pow,
         }
-
-
-@dataclass(frozen=True)
-class SetupConfig:
-    raw_packet: bytes
-    channels: int
-    book_ids: tuple[int, ...]
-    parsed: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
-
-    def __post_init__(self) -> None:
-        _require_int(self.channels, "channels", positive=True)
-        packet = bytes(self.raw_packet)
-        if not packet:
-            raise ValueError("setup packet must not be empty")
-        ids = tuple(_require_int(value, "book_id") for value in self.book_ids)
-        if not ids:
-            raise ValueError("setup config needs at least one book id")
-        if not isinstance(self.parsed, Mapping):
-            raise TypeError("parsed setup must be a mapping")
-        object.__setattr__(self, "raw_packet", packet)
-        object.__setattr__(self, "book_ids", ids)
-        object.__setattr__(self, "parsed", _freeze(dict(self.parsed)))
-
-
-@dataclass(frozen=True)
-class PacketResult:
-    """One encoded packet and the window-mode triple that produced it."""
-
-    packet: bytes
-    mode: int
-    previous_mode: int
-    following_mode: int
-
-    def __post_init__(self) -> None:
-        packet = bytes(self.packet)
-        if not packet:
-            raise ValueError("encoded packet must not be empty")
-        for name in ("mode", "previous_mode", "following_mode"):
-            value = getattr(self, name)
-            if not isinstance(value, int) or isinstance(value, bool) or value not in (0, 1):
-                raise ValueError(f"{name} must be short/long mode 0 or 1")
-        object.__setattr__(self, "packet", packet)
-
-    @property
-    def size(self) -> int:
-        return len(self.packet)
-
-    @property
-    def sha256(self) -> str:
-        return hashlib.sha256(self.packet).hexdigest()

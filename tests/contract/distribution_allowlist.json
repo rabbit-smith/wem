@@ -1,27 +1,11 @@
 {
   "schema": "wwise-wem.distribution-allowlist.v1",
   "root_exports": [
-    "PROFILES",
-    "PROFILE_REGISTRY",
-    "ContainerMetadata",
-    "Encoder",
-    "EncoderProfile",
     "EncodeResult",
     "EncodeStats",
-    "PacketResult",
     "PcmBuffer",
-    "ProfileKey",
-    "ProfileRegistry",
-    "SetupConfig",
-    "WwiseVorbisProfile",
-    "encode_pcm_wav",
-    "encode_raw_pcm",
-    "encode_wav",
-    "load_wem_profile",
-    "read_pcm16_wav",
-    "read_pcm_wav",
-    "read_raw_pcm",
-    "resolve_wem_profile"
+    "RawPcm",
+    "encode"
   ],
   "modules": [
     "wwise_wem/__init__.py",
@@ -32,7 +16,6 @@
     "wwise_wem/adapters/wav.py",
     "wwise_wem/api.py",
     "wwise_wem/application/__init__.py",
-    "wwise_wem/application/compat.py",
     "wwise_wem/application/encoder.py",
     "wwise_wem/application/models.py",
     "wwise_wem/cli.py",

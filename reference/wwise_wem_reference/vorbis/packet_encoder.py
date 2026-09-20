@@ -325,15 +325,8 @@ def pack_audio_header(
     op: OggPack,
     setup: Mapping[str, Any],
     mode: int,
-    prev_window: int = 0,
-    next_window: int = 0,
 ) -> None:
-    """Write the Wwise audio header.
-
-    ``prev_window`` and ``next_window`` remain accepted for compatibility
-    with callers that also track the PCM window scheduler.  They are not
-    packet fields in this format revision, which writes only the mode value.
-    """
+    """Write the mode-only Wwise audio header."""
     nmodes = setup["nmodes"]
     mode_bits = ilog(nmodes - 1) if nmodes > 1 else 0
     if mode_bits:
@@ -388,8 +381,6 @@ def pack_silence_packet(
     setup: Mapping[str, Any],
     channels: int,
     mode: int = 0,
-    prev_window: int = 0,
-    next_window: int = 0,
 ) -> bytes:
     """
     Silence audio packet: floor nonzero=0 for all channels → no residue.
@@ -398,7 +389,7 @@ def pack_silence_packet(
     Long (mode1): 1 + channels bits.
     """
     op = OggPack(16)
-    pack_audio_header(op, setup, mode, prev_window, next_window)
+    pack_audio_header(op, setup, mode)
     for _ in range(channels):
         op.write(0, 1)
     return op.get_buffer()
@@ -411,8 +402,6 @@ def pack_floor_only_packet(
     mode: int,
     curves: list[list[int] | None],
     *,
-    prev_window: int = 0,
-    next_window: int = 0,
     silent_residue: bool = True,
     absolute_posts: bool = False,
     n_spectrum: int | None = None,
@@ -426,7 +415,7 @@ def pack_floor_only_packet(
     they are wrapped with floor1_wrap before packing.
     """
     op = OggPack(512)
-    pack_audio_header(op, setup, mode, prev_window, next_window)
+    pack_audio_header(op, setup, mode)
     md = setup["modes"][mode]
     mapping = setup["maps"][md["mapping"]]
     any_nz = False
@@ -468,8 +457,6 @@ def pack_block_packet_details(
     absolute_posts: list[list[int] | None],
     mdct: list[list[float]],
     *,
-    prev_window: int = 0,
-    next_window: int = 0,
     coupling_peak: Sequence[Sequence[float]] | None = None,
     residue_vq: bool = True,
     posts_are_10bit: bool = False,
@@ -484,7 +471,7 @@ def pack_block_packet_details(
     mdct[ch]: MDCT spectrum for residual = mdct/floor_amp.
     """
     op = OggPack(8192)
-    pack_audio_header(op, setup, mode, prev_window, next_window)
+    pack_audio_header(op, setup, mode)
     md = setup["modes"][mode]
     mapping = setup["maps"][md["mapping"]]
     n_spectrum = len(mdct[0]) if mdct else (1024 if md["blockflag"] else 128)
@@ -596,8 +583,6 @@ def pack_block_packet(
     absolute_posts: list[list[int] | None],
     mdct: list[list[float]],
     *,
-    prev_window: int = 0,
-    next_window: int = 0,
     coupling_peak: Sequence[Sequence[float]] | None = None,
     residue_vq: bool = True,
     posts_are_10bit: bool = False,
@@ -610,8 +595,6 @@ def pack_block_packet(
         mode,
         absolute_posts,
         mdct,
-        prev_window=prev_window,
-        next_window=next_window,
         coupling_peak=coupling_peak,
         residue_vq=residue_vq,
         posts_are_10bit=posts_are_10bit,

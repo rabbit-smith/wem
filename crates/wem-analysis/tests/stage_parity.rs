@@ -50,7 +50,7 @@ fn int_field(v: &Value, field: &str) -> i64 {
 }
 
 /// Read an uncompressed signed-16 PCM WAV into channel-major f64 values.
-/// Mirrors Python `read_pcm16` (`value / 32768.0`).
+/// Mirrors Python `read_pcm_wav` (`value / 32768.0`).
 #[allow(clippy::needless_range_loop)]
 fn read_pcm16(path: &Path) -> (Vec<Vec<f64>>, i64, i64) {
     let bytes = std::fs::read(path).expect("input.wav reads");

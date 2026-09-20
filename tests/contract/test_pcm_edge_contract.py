@@ -10,9 +10,9 @@ import wave
 from pathlib import Path
 from typing import ClassVar, TypedDict
 
-from wwise_wem import EncodeResult, encode_wav
+from wwise_wem import EncodeResult, encode
 from wwise_wem_reference.container.wem import load_wem_parts_bytes
-from wwise_wem.application.compat import read_pcm16_wav
+from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem.model import PcmBuffer
 
 
@@ -113,7 +113,7 @@ class PcmLengthEncodeContractTests(unittest.TestCase):
         for frame_count in cls.EXPECTED:
             path = Path(cls._directory.name) / f"edge-{frame_count}.wav"
             _write_pcm16(path, frame_count)
-            cls.results[frame_count] = encode_wav(path)
+            cls.results[frame_count] = encode(path)
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -141,7 +141,7 @@ class PcmLengthEncodeContractTests(unittest.TestCase):
 
 
 class PcmInputAdapterContractTests(unittest.TestCase):
-    def test_read_pcm16_wav_preserves_geometry_and_signed_value_edges(self) -> None:
+    def test_read_pcm_wav_preserves_geometry_and_signed_value_edges(self) -> None:
         interleaved = [
             -32768,
             -1,
@@ -164,22 +164,25 @@ class PcmInputAdapterContractTests(unittest.TestCase):
                 target.setframerate(SAMPLE_RATE)
                 target.writeframes(struct.pack("<12h", *interleaved))
 
-            sample_rate, frames, pcm = read_pcm16_wav(path)
+            decoded = read_pcm_wav(path)
 
-        self.assertEqual((sample_rate, frames, len(pcm)), (SAMPLE_RATE, 2, CHANNELS))
         self.assertEqual(
-            pcm,
-            [
-                [-1.0, 32767 / 32768.0],
-                [-1 / 32768.0, 1 / 32768.0],
-                [0.0, 0.0],
-                [1 / 32768.0, -1 / 32768.0],
-                [32767 / 32768.0, -1.0],
-                [0.5, -0.5],
-            ],
+            (decoded.sample_rate, decoded.frame_count, decoded.channel_count),
+            (SAMPLE_RATE, 2, CHANNELS),
+        )
+        self.assertEqual(
+            decoded.channels,
+            (
+                (-1.0, 32767 / 32768.0),
+                (-1 / 32768.0, 1 / 32768.0),
+                (0.0, 0.0),
+                (1 / 32768.0, -1 / 32768.0),
+                (32767 / 32768.0, -1.0),
+                (0.5, -0.5),
+            ),
         )
 
-    def test_read_pcm16_wav_returns_empty_channel_rows_for_zero_frames(self) -> None:
+    def test_read_pcm_wav_rejects_zero_frames(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "empty.wav"
             with wave.open(str(path), "wb") as target:
@@ -188,12 +191,10 @@ class PcmInputAdapterContractTests(unittest.TestCase):
                 target.setframerate(SAMPLE_RATE)
                 target.writeframes(b"")
 
-            self.assertEqual(
-                read_pcm16_wav(path),
-                (SAMPLE_RATE, 0, [[] for _ in range(CHANNELS)]),
-            )
+            with self.assertRaisesRegex(ValueError, "at least one frame"):
+                read_pcm_wav(path)
 
-    def test_read_pcm16_wav_rejects_non_signed16_input(self) -> None:
+    def test_read_pcm_wav_rejects_unsupported_eight_bit_input(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "pcm8.wav"
             with wave.open(str(path), "wb") as target:
@@ -203,9 +204,9 @@ class PcmInputAdapterContractTests(unittest.TestCase):
                 target.writeframes(b"\x80" * CHANNELS)
 
             with self.assertRaisesRegex(
-                ValueError, "encoder input must be uncompressed signed-16 PCM WAV"
+                ValueError, "16-bit PCM, 24-bit PCM"
             ):
-                read_pcm16_wav(path)
+                read_pcm_wav(path)
 
 
 class PcmBufferEdgeContractTests(unittest.TestCase):

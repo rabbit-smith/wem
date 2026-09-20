@@ -70,17 +70,28 @@ check the kernel byte-for-byte.
 
 ```python
 from pathlib import Path
-from wwise_wem import encode_wav
+from wwise_wem import encode
 
-result = encode_wav(Path("input.wav"))
+result = encode(Path("input.wav"))
 Path("output.wem").write_bytes(result.data)
 print(result.stats.audio_packets, result.stats.bytes)
 ```
 
-For PCM already loaded in memory, construct `Encoder(profile)` and call
-`encode_pcm(PcmBuffer)`. Inputs need at least 4096 PCM frames.
-`read_pcm16_wav(path)` remains as a compatibility helper that reads a WAV
-into the historical `(rate, frames, channel_rows)` float domain.
+The same function accepts typed in-memory input:
+
+```python
+from wwise_wem import PcmBuffer, RawPcm, encode
+
+# Channel-major samples in the signed-16 / 32768 domain.
+result = encode(PcmBuffer(48000, (left, right)))
+
+# Unframed bytes require explicit geometry and format.
+result = encode(RawPcm(raw_bytes, 48000, 2, "s16le"))
+```
+
+WAV format is detected from its RIFF header, independent of the filename
+extension. Supported input formats are signed 16-bit PCM, signed 24-bit PCM,
+and 32-bit IEEE float PCM. Inputs need at least 4096 frames.
 
 ## Acceptance result
 

@@ -6,10 +6,9 @@ import unittest
 from dataclasses import replace
 from unittest.mock import patch
 
-from wwise_wem import encode_wav
+from wwise_wem import encode
 from wwise_wem.application.encoder import Encoder
 from wwise_wem.application.models import EncodeResult, EncodeStats
-from wwise_wem.model import PcmBuffer
 from wwise_wem_reference.analysis.preprocessing.detector_input import iter_detector_quanta
 from wwise_wem_reference.analysis.session import AnalysisSession
 from wwise_wem.profiles.registry import load_wem_profile
@@ -18,29 +17,32 @@ from wwise_wem.profiles.registry import load_wem_profile
 class ProfileRuntimeFlowTests(unittest.TestCase):
     def test_selected_profile_manifest_and_blocks_reach_stream(self):
         selected = load_wem_profile("wwise2013-6ch-44100")
-        pcm = PcmBuffer(44100, ((0.0,),) * 6)
+        payload = b"\0\0" * 6
         captured = []
 
         class FakeEncoder:
             def __init__(self, profile):
                 captured.append(profile)
 
-            def encode_pcm(self, value):
-                self.pcm = value
+            def encode_pcm16_interleaved(self, data, *, sample_rate, channels):
+                self.input = (data, sample_rate, channels)
                 return EncodeResult(
                     b"wem",
                     EncodeStats(1, 6, 0, 0, 0, 3, f"profile:{selected.name}"),
                 )
 
         with (
-            patch("wwise_wem.adapters.wav.read_pcm16", return_value=pcm),
+            patch(
+                "wwise_wem.adapters.wav._read_wav_pcm16_bytes",
+                return_value=(44100, 6, payload),
+            ),
             patch(
                 "wwise_wem.profiles.registry.load_wem_profile",
                 return_value=selected,
             ) as load,
             patch("wwise_wem.application.encoder.Encoder", FakeEncoder),
         ):
-            result = encode_wav("input.wav", profile="test-profile")
+            result = encode("input.wav", profile="test-profile")
 
         load.assert_called_once_with("test-profile", quality=None)
         self.assertEqual(captured, [selected])

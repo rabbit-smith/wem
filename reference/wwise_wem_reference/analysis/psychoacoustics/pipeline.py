@@ -298,10 +298,10 @@ def analyze_short_frame(
     cap_curve = resources.short_profiles[short_variant].mask_curves[1]
     remap = [
         build_psy_remap(
-            raw, q, look,
+            raw, look,
             cap_curve=cap_curve,
             curve_offsets=resources.short_surface.remap_curve_offsets,
-        )[3]
+        )
         for raw in raw_mdct
     ]
     seed = [

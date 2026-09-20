@@ -2058,11 +2058,11 @@ def run_self_check() -> int:
     # Encode the fixture with the reference oracle.
     from wwise_wem_reference import python_engine  # type: ignore
     from wwise_wem_reference.container.model import ContainerPlan  # type: ignore
-    from wwise_wem import load_wem_profile  # type: ignore
-    from wwise_wem.adapters.wav import read_pcm16  # type: ignore
+    from wwise_wem.profiles.registry import load_wem_profile  # type: ignore
+    from wwise_wem.adapters.wav import read_pcm_wav  # type: ignore
 
     profile = load_wem_profile("wwise2013-6ch-44100")
-    pcm = read_pcm16(fixture_pcm)
+    pcm = read_pcm_wav(fixture_pcm)
     result = python_engine.encode_pcm_python(
         profile=profile,
         container=ContainerPlan.from_profile(profile),

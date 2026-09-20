@@ -220,6 +220,22 @@ impl PyEncoder {
             .map_err(error_to_pyerr)?;
         Ok(PyEncodeResult { inner: result })
     }
+
+    /// Encode interleaved little-endian signed-16 PCM bytes directly.
+    fn encode_pcm16_interleaved(
+        &self,
+        py: Python<'_>,
+        sample_rate: i64,
+        channel_count: usize,
+        data: &Bound<'_, PyBytes>,
+    ) -> PyResult<PyEncodeResult> {
+        let pcm = Pcm16::from_interleaved_le(sample_rate, channel_count, data.as_bytes())
+            .map_err(error_to_pyerr)?;
+        let result = py
+            .allow_threads(|| self.inner.encode_pcm(&pcm))
+            .map_err(error_to_pyerr)?;
+        Ok(PyEncodeResult { inner: result })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -639,6 +655,62 @@ assert res.bytes_out == len(bytes(res.data))
                 None,
             )
             .expect("memoryview encode must be bit-exact");
+        });
+    }
+
+    #[test]
+    fn encoder_encode_pcm16_interleaved_is_bit_exact() {
+        let (raw, rate, channels, frames) = fixture_pcm_bytes();
+        Python::with_gil(|py| {
+            let m = import_module(py).unwrap();
+            let encoder = m
+                .getattr("Encoder")
+                .unwrap()
+                .call1((PROFILE_NAME,))
+                .unwrap();
+            let result = encoder
+                .call_method1(
+                    "encode_pcm16_interleaved",
+                    (rate, channels, PyBytes::new(py, &raw)),
+                )
+                .unwrap();
+            let digest: String = result.call_method0("sha256").unwrap().extract().unwrap();
+            let pcm_frames: i64 = result.getattr("pcm_frames").unwrap().extract().unwrap();
+            assert_eq!(digest, REFERENCE_SHA256);
+            assert_eq!(pcm_frames, frames as i64);
+        });
+    }
+
+    #[test]
+    fn encoder_encode_pcm16_interleaved_rejections_are_structured() {
+        Python::with_gil(|py| {
+            let m = import_module(py).unwrap();
+            let globals = PyDict::new(py);
+            globals.set_item("m", m).unwrap();
+            globals.set_item("profile", PROFILE_NAME).unwrap();
+            globals.set_item("max_channels", usize::MAX).unwrap();
+            py.run(
+                c_str!(
+                    r#"
+enc = m.Encoder(profile)
+for channels, data, code in (
+    (0, b"", "STATE_ERROR"),
+    (max_channels, b"\0\0", "STATE_ERROR"),
+    (max_channels // 2, b"", "STATE_ERROR"),
+    (2, b"\0\0\0", "GEOMETRY_MISMATCH"),
+):
+    try:
+        enc.encode_pcm16_interleaved(44100, channels, data)
+    except m.WemEncoderError as error:
+        assert error.code == code, (channels, error.code)
+    else:
+        raise AssertionError((channels, code))
+"#
+                ),
+                Some(&globals),
+                None,
+            )
+            .expect("packed PCM rejections remain structured errors");
         });
     }
 

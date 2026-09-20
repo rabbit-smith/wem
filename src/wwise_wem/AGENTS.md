@@ -39,8 +39,9 @@ kernel is verified against it, never the reverse.
 
 ## Compatibility surfaces
 
-- Package root exports (`docs/public-interface.md`): additive only; internal
-  module paths are explicitly not contract.
+- Package root exports (`docs/public-interface.md`) are an exact contract;
+  changing them requires explicit human approval. Internal module paths are
+  not contract.
 - `_f32` statement placement is normative for the Rust port — when touching a
   numeric function, keep every rounding site where it is unless a contract
   run proves the output bytes identical.
