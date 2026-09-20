@@ -7,9 +7,8 @@ from dataclasses import FrozenInstanceError
 from wwise_wem.application.models import EncodeResult, EncodeStats
 from wwise_wem.model import (
     ContainerMetadata,
-    PacketResult,
     PcmBuffer,
-    SetupConfig,
+    RawPcm,
 )
 from wwise_wem.profiles.registry import WWISE2013_6CH_44100
 
@@ -38,10 +37,11 @@ class PcmBufferTests(unittest.TestCase):
 
 class ContainerMetadataTests(unittest.TestCase):
     def test_profile_fmt_roundtrip_returns_fresh_dict(self):
-        metadata = ContainerMetadata.from_fmt_dict(WWISE2013_6CH_44100.fmt)
+        profile_fmt = WWISE2013_6CH_44100.container_metadata.to_fmt_dict()
+        metadata = ContainerMetadata.from_fmt_dict(profile_fmt)
         first = metadata.to_fmt_dict(frame_count=1234)
         second = metadata.to_fmt_dict(frame_count=1234)
-        self.assertEqual(set(first), set(WWISE2013_6CH_44100.fmt))
+        self.assertEqual(set(first), set(profile_fmt))
         self.assertEqual(first["dwTotalPCMFrames"], 1234)
         self.assertEqual(second, first)
         self.assertIsNot(first, second)
@@ -52,66 +52,30 @@ class ContainerMetadataTests(unittest.TestCase):
             metadata.nChannels = 2
 
     def test_rejects_invalid_geometry_and_frame_count(self):
-        values = dict(WWISE2013_6CH_44100.fmt)
+        values = WWISE2013_6CH_44100.container_metadata.to_fmt_dict()
         values["nChannels"] = 0
         with self.assertRaisesRegex(ValueError, "nChannels"):
             ContainerMetadata.from_fmt_dict(values)
-        metadata = ContainerMetadata.from_fmt_dict(WWISE2013_6CH_44100.fmt)
+        metadata = ContainerMetadata.from_fmt_dict(
+            WWISE2013_6CH_44100.container_metadata.to_fmt_dict()
+        )
         with self.assertRaisesRegex(ValueError, "frame_count"):
             metadata.to_fmt_dict(frame_count=-1)
 
 
-class SetupConfigTests(unittest.TestCase):
-    def test_copies_and_freezes_parsed_mapping(self):
-        source = {"floors": [{"multiplier": 2}], "book_ids": [1, 2]}
-        setup = SetupConfig(b"setup", 6, [1, 2], source)
-        source["book_ids"].append(3)
-        source["floors"][0]["multiplier"] = 4
-        self.assertEqual(setup.raw_packet, b"setup")
-        self.assertEqual(setup.book_ids, (1, 2))
-        self.assertEqual(setup.parsed["book_ids"], (1, 2))
-        self.assertEqual(setup.parsed["floors"][0]["multiplier"], 2)
-        with self.assertRaises(TypeError):
-            setup.parsed["new"] = 1
-        with self.assertRaises(TypeError):
-            setup.parsed["floors"][0]["multiplier"] = 3
-        with self.assertRaises(FrozenInstanceError):
-            setup.channels = 2
-
-    def test_rejects_empty_or_invalid_setup(self):
-        with self.assertRaisesRegex(ValueError, "packet must not be empty"):
-            SetupConfig(b"", 6, (1,), {})
-        with self.assertRaisesRegex(ValueError, "at least one book"):
-            SetupConfig(b"setup", 6, (), {})
-        with self.assertRaisesRegex(ValueError, "channels"):
-            SetupConfig(b"setup", 0, (1,), {})
-
-
-class PacketResultTests(unittest.TestCase):
-    def test_packet_metadata_is_immutable_and_hashed(self):
-        source = bytearray(b"packet")
-        result = PacketResult(source, mode=1, previous_mode=0, following_mode=1)
-        source[0] = 0
-        self.assertEqual(result.packet, b"packet")
-        self.assertEqual(result.size, 6)
-        self.assertEqual(result.sha256, hashlib.sha256(b"packet").hexdigest())
-        with self.assertRaises(FrozenInstanceError):
-            result.mode = 0
-
-    def test_rejects_empty_packet_and_invalid_modes(self):
-        with self.assertRaisesRegex(ValueError, "must not be empty"):
-            PacketResult(b"", 0, 0, 0)
-        for field in ("mode", "previous_mode", "following_mode"):
-            values = {"mode": 0, "previous_mode": 0, "following_mode": 0}
-            values[field] = 2
-            with self.subTest(field=field):
-                with self.assertRaisesRegex(ValueError, field):
-                    PacketResult(b"packet", **values)
+class RawPcmTests(unittest.TestCase):
+    def test_copies_bytes_and_validates_format(self):
+        source = bytearray(b"\0\0")
+        raw = RawPcm(source, 48000, 2, "s16le")
+        source[0] = 1
+        self.assertEqual(raw.data, b"\0\0")
+        with self.assertRaisesRegex(ValueError, "sample_format"):
+            RawPcm(b"\0", 48000, 2, "u8")  # type: ignore[arg-type]
 
 
 class EncodeResultTests(unittest.TestCase):
-    def test_legacy_dict_roundtrip(self):
-        legacy_stats = {
+    def test_stats_dictionary_is_an_independent_value(self):
+        expected = {
             "pcm_frames": 4096,
             "channels": 6,
             "audio_packets": 3,
@@ -120,20 +84,12 @@ class EncodeResultTests(unittest.TestCase):
             "bytes": 4,
             "metadata_source": "profile:wwise2013-6ch-44100",
         }
-        stats = EncodeStats.from_legacy_dict(legacy_stats)
-        self.assertEqual(stats.to_legacy_dict(), legacy_stats)
-        # Older dictionaries carried a provenance entry; it is tolerated on
-        # read and dropped on write (the execution path is single).
-        legacy_with_tag = dict(legacy_stats)
-        legacy_with_tag["engine"] = "native"
-        self.assertEqual(EncodeStats.from_legacy_dict(legacy_with_tag), stats)
-        self.assertNotIn("engine", EncodeStats.from_legacy_dict(legacy_with_tag).to_legacy_dict())
+        stats = EncodeStats(4096, 6, 3, 2, 1, 4, "profile:wwise2013-6ch-44100")
+        self.assertEqual(stats.to_dict(), expected)
         result = EncodeResult(b"WEM!", stats)
         self.assertEqual(result.stats, stats)
         self.assertEqual(result.sha256, hashlib.sha256(b"WEM!").hexdigest())
-        self.assertEqual(EncodeStats.from_legacy(legacy_stats), stats)
-        self.assertEqual(stats.to_legacy(), legacy_stats)
-        converted = stats.to_legacy_dict()
+        converted = stats.to_dict()
         converted["bytes"] = 100
         self.assertEqual(result.stats.bytes, 4)
         with self.assertRaises(FrozenInstanceError):

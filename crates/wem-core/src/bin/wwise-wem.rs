@@ -5,8 +5,7 @@
 //!
 //! * `--output` defaults to stdout (use "-" explicitly for stdout).
 //! * `--profile` selects an installed profile by name; without it, the
-//!   profile is resolved from the WAV's channel count / sample rate
-//!   (Python `api.py::encode_wav` default path).
+//!   profile is resolved from the WAV's channel count and sample rate.
 //! * `--time` prints per-stage timings to stderr (bench/diagnostics).
 //!
 //! A one-line summary (bytes, sha256, stats) is written to stderr so the

@@ -3,7 +3,7 @@
 These tests lock the exact arithmetic of the conversion helpers: the
 24-bit rule (integer add + shift + explicit saturation), the float rule
 (finiteness check, scale, round ties away from zero, saturation), and the
-legacy float-domain mapping.  Every case is a named boundary value from
+encoder float-domain mapping. Every case is a named boundary value from
 the documented conversion rules.
 """
 
@@ -121,8 +121,8 @@ class Int16ToDomainValueTests(unittest.TestCase):
         self.assertEqual(int16_to_domain_value(32767), 32767 / 32768.0)
         self.assertEqual(int16_to_domain_value(0), 0.0)
 
-    def test_matches_legacy_normalization(self):
-        # The historical read_pcm16_wav expression, verbatim.
+    def test_matches_encoder_normalization(self):
+        # The signed-16 WAV normalization expression, verbatim.
         for value in (-32768, -1, 0, 1, 16384, 32767):
             self.assertEqual(int16_to_domain_value(value), value / 32768.0)
 

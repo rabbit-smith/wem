@@ -16,7 +16,7 @@ from typing import Any, Iterable, Sequence
 from wwise_wem_reference.vorbis.packet_encoder import pack_analysis_frame
 from wwise_wem_reference.profiles.assembly import assemble_encoder_profile_resources
 from wwise_wem.profiles.bundle import load_profile_bundle
-from wwise_wem.application.compat import read_pcm16_wav
+from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem_reference.analysis.session import AnalysisSession
 from wwise_wem.profiles.registry import load_wem_profile, resolve_wem_profile
 
@@ -134,8 +134,11 @@ def first_nested_word_difference(
 
 def build_frame_contract(wav: Path, *, profile: str | None = None) -> dict[str, Any]:
     """Run the real encoder and return its compact per-frame contract."""
-    sample_rate, pcm_frames, pcm = read_pcm16_wav(Path(wav))
-    channels = len(pcm)
+    pcm_buffer = read_pcm_wav(Path(wav))
+    sample_rate = pcm_buffer.sample_rate
+    pcm_frames = pcm_buffer.frame_count
+    pcm = pcm_buffer.channels
+    channels = pcm_buffer.channel_count
     selected = (
         load_wem_profile(profile)
         if profile is not None

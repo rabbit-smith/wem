@@ -84,7 +84,7 @@ class RawPcmGeometryValidationTests(unittest.TestCase):
 
 
 class RawPcmFormatTests(unittest.TestCase):
-    def test_int16_preserves_the_legacy_domain(self):
+    def test_int16_preserves_the_encoder_domain(self):
         pcm = read_raw_pcm(
             _to_int16_le(-32768, 32767, 0, 1, -1),
             sample_rate=44100,

@@ -75,10 +75,9 @@ class Encoder:
         """Convert in-domain float PCM rows into kernel signed-16 rows.
 
         The kernel consumes integer signed-16 samples; the public float
-        domain is ``value / 32768.0`` as produced by ``read_pcm16_wav`` /
-        ``read_pcm16``. Every sample must be exactly that of an integer in
-        the signed-16 range; anything else is rejected with a plain
-        :class:`ValueError`.
+        domain is ``value / 32768.0`` as produced by the input adapters.
+        Every sample must be exactly that of an integer in the signed-16
+        range; anything else is rejected with a plain :class:`ValueError`.
         """
         rows: list[list[int]] = []
         for channel, row in enumerate(pcm.channels):
@@ -89,7 +88,7 @@ class Encoder:
                     raise ValueError(
                         f"PCM channel {channel} frame {frame} value {sample!r} "
                         "is not an integer signed-16 sample "
-                        "(expected the value/32768.0 domain of read_pcm16_wav)"
+                        "(expected the value/32768.0 signed-16 domain)"
                     )
                 values.append(int(scaled))
             rows.append(values)
@@ -110,6 +109,45 @@ class Encoder:
         candidate = Path(origin).resolve().parent / "data" / "profiles"
         return str(candidate) if candidate.is_dir() else None
 
+    def _backend(self) -> Any:
+        if self._core_backend is None:
+            self._core_backend = _core.Encoder(
+                self.profile.name,
+                self._profile_data_dir(),
+                self.profile.quality,
+            )
+        return self._core_backend
+
+    def encode_pcm16_interleaved(
+        self,
+        data: bytes,
+        *,
+        sample_rate: int,
+        channels: int,
+    ) -> EncodeResult:
+        """Encode packed signed-16 input without expanding Python sample objects."""
+        if (channels, sample_rate) != (
+            self.profile.channels,
+            self.profile.sample_rate,
+        ):
+            raise ValueError(
+                "PCM channel count/sample rate differs from encoder profile"
+            )
+        bytes_per_frame = channels * 2
+        if len(data) % bytes_per_frame:
+            raise ValueError("PCM data does not align to whole frames")
+        if len(data) // bytes_per_frame < 4096:
+            raise ValueError("PCM input must contain at least 4096 frames")
+        try:
+            result = self._backend().encode_pcm16_interleaved(
+                sample_rate,
+                channels,
+                data,
+            )
+        except _core.WemEncoderError as error:
+            raise ValueError(str(error)) from error
+        return self._result_from_core(result)
+
     def _encode_pcm_core(self, pcm: PcmBuffer, rows: list[list[int]]) -> EncodeResult:
         """Run one encode on the native kernel and fill the Python DTOs.
 
@@ -119,13 +157,7 @@ class Encoder:
         one the historical bytes are reproduced exactly.
         """
         try:
-            if self._core_backend is None:
-                self._core_backend = _core.Encoder(
-                    self.profile.name,
-                    self._profile_data_dir(),
-                    self.profile.quality,
-                )
-            result = self._core_backend.encode_pcm(pcm.sample_rate, rows)
+            result = self._backend().encode_pcm(pcm.sample_rate, rows)
         except _core.WemEncoderError as error:
             # The public contract surfaces input/configuration errors as
             # ValueError; kernel rejections reach the user only after all
@@ -134,6 +166,9 @@ class Encoder:
             # (Backend construction can raise the same kernel error, e.g.
             # a quality request on a profile without quality-curves.)
             raise ValueError(str(error)) from error
+        return self._result_from_core(result)
+
+    def _result_from_core(self, result: Any) -> EncodeResult:
         stats = EncodeStats(
             pcm_frames=int(result.pcm_frames),
             channels=int(result.channels),

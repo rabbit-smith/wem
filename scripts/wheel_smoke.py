@@ -127,7 +127,7 @@ def _facade_metadata_smoke(contract: dict[str, object]) -> str:
     return (
         "import wwise_wem; "
         f"assert wwise_wem.__all__=={contract['root_exports']!r}; "
-        "from wwise_wem import resolve_wem_profile; "
+        "from wwise_wem.profiles.registry import resolve_wem_profile; "
         "from wwise_wem.profiles.bundle import load_profile_bundle; "
         "p=resolve_wem_profile(6,44100); "
         "b=load_profile_bundle(); b.verify_all(); "
@@ -149,10 +149,10 @@ def _clean_venv_core_smoke() -> str:
     return (
         "import hashlib\n"
         "import sys\n"
-        "from wwise_wem import encode_wav\n"
+        "from wwise_wem import encode\n"
         "import wwise_wem._core as core\n"
         "assert hasattr(core, 'Encoder'), core\n"
-        "result = encode_wav(sys.argv[1])\n"
+        "result = encode(sys.argv[1])\n"
         "ref = hashlib.sha256(open(sys.argv[2], 'rb').read()).hexdigest()\n"
         "assert result.sha256 == ref, (result.sha256, ref)\n"
         "try:\n"

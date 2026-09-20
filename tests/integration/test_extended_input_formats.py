@@ -29,6 +29,7 @@ from wwise_wem import _core as core_mod
 from wwise_wem.adapters.raw import read_raw_pcm
 from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem.application.models import EncodeResult
+from wwise_wem.profiles.registry import load_wem_profile
 from wwise_wem_reference import python_engine
 from wwise_wem_reference.container.model import ContainerPlan
 
@@ -128,11 +129,11 @@ class ExtendedInputDomainTests(unittest.TestCase):
             self.assertEqual(pcm16, pcm24)
             self.assertEqual(pcm24, pcm32)
 
-    def test_encode_pcm_wav_int16_matches_encode_wav(self):
-        legacy = W.encode_wav(INPUT)
-        extended = W.encode_pcm_wav(INPUT)
-        self.assertEqual(legacy.data, extended.data)
-        self.assertEqual(legacy.sha256, extended.sha256)
+    def test_packed_wav_path_matches_typed_pcm(self):
+        packed = W.encode(INPUT)
+        typed = W.encode(read_pcm_wav(INPUT))
+        self.assertEqual(packed.data, typed.data)
+        self.assertEqual(packed.sha256, typed.sha256)
 
     def test_encoding_is_deterministic_across_runs_and_forms(self):
         import tempfile
@@ -145,20 +146,10 @@ class ExtendedInputDomainTests(unittest.TestCase):
             _write_int24_wav(wav24, values, 6, 44100)
             _write_float32_wav(wav32, values, 6, 44100)
 
-            first = W.encode_pcm_wav(wav24)
-            again = W.encode_pcm_wav(wav32)
-            raw24 = W.encode_raw_pcm(
-                _int24_bytes(values),
-                sample_rate=44100,
-                channels=6,
-                bits_per_sample=24,
-            )
-            raw32 = W.encode_raw_pcm(
-                _float32_bytes(values),
-                sample_rate=44100,
-                channels=6,
-                bits_per_sample=32,
-            )
+            first = W.encode(wav24)
+            again = W.encode(wav32)
+            raw24 = W.encode(W.RawPcm(_int24_bytes(values), 44100, 6, "s24le"))
+            raw32 = W.encode(W.RawPcm(_float32_bytes(values), 44100, 6, "f32le"))
             # Same samples through four entry forms: one byte stream.
             self.assertEqual(first.data, again.data)
             self.assertEqual(first.data, raw24.data)
@@ -177,20 +168,10 @@ class ExtendedInputDomainTests(unittest.TestCase):
             _write_float32_wav(wav32, values, 6, 44100)
 
             cases = (
-                lambda: W.encode_pcm_wav(wav24),
-                lambda: W.encode_pcm_wav(wav32),
-                lambda: W.encode_raw_pcm(
-                    _int24_bytes(values),
-                    sample_rate=44100,
-                    channels=6,
-                    bits_per_sample=24,
-                ),
-                lambda: W.encode_raw_pcm(
-                    _int16_bytes(values),
-                    sample_rate=44100,
-                    channels=6,
-                    bits_per_sample=16,
-                ),
+                lambda: W.encode(wav24),
+                lambda: W.encode(wav32),
+                lambda: W.encode(W.RawPcm(_int24_bytes(values), 44100, 6, "s24le")),
+                lambda: W.encode(W.RawPcm(_int16_bytes(values), 44100, 6, "s16le")),
             )
             for index, action in enumerate(cases):
                 with self.subTest(form=index):
@@ -204,12 +185,7 @@ class ExtendedInputDomainTests(unittest.TestCase):
         # unsupported geometry must still fail with the explicit rejection.
         values = _synthetic_int16(4096, channels=2)
         with self.assertRaisesRegex(ValueError, "no Wwise 2013.2 profile"):
-            W.encode_raw_pcm(
-                _int16_bytes(values),
-                sample_rate=44100,
-                channels=2,
-                bits_per_sample=16,
-            )
+            W.encode(W.RawPcm(_int16_bytes(values), 44100, 2, "s16le"))
 
 
 class ExtendedInputConsistencyTests(unittest.TestCase):
@@ -222,7 +198,7 @@ class ExtendedInputConsistencyTests(unittest.TestCase):
     """
 
     def _oracle_encode(self, pcm) -> EncodeResult:
-        profile = W.load_wem_profile(PROFILE_NAME)
+        profile = load_wem_profile(PROFILE_NAME)
         return python_engine.encode_pcm_python(
             profile=profile,
             container=ContainerPlan.from_profile(profile),
@@ -233,7 +209,7 @@ class ExtendedInputConsistencyTests(unittest.TestCase):
         pcm = read_pcm_wav(INPUT)
         golden = REFERENCE.read_bytes()
 
-        facade = W.encode_pcm_wav(INPUT, profile=PROFILE_NAME)
+        facade = W.encode(INPUT, profile=PROFILE_NAME)
         oracle = self._oracle_encode(pcm)
         direct_core = core_mod.Encoder(PROFILE_NAME).encode_pcm(
             44100,
@@ -256,34 +232,19 @@ class ExtendedInputConsistencyTests(unittest.TestCase):
             _write_int24_wav(wav24, values, 6, 44100)
             _write_float32_wav(wav32, values, 6, 44100)
             forms = [
-                ("wav-24", lambda: W.encode_pcm_wav(wav24)),
-                ("wav-32f", lambda: W.encode_pcm_wav(wav32)),
+                ("wav-24", lambda: W.encode(wav24)),
+                ("wav-32f", lambda: W.encode(wav32)),
                 (
                     "raw-24",
-                    lambda: W.encode_raw_pcm(
-                        _int24_bytes(values),
-                        sample_rate=44100,
-                        channels=6,
-                        bits_per_sample=24,
-                    ),
+                    lambda: W.encode(W.RawPcm(_int24_bytes(values), 44100, 6, "s24le")),
                 ),
                 (
                     "raw-32f",
-                    lambda: W.encode_raw_pcm(
-                        _float32_bytes(values),
-                        sample_rate=44100,
-                        channels=6,
-                        bits_per_sample=32,
-                    ),
+                    lambda: W.encode(W.RawPcm(_float32_bytes(values), 44100, 6, "f32le")),
                 ),
                 (
                     "raw-16",
-                    lambda: W.encode_raw_pcm(
-                        _int16_bytes(values),
-                        sample_rate=44100,
-                        channels=6,
-                        bits_per_sample=16,
-                    ),
+                    lambda: W.encode(W.RawPcm(_int16_bytes(values), 44100, 6, "s16le")),
                 ),
             ]
             # The oracle encodes the one in-domain PCM every form converts
@@ -301,8 +262,8 @@ class ExtendedInputConsistencyTests(unittest.TestCase):
                     self.assertEqual(facade_result.data, oracle_result.data, label)
                     self.assertGreater(len(facade_result.data), 0)
                     self.assertEqual(
-                        facade_result.stats.to_legacy_dict(),
-                        oracle_result.stats.to_legacy_dict(),
+                        facade_result.stats.to_dict(),
+                        oracle_result.stats.to_dict(),
                         label,
                     )
 

@@ -63,7 +63,7 @@ sys.path.insert(0, str(repo / "reference"))
 
 import wwise_wem_reference.python_engine as python_engine
 from wwise_wem_reference.container.model import ContainerPlan
-from wwise_wem.adapters.wav import read_pcm16
+from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem.profiles.registry import resolve_wem_profile
 
 captured = {}
@@ -83,7 +83,7 @@ def capture_build(fmt_fields, packets, **kw):
 
 python_engine.build_vorbis_wem = capture_build
 try:
-    pcm = read_pcm16(repo / "tests/fixtures/input.wav")
+    pcm = read_pcm_wav(repo / "tests/fixtures/input.wav")
     profile = resolve_wem_profile(pcm.channel_count, pcm.sample_rate)
     python_engine.encode_pcm_python(
         profile=profile,

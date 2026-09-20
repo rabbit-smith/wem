@@ -1,4 +1,4 @@
-"""Phase-0 contract tests for the intentionally supported public surface.
+"""Contract tests for the intentionally supported public surface.
 
 These tests freeze user-visible behavior, not the current internal module
 layout.  Refactors may freely replace the implementation behind this API.
@@ -14,36 +14,13 @@ import unittest
 import wave
 from pathlib import Path
 
-from wwise_wem import (
-    ProfileKey,
-    WwiseVorbisProfile,
-    encode_wav,
-    load_wem_profile,
-    resolve_wem_profile,
-)
+from wwise_wem import encode
 
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 INPUT = FIXTURES / "input.wav"
 PROFILE = "wwise2013-6ch-44100"
-
-
-class PublicProfileContractTests(unittest.TestCase):
-    def test_automatic_and_named_profile_resolution(self):
-        automatic = resolve_wem_profile(6, 44100)
-        explicit = load_wem_profile(PROFILE)
-        self.assertIsInstance(automatic, WwiseVorbisProfile)
-        self.assertEqual(automatic, explicit)
-        self.assertEqual(ProfileKey(6, 44100), ProfileKey(automatic.channels, automatic.sample_rate))
-        self.assertEqual(automatic.name, PROFILE)
-        self.assertEqual(len(automatic.setup_packet()), 201)
-
-    def test_unknown_profile_name_and_geometry_are_errors(self):
-        with self.assertRaisesRegex(ValueError, "unknown WEM profile"):
-            load_wem_profile("missing-profile")
-        with self.assertRaisesRegex(ValueError, "no Wwise 2013.2 profile"):
-            resolve_wem_profile(2, 44100)
 
 
 class PublicEncodeContractTests(unittest.TestCase):
@@ -57,8 +34,8 @@ class PublicEncodeContractTests(unittest.TestCase):
         with wave.open(str(cls.short_input), "wb") as target:
             target.setparams(params)
             target.writeframes(pcm)
-        cls.automatic_result = encode_wav(cls.short_input)
-        cls.explicit_result = encode_wav(cls.short_input, profile=PROFILE)
+        cls.automatic_result = encode(cls.short_input)
+        cls.explicit_result = encode(cls.short_input, profile=PROFILE)
 
     @classmethod
     def tearDownClass(cls):
@@ -71,14 +48,6 @@ class PublicEncodeContractTests(unittest.TestCase):
         self.assertEqual(
             self.automatic_result.stats, self.explicit_result.stats
         )
-
-    def test_encoder_is_a_lazy_canonical_root_export(self):
-        import wwise_wem
-        from wwise_wem.application.encoder import Encoder as CanonicalEncoder
-
-        self.assertIn("Encoder", wwise_wem.__all__)
-        self.assertIn("Encoder", dir(wwise_wem))
-        self.assertIs(wwise_wem.Encoder, CanonicalEncoder)
 
     def test_packet_counts_are_internally_consistent(self):
         stats = self.automatic_result.stats
@@ -97,9 +66,9 @@ class PublicEncodeContractTests(unittest.TestCase):
                 target.setframerate(44100)
                 target.writeframes(b"\0" * (4096 * 2 * 2))
             with self.assertRaisesRegex(ValueError, "no Wwise 2013.2 profile"):
-                encode_wav(path)
+                encode(path)
 
-    def test_non_s16_pcm_wav_is_an_error(self):
+    def test_unsupported_eight_bit_wav_is_an_error(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "pcm8.wav"
             with wave.open(str(path), "wb") as target:
@@ -107,8 +76,8 @@ class PublicEncodeContractTests(unittest.TestCase):
                 target.setsampwidth(1)
                 target.setframerate(44100)
                 target.writeframes(b"\x80" * (32 * 6))
-            with self.assertRaisesRegex(ValueError, "signed-16 PCM WAV"):
-                encode_wav(path)
+            with self.assertRaisesRegex(ValueError, "16-bit PCM, 24-bit PCM"):
+                encode(path)
 
 
 class PublicCliContractTests(unittest.TestCase):
@@ -159,7 +128,6 @@ import sys
 import wwise_wem
 names = [
     'wwise_wem.application.encoder',
-    'wwise_wem.application.compat',
     'wwise_wem_reference.python_engine',
     'wwise_wem_reference.analysis.dsp.transform',
     'wwise_wem_reference.analysis.psychoacoustics.pipeline',

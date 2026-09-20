@@ -33,7 +33,7 @@ EXPECTED_WEM_SHA256 = (
 )
 
 
-def read_pcm16_wav(path: Path) -> tuple[int, int, bytes]:
+def read_pcm16_interleaved(path: Path) -> tuple[int, int, bytes]:
     """Minimal RIFF/PCM-16 reader: (sample_rate, channels, interleaved bytes)."""
     raw = path.read_bytes()
     if raw[:4] != b"RIFF" or raw[8:12] != b"WAVE":
@@ -66,7 +66,9 @@ def main() -> int:
     print(f"module: {native.__file__}")
 
     # --- inputs -----------------------------------------------------------
-    sample_rate, channels, interleaved = read_pcm16_wav(FIXTURES / "input.wav")
+    sample_rate, channels, interleaved = read_pcm16_interleaved(
+        FIXTURES / "input.wav"
+    )
     total_frames = len(interleaved) // (2 * channels)
     reference = (FIXTURES / "reference.wem").read_bytes()
     ref_sha = sha256_hex(reference)

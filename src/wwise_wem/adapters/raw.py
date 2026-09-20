@@ -17,9 +17,16 @@ channel lengths.
 from __future__ import annotations
 
 import struct
+from array import array
+from sys import byteorder
 
 from ..model import PcmBuffer
-from .sample_conversion import float_to_int16, int16_to_domain_value, sample24_to_int16, unpack_sample24
+from .sample_conversion import (
+    float_to_int16,
+    int16_to_domain_value,
+    sample24_to_int16,
+    unpack_sample24,
+)
 
 _SUPPORTED_BITS = (16, 24, 32)
 
@@ -46,10 +53,26 @@ def read_raw_pcm(
     frame.  Supported bit depths: 16 (signed integer), 24 (signed
     integer), 32 (IEEE-754 float32).
     """
-    if isinstance(data, (bytes, bytearray, memoryview)):
-        payload = bytes(data)
-    else:
+    payload = _normalize_pcm16_bytes(
+        data,
+        sample_rate=sample_rate,
+        channels=channels,
+        bits_per_sample=bits_per_sample,
+    )
+    return _pcm16_bytes_to_buffer(payload, sample_rate=sample_rate, channels=channels)
+
+
+def _normalize_pcm16_bytes(
+    data: bytes | bytearray | memoryview,
+    *,
+    sample_rate: int,
+    channels: int,
+    bits_per_sample: int,
+) -> bytes:
+    """Validate raw PCM and return interleaved signed-16 little-endian bytes."""
+    if not isinstance(data, (bytes, bytearray, memoryview)):
         raise TypeError("data must be bytes-like")
+    payload = bytes(data)
     sample_rate = _require_geometry_int(sample_rate, "sample_rate", positive=True)
     channels = _require_geometry_int(channels, "channels", positive=True)
     if not isinstance(bits_per_sample, int) or isinstance(bits_per_sample, bool):
@@ -68,16 +91,40 @@ def read_raw_pcm(
         raise ValueError("raw PCM must contain at least one frame")
 
     if bits_per_sample == 16:
-        samples: list[int] = list(struct.unpack(f"<{frames * channels}h", payload))
-    elif bits_per_sample == 24:
-        samples = [
-            sample24_to_int16(unpack_sample24(payload, index * 3))
-            for index in range(frames * channels)
-        ]
-    else:  # bits_per_sample == 32, IEEE-754 float32
-        float_samples = list(struct.unpack(f"<{frames * channels}f", payload))
-        samples = [float_to_int16(value) for value in float_samples]
+        return payload
+    if bits_per_sample == 24:
+        samples = array(
+            "h",
+            (
+                sample24_to_int16(unpack_sample24(payload, index * 3))
+                for index in range(frames * channels)
+            ),
+        )
+    else:
+        samples = array(
+            "h",
+            (
+                float_to_int16(item[0])
+                for item in struct.iter_unpack("<f", payload)
+            ),
+        )
+    if byteorder != "little":
+        samples.byteswap()
+    return samples.tobytes()
 
+
+def _pcm16_bytes_to_buffer(
+    payload: bytes,
+    *,
+    sample_rate: int,
+    channels: int,
+) -> PcmBuffer:
+    """Expand validated interleaved signed-16 bytes into a typed PCM buffer."""
+    samples = array("h")
+    samples.frombytes(payload)
+    if byteorder != "little":
+        samples.byteswap()
+    frames = len(samples) // channels
     pcm = tuple(
         tuple(
             int16_to_domain_value(samples[frame * channels + channel])

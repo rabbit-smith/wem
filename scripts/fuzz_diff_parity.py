@@ -142,8 +142,8 @@ def _random_chunks(seed: int, frames: int, channels: int) -> list[slice]:
 
 def _golden_case(native) -> None:
     """Oracle == native == accepted reference WEM, three-way on the fixture."""
-    from wwise_wem.adapters.wav import read_pcm16
-    from wwise_wem import load_wem_profile
+    from wwise_wem.adapters.wav import read_pcm_wav
+    from wwise_wem.profiles.registry import load_wem_profile
 
     from wwise_wem_reference import python_engine
     from wwise_wem_reference.container.model import ContainerPlan
@@ -155,7 +155,7 @@ def _golden_case(native) -> None:
         )
 
     profile = load_wem_profile(PROFILE_NAME)
-    pcm = read_pcm16(FIXTURES / "input.wav")
+    pcm = read_pcm_wav(FIXTURES / "input.wav")
 
     container = ContainerPlan.from_profile(profile)
     oracle = python_engine.encode_pcm_python(
@@ -323,7 +323,7 @@ def main() -> int:
     profiles_dir = REPO / "src" / "wwise_wem" / "data" / "profiles"
     os.environ["WEM_DATA_DIR"] = str(profiles_dir)
 
-    from wwise_wem import load_wem_profile
+    from wwise_wem.profiles.registry import load_wem_profile
 
     profile = load_wem_profile(PROFILE_NAME)
     # The 2ch/48k geometry item uses its own installed profile.

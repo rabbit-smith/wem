@@ -96,12 +96,23 @@ impl Pcm16 {
                 message: "PCM buffer needs at least one channel".into(),
             });
         }
-        if !bytes.len().is_multiple_of(2 * channel_count) {
+        if bytes.is_empty() {
+            return Err(EncoderError::StateError {
+                message: "PCM buffer needs at least one frame".into(),
+            });
+        }
+        let bytes_per_frame =
+            channel_count
+                .checked_mul(2)
+                .ok_or_else(|| EncoderError::StateError {
+                    message: "PCM channel count is too large".into(),
+                })?;
+        if !bytes.len().is_multiple_of(bytes_per_frame) {
             return Err(EncoderError::GeometryMismatch {
                 message: "chunk carries a trailing partial PCM frame".into(),
             });
         }
-        let frames = bytes.len() / (2 * channel_count);
+        let frames = bytes.len() / bytes_per_frame;
         let mut channels = vec![Vec::with_capacity(frames); channel_count];
         for frame in 0..frames {
             for (slot, row) in channels.iter_mut().enumerate() {
@@ -127,7 +138,7 @@ impl Pcm16 {
     }
 
     /// Channel-major float rows at the legacy normalization
-    /// (`value / 32768.0`), exactly as Python `read_pcm16` feeds
+    /// (`value / 32768.0`), exactly as Python `read_pcm_wav` feeds
     /// `PcmBuffer`.
     pub fn to_float_rows(&self) -> Vec<Vec<f64>> {
         self.channels

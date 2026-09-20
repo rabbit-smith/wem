@@ -23,7 +23,7 @@ PROFILE_NAME = "wwise2013-6ch-44100"
 
 def _pcm(*, channels: int = 6, rate: int = 44100, frames: int = 4096) -> PcmBuffer:
     # In-domain signed-16 floats: the value / 32768.0 domain that
-    # read_pcm16 produces (the public encoder domain).
+    # read_pcm_wav produces (the public encoder domain).
     return PcmBuffer(
         rate,
         tuple(

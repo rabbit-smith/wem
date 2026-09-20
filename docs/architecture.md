@@ -17,7 +17,7 @@ wwise_wem/                      # distribution facade (wheel)
 ├── __init__.py, __main__.py, api.py, cli.py   # root API shell + CLI
 ├── model.py                     # root DTOs
 ├── adapters/                    # external PCM/WAV inputs (facade duty)
-├── application/                 # Encoder facade (single path: native core), compat, result DTOs
+├── application/                 # native-core orchestration and result DTOs
 ├── profiles/                    # profile identity, registry, and resource loaders
 └── _core.abi3.so                # in-package native extension (built artifact)
 
@@ -30,9 +30,8 @@ wwise_wem_reference/            # development-tree reference oracle (not in whee
 └── profiles/                    # table loaders, codebook assembly, resource assembly
 ```
 
-Public DTOs remain importable from the package root. Their implementation may
-live next to the domain that owns them; root exports are the compatibility
-boundary. Internal module paths are not compatibility surfaces. The reference
+The package root exports one `encode` function plus its input/result value
+types. Internal module paths are not compatibility surfaces. The reference
 package may import facade DTOs and profile-metadata types; the facade never
 imports the reference tree (oracle parity is test-only, locked by the
 parity suites).
@@ -68,7 +67,7 @@ Mandatory rules:
 
 ## Encoding flow
 
-`application.encoder.Encoder` owns one deterministic conversion:
+`application.encoder` owns one deterministic conversion:
 
 1. Resolve the installed profile bundle for the selected `EncoderProfile` identity.
 2. Plan short/long frames and materialize PCM windows.
@@ -103,8 +102,8 @@ profile inventory works from a source tree, an installed wheel, or a ZIP import.
 The manifest's `resources` object maps stable logical names (for example
 `vorbis.setup` and `transform.mdct`) to paths relative to that profile directory.
 
-`EncoderProfile` is the public identity value (name, key, setup digest, container
-defaults). Runtime tables are loaded only through that profile's installed
+`EncoderProfile` is the internal identity value (name, key, setup digest,
+container defaults). Runtime tables are loaded only through that profile's installed
 bundle; there is no separate global runtime-manifest gate.
 
 ## Geometry materializer parity

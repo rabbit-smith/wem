@@ -4,7 +4,7 @@
 //! adapters on top of the deep encoder.
 
 /// Minimal signed-16 PCM WAV reader
-/// (Python `wwise_wem/adapters/wav.py::read_pcm16`).
+/// (Python `wwise_wem/adapters/wav.py::read_pcm_wav`).
 ///
 /// Hand-rolled to keep the dependency surface locked: it reads the RIFF
 /// chunk list, requires a PCM (`format 1`) 16-bit `fmt ` chunk and a
@@ -47,7 +47,7 @@ impl Wav16 {
     }
 
     /// Convert into a [`Pcm16`](crate::encoder::Pcm16) with channel-major
-    /// rows (Python `read_pcm16` -> `PcmBuffer` normalization is applied
+    /// rows (Python `read_pcm_wav` -> `PcmBuffer` normalization is applied
     /// later at the analysis boundary).
     pub fn to_pcm16(&self) -> Result<crate::encoder::Pcm16, EncoderError> {
         let frames = self.frames();

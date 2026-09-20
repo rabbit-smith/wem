@@ -13,8 +13,8 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from wwise_wem import load_wem_profile
-from wwise_wem.adapters.wav import read_pcm16
+from wwise_wem.profiles.registry import load_wem_profile
+from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem.profiles.bundle import load_profile_bundle
 from wwise_wem_reference.analysis.session import AnalysisSession
 from wwise_wem_reference.profiles.assembly import assemble_encoder_profile_resources
@@ -63,7 +63,7 @@ class ModeSelectionTailTests(unittest.TestCase):
     def test_six_channel_fixture_plan_is_stable(self) -> None:
         """The byte-exact 6ch golden's plan must not move."""
         _, session = _session("wwise2013-6ch-44100")
-        pcm = read_pcm16(SIX_CHANNEL_FIXTURE)
+        pcm = read_pcm_wav(SIX_CHANNEL_FIXTURE)
         modes = session.select_modes(pcm.channels)
         self.assertEqual(len(modes), 205)
 

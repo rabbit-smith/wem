@@ -25,8 +25,8 @@ Conversion rules (per sample, all values two's-complement LE sources):
   ``* 32768.0``; round-to-nearest with ties away from zero; then
   saturate to ``[-32768, 32767]``.  ``1.0`` saturates to 32767 while
   ``-1.0`` maps exactly to -32768 (the signed-16 asymmetry).
-* int16 -> legacy float domain: ``value / 32768.0`` (the historical
-  ``read_pcm16_wav`` normalization, unchanged).
+* int16 -> encoder float domain: ``value / 32768.0`` (the byte-contract
+  signed-16 normalization).
 
 Inputs arriving through these rules are in-domain for the encoder;
 their WEM bytes are deterministic, but the project does not promise
@@ -124,7 +124,7 @@ def float_to_int16(sample: int | float) -> int:
 
 
 def int16_to_domain_value(sample16: int) -> float:
-    """Map a signed-16 sample into the legacy encoder float domain.
+    """Map a signed-16 sample into the encoder float domain.
 
     Uses the historical ``value / 32768.0`` normalization verbatim so
     converted inputs land on exactly the floats the signed-16 path
