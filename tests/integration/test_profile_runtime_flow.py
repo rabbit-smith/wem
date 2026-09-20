@@ -85,6 +85,7 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
         detector.assert_called_once_with(
             [[0.0] * 4096],
             terminal_samples=8192,
+            tail_training=None,
             blocksizes=(256, 2048),
         )
 
@@ -97,11 +98,14 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
         )
         pcm = [[0.0] * 4096]
         with patch(
-            "wwise_wem_reference.analysis.session.iter_detector_quanta", return_value=()
+            "wwise_wem_reference.analysis.session.detector_pcm_streams",
+            return_value=((0.0,) * 128,),
         ) as detector:
             modes = stream.select_modes(pcm)
         self.assertTrue(modes)
-        detector.assert_called_once_with(pcm, blocksizes=(256, 2048))
+        self.assertEqual(detector.call_count, 2)
+        for call in detector.call_args_list:
+            self.assertEqual(call.kwargs["blocksizes"], (256, 2048))
 
     def test_unsupported_block_geometry_is_rejected_at_session_creation(self):
         with self.assertRaisesRegex(ValueError, "256/2048"):

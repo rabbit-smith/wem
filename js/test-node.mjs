@@ -89,7 +89,7 @@ const wavBytes = new Uint8Array(readFileSync(join(repoRoot, "tests/fixtures/inpu
 await initWasm();
 
 // --- 1) one-shot parity ----------------------------------------------------
-const bundle = await loadProfileBundle(indexBytes, files);
+const bundle = await loadProfileBundle(PROFILE_NAME, indexBytes, files);
 check(
   "profile bundle verified (kernel SHA-256 entries)",
   bundle.info.name === PROFILE_NAME && bundle.info.setupSha256 === SETUP_SHA256,
@@ -194,68 +194,59 @@ await expectWemError(
   "WEM_ERR_GEOMETRY_MISMATCH",
 );
 
-const DRAFT_PROFILE = "wwise2013-2ch-48000";
-const DRAFT_SETUP_SHA256 =
+const TWO_CHANNEL_PROFILE = "wwise2013-2ch-48000";
+const TWO_CHANNEL_SETUP_SHA256 =
   "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc";
 
 // --- 4) 2ch/48000 profile (fully registered: positive gate) -----------------
-// The 2ch/48000 profile now ships its setup packet, codebooks, and the full
-// psychoacoustic calibration (registered from the reverse-engineered
-// sample), so the wasm kernel must build its encoder through the bytes entry
-// and encode — the old analysis-pending refusal is retired.  This is a
-// positive contract: a regression that re-introduces the refusal (or any
-// build/encode failure for 2ch) must fail this gate.
-const draftIndexBytes = (() => {
-  const index = JSON.parse(new TextDecoder().decode(indexBytes));
-  index.default = DRAFT_PROFILE;
-  return new TextEncoder().encode(JSON.stringify(index, null, 2));
-})();
+// The profile name must select the 2ch bundle even though index.json keeps 6ch
+// as its default. This catches accidental fallback to the default bundle.
 
 check(
   "2ch profile files are present in the profile tree",
-  files.has(`${DRAFT_PROFILE}/analysis/quality-curves.json`) &&
-    files.has(`${DRAFT_PROFILE}/analysis/frozen-tables.json`) &&
-    files.has(`${DRAFT_PROFILE}/pending.json`) &&
-    files.has(`${DRAFT_PROFILE}/manifest.json`) &&
-    files.has(`${DRAFT_PROFILE}/vorbis/setup.bin`) &&
-    files.has(`${DRAFT_PROFILE}/vorbis/codebooks/t97.json`) &&
-    files.has(`${DRAFT_PROFILE}/vorbis/codebooks/t282.json`) &&
-    files.has(`${DRAFT_PROFILE}/psychoacoustics/short-seed.json`) &&
-    files.has(`${DRAFT_PROFILE}/psychoacoustics/short-profiles.json`) &&
-    files.has(`${DRAFT_PROFILE}/psychoacoustics/long-base.json`) &&
-    files.has(`${DRAFT_PROFILE}/psychoacoustics/long-modes.json`),
+  files.has(`${TWO_CHANNEL_PROFILE}/analysis/quality-curves.json`) &&
+    files.has(`${TWO_CHANNEL_PROFILE}/analysis/frozen-tables.json`) &&
+    files.has(`${TWO_CHANNEL_PROFILE}/pending.json`) &&
+    files.has(`${TWO_CHANNEL_PROFILE}/manifest.json`) &&
+    files.has(`${TWO_CHANNEL_PROFILE}/vorbis/setup.bin`) &&
+    files.has(`${TWO_CHANNEL_PROFILE}/vorbis/codebooks/t97.json`) &&
+    files.has(`${TWO_CHANNEL_PROFILE}/vorbis/codebooks/t282.json`) &&
+    files.has(`${TWO_CHANNEL_PROFILE}/psychoacoustics/short-seed.json`) &&
+    files.has(`${TWO_CHANNEL_PROFILE}/psychoacoustics/short-profiles.json`) &&
+    files.has(`${TWO_CHANNEL_PROFILE}/psychoacoustics/long-base.json`) &&
+    files.has(`${TWO_CHANNEL_PROFILE}/psychoacoustics/long-modes.json`),
 );
 
-let draftEncoder = null;
-let draftError = null;
+let twoChannelEncoder = null;
+let twoChannelError = null;
 try {
-  draftEncoder = new core.WemEncoder(draftIndexBytes, files);
+  twoChannelEncoder = new core.WemEncoder(TWO_CHANNEL_PROFILE, indexBytes, files);
 } catch (error) {
-  draftError = error;
+  twoChannelError = error;
 }
 check(
-  "2ch profile builds through the wasm kernel (analysis-pending refusal retired)",
-  draftEncoder !== null && draftError === null,
-  draftError
-    ? `code=${draftError.code ?? "<no code>"}, message="${draftError.message ?? draftError}"`
+  "2ch profile builds through the wasm kernel",
+  twoChannelEncoder !== null && twoChannelError === null,
+  twoChannelError
+    ? `code=${twoChannelError.code ?? "<no code>"}, message="${twoChannelError.message ?? twoChannelError}"`
     : "built",
 );
-if (draftEncoder) {
-  const info = draftEncoder.profile_info();
+if (twoChannelEncoder) {
+  const info = twoChannelEncoder.profile_info();
   check(
     "2ch encoder reports the registered 2ch/48000 geometry",
-    info.name === DRAFT_PROFILE &&
+    info.name === TWO_CHANNEL_PROFILE &&
       info.channels === 2 &&
       info.sampleRate === 48000 &&
-      info.setupSha256 === DRAFT_SETUP_SHA256,
+      info.setupSha256 === TWO_CHANNEL_SETUP_SHA256,
     `name=${info.name}, ch=${info.channels}, rate=${info.sampleRate}, setup=${info.setupSha256.slice(0, 12)}...`,
   );
   // Encode a deterministic 8192-frame 2ch/48k stream (sines + LCG noise):
   // the positive gate is that encoding succeeds with the right stats, not
   // the audio quality (that is covered by the Python E2E round-trip suite).
   const frames = 8192;
-  const draftPcm = new Uint8Array(frames * 2 * 2);
-  const draftView = new DataView(draftPcm.buffer);
+  const twoChannelPcm = new Uint8Array(frames * 2 * 2);
+  const twoChannelView = new DataView(twoChannelPcm.buffer);
   let lcg = 0x9e3779b9;
   const lcgNext = () => {
     lcg = (Math.imul(lcg, 48271) + 11) | 0;
@@ -267,21 +258,21 @@ if (draftEncoder) {
       0.2 * Math.sin(2 * Math.PI * 440 * t) + 0.02 * (lcgNext() - 0.5);
     const s1 =
       0.15 * Math.sin(2 * Math.PI * 660 * t + 1.3) + 0.02 * (lcgNext() - 0.5);
-    draftView.setInt16(f * 4, Math.round(Math.max(-1, Math.min(1, s0)) * 32767), true);
-    draftView.setInt16(f * 4 + 2, Math.round(Math.max(-1, Math.min(1, s1)) * 32767), true);
+    twoChannelView.setInt16(f * 4, Math.round(Math.max(-1, Math.min(1, s0)) * 32767), true);
+    twoChannelView.setInt16(f * 4 + 2, Math.round(Math.max(-1, Math.min(1, s1)) * 32767), true);
   }
-  const draftResult = draftEncoder.encode_pcm16_interleaved(draftPcm);
+  const twoChannelResult = twoChannelEncoder.encode_pcm16_interleaved(twoChannelPcm);
   check(
     "2ch encode produces a WEM stream through the wasm kernel",
-    draftResult.data.byteLength > 0 &&
-      draftResult.stats.channels === 2 &&
-      draftResult.stats.pcmFrames === frames &&
-      draftResult.stats.audioPackets > 0 &&
-      draftResult.stats.shortPackets + draftResult.stats.longPackets ===
-        draftResult.stats.audioPackets,
-    `bytes=${draftResult.data.byteLength}, packets=${draftResult.stats.audioPackets}, sha=${draftResult.sha256Hex.slice(0, 12)}...`,
+    twoChannelResult.data.byteLength > 0 &&
+      twoChannelResult.stats.channels === 2 &&
+      twoChannelResult.stats.pcmFrames === frames &&
+      twoChannelResult.stats.audioPackets > 0 &&
+      twoChannelResult.stats.shortPackets + twoChannelResult.stats.longPackets ===
+        twoChannelResult.stats.audioPackets,
+    `bytes=${twoChannelResult.data.byteLength}, packets=${twoChannelResult.stats.audioPackets}, sha=${twoChannelResult.sha256Hex.slice(0, 12)}...`,
   );
-  draftEncoder.free();
+  twoChannelEncoder.free();
 }
 
 // --- summary ------------------------------------------------------------------

@@ -117,7 +117,7 @@ class QualityCurvesSpecParityTests(unittest.TestCase):
 
     def test_large_index_two_step_difference(self):
         # At i > 0 the frac write/read round-trip is not the identity; pin
-        # the two-step result on the 13-breakpoint draft control table.
+        # the two-step result on the 13-breakpoint two-channel control table.
         bp = (-0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
         samples = (
             12.9, 13.8, 14.7, 15.6, 16.5, 17.1, 18.0, 19.5, 48.0, 999.0, 999.0, 999.0,

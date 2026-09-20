@@ -58,7 +58,7 @@ fn streaming_frame_rows_match_batch_materialization() {
 
     // Batch reference.
     let batch_frames =
-        iter_planned_pcm_windows(&pcm, &plans, &[256, 2048], Some(&frozen)).expect("batch");
+        iter_planned_pcm_windows(&pcm, &plans, &[256, 2048], Some(&frozen), None).expect("batch");
 
     // Streaming path: chunked push, then EOS. The first chunk (3000
     // samples) precedes the 4096-sample prime batch, so its drain is
@@ -75,7 +75,7 @@ fn streaming_frame_rows_match_batch_materialization() {
         feeder.push(&rows).expect("push");
         drained += feeder.drain_completed_quanta().expect("drain").len();
     }
-    feeder.finish_source().expect("finish");
+    feeder.finish_source(None).expect("finish");
     drained += feeder.drain_completed_quanta().expect("drain tail").len();
     let batch_len =
         (feeder.detector_stream_length() - STREAM_DETECTOR_WINDOW) / STREAM_DETECTOR_HOP + 1;
@@ -146,6 +146,7 @@ fn streaming_detector_quanta_match_batch_views() {
         STREAM_DETECTOR_WINDOW,
         None,
         STREAM_TAIL_SAMPLES,
+        None,
         &[256, 2048],
     )
     .expect("batch quanta");
@@ -170,7 +171,7 @@ fn streaming_detector_quanta_match_batch_views() {
             );
         }
     }
-    feeder.finish_source().expect("finish");
+    feeder.finish_source(None).expect("finish");
     let tail_windows = feeder.drain_completed_quanta().expect("drain");
     let base = feeder.quanta_extracted_through() - tail_windows.len() as i64;
     for (delta, window) in tail_windows.iter().enumerate() {
@@ -194,6 +195,7 @@ fn huge_single_chunk_keeps_every_quantum() {
         128,
         None,
         8192,
+        None,
         &[256, 2048],
     )
     .expect("batch quanta");
@@ -212,7 +214,7 @@ fn huge_single_chunk_keeps_every_quantum() {
         );
     }
     feeder.settle();
-    feeder.finish_source().expect("finish");
+    feeder.finish_source(None).expect("finish");
     let tail_windows = feeder.drain_completed_quanta().expect("drain");
     let base = feeder.quanta_extracted_through() - tail_windows.len() as i64;
     for (delta, window) in tail_windows.iter().enumerate() {

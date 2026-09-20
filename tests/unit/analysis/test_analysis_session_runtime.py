@@ -118,5 +118,15 @@ class AnalysisSessionRuntimeTests(unittest.TestCase):
             stream.reset()
             stream.analyze_window(first)
 
+    def test_captured_transition_codes_never_fall_back(self):
+        stream = _stream()
+        pcm = [[((index * 7 + 3) % 64536 - 32768) / 32768.0 for index in range(4096)]]
+        modes = stream.select_modes(pcm)
+        missing = _window(len(modes), 0, 0, 0, 256)
+        with self.assertRaisesRegex(
+            RuntimeError, rf"transition code missing for frame {len(modes)}"
+        ):
+            stream.transition_code(missing)
+
 if __name__ == "__main__":
     unittest.main()

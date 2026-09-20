@@ -18,6 +18,9 @@ use wem_core::usecases::wav::read_pcm16;
 const PROFILE_NAME: &str = "wwise2013-6ch-44100";
 const GOLDEN_WEM_SHA256: &str = "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247";
 const SETUP_SHA256: &str = "3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3";
+const TWO_CHANNEL_PROFILE_NAME: &str = "wwise2013-2ch-48000";
+const TWO_CHANNEL_SETUP_SHA256: &str =
+    "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc";
 
 fn fixtures_dir() -> std::path::PathBuf {
     // CARGO_MANIFEST_DIR = <root>/crates/wem-core
@@ -69,6 +72,12 @@ fn read_profile_bytes_bundle() -> (Vec<u8>, Vec<(String, Vec<u8>)>) {
 
 fn read_fixture(name: &str) -> Vec<u8> {
     std::fs::read(fixtures_dir().join(name)).expect("fixture file reads")
+}
+
+fn two_channel_dir() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests/data/2ch-reference")
 }
 
 fn encode_once(encoder: &Encoder) -> wem_core::EncodeResult {
@@ -148,6 +157,43 @@ fn bytes_stream_session_matches_encode_pcm() {
     assert_eq!(
         sha, GOLDEN_WEM_SHA256,
         "bytes stream WEM differs from golden"
+    );
+}
+
+#[test]
+fn named_bytes_encoder_selects_two_channel_profile() {
+    let (index, files) = read_profile_bytes_bundle();
+    let encoder = Encoder::from_profile_bytes_named(TWO_CHANNEL_PROFILE_NAME, &index, files)
+        .expect("named 2ch bytes encoder builds");
+    let wav = read_pcm16(&two_channel_dir().join("tone_high.wav")).expect("2ch WAV reads");
+    let pcm = wav.to_pcm16().expect("2ch WAV converts to Pcm16");
+    let result = encoder.encode_pcm(&pcm).expect("2ch bytes encode runs");
+
+    assert_eq!(encoder.profile().name(), TWO_CHANNEL_PROFILE_NAME);
+    assert_eq!(
+        result.data,
+        std::fs::read(two_channel_dir().join("tone_high.wem")).unwrap()
+    );
+}
+
+#[test]
+fn named_bytes_stream_selects_two_channel_profile() {
+    let (index, files) = read_profile_bytes_bundle();
+    let wav = read_pcm16(&two_channel_dir().join("tone_high.wav")).expect("2ch WAV reads");
+    let le_bytes = wav.interleaved_le_bytes();
+    let bytes_per_frame = wav.channels() * 2;
+    let ref_ = ProfileRef::with_name(TWO_CHANNEL_SETUP_SHA256, TWO_CHANNEL_PROFILE_NAME);
+    let mut session = StreamSession::for_profile_ref_bytes(&ref_, &index, files)
+        .expect("named 2ch bytes stream builds");
+
+    let cut = 12_345 * bytes_per_frame;
+    session.push_pcm_chunk(&le_bytes[..cut]).expect("chunk one");
+    session.push_pcm_chunk(&le_bytes[cut..]).expect("chunk two");
+    let result = session.finish().expect("2ch bytes stream finishes");
+
+    assert_eq!(
+        result.data,
+        std::fs::read(two_channel_dir().join("tone_high.wem")).unwrap()
     );
 }
 
@@ -279,6 +325,14 @@ fn bytes_entry_refuses_unknown_profiles_and_bogus_digests() {
             wem_profiles::ProfileError::ProfileNotInIndex { ref profile } if profile == "nope"
         ),
         "expected ProfileNotInIndex, got {err:?}"
+    );
+
+    let err = Encoder::from_profile_bytes_named("nope", &index, files.clone())
+        .err()
+        .expect("named bytes encoder must reject an unknown profile");
+    assert!(
+        matches!(err, wem_core::error::EncoderError::ProfileNotFound { .. }),
+        "expected ProfileNotFound, got {err:?}"
     );
 
     // StreamSession: setup sha that matches no bytes-bundle profile.

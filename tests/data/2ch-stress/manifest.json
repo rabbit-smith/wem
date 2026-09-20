@@ -1,0 +1,32 @@
+{
+  "build": "Wwise 2013.2.10 build 4884",
+  "cases": [
+    {
+      "audio_packets": 369,
+      "input": "channel_bursts.wav",
+      "input_sha256": "1bc6eb3a78d46e5675b6440cbddca0ce507f114e04ba8002e357201d7a96bd0b",
+      "long_packets": 1,
+      "name": "alternating channel bursts",
+      "reference": "channel_bursts.wem",
+      "reference_bytes": 35172,
+      "reference_sha256": "d58260f839b3dec4d1f8b21a05f4022b56030fdf963e36079299f0caab816a4f",
+      "short_packets": 368
+    },
+    {
+      "audio_packets": 68,
+      "input": "tail_change.wav",
+      "input_sha256": "6243e290970c83477c488ef7902f02156836f92e1b124d30c520f5502a498e88",
+      "long_packets": 44,
+      "name": "tail frequency change",
+      "reference": "tail_change.wem",
+      "reference_bytes": 4909,
+      "reference_sha256": "1eb4e4831faa40a0282292f47e995df88078d5f22bd779b1bf8f64c74de53b40",
+      "short_packets": 24
+    }
+  ],
+  "channels": 2,
+  "frames_per_case": 48000,
+  "profile": "wwise2013-2ch-48000",
+  "sample_rate": 48000,
+  "schema": "wem.2ch-stress-corpus.v2"
+}

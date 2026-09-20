@@ -72,27 +72,34 @@ class PcmLengthEncodeContractTests(unittest.TestCase):
     # inside the PCM. That end-on-the-source-length signature is what all six
     # measured reference streams show (both conversion routes), and the 6ch
     # fixture golden digest is unaffected.
+    #
+    # The payload hashes were re-locked again when EOS prediction was corrected
+    # to train on the final long block (2048 samples), matching the public
+    # Vorbis analysis algorithm and the paired build's predicted samples.
+    # The current hashes also include the terminal overlap excess derived from
+    # the emitted mode sequence in fmt fields 0x24 and 0x32. Packet bytes and
+    # lengths are unchanged by that header correction.
     EXPECTED: dict[int, _Case] = {
         4096: {
             "audio_packets": 33,
             "short_packets": 33,
             "long_packets": 0,
-            "bytes": 10795,
-            "sha256": "483fad7a759aaa3483dee1b766b8dc24189a7060be42b16bb2dbf231ba23773a",
+            "bytes": 10793,
+            "sha256": "f0813e4e6595d9492369635cb87da83811142cda07032acdcb26806a547d2f5e",
         },
         4097: {
             "audio_packets": 34,
             "short_packets": 34,
             "long_packets": 0,
-            "bytes": 11168,
-            "sha256": "0f9c5d440fddbb398608878013e15cf7baaea263f7e6d5da825309eb2b9b7a25",
+            "bytes": 11148,
+            "sha256": "6e3cc48f03634f065c537f3bdce1009e985f609e61c311fab205338be6120ab6",
         },
         8192: {
             "audio_packets": 65,
             "short_packets": 65,
             "long_packets": 0,
-            "bytes": 21141,
-            "sha256": "135c9beaef2fcd275df5c69bd777ddad2bf20ade0ee40289efff68928cd8330e",
+            "bytes": 21144,
+            "sha256": "ee9e06531f101812fd0a69c1eb1c032b9c1cff0d6b168f693bc3c2b60cf91c24",
         },
     }
 
@@ -128,7 +135,9 @@ class PcmLengthEncodeContractTests(unittest.TestCase):
                 audio_packets = load_wem_parts_bytes(result.data)["packets"][1:]
                 modes = tuple(packet[0] & 1 for packet in audio_packets)
                 self.assertEqual(len(modes), expected["audio_packets"])
-                self.assertEqual(modes, (0,) * expected["short_packets"] + (1,) * expected["long_packets"])
+                self.assertEqual(
+                    modes, (0,) * expected["short_packets"] + (1,) * expected["long_packets"]
+                )
 
 
 class PcmInputAdapterContractTests(unittest.TestCase):

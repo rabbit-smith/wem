@@ -100,7 +100,7 @@ fn book_id_resolution_oracle() {
 }
 
 #[test]
-fn twenty_two_ch_profile_resolves_t282_books() {
+fn two_channel_profile_resolves_t282_books() {
     // The 2ch/48k profile's setup references t97 floor books plus t282
     // residue books (IDs 316..597); the registry must attribute them to the
     // t282 table rather than reject them as out-of-range.
@@ -926,16 +926,16 @@ fn installed_registry_resolutions() {
     // The 2ch/48000 profile resolves by its geometry and carries its setup
     // digest; its psychoacoustics are registered, so the profile is fully
     // ready (no manifest-declared pending reason).
-    let draft = registry
+    let stereo = registry
         .resolve_geometry(2, 48000)
         .expect("2ch geometry resolves");
-    assert_eq!(draft.name(), "wwise2013-2ch-48000");
-    assert!(draft.setup_available());
+    assert_eq!(stereo.name(), "wwise2013-2ch-48000");
+    assert!(stereo.setup_available());
     assert_eq!(
-        draft.setup_sha256(),
+        stereo.setup_sha256(),
         "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc"
     );
-    assert!(draft.pending_reason().is_none());
+    assert!(stereo.pending_reason().is_none());
 
     // Unknown key rejected.
     let unknown = ProfileKey::with_identity(
@@ -989,9 +989,9 @@ fn installed_registry_resolutions() {
         None
     );
     assert!(wem_profiles::load_wem_profile_quality(name, Some(f64::NAN)).is_err());
-    let draft_by_name =
+    let stereo_by_name =
         wem_profiles::load_wem_profile_quality("wwise2013-2ch-48000", None).expect("2ch profile");
-    assert!(draft_by_name.setup_available());
+    assert!(stereo_by_name.setup_available());
 }
 
 #[test]

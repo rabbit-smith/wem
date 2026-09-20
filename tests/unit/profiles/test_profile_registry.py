@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import unittest
 
 from wwise_wem.model import ContainerMetadata
-from wwise_wem.profiles.bundle import ProfileKey, load_profile_bundle
-from wwise_wem.profiles.resources import ResourceRef
+from wwise_wem.profiles.bundle import (
+    DEFAULT_INDEX,
+    PACKAGE,
+    ProfileKey,
+    load_profile_bundle,
+)
+from wwise_wem.profiles.resources import ResourceRef, resource_traversable
 from wwise_wem.profiles.model import EncoderProfile, WwiseVorbisProfile
 from wwise_wem.profiles.registry import (
     PROFILES,
     PROFILE_REGISTRY,
+    WWISE2013_2CH_48000,
+    WWISE2013_6CH_44100,
     ProfileRegistry,
     load_wem_profile,
     resolve_wem_profile,
@@ -77,6 +85,17 @@ class ProfileRegistryTests(unittest.TestCase):
         self.assertIsInstance(profile.setup_path, ResourceRef)
         self.assertEqual(profile.setup_path, bundle.setup)
         self.assertEqual(profile.setup_sha256, bundle.setup.sha256)
+
+    def test_registry_inventory_is_declared_by_the_packaged_index(self) -> None:
+        index = json.loads(
+            resource_traversable(PACKAGE, DEFAULT_INDEX).read_text(encoding="utf-8")
+        )
+        declared = tuple(index["profiles"])
+        self.assertEqual(set(PROFILES), set(declared))
+        for name in declared:
+            self.assertEqual(load_wem_profile(name).name, name)
+        self.assertIs(PROFILES[WWISE2013_6CH_44100.name], WWISE2013_6CH_44100)
+        self.assertIs(PROFILES[WWISE2013_2CH_48000.name], WWISE2013_2CH_48000)
 
     def test_registry_resolve_get_list_and_mapping_compatibility(self) -> None:
         profile = load_wem_profile("wwise2013-6ch-44100")

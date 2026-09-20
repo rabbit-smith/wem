@@ -1,7 +1,7 @@
 import hashlib
 import unittest
 
-from wwise_wem import PROFILES, ProfileKey, resolve_wem_profile
+from wwise_wem import PROFILE_REGISTRY, PROFILES, ProfileKey, resolve_wem_profile
 
 
 class ProfileTests(unittest.TestCase):
@@ -15,9 +15,8 @@ class ProfileTests(unittest.TestCase):
         )
 
     def test_registry_key(self):
-        self.assertEqual(len(PROFILES), 2)
         self.assertEqual(
-            set(PROFILES), {"wwise2013-6ch-44100", "wwise2013-2ch-48000"}
+            set(PROFILES), {profile.name for profile in PROFILE_REGISTRY.list()}
         )
         self.assertEqual(ProfileKey(6, 44100).channels, 6)
 

@@ -33,6 +33,7 @@ def _analysis(window, *, raw=(2.0,), post=(1.0,), side=(3.0,)) -> PsyFrame:
         ((0.0,),),
         (tuple(post),),
         (tuple(side),),
+        ((0.0,),),
     )
 
 
@@ -63,6 +64,7 @@ class AudioPacketTests(unittest.TestCase):
         )
         fit.assert_called_once_with((1.0,), (2.0,), setup["floors"][0], n=1)
         self.assertEqual(pack.call_args.kwargs["posts_are_10bit"], True)
+        self.assertEqual(pack.call_args.kwargs["coupling_peak"], ((0.0,),))
 
     def test_channel_contract_is_checked_before_floor_fitting(self):
         window = _window(0, 0, 0, 0, 128)

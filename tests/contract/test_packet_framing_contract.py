@@ -210,6 +210,23 @@ class VorbisFmtSizeContractTests(unittest.TestCase):
 
         self.assertEqual(result["uMaxPacketSize"], 2)
 
+    def test_terminal_overlap_excess_is_derived_from_audio_modes(self) -> None:
+        fields = {
+            "dwTotalPCMFrames": 2304,
+            "uBlocksize0Pow": 8,
+            "uBlocksize1Pow": 11,
+            "dwUnknown_0x24": 99,
+            "uUnknown_0x32": 99,
+        }
+        # setup + four long packets produce three 1024-sample transitions:
+        # 3072 rendered frames, 768 past the requested frame count.
+        result = recompute_vorbis_fmt_sizes(
+            fields, [b"setup", b"\x01", b"\x01", b"\x01", b"\x01"]
+        )
+
+        self.assertEqual(result["uUnknown_0x32"], 768)
+        self.assertEqual(result["dwUnknown_0x24"], 768 << 16)
+
 
 if __name__ == "__main__":
     unittest.main()

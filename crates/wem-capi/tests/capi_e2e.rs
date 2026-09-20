@@ -455,7 +455,7 @@ fn unknown_profile_rejects_with_profile_not_found() {
 }
 
 #[test]
-fn explicit_data_dir_scopes_profile_resolution() {
+fn explicit_data_dir_selects_profile_tree() {
     let profiles_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join("src/wwise_wem/data/profiles");

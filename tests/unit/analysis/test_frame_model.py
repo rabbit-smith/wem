@@ -26,6 +26,7 @@ class FrameModelTests(unittest.TestCase):
             ((6.0,),),
             ((7.0,),),
             ((8.0,),),
+            ((9.0,),),
         )
 
         self.assertIs(frame.spectrum, spectrum)

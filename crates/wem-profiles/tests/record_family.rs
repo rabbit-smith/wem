@@ -49,14 +49,10 @@ fn family_structure_matches_the_static_extraction() {
     assert_eq!(fam.records.len(), 6);
     assert_eq!(fam.index_curve.len(), 13);
     assert_eq!(fam.breakpoints.len(), 13);
-    assert_eq!(fam.band_words.len(), 12);
-    assert_eq!(fam.stride_words.len(), 12);
+    assert_eq!(fam.window_u32.len(), 128);
+    assert_eq!(fam.bands.len(), 12);
     // Adjudicated default: record 3 (the High band of the paired build).
     assert_eq!(fam.default_record_index, 3.0);
-    // The widened runtime PI and the 127.0 divisor from the extraction.
-    assert_eq!(fam.window_pi, 3.1415927410125732);
-    assert_eq!(fam.window_divisor, 127.0);
-    assert_eq!(fam.window_half_addend, 0.5);
     // Record stride / offsets as extracted.
     assert_eq!(fam.records[0].file_off, "0xc6b68");
     assert_eq!(fam.records[1].file_off, "0xc6d7c");
@@ -177,10 +173,8 @@ fn fractional_index_20_interpolates_between_records_two_and_three() {
 
 #[test]
 fn materialized_window_matches_the_six_ch_registered_window() {
-    // The family's construction constants reproduce the paired build's
-    // runtime window bit-for-bit, including the [127] endpoint
-    // 0x2809aded - the old 2ch materializer's forced-0 endpoint difference
-    // is intentionally corrected.
+    // The record-family carries the paired build's static window words,
+    // including the [127] endpoint 0x2809aded.
     let fam = family();
     let t2 = load_transient_tables_from(&fam, None).expect("2ch materialize");
 
@@ -212,11 +206,10 @@ fn band_weights_pins_match_the_python_reference() {
     let t = load_transient_tables_from(&fam, None).expect("materialize");
     // Band 0 weight[0] and band 0 scale (shared f32 bits pins).
     assert_eq!(f32_bits(&t.bands[0].weights[0]), 1053028118);
-    // Twelve bands with the extracted word counts.
+    // Twelve bands match the stored static descriptors.
     assert_eq!(t.bands.len(), 12);
-    for (i, band) in t.bands.iter().enumerate() {
-        assert_eq!(band.weights.len(), fam.stride_words[i] as usize);
-        assert_eq!(band.offset, fam.band_words[i] as i64);
+    for (band, stored) in t.bands.iter().zip(&fam.bands) {
+        assert_eq!(band, stored);
     }
 }
 

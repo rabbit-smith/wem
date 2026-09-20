@@ -161,6 +161,28 @@ class GeometryMaterializerContract(unittest.TestCase):
         )
         self.assertLess(worst, int(geom["total_octave_lines"]))
 
+    def test_2ch_rate_specific_aotuv_bounds(self) -> None:
+        """The 48 kHz preset must not retain the 44.1 kHz bin bounds."""
+        self.assertEqual(self.seed_2ch["look"]["short_limit"], 70)
+        self.assertTrue(
+            all(profile["peak_cutoff"] == 83 for profile in self.profiles_2ch["profiles"])
+        )
+        self.assertTrue(
+            all(profile["band_limits"] == [8, 6, 3] for profile in self.profiles_2ch["profiles"])
+        )
+        self.assertTrue(
+            all(
+                f32_bits(profile["side_gain"]) == 0x3F9A3D71
+                for profile in self.profiles_2ch["profiles"]
+            )
+        )
+        self.assertTrue(
+            all(
+                f32_bits(profile["candidate_bias_by_mode"][1]) == 0x41100000
+                for profile in self.profiles_2ch["profiles"]
+            )
+        )
+
     def test_long_base_surfaces(self) -> None:
         out = long_base.build(self.family, KEY, KEY)
         for i in range(3):

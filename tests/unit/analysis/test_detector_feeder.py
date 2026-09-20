@@ -19,6 +19,7 @@ def _float_sha256(values) -> str:
 
 class DetectorFeederTests(unittest.TestCase):
     def test_lpc_padded_timeline_and_quantum_boundaries_are_word_exact(self):
+        # EOS prediction is trained on the final long block (2048 samples).
         signal = tuple(
             (((index * 37) & 2047) - 1024) / 32768
             for index in range(4096)
@@ -29,7 +30,7 @@ class DetectorFeederTests(unittest.TestCase):
         self.assertEqual(len(stream), 13312)
         self.assertEqual(
             _float_sha256(stream),
-            "cfea0c73a1d69192da99fb8df11d2ca06f4878ca5d7f4c0fe10a0e29ef6b2f6e",
+            "0e445d751f57d9602c4c33277d097608a366b78e5197fd811614f5576b4d7c11",
         )
         self.assertEqual(len(quanta), 207)
         self.assertEqual(
@@ -38,9 +39,9 @@ class DetectorFeederTests(unittest.TestCase):
                 0: "e8bd35d84e86e66371bf349803bbde066dc363e9e5e88f7b4a48d831ec738fa1",
                 15: "b67bf73f5f9370e16ecdb40b4ae31113e03b260cf5405d49d84642f21e8709c5",
                 16: "1517965797e845fb468925ffb976041ab8bdf4b8f647f62b675a8400fa25d544",
-                79: "789bd8e4b113422a81cc951d916e0eb95b454650ef9f231c078a4e4aff1595b6",
-                80: "d65235724dd5a4bbe053e84f6ecda7a9355dd803340f200a197c57a4f1ed8d2c",
-                206: "ac97b7ed699bcb7638cf35124276dd8e31ad1fe6738c38194616cc4065600a6d",
+                79: "28bcefea6cb7ce06fac684a7fb5c3760ff4d28113c168f3b2e02a7a6d90d1f9b",
+                80: "0611d5d35a057d11f4248800f61cca4596e5265f237df936d3e4ddb785c8165d",
+                206: "bdf6fb2c31886d9fbe2ceffaddc6f2db31ed54249177e5be25eb92a081566bf6",
             },
         )
 

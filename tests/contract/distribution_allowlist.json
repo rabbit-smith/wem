@@ -46,6 +46,7 @@
   "resources": [
     "wwise_wem/data/profiles/index.json",
     "wwise_wem/data/profiles/wwise2013-2ch-48000/analysis/frozen-tables.json",
+    "wwise_wem/data/profiles/wwise2013-2ch-48000/analysis/input-conditioner.json",
     "wwise_wem/data/profiles/wwise2013-2ch-48000/analysis/quality-curves.json",
     "wwise_wem/data/profiles/wwise2013-2ch-48000/analysis/transient.json",
     "wwise_wem/data/profiles/wwise2013-2ch-48000/manifest.json",

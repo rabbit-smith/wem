@@ -22,7 +22,7 @@ use std::time::Instant;
 
 use sha2::{Digest, Sha256};
 use wem_container::load_wem_parts_bytes;
-use wem_core::encoder::Encoder;
+use wem_core::encoder::{Encoder, Pcm16};
 use wem_core::stream::{ProfileRef, StreamSession};
 use wem_core::usecases::wav::read_pcm16;
 
@@ -466,6 +466,41 @@ fn stream_giant_chunk_segmentation_parity() {
     assert_eq!(
         giant_result.data, split_result.data,
         "internal segmentation changed the output bytes"
+    );
+}
+
+#[test]
+fn stream_tail_matches_batch_when_final_center_crosses_source_end() {
+    let frames = 4_388usize;
+    let mut state = 20_130_701u32;
+    let mut pcm_bytes = Vec::with_capacity(frames * CHANNELS * 2);
+    for _ in 0..frames * CHANNELS {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        pcm_bytes.extend_from_slice(&(state as i16).to_le_bytes());
+    }
+    let pcm = Pcm16::from_interleaved_le(SAMPLE_RATE, CHANNELS, &pcm_bytes)
+        .expect("synthetic PCM parses");
+    let expected = Encoder::from_profile(PROFILE_NAME)
+        .expect("encoder builds")
+        .encode_pcm(&pcm)
+        .expect("batch encode runs");
+
+    let mut streamed = build_session();
+    streamed
+        .push_pcm_chunk(&pcm_bytes)
+        .expect("single chunk pushes");
+    let actual = streamed.finish().expect("stream finish runs");
+
+    assert!(
+        actual.data == expected.data,
+        "stream tail emitted a different frame sequence from batch: \
+         batch_packets={}, stream_packets={}, batch_bytes={}, stream_bytes={}",
+        expected.stats.audio_packets,
+        actual.stats.audio_packets,
+        expected.data.len(),
+        actual.data.len(),
     );
 }
 

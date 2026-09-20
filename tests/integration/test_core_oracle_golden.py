@@ -36,6 +36,10 @@ PROFILE_NAME = "wwise2013-6ch-44100"
 EXPECTED_SHA256 = (
     "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247"
 )
+STEREO_PROFILE_NAME = "wwise2013-2ch-48000"
+STEREO_EXPECTED_SHA256 = (
+    "4e944dd43000e6738e4399af8851789cd8f90a0004100ff38e8e2b2ed61f3654"
+)
 
 # Frame counts probing the frame-plan edges: the minimum length, both sides
 # of each short/long boundary, and a long-stream value.
@@ -74,6 +78,18 @@ def _synthetic_pcm(frames: int) -> PcmBuffer:
             )
         )
     return PcmBuffer(44100, tuple(channels))
+
+
+def _synthetic_stereo_pcm(frames: int = 16384) -> PcmBuffer:
+    """Deterministic 2ch input covering short, long, and terminal frames."""
+    channels = tuple(
+        tuple(
+            ((frame * 7 + channel * 11 + 3) % 64536 - 32768) / 32768.0
+            for frame in range(frames)
+        )
+        for channel in range(2)
+    )
+    return PcmBuffer(48000, channels)
 
 
 class CoreOracleGoldenTests(unittest.TestCase):
@@ -125,6 +141,25 @@ class CoreOracleGoldenTests(unittest.TestCase):
                     oracle.stats.to_legacy_dict(),
                     native.stats.to_legacy_dict(),
                 )
+
+    def test_stereo_profile_has_a_pinned_native_oracle_byte_contract(self):
+        profile = load_wem_profile(STEREO_PROFILE_NAME)
+        pcm = _synthetic_stereo_pcm()
+
+        oracle = _oracle_encode(pcm, profile)
+        native = Encoder(profile).encode_pcm(pcm)
+        direct_core = core_module.Encoder(STEREO_PROFILE_NAME).encode_pcm(
+            pcm.sample_rate, _rows_from_pcm(pcm)
+        )
+
+        self.assertEqual(bytes(native.data), bytes(oracle.data))
+        self.assertEqual(bytes(direct_core.data), bytes(oracle.data))
+        self.assertEqual(native.sha256, STEREO_EXPECTED_SHA256)
+        self.assertEqual(oracle.sha256, STEREO_EXPECTED_SHA256)
+        self.assertEqual(direct_core.sha256(), STEREO_EXPECTED_SHA256)
+        self.assertEqual(native.stats.audio_packets, 26)
+        self.assertEqual(native.stats.short_packets, 10)
+        self.assertEqual(native.stats.long_packets, 16)
 
 
 if __name__ == "__main__":

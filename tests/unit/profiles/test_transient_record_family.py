@@ -64,15 +64,15 @@ class RecordFamilyStructureTests(unittest.TestCase):
         self.assertEqual(len(data["record_index_curve"]["values"]), 13)
         self.assertEqual(len(data["quality_axis_breakpoints"]["values"]), 13)
         self.assertEqual(data["default_record_index"], 3.0)
-        self.assertEqual(data["window_build"]["pi_f64"]["value"], 3.1415927410125732)
-        self.assertEqual(data["window_build"]["divisor_f64"]["value"], 127.0)
-        self.assertEqual(data["window_build"]["half_constant_f64"]["value"], 0.5)
+        self.assertEqual(len(data["window_u32"]), 128)
+        self.assertEqual(len(data["bands"]), 12)
 
     def test_family_loads_from_the_manifest_resource(self):
         fam = _family()
         self.assertEqual(len(fam.records), 6)
         self.assertEqual(fam.default_record_index, 3.0)
-        self.assertEqual(fam.window_pi, 3.1415927410125732)
+        self.assertEqual(len(fam.window_u32), 128)
+        self.assertEqual(len(fam.bands), 12)
         # Records agree with the raw JSON words.
         data = json.loads(_RESOURCE.read_text(encoding="utf-8"))
         for raw, rec in zip(data["record_family"]["records"], fam.records):
@@ -182,9 +182,8 @@ class MaterializationBitPinTests(unittest.TestCase):
         self.assertEqual(_bits(tables.window[0]), 0x00000000)
         self.assertEqual(_bits(tables.bands[0].weights[0]), 1053028118)
         self.assertEqual(len(tables.bands), 12)
-        for band, offset, count in zip(tables.bands, fam.band_words, fam.stride_words):
-            self.assertEqual(band.offset, offset)
-            self.assertEqual(len(band.weights), count)
+        for band, stored in zip(tables.bands, fam.bands):
+            self.assertEqual(band, stored)
 
 
 class DispatchAndRegressionTests(unittest.TestCase):

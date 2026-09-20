@@ -272,8 +272,8 @@ fn octave_parity() {
     let o6 = octave(128, 44100, 5);
     let o2 = octave(128, 48000, 5);
     for i in 0..128 {
-        assert_eq!((o6[i] as u32) & 0xFFFF_FFFF, OCT_44100[i], "oct6 {i}");
-        assert_eq!((o2[i] as u32) & 0xFFFF_FFFF, OCT_48000[i], "oct2 {i}");
+        assert_eq!(o6[i] as u32, OCT_44100[i], "oct6 {i}");
+        assert_eq!(o2[i] as u32, OCT_48000[i], "oct2 {i}");
     }
 }
 

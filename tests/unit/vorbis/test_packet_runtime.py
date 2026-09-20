@@ -4,10 +4,12 @@ import unittest
 
 import wwise_wem_reference.vorbis.packet_encoder as packet_encoder
 from wwise_wem_reference.profiles.codebooks import load_setup_codebooks
+from wwise_wem_reference.profiles.assembly import assemble_encoder_profile_resources
 from tests.codebook_resource_support import installed_codebook_tables
 from wwise_wem_reference.vorbis.floor_fit import floor1_fit_simple
 from wwise_wem_reference.vorbis.setup import parse_setup
 from wwise_wem.profiles.registry import resolve_wem_profile
+from wwise_wem.profiles.bundle import load_profile_bundle
 
 
 class PacketRuntimeTests(unittest.TestCase):
@@ -20,6 +22,14 @@ class PacketRuntimeTests(unittest.TestCase):
         cls.books = load_setup_codebooks(
             cls.setup["book_ids"], installed_codebook_tables()
         )
+        stereo = resolve_wem_profile(2, 48000)
+        cls.stereo_setup = parse_setup(stereo.setup_packet(), channels=2)
+        cls.stereo_books = assemble_encoder_profile_resources(
+            load_profile_bundle(profile=stereo.name, verify_all=False),
+            setup_packet=stereo.setup_packet(),
+            quality=stereo.quality,
+        )
+        cls.stereo_books = cls.stereo_books.codebooks
 
     def test_mode_only_silence_headers_remain_exact(self):
         self.assertEqual(packet_encoder.pack_silence_packet(self.setup, 6, 0), b"\x00")
@@ -62,6 +72,26 @@ class PacketRuntimeTests(unittest.TestCase):
             hashlib.sha256(q_bytes).hexdigest(),
             "7af3033268a641f6078352a0a3d25460fd8c50400ed4b852c845044ac19f19bc",
         )
+
+    def test_type2_coupling_propagates_one_sided_floor_use(self):
+        n = 128
+        active = [2.0 if index % 2 == 0 else -1.5 for index in range(n)]
+        posts = floor1_fit_simple(
+            [abs(value) for value in active], self.stereo_setup["floors"][0], n
+        )
+
+        for floor_posts in ([posts, None], [None, posts]):
+            with self.subTest(floor_posts=[value is not None for value in floor_posts]):
+                result = packet_encoder.pack_block_packet_details(
+                    self.stereo_setup,
+                    self.stereo_books,
+                    2,
+                    0,
+                    floor_posts,
+                    [active, active],
+                )
+                self.assertTrue(any(result.quantized_residue[0]))
+                self.assertTrue(any(result.quantized_residue[1]))
 
 if __name__ == "__main__":
     unittest.main()

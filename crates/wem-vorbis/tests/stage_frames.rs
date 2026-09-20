@@ -170,6 +170,7 @@ fn pack_frame(
         mode,
         &posts,
         &side,
+        None,
         true,
         true,
     )

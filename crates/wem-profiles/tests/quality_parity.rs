@@ -24,21 +24,21 @@ use wem_profiles::{
 // Shared parity pins (identical vectors on the Python side)
 // ---------------------------------------------------------------------------
 
-const DRAFT_BP: [f64; 13] = [
+const TWO_CHANNEL_BP: [f64; 13] = [
     -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,
 ];
-const DRAFT_DESC3: [f64; 13] = [
+const TWO_CHANNEL_DESC3: [f64; 13] = [
     1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
 ];
-const DRAFT_DESC29: [f64; 13] = [
+const TWO_CHANNEL_DESC29: [f64; 13] = [
     -100.0, -100.0, -100.0, -100.0, -100.0, -100.0, -100.0, -105.0, -105.0, -105.0, -105.0, -110.0,
     -120.0,
 ];
-const DRAFT_DESC30: [f64; 13] = [
+const TWO_CHANNEL_DESC30: [f64; 13] = [
     -130.0, -130.0, -130.0, -130.0, -130.0, -135.0, -140.0, -140.0, -140.0, -140.0, -140.0, -140.0,
     -150.0,
 ];
-const DRAFT_DESC31: [f64; 13] = [
+const TWO_CHANNEL_DESC31: [f64; 13] = [
     12.9, 13.8, 14.7, 15.6, 16.5, 17.1, 18.0, 19.5, 48.0, 999.0, 999.0, 999.0, 999.0,
 ];
 
@@ -81,15 +81,15 @@ fn kernel_pins_match_the_python_reference() {
 }
 
 #[test]
-fn draft_13bp_curves_pins_match_the_python_reference() {
+fn two_channel_13bp_curves_match_the_python_reference() {
     // q = 4.0 -> qnorm = 0.4000001 -> the two-step fraction at i = 4.
     {
         let qnorm = normalize_quality_factor(4.0);
         assert_eq!(qnorm, 0.4000001);
-        let (d3, e3) = linear_frac(&DRAFT_BP, &DRAFT_DESC3, qnorm);
-        let (d29, e29) = linear_frac(&DRAFT_BP, &DRAFT_DESC29, qnorm);
-        let (d30, e30) = linear_frac(&DRAFT_BP, &DRAFT_DESC30, qnorm);
-        let (d31, e31) = linear_frac(&DRAFT_BP, &DRAFT_DESC31, qnorm);
+        let (d3, e3) = linear_frac(&TWO_CHANNEL_BP, &TWO_CHANNEL_DESC3, qnorm);
+        let (d29, e29) = linear_frac(&TWO_CHANNEL_BP, &TWO_CHANNEL_DESC29, qnorm);
+        let (d30, e30) = linear_frac(&TWO_CHANNEL_BP, &TWO_CHANNEL_DESC30, qnorm);
+        let (d31, e31) = linear_frac(&TWO_CHANNEL_BP, &TWO_CHANNEL_DESC31, qnorm);
         assert!(!e3 && !e29 && !e30 && !e31);
         assert_eq!(d3, 1.0);
         assert_eq!(d29, -100.000005);
@@ -100,9 +100,9 @@ fn draft_13bp_curves_pins_match_the_python_reference() {
     {
         let qnorm = normalize_quality_factor(10.0);
         assert_eq!(qnorm, 0.9998999834060669);
-        let (d29, e29) = linear_frac(&DRAFT_BP, &DRAFT_DESC29, qnorm);
-        let (d30, e30) = linear_frac(&DRAFT_BP, &DRAFT_DESC30, qnorm);
-        let (d31, e31) = linear_frac(&DRAFT_BP, &DRAFT_DESC31, qnorm);
+        let (d29, e29) = linear_frac(&TWO_CHANNEL_BP, &TWO_CHANNEL_DESC29, qnorm);
+        let (d30, e30) = linear_frac(&TWO_CHANNEL_BP, &TWO_CHANNEL_DESC30, qnorm);
+        let (d31, e31) = linear_frac(&TWO_CHANNEL_BP, &TWO_CHANNEL_DESC31, qnorm);
         assert!(!e29 && !e30 && !e31);
         assert_eq!(d29, -119.98999834060669);
         assert_eq!(d30, -149.9899983406067);
@@ -111,7 +111,7 @@ fn draft_13bp_curves_pins_match_the_python_reference() {
     // q = -3.0 -> below-domain clamp, extrapolated.
     {
         let qnorm = normalize_quality_factor(-3.0);
-        let (d31, e31) = linear_frac(&DRAFT_BP, &DRAFT_DESC31, qnorm);
+        let (d31, e31) = linear_frac(&TWO_CHANNEL_BP, &TWO_CHANNEL_DESC31, qnorm);
         assert!(e31);
         assert_eq!(d31, 12.9);
     }

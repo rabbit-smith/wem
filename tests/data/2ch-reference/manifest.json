@@ -1,0 +1,70 @@
+{
+  "build": "Wwise 2013.2.10 build 4884",
+  "cases": [
+    {
+      "audio_packets": 49,
+      "input": "silence.wav",
+      "input_sha256": "ede1f6dd33abfce7bb3a45ba79b0ab5f8baae692709dd32214a41da9af55ab13",
+      "long_packets": 48,
+      "name": "silence",
+      "reference": "silence.wem",
+      "reference_sha256": "b7ce98da4b10cf1ba29ee5ee3b65b476dd18e9d83362af27b368b22710470dba",
+      "short_packets": 1
+    },
+    {
+      "audio_packets": 49,
+      "input": "dc_opposed.wav",
+      "input_sha256": "f6b835d0ca83e37948a026b4c2810c6b80ac0b707812513525a112e89feec20d",
+      "long_packets": 48,
+      "name": "opposed DC",
+      "reference": "dc_opposed.wem",
+      "reference_sha256": "9175ababec71a7d03c238a8ab31f554d4fc6de6fb54f21669da9855ae72e14ff",
+      "short_packets": 1
+    },
+    {
+      "audio_packets": 49,
+      "input": "tone_low.wav",
+      "input_sha256": "6abbaf870f9160dec98defdf015ac1e9252d94f332c70aeb08873f13314aa757",
+      "long_packets": 48,
+      "name": "low tone",
+      "reference": "tone_low.wem",
+      "reference_sha256": "565164f1a957d82473b7615f38062d5d81f331c3f846afecc159dd27b632c87d",
+      "short_packets": 1
+    },
+    {
+      "audio_packets": 54,
+      "input": "tone_high.wav",
+      "input_sha256": "691d4287d2d9daa5fdd43c67a8836e4e9ff5c1410592a570211791ea0691441c",
+      "long_packets": 46,
+      "name": "high tones",
+      "reference": "tone_high.wem",
+      "reference_sha256": "ee4d5a7ca0957c2e0cb97e994da73bf7cc99a2fbad020f96ed0e9002f1a6c8cc",
+      "short_packets": 8
+    },
+    {
+      "audio_packets": 59,
+      "input": "impulse.wav",
+      "input_sha256": "72093569427bd44de084b37a2f40dfa93175183f36f3966a3a77c7d45537e2d9",
+      "long_packets": 46,
+      "name": "isolated impulses",
+      "reference": "impulse.wem",
+      "reference_sha256": "857a88b0d90a7fbda7942e40271dc3c6c7e255b15a352ec421a8888241dcaec0",
+      "short_packets": 13
+    },
+    {
+      "audio_packets": 54,
+      "input": "stereo_noise.wav",
+      "input_sha256": "b7653ca7a5dae619f2aaf8dab2c0e70a370dd6e514d88f851a3dc00bedb7add2",
+      "long_packets": 46,
+      "name": "independent stereo noise",
+      "reference": "stereo_noise.wem",
+      "reference_sha256": "5e002a53014013b1f77cde10320a9aee0e17b89d8f995e129cc2368d7258d819",
+      "short_packets": 8
+    }
+  ],
+  "channels": 2,
+  "frames_per_case": 48000,
+  "profile": "wwise2013-2ch-48000",
+  "sample_rate": 48000,
+  "schema": "wem.2ch-reference-corpus.v1"
+}

@@ -131,29 +131,30 @@ class WindowingTests(unittest.TestCase):
                 self.assertEqual(_snapshot(frame), snapshot)
 
     def test_pcm_length_edges_lock_prefix_and_terminal_tail(self):
+        # Terminal windows pin the 32-tap predictor trained on one long block.
         expected = {
             4096: {
                 "modes": (0,) * 34 + (1,),
                 "last_center": 4800,
                 "last_hash": (
-                    "fa971e364774b4e4aa163e1688738832"
-                    "f19ef891ce9c53dc1de334f7b2031ba7"
+                    "d007eab41c074bdfb5cfd77d641afbf7"
+                    "c769d3dc4696d5d65c2ea2e2ebbb4a98"
                 ),
             },
             4097: {
                 "modes": (0,) * 34 + (1,),
                 "last_center": 4800,
                 "last_hash": (
-                    "54a4b8d9b3ad4d37bca6bf09e9b9bfd6"
-                    "adfa2074ee0b924df25072d818741ad6"
+                    "d8e9ac73ce1d81411e739ed8f2abe7a7"
+                    "eecc90678f69d5096696e849178b74da"
                 ),
             },
             8192: {
                 "modes": (0,) * 66 + (1,),
                 "last_center": 8896,
                 "last_hash": (
-                    "3044f2b9e595f78e563b3163a8666d04"
-                    "02868a1b936f8367137166ab8e449236"
+                    "f6d9e6feded020b5fcfae4fa96b9d58e"
+                    "5d9a3fd4645cd09faa61ab1a2273ba06"
                 ),
             },
         }

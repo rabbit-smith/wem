@@ -7,7 +7,10 @@
 //! not (the 2ch/48k reference stream is seven short frames shorter than that
 //! bound produces).
 
+use wem_analysis::config::AnalysisError;
+use wem_analysis::preprocessing::windowing::WindowedFrame;
 use wem_analysis::session::AnalysisSession;
+use wem_scheduling::FramePlan;
 
 fn repo_root() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -63,4 +66,46 @@ fn tail_stops_one_frame_past_the_source_length() {
         );
     }
     assert_eq!(centers.len(), 10, "paired-build tail emits ten frames here");
+}
+
+#[test]
+fn captured_transition_codes_never_fall_back_to_advanced_selector_state() {
+    let data_dir =
+        wem_profiles::DataDir::from_profiles_dir(repo_root().join("src/wwise_wem/data/profiles"));
+    let bundle = wem_profiles::load_profile_bundle(&data_dir, Some("wwise2013-2ch-48000"), false)
+        .expect("profile loads");
+    let resources =
+        wem_profiles::assemble_analysis_resources(&bundle, None).expect("resources assemble");
+    let mut session = AnalysisSession::new(2, 48000, [256, 2048], resources).expect("session");
+
+    assert!(matches!(
+        session.finalize_terminal_transition(0, 1),
+        Err(AnalysisError::TransitionCodeMissing { recorded: 0, .. })
+    ));
+
+    let modes = session
+        .select_modes(&synthetic(4096, 2))
+        .expect("mode selection");
+    let missing_index = modes.len() as i64;
+    let missing = WindowedFrame {
+        plan: FramePlan {
+            index: missing_index,
+            previous: 0,
+            current: 0,
+            following: 0,
+            sample_start: 0,
+            sample_end: 256,
+            required_filled: 256,
+            advance: 128,
+        },
+        center: 0,
+        samples: vec![vec![0.0; 256]; 2],
+    };
+    assert_eq!(
+        session.transition_code(&missing),
+        Err(AnalysisError::TransitionCodeMissing {
+            index: missing_index,
+            recorded: modes.len(),
+        })
+    );
 }
