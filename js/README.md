@@ -55,7 +55,7 @@ const indexBytes = /* index.json bytes */;
 const files = new Map([ /* profiles-dir-relative path → bytes */ ]);
 
 await initWasm();                              // or initWasm(url | response | arrayBuffer)
-const bundle = await loadProfileBundle(indexBytes, files); // kernel-verified
+const bundle = await loadProfileBundle("wwise2013-2ch-48000", indexBytes, files);
 // bundle.info → { name, setupSha256, channels, sampleRate }
 
 // one-shot: WAV bytes → WEM

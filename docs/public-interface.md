@@ -210,6 +210,10 @@ of two installed profiles (the other is `wwise2013-2ch-48000`);
 `PROFILES` is the registry's read-only name view. Geometry-only resolution
 reports ambiguity when multiple complete identities share the same channel
 count and sample rate; callers can then resolve with a complete `ProfileKey`.
+The packaged `data/profiles/index.json` declares the complete installed
+inventory. At import time the registry loads one self-contained bundle for
+every index entry; profile selection chooses one of those exact bundles rather
+than assembling fragments from multiple profiles.
 
 The representation of fmt metadata, table paths, registries and packaged
 resources is an implementation detail.
@@ -220,8 +224,8 @@ resources is an implementation detail.
 keyword `quality`:
 
 ```python
-profile = load_wem_profile("wwise2013-6ch-44100", quality=4.0)
-profile = resolve_wem_profile(6, 44100, quality=4.0)
+profile = load_wem_profile("wwise2013-2ch-48000", quality=4.0)
+profile = resolve_wem_profile(2, 48000, quality=4.0)
 ```
 
 With `quality` omitted (the default), the behavior is identical to the
@@ -230,15 +234,16 @@ historical signature: the cached registry instance is returned unchanged and
 carrying that factor is returned; the registered profile is never mutated.
 `quality` must be a finite number (a `ValueError` otherwise).
 
-Quality is a profile-internal psychoacoustic interpolation parameter: a
-profile optionally ships an `analysis/quality-curves.json` (schema
-`wem.quality-curves.v1`) that interpolates selected psychoacoustic fields
-along a fixed breakpoint table. Requesting a quality from a profile that has
-no such resource is a configuration error (`ValueError`); the installed
-built-in profile does not carry quality curves, so its encode output is
-unchanged. A `quality` value outside the recorded control points is clamped
-to the nearest control point, and the assembly records that the value was
-extrapolated (honesty flag).
+Quality is a profile-internal psychoacoustic interpolation parameter. A
+profile may ship `analysis/quality-curves.json` using schema
+`wem.quality-curves.v2`, whose semantic map routes each recorded descriptor to
+its consumer. The 2ch/48 kHz profile uses it for short-block ATH offset/floor
+and carries the transient record-index axis in its transient resource; its
+recorded no-op descriptor remains inert. The 6ch/44.1 kHz profile has no
+quality-curves resource, so requesting a quality for that profile is a
+configuration error (`ValueError`) when resources are assembled. Values
+outside the recorded normalized domain use the documented endpoint rules and
+set the assembly's extrapolation flag.
 
 The encode entry points (`encode_wav`, `encode_pcm_wav`, `encode_raw_pcm`)
 and the CLI (`--quality`) forward an optional `quality` to profile selection;
@@ -258,7 +263,7 @@ Supported options are:
 | Option | Contract |
 |---|---|
 | `--output PATH` | Required destination WEM. |
-| `--profile wwise2013-6ch-44100` | Explicit built-in profile. |
+| `--profile NAME` | Explicit built-in profile (`wwise2013-6ch-44100` or `wwise2013-2ch-48000`). |
 | `--quality N` | Optional psychoacoustic quality factor forwarded to profile selection. |
 | `--wwise-version 2013` | Assert the supported Wwise generation. |
 | `--channels N` | Assert the WAV channel count before encoding. |

@@ -7,6 +7,7 @@ Static page: drag a `.wav` → streamed encode in WebAssembly → download the `
 ```sh
 node examples/wasm-demo/serve.mjs            # port 8090 (or: [port])
 # open http://localhost:8090/examples/wasm-demo/
+# select 2ch explicitly with ?profile=wwise2013-2ch-48000
 ```
 
 The server (zero dependencies) serves the repo root so the demo can reach,
@@ -21,7 +22,8 @@ No build step is needed: the wasm artifacts are committed under `js/`.
 
 ## How it encodes
 
-1. **Profile**: `index.json` → default profile → `manifest.json` → every
+1. **Profile**: `index.json` → requested `?profile=NAME` (or the index default)
+   → `manifest.json` → every
    logical resource (each with its `sha256`). All bytes are passed to the
    kernel as `(path, bytes)`; the kernel re-verifies every SHA-256 on load
    (`wem_profile_bundle_from_bytes` path) and asserts the setup digest.

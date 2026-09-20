@@ -30,17 +30,15 @@ Currently installed:
   transient record family, look envelopes and remap tables, frozen window
   halves, MDCT trig blocks) are byte-verified from the paired build; the
   remaining psychoacoustic surfaces (ATH/octave/mask/interval/1024-bin
-  curves/tone/mode variants) have no static host anywhere in the paired
-  build: they are init-time materializations of deterministic geometry
-  produced by the paired build's geometry materializer
-  (the build's conversion plug-in image), reproduced byte-exact on the 6ch gates
-  for the five short surfaces by a per-instruction port, with the twelve
-  long surfaces awaiting the same mechanism re-derivation; on 2ch the five
-  short surfaces are registered from that mechanism, with `first_octave` read
-  from the paired build running at 48000 Hz, while the twelve long surfaces are
-  registered from the same mechanism after a live read of their 48 kHz values;
-  the container aux fields
-  stay partial pending behavior pairing.
+  curves/tone/mode variants) have no static host in the paired build: they are
+  init-time materializations of deterministic geometry. The short surfaces are
+  reproduced by the checked geometry materializer. The long geometry surfaces
+  and complete 17x8 tone bank were read from the running 48 kHz build; the
+  directly readable prefixes of both long profile records also match the
+  registered words. The paired whole-file corpus, stress corpus, and long-run
+  cross-implementation contract exercise the assembled profile. Container
+  layout constants are paired-build values, while content-derived size/rate
+  fields are recomputed for each encode.
 
 ## Exact setup identity
 
