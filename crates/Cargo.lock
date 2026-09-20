@@ -462,8 +462,6 @@ name = "wem-analysis"
 version = "0.1.0"
 dependencies = [
  "rayon",
- "serde_json",
- "wem-profiles",
  "wem-scheduling",
 ]
 
@@ -489,6 +487,7 @@ dependencies = [
 name = "wem-core"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "sha2",
  "wem-analysis",
  "wem-container",
@@ -528,10 +527,7 @@ dependencies = [
 name = "wem-vorbis"
 version = "0.1.0"
 dependencies = [
- "serde_json",
- "sha2",
  "wem-analysis",
- "wem-profiles",
 ]
 
 [[package]]

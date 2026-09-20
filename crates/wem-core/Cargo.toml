@@ -19,3 +19,6 @@ wem-analysis = { workspace = true }
 wem-vorbis = { workspace = true }
 wem-container = { workspace = true }
 wem-profiles = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
