@@ -267,9 +267,9 @@ pub fn mask_knots(raw: &[u32], index: f64) -> [Vec<f64>; 3] {
     // 1000d967: fisubl keeps x87 precision
     let frac = add80(F80::from_f64(index), fi(-g));
     // 1000d974/976: complement = 1 - frac (register width)
-    let complement = add80(F80::from_f64(1.0), frac.neg());
+    let complement = add80(F80::from_f64(1.0), -frac);
     let mut rows = [Vec::new(), Vec::new(), Vec::new()];
-    for row in 0..3 {
+    for (row, output) in rows.iter_mut().enumerate() {
         let mut values = Vec::with_capacity(17);
         for j in 0..17 {
             // 1000d96e/d9bc: quality stride 0xcc = 51 words; row stride 0x44
@@ -283,7 +283,7 @@ pub fn mask_knots(raw: &[u32], index: f64) -> [Vec<f64>; 3] {
         }
         // dac9/dad6/dad8: floor = f32(first + 6.0)
         let floor = f32_round(add80(F80::from_f64(values[0]), F80::from_f64(SIX)).to_f64());
-        rows[row] = values
+        *output = values
             .iter()
             .map(|v| {
                 let r = *v;
@@ -403,7 +403,7 @@ mod tests {
         assert_eq!(v.len(), 128);
         let o = octave(128, 44100, 5);
         assert_eq!(o.len(), 128);
-        assert!(o.iter().all(|&x| x >= -64 && x <= 1024));
+        assert!(o.iter().all(|&x| (-64..=1024).contains(&x)));
         let iv = interval_table(128, 44100, 3, 3);
         assert_eq!(iv.len(), 128);
     }

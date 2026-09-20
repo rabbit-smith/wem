@@ -36,16 +36,20 @@ impl PartialEq for F80 {
     }
 }
 
-impl F80 {
+impl std::ops::Neg for F80 {
+    type Output = F80;
+
     /// Sign flip at register width (x87 `fchs`).
     #[inline]
-    pub fn neg(self) -> F80 {
+    fn neg(self) -> Self::Output {
         F80 {
             neg: !self.neg,
             ..self
         }
     }
+}
 
+impl F80 {
     /// Exact 80-bit form of a finite f64 (normal and subnormal).
     pub fn from_f64(x: f64) -> F80 {
         assert!(x.is_finite(), "F80::from_f64: non-finite input");

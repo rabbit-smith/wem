@@ -53,6 +53,7 @@ def iter_pcm_windows(
     blocksizes: Sequence[int] = DEFAULT_BLOCKSIZES,
     terminal_following: int = 1,
     frozen_windows: Mapping[int, Sequence[float]] | None = None,
+    tail_training: int | None = None,
 ) -> Iterator[WindowedFrame]:
     """Yield hybrid-windowed PCM blocks for an already-decided mode stream.
 
@@ -68,7 +69,11 @@ def iter_pcm_windows(
         terminal_following=terminal_following,
     )
     yield from iter_planned_pcm_windows(
-        pcm, plans, blocksizes=blocksizes, frozen_windows=frozen_windows
+        pcm,
+        plans,
+        blocksizes=blocksizes,
+        frozen_windows=frozen_windows,
+        tail_training=tail_training,
     )
 
 
@@ -78,6 +83,7 @@ def iter_planned_pcm_windows(
     *,
     blocksizes: Sequence[int] = DEFAULT_BLOCKSIZES,
     frozen_windows: Mapping[int, Sequence[float]] | None = None,
+    tail_training: int | None = None,
 ) -> Iterator[WindowedFrame]:
     """Materialize PCM exclusively from scheduler-owned frame plans."""
     if not plans:
@@ -119,10 +125,16 @@ def iter_planned_pcm_windows(
     # reverse 16-tap bootstrap at packet zero).  The largest block view can
     # need nearly one complete long-block view past the source endpoint:
     # EOS can begin less than a short half-block before it.
-    tail_count = max(int(size) for size in blocksizes)
+    tail_count = (
+        max(int(size) for size in blocksizes)
+        if tail_training is None
+        else int(tail_training)
+    )
+    if tail_count <= 32 or tail_count > source_len:
+        raise ValueError("PCM feeder tail training length is invalid")
     tails = [
         wwise_lpc_predict(
-            wwise_lpc_from_data(channel[-4096:], order=32),
+            wwise_lpc_from_data(channel[-tail_count:], order=32),
             channel[-32:],
             tail_count,
         )

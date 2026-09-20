@@ -139,6 +139,8 @@ pub enum AnalysisError {
     FramePlanTransitionsDiffer,
     /// "PCM feeder needs at least one channel"
     PcmFeederEmpty,
+    /// "input conditioner channel count differs"
+    InputConditionerChannelCountMismatch { want: i64, got: i64 },
     /// "PCM feeder needs 4096 samples for Wwise LPC priming"
     PcmFeederShort { frames: i64 },
     /// "all PCM channels must have the same frame count"
@@ -181,6 +183,8 @@ pub enum AnalysisError {
     ModeSelectionNotFresh,
     /// "mode selection PCM must be equal-length and at least 4096 samples"
     ModeSelectionPcmInvalid { frames: i64 },
+    /// A selected frame has no transition code captured at mode-scan time.
+    TransitionCodeMissing { index: i64, recorded: usize },
     /// "short psychoacoustic vectors must each contain 128 values"
     ShortVectorsLength { want: i64 },
     /// "short psychoacoustic mode is outside the curve table"
@@ -543,6 +547,25 @@ pub struct FrozenMathTables {
 // Assembly aggregate
 // ---------------------------------------------------------------------------
 
+/// Profile-selected DC filter configuration before scheduling and analysis.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InputConditionerConfig {
+    pub dc_filter_coefficient: f32,
+}
+
+impl InputConditionerConfig {
+    pub fn new(dc_filter_coefficient: f32) -> Result<Self, AnalysisError> {
+        if !(0.0..1.0).contains(&dc_filter_coefficient) || dc_filter_coefficient == 0.0 {
+            return Err(AnalysisError::MalformedField {
+                reason: "DC filter coefficient must be between zero and one",
+            });
+        }
+        Ok(Self {
+            dc_filter_coefficient,
+        })
+    }
+}
+
 /// Immutable resources injected into one analysis session
 /// (Python `AnalysisProfileResources`).
 #[derive(Debug, Clone, PartialEq)]
@@ -555,6 +578,7 @@ pub struct AnalysisProfileResources {
     pub long_base: WwisePsyLongTables,
     pub long_variants: std::collections::BTreeMap<i64, WwisePsyLongTables>,
     pub long_floor_looks: std::collections::BTreeMap<i64, LongFloorEnvelopeLook>,
+    pub input_conditioner: Option<InputConditionerConfig>,
     pub frozen: Option<FrozenMathTables>,
     /// Normalized quality value on the profile's breakpoint axis
     /// (`None` = historical behavior, no quality interpolation).
@@ -577,6 +601,7 @@ impl AnalysisProfileResources {
         long_base: WwisePsyLongTables,
         long_variants: std::collections::BTreeMap<i64, WwisePsyLongTables>,
         long_floor_looks: std::collections::BTreeMap<i64, LongFloorEnvelopeLook>,
+        input_conditioner: Option<InputConditionerConfig>,
         frozen: Option<FrozenMathTables>,
         quality_value: Option<f64>,
         quality_extrapolated: bool,
@@ -605,6 +630,7 @@ impl AnalysisProfileResources {
             long_base,
             long_variants,
             long_floor_looks,
+            input_conditioner,
             frozen,
             quality_value,
             quality_extrapolated,
@@ -797,6 +823,6 @@ pub fn make_long_floor_envelope_look(
         curve_bias: u32_to_f32(profile[4]),
         curve_cap: u32_to_f32(profile[27]),
         history_start: i64::from(profile[167]),
-        side_gain: 1.0,
+        side_gain: u32_to_f32(table.seed_outer_u32[16]),
     })
 }

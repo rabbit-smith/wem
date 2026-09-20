@@ -11,6 +11,7 @@ pub fn detector_pcm_streams(
     pcm: &[Vec<f64>],
     prefix_samples: Option<i64>,
     terminal_samples: i64,
+    tail_training: Option<i64>,
     blocksizes: &[i64],
 ) -> Result<Vec<Vec<f64>>, AnalysisError> {
     if pcm.is_empty() {
@@ -35,12 +36,18 @@ pub fn detector_pcm_streams(
         });
     }
 
+    let tail_training =
+        tail_training.unwrap_or_else(|| blocksizes.iter().copied().max().unwrap_or(0));
+    if tail_training <= 32 || tail_training > source_len {
+        return Err(AnalysisError::DetectorPcmShort { frames: source_len });
+    }
+    let tail_training = tail_training as usize;
     let mut result = Vec::with_capacity(pcm.len());
     for source in pcm {
         let channel: Vec<f64> = source.iter().map(|v| f32_of(*v)).collect();
         let prefix = wwise_first_frame_lpc_prime(&channel, prefix_samples, 4096, 16)?;
         let len = channel.len();
-        let coeffs = wwise_lpc_from_data(&channel[len - 4096..], 32)?;
+        let coeffs = wwise_lpc_from_data(&channel[len - tail_training..], 32)?;
         let tail = wwise_lpc_predict(&coeffs, &channel[len - 32..], terminal_samples)?;
         let mut stream = prefix;
         stream.extend_from_slice(&channel);
@@ -58,12 +65,13 @@ pub fn iter_detector_quanta(
     window: i64,
     count: Option<i64>,
     terminal_samples: i64,
+    tail_training: Option<i64>,
     blocksizes: &[i64],
 ) -> Result<Vec<Vec<Vec<f64>>>, AnalysisError> {
     if hop <= 0 || window <= 0 {
         return Err(AnalysisError::DetectorHopWindowInvalid { hop, window });
     }
-    let streams = detector_pcm_streams(pcm, None, terminal_samples, blocksizes)?;
+    let streams = detector_pcm_streams(pcm, None, terminal_samples, tail_training, blocksizes)?;
     let available = (streams[0].len() as i64 - window) / hop + 1;
     let count = match count {
         Some(c) => c,
@@ -104,7 +112,7 @@ mod tests {
     #[test]
     fn detector_streams_lengths() {
         let p = pcm(2, 5000);
-        let streams = detector_pcm_streams(&p, None, 8192, &[256, 2048]).expect("streams");
+        let streams = detector_pcm_streams(&p, None, 8192, None, &[256, 2048]).expect("streams");
         // 1024 prefix + 5000 + 8192 tail
         assert_eq!(streams[0].len() as i64, 1024 + 5000 + 8192);
     }
@@ -112,7 +120,8 @@ mod tests {
     #[test]
     fn detector_quanta_available() {
         let p = pcm(2, 5000);
-        let quanta = iter_detector_quanta(&p, 64, 128, None, 8192, &[256, 2048]).expect("quanta");
+        let quanta =
+            iter_detector_quanta(&p, 64, 128, None, 8192, None, &[256, 2048]).expect("quanta");
         // (len - 128) // 64 + 1
         let stream_len = 1024 + 5000 + 8192;
         let available = (stream_len - 128) / 64 + 1;
@@ -123,8 +132,8 @@ mod tests {
     #[test]
     fn detector_rejects() {
         let p = pcm(2, 5000);
-        assert!(detector_pcm_streams(&[], None, 8192, &[256, 2048]).is_err());
-        assert!(detector_pcm_streams(&p, None, -1, &[256, 2048]).is_err());
-        assert!(iter_detector_quanta(&p, 0, 128, None, 8192, &[256, 2048]).is_err());
+        assert!(detector_pcm_streams(&[], None, 8192, None, &[256, 2048]).is_err());
+        assert!(detector_pcm_streams(&p, None, -1, None, &[256, 2048]).is_err());
+        assert!(iter_detector_quanta(&p, 0, 128, None, 8192, None, &[256, 2048]).is_err());
     }
 }

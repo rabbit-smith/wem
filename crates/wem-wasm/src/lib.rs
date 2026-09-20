@@ -12,7 +12,7 @@
 //!   bytes (no filesystem on wasm32-unknown-unknown): the constructor takes
 //!   the raw `index.json` bytes plus every profile-resource file as
 //!   `(path, bytes)` pairs and drives the kernel's bytes entry
-//!   (`wem_core::Encoder::from_profile_bytes`, which SHA-256 verifies every
+//!   (`wem_core::Encoder::from_profile_bytes_named`, which SHA-256 verifies every
 //!   logical resource on load).
 //! * **Streaming** (`wem_session_*`): [`WemSession`] — Init -> push* ->
 //!   Finish -> free. `new` is the Init (bytes entry
@@ -253,7 +253,7 @@ pub fn wem_parse_wav(wav: &[u8]) -> Result<JsValue, JsValue> {
 /// One profile-resolved, shareable encoder built entirely from bytes
 /// (the wasm mirror of `wem_encoder_new`; the profile bundle travels as
 /// bytes — the kernel verifies every resource's SHA-256 on load and
-/// selects the index `default` profile).
+/// selects the requested profile).
 #[wasm_bindgen]
 pub struct WemEncoder {
     encoder: Encoder,
@@ -263,6 +263,7 @@ pub struct WemEncoder {
 impl WemEncoder {
     /// Init from one in-memory profile bundle.
     ///
+    /// - `profile_name`: the profile key in `index.json`;
     /// - `profile_index`: the raw `index.json` bytes;
     /// - `files`: a `Map`/object of profiles-dir-relative path -> bytes
     ///   (e.g. `"wwise2013-6ch-44100/manifest.json"`,
@@ -271,10 +272,10 @@ impl WemEncoder {
     /// Throws `WEM_ERR_PROFILE_NOT_FOUND` / `WEM_ERR_STATE_ERROR` /
     /// `WEM_ERR_INTERNAL` on malformed or failing bundles.
     #[wasm_bindgen(constructor)]
-    pub fn new(profile_index: &[u8], files: JsValue) -> Result<Self, JsValue> {
+    pub fn new(profile_name: &str, profile_index: &[u8], files: JsValue) -> Result<Self, JsValue> {
         let files = collect_files(&files)?;
-        let encoder =
-            Encoder::from_profile_bytes(profile_index, files).map_err(|error| reject(&error))?;
+        let encoder = Encoder::from_profile_bytes_named(profile_name, profile_index, files)
+            .map_err(|error| reject(&error))?;
         Ok(Self { encoder })
     }
 

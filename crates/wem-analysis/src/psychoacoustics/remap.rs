@@ -289,6 +289,7 @@ pub fn wwise_psy_peak_suppress(
     original: &[f64],
     difference: &[f64],
     look: &WwisePsyLook,
+    cap_curve: &[f64],
 ) -> Result<Vec<f64>, AnalysisError> {
     if original.len() != difference.len() {
         return Err(AnalysisError::PsyCurveLengthMismatch {
@@ -300,6 +301,12 @@ pub fn wwise_psy_peak_suppress(
         return Err(AnalysisError::PsyLookCurveLengthMismatch {
             look_n: look.n,
             got: original.len() as i64,
+        });
+    }
+    if cap_curve.len() as i64 != look.n {
+        return Err(AnalysisError::PsyLookCurveLengthMismatch {
+            look_n: look.n,
+            got: cap_curve.len() as i64,
         });
     }
     let n = look.n as usize;
@@ -356,8 +363,7 @@ pub fn wwise_psy_peak_suppress(
     }
     let mut out: Vec<f64> = difference.iter().map(|v| f32_of(*v)).collect();
     for i in 3..limit {
-        let cap = (look.envelope[i] as f64)
-            .min(look.second_envelope[i] as f64 + (look.second_envelope[0] as f64).abs());
+        let cap = (look.envelope[i] as f64).min(cap_curve[i] + cap_curve[0].abs());
         if cap < peak_floor[i] {
             peak_floor[i] = cap;
         }
@@ -507,6 +513,44 @@ pub fn build_long_psy_remap_mode2(
     build_long_psy_remap_variant(original, 2, tables)
 }
 
+const STEREO_NOISE_COMPAND: [i64; 40] = [
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 15, 16, 16, 16,
+    17, 17, 18, 18, 18, 19, 19, 19, 20, 21, 22, 23, 24, 25,
+];
+
+/// Build aoTuV beta 6.03's impulse peak surface for stereo coupling.
+pub fn build_coupling_peak(
+    raw_mdct: &[f64],
+    selector: &[f64],
+    base: &[f64],
+    previous_mdct: &[f64],
+    tone_end: usize,
+    enabled: bool,
+) -> Result<Vec<f64>, AnalysisError> {
+    let n = raw_mdct.len();
+    if selector.len() != n || base.len() != n || previous_mdct.len() != n {
+        return Err(AnalysisError::PsyBaseSelectorLengthMismatch {
+            want: n as i64,
+            got: selector.len().min(base.len()).min(previous_mdct.len()) as i64,
+        });
+    }
+    let mut peak = vec![0.0; n];
+    if !enabled {
+        return Ok(peak);
+    }
+    for index in 0..tone_end.min(n) {
+        let choice = ((selector[index] + 0.5) as i64).clamp(0, 39) as usize;
+        let noise = f32_of(base[index] + STEREO_NOISE_COMPAND[choice] as f64);
+        if f32_of(raw_mdct[index] - noise) >= 12.0 {
+            let delta = f32_of(raw_mdct[index] - previous_mdct[index]);
+            if delta >= 1.0 {
+                peak[index] = delta;
+            }
+        }
+    }
+    Ok(peak)
+}
+
 /// Build the remap offset curve from base and selector buffers
 /// (Python `wwise_psy_row3_curve`).
 pub fn wwise_psy_row3_curve(
@@ -536,6 +580,7 @@ pub fn wwise_psy_row3_curve(
 pub fn wwise_psy_residual_core(
     original: &[f64],
     look: &WwisePsyLook,
+    cap_curve: &[f64],
 ) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>), AnalysisError> {
     if original.len() as i64 != look.n {
         return Err(AnalysisError::PsyLookCurveLengthMismatch {
@@ -560,7 +605,7 @@ pub fn wwise_psy_residual_core(
         .zip(difference.iter())
         .map(|(a, b)| f32_of(a - b))
         .collect();
-    base = wwise_psy_peak_suppress(original, &base, look)?;
+    base = wwise_psy_peak_suppress(original, &base, look, cap_curve)?;
     Ok((first, selector, base))
 }
 
@@ -623,9 +668,10 @@ pub fn build_psy_remap(
     original: &[f64],
     _q: f64,
     look: &WwisePsyLook,
+    cap_curve: &[f64],
     curve_offsets: &[i64],
 ) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>), AnalysisError> {
-    let (first, selector, base) = wwise_psy_residual_core(original, look)?;
+    let (first, selector, base) = wwise_psy_residual_core(original, look, cap_curve)?;
     // ``q`` and the extension fields are retained in the signature because
     // their separate scratch role is still modelled; they do not select
     // remapped spectrum.

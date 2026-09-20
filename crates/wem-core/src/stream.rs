@@ -22,7 +22,7 @@
 //!
 //! * a per-channel ring of the most recent
 //!   [`STREAM_RING_KEEP`](wem_analysis::preprocessing::streaming::STREAM_RING_KEEP)
-//!   samples (9216) — the 4096-sample LPC tail model, the 8192-sample
+//!   samples (9216) — the at-most-2048-sample LPC tail model, the 8192-sample
 //!   detector end-of-stream tail reach (8192 + 1024 prime offset), and
 //!   every in-flight 2048-sample frame window fit inside it;
 //! * the cached first-frame LPC prime (1024 samples per channel);
@@ -126,9 +126,6 @@ struct StreamPipeline {
     blocksizes: [i64; 2],
     session: AnalysisSession,
     feeder: StreamingPcmFeeder,
-    /// Mode-loop cursor (batch `select_modes` loop variables).
-    center: i64,
-    current_mode: i64,
     /// Decided current modes: `modes[k]` is frame k's mode.
     modes: Vec<i64>,
     /// Incremental planner state (batch `plan_mode_sequence` state);
@@ -137,12 +134,11 @@ struct StreamPipeline {
     /// Emitted frame plans (frame k's plan at index k).
     plans: Vec<FramePlan>,
     /// For every pending plan (indices `plans.len()..modes.len()-1`), the
-    /// mode-loop center *after* the deciding iteration: the batch loop
-    /// terminates when that center reaches `source_len + prefix`, which
-    /// is unknowable until `finish` — so the plan's `following` (the
-    /// scanned mode, or the `terminal_following` rule at EOS) is decided
-    /// then.
-    pending_centers: Vec<i64>,
+    /// frame center at the start of its mode-loop iteration. The batch loop
+    /// continues once more exactly while this center is below `source_len`,
+    /// which is unknowable until `finish`; the plan's `following` is deferred
+    /// until that endpoint decision is available.
+    pending_origins: Vec<i64>,
     /// Frames fully analyzed and packed so far.
     frames_done: i64,
     /// Audio packets in encoding order.
@@ -171,12 +167,10 @@ impl StreamPipeline {
             blocksizes,
             session,
             feeder,
-            center: 0,
-            current_mode: 0,
             modes: Vec::new(),
             planner_state: None,
             plans: Vec::new(),
-            pending_centers: Vec::new(),
+            pending_origins: Vec::new(),
             frames_done: 0,
             audio_packets: Vec::new(),
             setup_emitted: false,
@@ -222,20 +216,26 @@ impl StreamPipeline {
     /// scan, record the current mode, advance the cursor. The scanned
     /// `following` stays in `current_mode`; plan emission is separate
     /// (the batch `terminal_following` rule may override it at EOS).
-    fn mode_iteration(&mut self) -> Result<(), EncoderError> {
-        let status = self
+    fn mode_iteration(&mut self, eos: bool) -> Result<bool, EncoderError> {
+        let decision = self
             .session
-            .mode_selection_status(self.center + self.blocksizes[1] / 2, self.current_mode)
+            .scan_next_mode(eos)
             .map_err(|error| EncoderError::Internal(InternalError::Analysis(error)))?;
-        let following = if status < 0 { 0 } else { status };
-        self.modes.push(self.current_mode);
-        self.center += self.blocksizes[self.current_mode as usize] / 4
-            + self.blocksizes[following as usize] / 4;
-        self.current_mode = following;
-        // Record the center after this iteration: it decides whether
-        // plan `modes.len() - 1` is the terminal one at EOS.
-        self.pending_centers.push(self.center);
-        Ok(())
+        let Some(decision) = decision else {
+            return Ok(false);
+        };
+        self.modes.push(decision.current);
+        self.pending_origins.push(decision.center);
+        Ok(true)
+    }
+
+    fn pending_origin(&self) -> Result<i64, EncoderError> {
+        self.pending_origins
+            .first()
+            .copied()
+            .ok_or(EncoderError::Internal(InternalError::Invariant {
+                message: "mode sequence is missing its pending frame origin",
+            }))
     }
 
     /// Emit one frame plan (the batch `plan_mode_sequence` step) for
@@ -246,6 +246,7 @@ impl StreamPipeline {
                 message: "plan emission order diverged",
             }));
         }
+        self.pending_origin()?;
         let mut state = match self.planner_state.take() {
             None => SchedulerState::new(
                 0,
@@ -276,8 +277,8 @@ impl StreamPipeline {
         self.planner_state = Some(state);
         self.plans.push(plan);
         // Plan emission is strictly in order: each one consumes the
-        // front pending-center entry (center after its deciding scan).
-        self.pending_centers.remove(0);
+        // front pending-origin entry (the center of its deciding scan).
+        self.pending_origins.remove(0);
         Ok(())
     }
 
@@ -352,12 +353,11 @@ impl StreamPipeline {
             }
             let index = self.plans.len() as i64;
             if index < self.modes.len() as i64 {
-                // A plan is pending its EOS decision: it is non-terminal
-                // (batch loop continues) whenever its post-iteration
-                // center is strictly below `total + prefix`.
-                let post_center = self.pending_centers[0];
-                if post_center < self.total() + self.blocksizes[1] / 2 {
-                    self.emit_plan(index, self.current_mode)?;
+                // The batch mode loop continues after this frame exactly
+                // while its center is still inside the source received so far.
+                let frame_center = self.pending_origin()?;
+                if frame_center < self.total() {
+                    self.emit_plan(index, self.session.pending_following_mode())?;
                     continue;
                 }
                 // Possibly terminal: it may still become non-terminal as
@@ -368,8 +368,10 @@ impl StreamPipeline {
             }
             // 2) index == modes.len(): run the next scan once its
             //    look-ahead frontier is inside the received samples.
-            if self.scan_safe(self.center) {
-                self.mode_iteration()?;
+            if self.scan_safe(self.session.next_mode_center()) {
+                if !self.mode_iteration(false)? {
+                    break;
+                }
                 continue;
             }
             break;
@@ -380,32 +382,62 @@ impl StreamPipeline {
     /// The `finish` continuation: end-of-stream tail, remaining quanta,
     /// remaining mode decisions, and the deferred tail frames.
     fn finish_source(&mut self, encoder: &Encoder) -> Result<(), EncoderError> {
+        let source_len = self.total();
+        loop {
+            let index = self.plans.len() as i64;
+            if index < self.modes.len() as i64 {
+                let frame_center = self.pending_origin()?;
+                if frame_center < source_len {
+                    self.emit_plan(index, self.session.pending_following_mode())?;
+                    continue;
+                }
+                break;
+            }
+            if self.session.mode_scan_has_source_frame(source_len) && self.mode_iteration(false)? {
+                continue;
+            }
+            break;
+        }
+        let tail_training = self.blocksizes[1]
+            .min(self.blocksizes[1] / 2 + self.total() - self.session.next_mode_center());
         self.feeder
-            .finish_source()
+            .finish_source(Some(tail_training))
             .map_err(|error| EncoderError::Internal(InternalError::Analysis(error)))?;
         self.ingest_completed_quanta()?;
-        let stop_center = self.total() + self.blocksizes[1] / 2;
         loop {
             let index = self.plans.len() as i64;
             if index < self.modes.len() as i64 {
                 // A plan is pending its EOS decision: decide it now that
                 // the endpoint is known.
-                let post_center = self.pending_centers[0];
-                if post_center < stop_center {
+                let frame_center = self.pending_origin()?;
+                if frame_center < source_len {
                     // Batch loop continues: the scanned following holds.
-                    self.emit_plan(index, self.current_mode)?;
+                    self.emit_plan(index, self.session.pending_following_mode())?;
                     continue;
                 }
                 // Batch loop terminates after this frame: the
                 // `terminal_following` rule overrides the scan.
+                let previous_mode = if index > 0 {
+                    self.modes[index as usize - 1]
+                } else {
+                    0
+                };
+                self.session
+                    .finalize_terminal_transition(previous_mode, self.modes[index as usize])
+                    .map_err(|error| EncoderError::Internal(InternalError::Analysis(error)))?;
                 self.emit_plan(index, 1)?;
-                self.pending_centers.clear();
+                self.pending_origins.clear();
                 break;
             }
-            // index == modes.len(): the batch loop runs one more
-            // iteration while its center stays below the stop line.
-            if self.center < stop_center {
-                self.mode_iteration()?;
+            // index == modes.len(): mirror the batch loop's `previous <
+            // source_len` condition. The first iteration always runs because
+            // `previous_center` starts at -1.
+            if self.session.mode_scan_has_source_frame(source_len) {
+                if !self.mode_iteration(true)? {
+                    return Err(EncoderError::Internal(InternalError::Invariant {
+                        message: "EOS mode scan did not emit a decision",
+                    }));
+                }
                 continue;
             }
             break;
@@ -439,6 +471,15 @@ impl StreamSession {
         self.init_profile_quality(ref_, None)
     }
 
+    /// Open the session on one installed profile from an explicit data tree.
+    pub fn init_profile_in(
+        &mut self,
+        data: &DataDir,
+        ref_: &ProfileRef,
+    ) -> Result<(), EncoderError> {
+        self.init_profile_quality_in(data, ref_, None)
+    }
+
     /// Open the session on one installed profile with an explicit quality
     /// factor (`Init` quality variant).
     ///
@@ -454,6 +495,19 @@ impl StreamSession {
         ref_: &ProfileRef,
         quality: Option<f64>,
     ) -> Result<(), EncoderError> {
+        let data = DataDir::from_env()?;
+        self.init_profile_quality_in(&data, ref_, quality)
+    }
+
+    /// Open the session on one installed profile from an explicit data tree
+    /// and optionally bind a quality factor. This entry never reads or
+    /// mutates `WEM_DATA_DIR`.
+    pub fn init_profile_quality_in(
+        &mut self,
+        data: &DataDir,
+        ref_: &ProfileRef,
+        quality: Option<f64>,
+    ) -> Result<(), EncoderError> {
         if self.initialized || self.finished {
             return Err(EncoderError::StateError {
                 message: "Init must be the first request".into(),
@@ -466,8 +520,7 @@ impl StreamSession {
                 });
             }
         }
-        let data = DataDir::from_env()?;
-        let registry = installed_registry(&data)?;
+        let registry = installed_registry(data)?;
         let wanted = ref_.setup_sha256.to_lowercase();
         if wanted.is_empty() {
             return Err(EncoderError::ProfileNotFound {
@@ -503,7 +556,7 @@ impl StreamSession {
                 .map_err(|error| EncoderError::Internal(InternalError::Profile(error)))?,
             None => profile,
         };
-        let encoder = Encoder::from_profile_model(&profile, None)?;
+        let encoder = Encoder::from_profile_model_in(data, &profile, None)?;
         let pipeline = StreamPipeline::new(&encoder)?;
         self.encoder = Some(encoder);
         self.pipeline = Some(pipeline);
@@ -518,6 +571,13 @@ impl StreamSession {
         Ok(session)
     }
 
+    /// Convenience constructor over an explicit profile data tree.
+    pub fn for_profile_ref_in(data: &DataDir, ref_: &ProfileRef) -> Result<Self, EncoderError> {
+        let mut session = Self::new();
+        session.init_profile_in(data, ref_)?;
+        Ok(session)
+    }
+
     /// Convenience constructor: `new()` + `init_profile_quality()`.
     pub fn for_profile_ref_quality(
         ref_: &ProfileRef,
@@ -526,6 +586,32 @@ impl StreamSession {
         let mut session = Self::new();
         session.init_profile_quality(ref_, quality)?;
         Ok(session)
+    }
+
+    /// Convenience constructor over an explicit profile data tree with an
+    /// optional quality factor.
+    pub fn for_profile_ref_quality_in(
+        data: &DataDir,
+        ref_: &ProfileRef,
+        quality: Option<f64>,
+    ) -> Result<Self, EncoderError> {
+        let mut session = Self::new();
+        session.init_profile_quality_in(data, ref_, quality)?;
+        Ok(session)
+    }
+
+    /// Open a streaming session by installed profile name from the default
+    /// profile data tree.
+    pub fn for_profile(name: &str) -> Result<Self, EncoderError> {
+        let data = DataDir::from_env()?;
+        Self::for_profile_in(&data, name)
+    }
+
+    /// Open a streaming session by installed profile name from an explicit
+    /// data tree.
+    pub fn for_profile_in(data: &DataDir, name: &str) -> Result<Self, EncoderError> {
+        let encoder = Encoder::from_profile_in(data, name)?;
+        Self::from_encoder(encoder)
     }
 
     /// Open the session on one profile carried entirely as bytes (`Init`
@@ -544,30 +630,13 @@ impl StreamSession {
         index: &[u8],
         files: impl IntoIterator<Item = (String, Vec<u8>)>,
     ) -> Result<Self, EncoderError> {
-        let encoder = Encoder::from_profile_bytes(index, files)?;
-        let profile = encoder.profile();
-        if profile.setup_sha256() != ref_.setup_sha256.to_lowercase() {
-            return Err(EncoderError::ProfileNotFound {
-                requested: ref_.setup_sha256.clone(),
-            });
-        }
-        if let Some(name) = &ref_.name {
-            if name != profile.name() {
-                return Err(EncoderError::StateError {
-                    message: format!(
-                        "profile name mismatch: setup_sha256 resolves to \n                         '{}', not '{name}'",
-                        profile.name()
-                    ),
-                });
-            }
-        }
-        let pipeline = StreamPipeline::new(&encoder)?;
-        Ok(Self {
-            initialized: true,
-            finished: false,
-            encoder: Some(encoder),
-            pipeline: Some(pipeline),
-        })
+        let encoder = match ref_.name.as_deref() {
+            Some(name) => Encoder::from_profile_bytes_named(name, index, files)
+                .map_err(|error| Self::map_named_bytes_error(error, name))?,
+            None => Encoder::from_profile_bytes(index, files)?,
+        };
+        Self::validate_profile_ref(&encoder, ref_)?;
+        Self::from_encoder(encoder)
     }
 
     /// The bytes entry with an explicit quality factor: same semantics as
@@ -580,7 +649,18 @@ impl StreamSession {
         files: impl IntoIterator<Item = (String, Vec<u8>)>,
         quality: Option<f64>,
     ) -> Result<Self, EncoderError> {
-        let encoder = Encoder::from_profile_bytes_with_quality(index, files, quality)?;
+        let encoder = match ref_.name.as_deref() {
+            Some(name) => {
+                Encoder::from_profile_bytes_named_with_quality(name, index, files, quality)
+                    .map_err(|error| Self::map_named_bytes_error(error, name))?
+            }
+            None => Encoder::from_profile_bytes_with_quality(index, files, quality)?,
+        };
+        Self::validate_profile_ref(&encoder, ref_)?;
+        Self::from_encoder(encoder)
+    }
+
+    fn validate_profile_ref(encoder: &Encoder, ref_: &ProfileRef) -> Result<(), EncoderError> {
         let profile = encoder.profile();
         if profile.setup_sha256() != ref_.setup_sha256.to_lowercase() {
             return Err(EncoderError::ProfileNotFound {
@@ -591,12 +671,25 @@ impl StreamSession {
             if name != profile.name() {
                 return Err(EncoderError::StateError {
                     message: format!(
-                        "profile name mismatch: setup_sha256 resolves to \n                         '{}', not '{name}'",
+                        "profile name mismatch: setup_sha256 resolves to '{}', not '{name}'",
                         profile.name()
                     ),
                 });
             }
         }
+        Ok(())
+    }
+
+    fn map_named_bytes_error(error: EncoderError, name: &str) -> EncoderError {
+        match error {
+            EncoderError::ProfileNotFound { .. } => EncoderError::StateError {
+                message: format!("profile name mismatch: '{name}' is absent from profile bundle"),
+            },
+            other => other,
+        }
+    }
+
+    fn from_encoder(encoder: Encoder) -> Result<Self, EncoderError> {
         let pipeline = StreamPipeline::new(&encoder)?;
         Ok(Self {
             initialized: true,
@@ -660,6 +753,10 @@ impl StreamSession {
         while offset < data.len() {
             let end = data.len().min(offset + bytes_per_segment);
             let rows = chunk_to_float_rows(&data[offset..end], channels);
+            let rows = pipeline
+                .session
+                .condition_pcm(&rows)
+                .map_err(|error| EncoderError::Internal(InternalError::Analysis(error)))?;
             pipeline
                 .feeder
                 .push(&rows)

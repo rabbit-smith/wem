@@ -5,8 +5,11 @@ This Wwise build's audio header contains its mode bits only: unlike raw
 Vorbis-I long packets, it does not serialize previous/next-window flags.
 Floor1 body matches Vorbis I.
 """
+
 from __future__ import annotations
 
+import math
+import struct
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
@@ -14,8 +17,10 @@ from ..analysis.model import PsyFrame
 from .bitio import OggPack
 from .codebook import Codebook
 from .floor import (
+    FLOOR1_fromdB_LOOKUP,
     FLOOR1_RANGES,
     floor1_curve_from_posts,
+    floor1_quant_curve_from_posts,
     floor1_wrap,
     floor1_wrap_with_posts,
     postlist_from_floor,
@@ -31,14 +36,189 @@ from .residue import (
 from .setup import ilog
 
 
+def _f32(value: float) -> float:
+    return struct.unpack("<f", struct.pack("<f", float(value)))[0]
+
+
+def _lossless_couple_pair(magnitude: int | float, angle: int | float) -> tuple:
+    first = magnitude
+    second = angle
+    if abs(first) > abs(second):
+        coupled_angle = first - second if first > 0 else second - first
+        coupled_magnitude = first
+    else:
+        coupled_angle = first - second if second > 0 else second - first
+        coupled_magnitude = second
+    if coupled_angle >= abs(coupled_magnitude) * 2:
+        coupled_angle = -coupled_angle
+        coupled_magnitude = -coupled_magnitude
+    return coupled_magnitude, coupled_angle
+
+
+def _point_hypot(first: float, second: float, reversal: float) -> float:
+    first_abs = _f32(abs(_f32(first * _f32(0.94))))
+    second_abs = _f32(abs(_f32(second * _f32(0.94))))
+    if first > 0.0:
+        if second > 0.0:
+            return _f32(first_abs + second_abs)
+        if first > -second:
+            return _f32(first_abs - second_abs * reversal)
+        return _f32(-(second_abs - first_abs * reversal))
+    if second < 0.0:
+        return _f32(-(first_abs + second_abs))
+    if -first > second:
+        return _f32(-(first_abs - second_abs * reversal))
+    return _f32(second_abs - first_abs * reversal)
+
+
+def _aotuv_stereo_residue(
+    mdct: Sequence[Sequence[float]],
+    floor_indices: Sequence[Sequence[int]],
+    coupling_peak: Sequence[Sequence[float]],
+    ch_used: Sequence[bool],
+) -> list[list[int]]:
+    """aoTuV beta 6.03 joint quantization used by the 2ch/48k profile."""
+    if not (len(mdct) == len(floor_indices) == len(coupling_peak) == 2):
+        raise ValueError("stereo residue quantization needs two channel rows")
+    n = len(mdct[0])
+    if any(len(row) < n for row in (*mdct, *floor_indices, *coupling_peak)):
+        raise ValueError("stereo residue rows differ in length")
+    partition = 8 if n == 128 else 32
+    point_limit = n // 3
+    lowpass = n * 3 // 4
+    tonefix_end = n * 35 // 64
+    output = [[0] * n for _ in range(2)]
+    previous_residue_def = -1.0
+
+    for begin in range(0, lowpass, partition):
+        count = min(partition, n - begin)
+        raw = [[0.0] * count for _ in range(2)]
+        quant = [[0.0] * count for _ in range(2)]
+        floor_energy = [[0.0] * count for _ in range(2)]
+        residue = [[0.0] * count for _ in range(2)]
+        flags = [[0] * count for _ in range(2)]
+
+        for channel in range(2):
+            if not ch_used[channel]:
+                floor_energy[channel] = [_f32(1e-10)] * count
+                continue
+            crossing = point_limit - begin
+            if crossing > 0:
+                point = _f32(0.0)
+                rephase_point = _f32(0.0)
+                interpolate = crossing - count <= 0
+                point_step = _f32(2.5 / count) if interpolate else 0.0
+                rephase_step = _f32(0.5 / count) if interpolate else 0.0
+            else:
+                point = _f32(2.5)
+                rephase_point = _f32(0.5)
+                interpolate = False
+                point_step = rephase_step = 0.0
+            for local in range(count):
+                index = begin + local
+                if interpolate:
+                    point = _f32(point + point_step)
+                    rephase_point = _f32(rephase_point + rephase_step)
+                saved_point = point
+                floor_value = _f32(FLOOR1_fromdB_LOOKUP[floor_indices[channel][index]])
+                normalized = _f32(_f32(mdct[channel][index]) / floor_value)
+                residue[channel][local] = normalized
+                threshold = _f32(point - _f32(coupling_peak[channel][index]))
+                if threshold < 0.0:
+                    threshold = 0.0
+                magnitude = _f32(abs(normalized))
+                if magnitude < threshold:
+                    flags[channel][local] = 0 if magnitude < rephase_point else -1
+                else:
+                    flags[channel][local] = 1
+                point = saved_point
+                energy = _f32(_f32(mdct[channel][index]) * _f32(mdct[channel][index]))
+                quant[channel][local] = energy
+                raw[channel][local] = _f32(-energy if mdct[channel][index] < 0.0 else energy)
+                floor_energy[channel][local] = _f32(floor_value * floor_value)
+                output[channel][index] = quantize_residue_value(normalized)
+
+        if begin < tonefix_end:
+            reversed_phase = 0
+            same_phase = 0
+            residue_def = _f32(0.0)
+            for local in range(count):
+                if (
+                    residue[0][local] < -0.5
+                    or residue[0][local] >= 0.5
+                    or residue[1][local] < -0.5
+                    or residue[1][local] >= 0.5
+                ):
+                    opposite = (raw[0][local] > 0.0 > raw[1][local]) or (
+                        raw[1][local] > 0.0 > raw[0][local]
+                    )
+                    reversed_phase += int(opposite)
+                    same_phase += int(not opposite)
+                    residue_def = _f32(
+                        residue_def + _f32(abs(abs(residue[0][local]) - abs(residue[1][local])))
+                    )
+            active = reversed_phase + same_phase
+            if active:
+                current_def = _f32(residue_def / active)
+                residue_def = current_def
+                if previous_residue_def > 0.0:
+                    residue_def = _f32(_f32(current_def * 0.5) + _f32(previous_residue_def * 0.5))
+                previous_residue_def = current_def
+                if residue_def > 1.0:
+                    for local in range(count):
+                        if flags[0][local] == -1 or flags[1][local] == -1:
+                            flags[0][local] = 1
+                if _f32(reversed_phase / active) >= _f32(0.34):
+                    for local in range(count):
+                        opposite = (raw[0][local] > 0.0 > raw[1][local]) or (
+                            raw[1][local] > 0.0 > raw[0][local]
+                        )
+                        if opposite and (flags[0][local] == -1 or flags[1][local] == -1):
+                            flags[0][local] = 1
+            else:
+                previous_residue_def = -1.0
+
+        point_coupled = False
+        for local in range(count):
+            index = begin + local
+            if flags[0][local] == 1 or flags[1][local] == 1:
+                residue[0][local], residue[1][local] = (
+                    _f32(value)
+                    for value in _lossless_couple_pair(residue[0][local], residue[1][local])
+                )
+                output[0][index], output[1][index] = _lossless_couple_pair(
+                    output[0][index], output[1][index]
+                )
+                flags[0][local] = flags[1][local] = 1
+            else:
+                reversal = _f32(0.18 if index < point_limit else 0.12)
+                raw[0][local] = _point_hypot(raw[0][local], raw[1][local], reversal)
+                quant[0][local] = _f32(abs(raw[0][local]))
+                raw[1][local] = quant[1][local] = 0.0
+                flags[1][local] = 1
+                output[1][index] = 0
+                point_coupled = True
+            combined_floor = _f32(floor_energy[0][local] + floor_energy[1][local])
+            floor_energy[0][local] = floor_energy[1][local] = combined_floor
+
+        if point_coupled:
+            for local in range(count):
+                if flags[0][local] != 1:
+                    value = _f32(math.sqrt(quant[0][local] / floor_energy[0][local]))
+                    output[0][begin + local] = (
+                        -quantize_residue_value(value)
+                        if raw[0][local] < 0.0
+                        else quantize_residue_value(value)
+                    )
+    return output
+
+
 def _nearest_used_entry(book: Codebook, value: int) -> int:
     """Map residual value to a used codebook entry (dim-1 maptype0: entry≈value)."""
     used = book.used_entries()
     if not used:
         raise ValueError("codebook has no used entries")
-    if value in used or (
-        0 <= value < book.entries and book.lengthlist[value] > 0
-    ):
+    if value in used or (0 <= value < book.entries and book.lengthlist[value] > 0):
         return value
     # nearest used
     return min(used, key=lambda e: abs(e - value))
@@ -129,6 +309,16 @@ def apply_mapping_coupling(
                 else:
                     mag_row[j] = a_value
                     ang_row[j] = a_value - m_value
+
+
+def propagate_mapping_nonzero(ch_used: list[bool], coupling: Sequence[Mapping[str, int]]) -> None:
+    """Propagate floor use across mapping0 coupling pairs before residue."""
+    for step in coupling:
+        mag = int(step["mag"])
+        ang = int(step["ang"])
+        if ch_used[mag] or ch_used[ang]:
+            ch_used[mag] = True
+            ch_used[ang] = True
 
 
 def pack_audio_header(
@@ -258,9 +448,7 @@ def pack_floor_only_packet(
             ch_count += 1
     if any_nz and silent_residue:
         res = setup["residues"][mapping["residues"][0]]
-        pack_residue_silent(
-            op, res, books, ch_count, n_spectrum=n_spectrum
-        )
+        pack_residue_silent(op, res, books, ch_count, n_spectrum=n_spectrum)
     return op.get_buffer()
 
 
@@ -282,9 +470,10 @@ def pack_block_packet_details(
     *,
     prev_window: int = 0,
     next_window: int = 0,
+    coupling_peak: Sequence[Sequence[float]] | None = None,
     residue_vq: bool = True,
     posts_are_10bit: bool = False,
- ) -> BlockPacketResult:
+) -> BlockPacketResult:
     """
     Full short/long audio packet: floor1 + residue VQ (or silent).
 
@@ -298,12 +487,11 @@ def pack_block_packet_details(
     pack_audio_header(op, setup, mode, prev_window, next_window)
     md = setup["modes"][mode]
     mapping = setup["maps"][md["mapping"]]
-    n_spectrum = len(mdct[0]) if mdct else (
-        1024 if md["blockflag"] else 128
-    )
+    n_spectrum = len(mdct[0]) if mdct else (1024 if md["blockflag"] else 128)
 
     ch_used: list[bool] = []
     residuals: list[list[float]] = []
+    floor_indices: list[list[int]] = []
     for ch in range(channels):
         sub = mapping["chmux"][ch] if mapping["submaps"] > 1 else 0
         floor = setup["floors"][mapping["floors"][sub]]
@@ -312,24 +500,24 @@ def pack_block_packet_details(
             op.write(0, 1)
             ch_used.append(False)
             residuals.append([0.0] * n_spectrum)
+            floor_indices.append([0] * n_spectrum)
             continue
         op.write(1, 1)
         pl = postlist_from_floor(floor)
         rng = FLOOR1_RANGES[floor["multiplier"]]
         packet_posts = (
-            floor1_quantize_posts(posts, floor["multiplier"])
-            if posts_are_10bit
-            else posts
+            floor1_quantize_posts(posts, floor["multiplier"]) if posts_are_10bit else posts
         )
         raster_posts, Y = floor1_wrap_with_posts(packet_posts, pl, rng)
         pack_floor1_body(op, floor, books, Y)
         ch_used.append(True)
         # amplitude floor curve for residual
         # use unwrapped absolute posts (fit output already absolute)
-        curve = floor1_curve_from_posts(
-            raster_posts, pl, n_spectrum, floor["multiplier"]
-        )
+        curve = floor1_curve_from_posts(raster_posts, pl, n_spectrum, floor["multiplier"])
         residuals.append(mdct_to_residue(mdct[ch], curve))
+        floor_indices.append(
+            floor1_quant_curve_from_posts(raster_posts, pl, n_spectrum, floor["multiplier"])
+        )
 
     quantized_residue = [[0] * n_spectrum for _ in range(channels)]
     if any(ch_used):
@@ -338,7 +526,13 @@ def pack_block_packet_details(
         # pair in the residue domain, not raw per-channel coefficients: apply
         # the exact inverse of the decoder's 4-branch coupling (no-op when the
         # mapping has no coupling steps, e.g. the 5.1 profile).
-        apply_mapping_coupling(residuals, mapping.get("coupling") or [])
+        coupling = mapping.get("coupling") or []
+        if coupling_peak is not None and channels == 2 and len(coupling) == 1:
+            quantized = _aotuv_stereo_residue(mdct, floor_indices, coupling_peak, ch_used)
+            residuals = [[float(value) for value in row] for row in quantized]
+        else:
+            apply_mapping_coupling(residuals, coupling)
+        propagate_mapping_nonzero(ch_used, coupling)
         # Materialize the integer residue handoff once. The residue packer
         # accepts numeric rows and its own integer normalization is
         # idempotent, so these exact rows feed both classification and VQ.
@@ -370,9 +564,7 @@ def pack_block_packet_details(
             end = min(int(res["end"]), n_spectrum)
             quantized_residue = [
                 [
-                    quantize_residue_value(value)
-                    if used and begin <= index < end
-                    else 0
+                    quantize_residue_value(value) if used and begin <= index < end else 0
                     for index, value in enumerate(row)
                 ]
                 for row, used in zip(residuals, ch_used)
@@ -406,6 +598,7 @@ def pack_block_packet(
     *,
     prev_window: int = 0,
     next_window: int = 0,
+    coupling_peak: Sequence[Sequence[float]] | None = None,
     residue_vq: bool = True,
     posts_are_10bit: bool = False,
 ) -> bytes:
@@ -419,6 +612,7 @@ def pack_block_packet(
         mdct,
         prev_window=prev_window,
         next_window=next_window,
+        coupling_peak=coupling_peak,
         residue_vq=residue_vq,
         posts_are_10bit=posts_are_10bit,
     ).packet
@@ -447,14 +641,10 @@ def pack_analysis_frame(
     mode = analysis.window.current
     mapping = setup["maps"][setup["modes"][mode]["mapping"]]
     posts: list[list[int] | None] = []
-    for channel, (post_curve, raw_curve) in enumerate(
-        zip(analysis.post, analysis.raw_mdct)
-    ):
+    for channel, (post_curve, raw_curve) in enumerate(zip(analysis.post, analysis.raw_mdct)):
         submap = mapping["chmux"][channel] if mapping["submaps"] > 1 else 0
         floor = setup["floors"][mapping["floors"][submap]]
-        posts.append(
-            floor1_fit_wwise(post_curve, raw_curve, floor, n=len(raw_curve))
-        )
+        posts.append(floor1_fit_wwise(post_curve, raw_curve, floor, n=len(raw_curve)))
     packet_result = pack_block_packet_details(
         setup,
         books,
@@ -462,6 +652,7 @@ def pack_analysis_frame(
         mode,
         posts,
         [list(row) for row in analysis.side],
+        coupling_peak=analysis.coupling_peak,
         posts_are_10bit=True,
     )
     return EncodedPacket(

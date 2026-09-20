@@ -31,6 +31,7 @@ class PsyFrame:
     seed: FloatRows
     post: FloatRows
     side: FloatRows
+    coupling_peak: FloatRows
 
     @property
     def window(self) -> WindowedFrame:

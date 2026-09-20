@@ -16,6 +16,8 @@ pub enum ResidueError {
     UnsupportedClassCount { nclass: u64 },
     /// Residue book index out of range.
     BookIndexOutOfRange { book_id: i64, books: usize },
+    /// The phrasebook does not code a class combination required by the setup.
+    UnencodableClassword { entry: i64, entries: i64 },
 }
 
 impl std::fmt::Display for ResidueError {
@@ -29,6 +31,12 @@ impl std::fmt::Display for ResidueError {
             }
             ResidueError::BookIndexOutOfRange { book_id, books } => {
                 write!(f, "residue book id {book_id} out of range 0..{books}")
+            }
+            ResidueError::UnencodableClassword { entry, entries } => {
+                write!(
+                    f,
+                    "type-2 classword entry {entry} is not coded in 0..{entries}"
+                )
             }
         }
     }
@@ -343,14 +351,13 @@ pub fn pack_residue_vq(
     Ok(())
 }
 
-/// Class metrics for the type-2 (flat-domain) residue template, read from the
-/// reference converter's data segment: the type-2 configuration record carries
-/// its magnitude metrics and its angle metrics as these two tables. A negative
-/// angle metric disables that class's angle gate, the same convention as the
-/// validated type-1 metric table.
+/// Class metrics for the coupled 32/44.1/48-kHz `mid` residue template in
+/// aoTuV beta6.03 `lib/modes/residue_44.h`. The Wwise type-2 path uses the
+/// coupled magnitude/angle classifier even though its codebooks follow the
+/// separately configured Wwise setup packet.
 /// (Python `WWISE_RESIDUE_TYPE2_CLASS_METRICS`.)
-const TYPE2_CLASS_MAGNITUDE_METRICS: [i64; 9] = [0, 1, 1, 2, 2, 4, 4, 16, 60];
-const TYPE2_CLASS_ANGLE_METRICS: [i64; 9] = [-1, 30, -1, 50, -1, 80, -1, -1, -1];
+const TYPE2_CLASS_MAGNITUDE_METRICS: [i64; 9] = [0, 1, 1, 2, 2, 4, 8, 16, 32];
+const TYPE2_CLASS_ANGLE_METRICS: [i64; 9] = [0, 0, 999, 0, 999, 4, 8, 16, 32];
 
 /// Classify one type-2 partition (reference `_2class`)
 /// (Python `_classify_partition_type2`).
@@ -385,7 +392,7 @@ pub fn classify_partition_type2(
     for classification in 0..TYPE2_CLASS_MAGNITUDE_METRICS.len() {
         let max_metric = TYPE2_CLASS_MAGNITUDE_METRICS[classification];
         let angle_metric = TYPE2_CLASS_ANGLE_METRICS[classification];
-        if magnitude_peak <= max_metric && (angle_metric < 0 || angle_peak <= angle_metric) {
+        if magnitude_peak <= max_metric && angle_peak <= angle_metric {
             return classification as i64;
         }
     }
@@ -396,10 +403,8 @@ pub fn classify_partition_type2(
 /// (Python `_pack_classbook_entry_type2`).
 ///
 /// entry = c0 * nclass^(ppw-1) + ... + c_{ppw-1}; the decoder unpacks the
-/// same mixed radix.  A classbook only codes a subset of the mixed-radix
-/// domain (e.g. the 2ch short classbook carries classes 4..9 only); an
-/// uncoded combination falls back to the smallest coded entry, matching
-/// the calibrated 2ch behavior.
+/// same mixed radix. A valid setup must code the complete classword domain;
+/// silently substituting another entry would change the partition classes.
 fn pack_classbook_entry_type2(
     op: &mut OggPack,
     cb: &Codebook,
@@ -411,13 +416,10 @@ fn pack_classbook_entry_type2(
         entry = entry * nclass as i64 + (c % nclass as i64);
     }
     if entry as u64 >= cb.entries() as u64 || cb.lengthlist()[entry as usize] <= 0 {
-        // uncoded combination: smallest coded entry
-        for (e, &l) in cb.lengthlist().iter().enumerate() {
-            if l > 0 {
-                entry = e as i64;
-                break;
-            }
-        }
+        return Err(ResidueError::UnencodableClassword {
+            entry,
+            entries: cb.entries(),
+        });
     }
     cb.encode(op, entry)
         .map_err(|_| ResidueError::BookIndexOutOfRange {
@@ -652,5 +654,15 @@ mod tests {
         assert_eq!(quantize_residue_value(1.5), 2); // half-even
         assert_eq!(quantize_residue_value(-2.5), -2); // half-even
         assert_eq!(quantize_residue_value(-0.5), -0);
+    }
+
+    #[test]
+    fn classify_type2_uses_coupled_peak_metrics() {
+        assert_eq!(classify_partition_type2(&[0.0, 0.0], 10, 2, false), 0);
+        assert_eq!(classify_partition_type2(&[1.0, 0.0], 10, 2, false), 1);
+        assert_eq!(classify_partition_type2(&[1.0, 2.0], 10, 2, false), 2);
+        assert_eq!(classify_partition_type2(&[3.0, 5.0], 10, 2, false), 6);
+        assert_eq!(classify_partition_type2(&[10.0, 13.0], 10, 2, false), 7);
+        assert_eq!(classify_partition_type2(&[40.0, 15.0], 10, 2, false), 9);
     }
 }

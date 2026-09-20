@@ -525,6 +525,72 @@ pub fn floor1_curve_from_posts(
     Ok(out)
 }
 
+/// Render floor1 in the integer 0..255 domain consumed by residue
+/// quantization (Python `floor1_quant_curve_from_posts`).
+pub fn floor1_quant_curve_from_posts(
+    posts: &[i64],
+    postlist: &[i64],
+    n: usize,
+    multiplier: u64,
+) -> Result<Vec<i64>, Floor1Error> {
+    if posts.len() != postlist.len() {
+        return Err(Floor1Error::LengthMismatch {
+            posts: posts.len(),
+            postlist: postlist.len(),
+        });
+    }
+    let mut order: Vec<usize> = (0..posts.len()).collect();
+    order.sort_by_key(|&index| postlist[index]);
+    let mut ly = ((posts[0] & 0x7fff) * multiplier as i64).clamp(0, 255);
+    let mut lx = 0i64;
+    let mut hx = 0i64;
+    let mut out = vec![ly; n];
+    for &current in order.iter().skip(1) {
+        let mut hy = posts[current] & 0x7fff;
+        if hy == posts[current] {
+            hx = postlist[current];
+            hy = (hy * multiplier as i64).clamp(0, 255);
+            render_line_quant(lx, hx, ly, hy, &mut out);
+            lx = hx;
+            ly = hy;
+        }
+    }
+    for value in out.iter_mut().skip(hx.max(0) as usize) {
+        *value = ly;
+    }
+    Ok(out)
+}
+
+fn render_line_quant(x0: i64, x1: i64, y0: i64, y1: i64, out: &mut [i64]) {
+    if x0 >= x1 || x0 < 0 || x0 as usize >= out.len() {
+        return;
+    }
+    let dy = y1 - y0;
+    let adx = x1 - x0;
+    let mut ady = dy.abs();
+    let base_step = dy / adx;
+    let sy = if dy < 0 { base_step - 1 } else { base_step + 1 };
+    let mut x = x0;
+    let mut y = y0;
+    let mut err = 0i64;
+    ady -= (base_step * adx).abs();
+    let limit = x1.min(out.len() as i64);
+    if x < limit {
+        out[x as usize] = y;
+    }
+    while x + 1 < limit {
+        x += 1;
+        err += ady;
+        if err >= adx {
+            err -= adx;
+            y += sy;
+        } else {
+            y += base_step;
+        }
+        out[x as usize] = y;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

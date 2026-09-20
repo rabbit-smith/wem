@@ -362,3 +362,30 @@ def floor1_curve_from_posts(
     for j in range(hx, n):
         out[j] *= FLOOR1_fromdB_LOOKUP[ly]
     return out
+
+
+def floor1_quant_curve_from_posts(
+    posts: Sequence[int],
+    postlist: Sequence[int],
+    n: int,
+    multiplier: int,
+) -> list[int]:
+    """Render floor1's integer 0..255 curve supplied to residue quantization."""
+    if len(posts) != len(postlist):
+        raise ValueError("posts/postlist length mismatch")
+    order = sorted(range(len(posts)), key=lambda index: postlist[index])
+    ly = max(0, min(255, (posts[0] & 0x7FFF) * multiplier))
+    lx = 0
+    hx = 0
+    rendered = [float(ly)] * n
+    for current in order[1:]:
+        hy = posts[current] & 0x7FFF
+        if hy == posts[current]:
+            hx = postlist[current]
+            hy = max(0, min(255, hy * multiplier))
+            floor1_render_line(lx, hx, ly, hy, rendered)
+            lx = hx
+            ly = hy
+    for index in range(hx, n):
+        rendered[index] = float(ly)
+    return [int(value) for value in rendered]

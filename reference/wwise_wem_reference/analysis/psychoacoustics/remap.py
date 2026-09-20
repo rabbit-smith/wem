@@ -15,8 +15,9 @@ def wwise_psy_peak_suppress(
     original: Sequence[float],
     difference: Sequence[float],
     look: WwisePsyLook,
+    cap_curve: Sequence[float],
 ) -> list[float]:
-    """Port the short/mode-0 branch of reference routine.
+    """Apply short-block peak suppression with the selected look's cap curve.
 
     ``original`` is the MDCT log curve and ``difference`` is the in-place
     MDCT-minus-FFT curve prepared by the reference routinepsychoacoustic remap``.  The function returns
@@ -27,6 +28,8 @@ def wwise_psy_peak_suppress(
         raise ValueError("psycho curves must have the same length")
     if len(original) != look.n:
         raise ValueError("psycho look and curve length differ")
+    if len(cap_curve) != look.n:
+        raise ValueError("psycho peak cap curve length differs")
 
     n = look.n
     limit = min(look.short_limit, n)
@@ -82,7 +85,7 @@ def wwise_psy_peak_suppress(
     for i in range(3, limit):
         cap = min(
             look.envelope[i],
-            look.second_envelope[i] + abs(look.second_envelope[0]),
+            cap_curve[i] + abs(cap_curve[0]),
         )
         if cap < peak_floor[i]:
             peak_floor[i] = cap
@@ -448,8 +451,9 @@ def wwise_psy_curve_smooth(
 def wwise_psy_residual_core(
     original: Sequence[float],
     look: WwisePsyLook,
+    cap_curve: Sequence[float],
 ) -> tuple[list[float], list[float], list[float]]:
-    """Stage the reference routinepsychoacoustic remap`` as ``(first_smooth, selector, base)``.
+    """Stage the psychoacoustic remap as ``(first_smooth, selector, base)``.
 
     The second ``smoothing`` result is a selector for the later 40-entry lookup;
     it is not subtracted from the base curve.  The reference encoder instead reconstructs
@@ -470,7 +474,7 @@ def wwise_psy_residual_core(
         fixed_window=look.noise_fixed_window,
     )
     base = [_f32(a - b) for a, b in zip(original, difference)]
-    base = wwise_psy_peak_suppress(original, base, look)
+    base = wwise_psy_peak_suppress(original, base, look, cap_curve)
     return first, selector, base
 
 
@@ -528,6 +532,7 @@ def build_psy_remap(
     q: float,
     look: WwisePsyLook,
     *,
+    cap_curve: Sequence[float],
     low_extension: float | Sequence[float] | None = None,
     high_extension: float | Sequence[float] | None = None,
     curve_offsets: Sequence[int],
@@ -543,7 +548,7 @@ def build_psy_remap(
     compatibility with earlier diagnostic callers which named it
     ``offset_curve``.
     """
-    first, selector, base = wwise_psy_residual_core(original, look)
+    first, selector, base = wwise_psy_residual_core(original, look, cap_curve)
     # ``q`` and the extension fields are retained in this public signature
     # because their separate scratch role is still modelled by
     # ``wwise_psy_apply_q_extension``.  They do not select remapped spectrum.
@@ -581,3 +586,35 @@ def build_long_psy_remap_variant(
         for value, choice in zip(base, selector)
     ]
     return LongRemapResult(first, residual, selector, base_before, base, remap)
+
+
+_STEREO_NOISE_COMPAND = (
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14,
+    15, 15, 15, 16, 16, 16, 17, 17, 18, 18, 18, 19, 19, 19, 20, 21, 22, 23, 24, 25,
+)
+
+
+def build_coupling_peak(
+    raw_mdct: Sequence[float],
+    selector: Sequence[float],
+    base: Sequence[float],
+    previous_mdct: Sequence[float],
+    *,
+    tone_end: int,
+    enabled: bool,
+) -> list[float]:
+    """Build aoTuV beta 6.03's impulse peak surface for stereo coupling."""
+    n = len(raw_mdct)
+    if not (len(selector) == len(base) == len(previous_mdct) == n):
+        raise ValueError("coupling-peak surfaces must have equal lengths")
+    peak = [0.0] * n
+    if not enabled:
+        return peak
+    for index in range(min(int(tone_end), n)):
+        choice = max(0, min(39, int(float(selector[index]) + 0.5)))
+        noise = _f32(float(base[index]) + _STEREO_NOISE_COMPAND[choice])
+        if _f32(float(raw_mdct[index]) - noise) >= 12.0:
+            delta = _f32(float(raw_mdct[index]) - float(previous_mdct[index]))
+            if delta >= 1.0:
+                peak[index] = delta
+    return peak

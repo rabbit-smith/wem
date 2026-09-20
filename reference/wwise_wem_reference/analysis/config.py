@@ -218,6 +218,7 @@ def make_long_floor_envelope_look(table: WwisePsyLongTables) -> LongFloorEnvelop
     return LongFloorEnvelopeLook(
         table.n, table.analysis_curves[1], _u32_f32(profile[4]),
         _u32_f32(profile[27]), int(profile[167]),
+        _u32_f32(table.seed_outer_u32[16]),
     )
 
 
@@ -302,6 +303,25 @@ class FrozenMathTables:
 
 
 @dataclass(frozen=True)
+class InputConditionerConfig:
+    """Profile-selected PCM conditioning before scheduling and analysis."""
+
+    dc_filter_coefficient: float
+
+    @classmethod
+    def from_bits(cls, bits: int) -> "InputConditionerConfig":
+        if not isinstance(bits, int) or isinstance(bits, bool) or not 0 <= bits <= 0xFFFFFFFF:
+            raise ValueError("DC filter coefficient bits must be a u32")
+        return cls(_u32_f32(bits))
+
+    def __post_init__(self) -> None:
+        coefficient = _f32(self.dc_filter_coefficient)
+        if not 0.0 < coefficient < 1.0:
+            raise ValueError("DC filter coefficient must be between zero and one")
+        object.__setattr__(self, "dc_filter_coefficient", coefficient)
+
+
+@dataclass(frozen=True)
 class AnalysisProfileResources:
     """Immutable resources injected into one analysis session.
 
@@ -317,6 +337,7 @@ class AnalysisProfileResources:
     long_base: WwisePsyLongTables
     long_variants: Mapping[int, WwisePsyLongTables]
     long_floor_looks: Mapping[int, LongFloorEnvelopeLook]
+    input_conditioner: InputConditionerConfig | None = None
     frozen: FrozenMathTables | None = None
     quality_value: float | None = None
     quality_extrapolated: bool = False

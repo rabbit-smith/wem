@@ -509,9 +509,9 @@ mod tests {
         // The octave pair drives ``end`` to 15 while the seed surface only has
         // 10 slots, so the inner walk must stop at the same bound the loop head
         // enforces. Regression: this used to panic with an index out of bounds.
-        let mut seed = vec![NEGATIVE_INFINITY_DB as f64; 10];
+        let seed = vec![NEGATIVE_INFINITY_DB as f64; 10];
         let mut floor_curve = vec![0.0f64; 2];
-        let err = wwise_apply_max_seed_floor(&mut seed, &mut floor_curve, &[0, 30], 0, 0, 10, 0.0)
+        let err = wwise_apply_max_seed_floor(&seed, &mut floor_curve, &[0, 30], 0, 0, 10, 0.0)
             .expect_err("out-of-range cursor must be reported");
         assert!(matches!(
             err,

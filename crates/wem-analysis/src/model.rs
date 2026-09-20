@@ -28,6 +28,7 @@ pub struct PsyFrame {
     pub seed: FloatRows,
     pub post: FloatRows,
     pub side: FloatRows,
+    pub coupling_peak: FloatRows,
 }
 
 impl PsyFrame {

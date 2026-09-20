@@ -12,6 +12,7 @@ def detector_pcm_streams(
     *,
     prefix_samples: int | None = None,
     terminal_samples: int = 8192,
+    tail_training: int | None = None,
     blocksizes: Sequence[int] = DEFAULT_BLOCKSIZES,
 ) -> tuple[tuple[float, ...], ...]:
     """Build the absolute PCM streams consumed by the transient detector.
@@ -41,12 +42,16 @@ def detector_pcm_streams(
     )
     from ..dsp.transform import _f32
 
+    if tail_training is None:
+        tail_training = max(int(size) for size in blocksizes)
+    if tail_training <= 32 or tail_training > source_len:
+        raise ValueError("transient-detector tail training length is invalid")
     result = []
     for source in pcm:
         channel = [_f32(value) for value in source]
         prefix = wwise_first_frame_lpc_prime(channel, prefill=prefix_samples)
         tail = wwise_lpc_predict(
-            wwise_lpc_from_data(channel[-4096:], order=32),
+            wwise_lpc_from_data(channel[-tail_training:], order=32),
             channel[-32:],
             terminal_samples,
         )
@@ -61,6 +66,7 @@ def iter_detector_quanta(
     window: int = 128,
     count: int | None = None,
     terminal_samples: int = 8192,
+    tail_training: int | None = None,
     blocksizes: Sequence[int] = DEFAULT_BLOCKSIZES,
 ) -> Iterator[tuple[tuple[float, ...], ...]]:
     """Yield channel-major transient-detector PCM windows on the absolute detector timeline."""
@@ -69,6 +75,7 @@ def iter_detector_quanta(
     streams = detector_pcm_streams(
         pcm,
         terminal_samples=terminal_samples,
+        tail_training=tail_training,
         blocksizes=blocksizes,
     )
     available = (len(streams[0]) - window) // hop + 1

@@ -6,7 +6,13 @@ import dataclasses
 from types import MappingProxyType
 from typing import Iterable, Iterator, Mapping, TypeVar
 
-from .bundle import ProfileKey, WWISE_GENERATION, load_profile_bundle
+from .bundle import (
+    ProfileBundle,
+    ProfileKey,
+    WWISE_GENERATION,
+    installed_profile_names,
+    load_profile_bundle,
+)
 from .model import EncoderProfile
 
 
@@ -105,34 +111,37 @@ class ProfileRegistry:
         return self._by_name
 
 
-_WWISE2013_6CH_44100_BUNDLE = load_profile_bundle(verify_all=False)
-
-WWISE2013_6CH_44100 = EncoderProfile(
-    name=_WWISE2013_6CH_44100_BUNDLE.name,
-    key=_WWISE2013_6CH_44100_BUNDLE.key,
-    setup_path=_WWISE2013_6CH_44100_BUNDLE.setup,
-    setup_sha256=_WWISE2013_6CH_44100_BUNDLE.setup.sha256,
-    block_sizes=_WWISE2013_6CH_44100_BUNDLE.block_sizes,
-    container_metadata=_WWISE2013_6CH_44100_BUNDLE.container_metadata,
-)
-
-_WWISE2013_2CH_48000_BUNDLE = load_profile_bundle(
-    profile="wwise2013-2ch-48000", verify_all=False
-)
-
-WWISE2013_2CH_48000 = EncoderProfile(
-    name=_WWISE2013_2CH_48000_BUNDLE.name,
-    key=_WWISE2013_2CH_48000_BUNDLE.key,
-    setup_path=_WWISE2013_2CH_48000_BUNDLE.setup,
-    setup_sha256=_WWISE2013_2CH_48000_BUNDLE.setup.sha256,
-    block_sizes=_WWISE2013_2CH_48000_BUNDLE.block_sizes,
-    container_metadata=_WWISE2013_2CH_48000_BUNDLE.container_metadata,
-)
+def _profile_from_bundle(bundle: ProfileBundle) -> EncoderProfile:
+    return EncoderProfile(
+        name=bundle.name,
+        key=bundle.key,
+        setup_path=bundle.setup,
+        setup_sha256=bundle.setup.sha256,
+        block_sizes=bundle.block_sizes,
+        container_metadata=bundle.container_metadata,
+    )
 
 
-PROFILE_REGISTRY = ProfileRegistry(
-    (WWISE2013_6CH_44100, WWISE2013_2CH_48000)
-)
+_INSTALLED_PROFILES = {
+    name: _profile_from_bundle(
+        load_profile_bundle(profile=name, verify_all=False)
+    )
+    for name in installed_profile_names()
+}
+
+
+def _required_profile(name: str) -> EncoderProfile:
+    try:
+        return _INSTALLED_PROFILES[name]
+    except KeyError as error:
+        raise ValueError(f"required built-in profile {name!r} is absent") from error
+
+
+WWISE2013_6CH_44100 = _required_profile("wwise2013-6ch-44100")
+WWISE2013_2CH_48000 = _required_profile("wwise2013-2ch-48000")
+
+
+PROFILE_REGISTRY = ProfileRegistry(_INSTALLED_PROFILES.values())
 PROFILES = PROFILE_REGISTRY.profiles_by_name
 
 

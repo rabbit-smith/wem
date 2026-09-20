@@ -9,6 +9,7 @@ from typing import Any, Mapping
 
 from ..analysis.config import (
     AnalysisProfileResources,
+    InputConditionerConfig,
     WwisePsySeedSurface,
     make_long_floor_envelope_look,
     make_wwise_psy_look,
@@ -144,6 +145,21 @@ def _f32_override(value: float) -> float:
     return struct.unpack("<f", struct.pack("<f", float(value)))[0]
 
 
+def _load_input_conditioner(bundle: ProfileBundle) -> InputConditionerConfig | None:
+    ref = bundle.runtime_manifest.resources.get("analysis.input-conditioner")
+    if ref is None:
+        return None
+    payload = ref.read_json()
+    if not isinstance(payload, dict):
+        raise ValueError("input conditioner resource must be an object")
+    if payload.get("schema") != "wem.input-conditioner.v1":
+        raise ValueError("unsupported input conditioner schema")
+    bits = payload.get("dc_filter_coefficient_f32_bits")
+    if not isinstance(bits, int) or isinstance(bits, bool) or not 0 <= bits <= 0xFFFFFFFF:
+        raise ValueError("input conditioner coefficient bits must be a u32")
+    return InputConditionerConfig.from_bits(bits)
+
+
 def assemble_analysis_resources(
     bundle: ProfileBundle,
     *,
@@ -201,6 +217,7 @@ def assemble_analysis_resources(
             mode: make_long_floor_envelope_look(table)
             for mode, table in long_variants.items()
         },
+        input_conditioner=_load_input_conditioner(bundle),
         frozen=frozen,
         quality_value=quality_normalized,
         quality_extrapolated=quality_extrapolated,

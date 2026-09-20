@@ -21,16 +21,13 @@
 //! * [`WemSession`] has single-threaded ownership: never share it
 //!   between threads (it is intentionally not `Send`).
 
-use std::ffi::{c_void, CStr, OsString};
+use std::ffi::{c_void, CStr};
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
 
 use wem_core::encoder::{Encoder, Pcm16};
 use wem_core::error::EncoderError;
-use wem_core::stream::{ProfileRef, StreamSession};
-use wem_profiles::error::ProfileError;
-use wem_profiles::model::EncoderProfile;
-use wem_profiles::registry::load_wem_profile;
+use wem_core::stream::StreamSession;
+use wem_profiles::data::DataDir;
 
 /// Callback that receives output bytes in blocks: the one-shot container
 /// bytes and the terminal streaming container bytes. The `data` pointer
@@ -113,69 +110,17 @@ pub struct WemSession {
 /// the whole container).
 const WRITE_BLOCK: usize = 65536;
 
-/// Serializes the `WEM_DATA_DIR` env-var scoping: profile resolution
-/// reads the variable, so concurrent FFI entries must not interleave a
-/// half-written override. (std::env mutation is not thread-safe.)
-static DATA_DIR_LOCK: Mutex<()> = Mutex::new(());
-
-/// Scoped `WEM_DATA_DIR` override held while a profile is resolved.
-struct DataDirGuard {
-    _lock: MutexGuard<'static, ()>,
-    previous: Option<OsString>,
-}
-
-impl DataDirGuard {
-    /// Point the kernel's documented `WEM_DATA_DIR` override at `dir`
-    /// (or unset it when `dir` is `None`) for the guard's lifetime.
-    fn set(dir: Option<PathBuf>) -> Self {
-        let lock = match DATA_DIR_LOCK.lock() {
-            Ok(lock) => lock,
-            // A poisoned lock means a prior entry panicked mid-resolution
-            // (itself an internal fault); recover instead of failing
-            // forever — the env-var state is still consistent.
-            Err(poisoned) => poisoned.into_inner(),
-        };
-        let previous = std::env::var_os("WEM_DATA_DIR");
-        match dir {
-            Some(dir) => std::env::set_var("WEM_DATA_DIR", dir),
-            None => std::env::remove_var("WEM_DATA_DIR"),
-        }
-        Self {
-            _lock: lock,
-            previous,
-        }
+fn load_encoder(name: &str, dir: Option<PathBuf>) -> Result<Encoder, EncoderError> {
+    match dir {
+        Some(dir) => Encoder::from_profile_in(&DataDir::from_profiles_dir(dir), name),
+        None => Encoder::from_profile(name),
     }
 }
 
-impl Drop for DataDirGuard {
-    fn drop(&mut self) {
-        match self.previous.take() {
-            Some(previous) => std::env::set_var("WEM_DATA_DIR", previous),
-            None => std::env::remove_var("WEM_DATA_DIR"),
-        }
-    }
-}
-
-/// Run one profile resolution with a scoped data directory.
-fn with_data_dir<T>(
-    dir: Option<PathBuf>,
-    work: impl FnOnce() -> Result<T, EncoderError>,
-) -> Result<T, EncoderError> {
-    let _guard = DataDirGuard::set(dir);
-    work()
-}
-
-/// Resolve one installed profile by name (the kernel's own semantics:
-/// unknown name is `PROFILE_NOT_FOUND`, other load faults are internal).
-fn resolve_profile(name: &str) -> Result<EncoderProfile, EncoderError> {
-    match load_wem_profile(name) {
-        Ok(profile) => Ok(profile),
-        Err(ProfileError::UnknownProfile { .. }) => Err(EncoderError::ProfileNotFound {
-            requested: name.to_string(),
-        }),
-        Err(error) => Err(EncoderError::Internal(
-            wem_core::error::InternalError::Profile(error),
-        )),
+fn load_stream(name: &str, dir: Option<PathBuf>) -> Result<StreamSession, EncoderError> {
+    match dir {
+        Some(dir) => StreamSession::for_profile_in(&DataDir::from_profiles_dir(dir), name),
+        None => StreamSession::for_profile(name),
     }
 }
 
@@ -264,8 +209,8 @@ fn encode_with(
 /// Resolve one installed profile into a shareable encoder handle
 /// (include/wem.h `wem_encoder_new`).
 ///
-/// `data_dir` scopes the kernel's `WEM_DATA_DIR` override; NULL uses the
-/// kernel default (the environment or the repository layout). On
+/// `data_dir` selects an explicit profile tree without changing process
+/// environment; NULL uses the kernel default. On
 /// `WEM_OK`, `*out_encoder` owns the handle; on error it is set to NULL.
 ///
 /// # Safety
@@ -287,10 +232,8 @@ pub unsafe extern "C" fn wem_encoder_new(
     };
     let dir = cstr_opt(data_dir);
     let outcome = guarded(move || {
-        with_data_dir(dir, || {
-            Ok(WemEncoder {
-                encoder: Encoder::from_profile(&name)?,
-            })
+        Ok(WemEncoder {
+            encoder: load_encoder(&name, dir)?,
         })
     });
     match outcome {
@@ -385,7 +328,7 @@ pub unsafe extern "C" fn wem_encode_pcm16_interleaved(
         return WemError::StateError;
     };
     let dir = cstr_opt(data_dir);
-    let outcome = guarded(move || with_data_dir(dir, || Encoder::from_profile(&name)));
+    let outcome = guarded(move || load_encoder(&name, dir));
     match outcome {
         Ok(encoder) => match encode_with(&encoder, pcm, frames, write_cb, user_data) {
             Ok(()) => WemError::Ok,
@@ -438,20 +381,13 @@ pub unsafe extern "C" fn wem_session_new(
     let write_cb = Some(write_cb.expect("validated non-null above"));
     let dir = cstr_opt(data_dir);
     let outcome = guarded(move || {
-        with_data_dir(dir, || {
-            let profile = resolve_profile(&name)?;
-            let profile_ref = ProfileRef::with_name(
-                profile.setup_sha256().to_string(),
-                profile.name().to_string(),
-            );
-            StreamSession::for_profile_ref(&profile_ref).map(|session| WemSession {
-                session,
-                write_cb,
-                packet_cb,
-                user_data,
-                next_seq: 0,
-                failed: false,
-            })
+        load_stream(&name, dir).map(|session| WemSession {
+            session,
+            write_cb,
+            packet_cb,
+            user_data,
+            next_seq: 0,
+            failed: false,
         })
     });
     match outcome {

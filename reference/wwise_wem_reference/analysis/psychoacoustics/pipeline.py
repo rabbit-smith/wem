@@ -12,7 +12,7 @@ from .envelope import (
     make_channel_floor_envelope_scratch,
     shape_first_long_floor_envelope,
 )
-from .remap import build_long_psy_remap_variant, build_psy_remap
+from .remap import build_coupling_peak, build_long_psy_remap_variant, build_psy_remap
 from .seed import (
     SpectrumPeakState,
     build_long_floor_seed,
@@ -55,6 +55,7 @@ class LongPsyFrame:
     seed: list[list[float]]
     post: list[list[float]]
     side: list[list[float]]
+    coupling_peak: list[list[float]]
     scratch: list[FloorEnvelopeScratch]
     state_info: PsyFrameControls | None = None
 
@@ -77,6 +78,7 @@ class ShortPsyStreamFrame:
     seed: list[list[float]]
     post: list[list[float]]
     side: list[list[float]]
+    coupling_peak: list[list[float]]
     state_result: ShortPsyFrameResult
 
 def analyze_long_frame(
@@ -167,14 +169,27 @@ def analyze_long_frame(
     seed: list[list[float]] = []
     post: list[list[float]] = []
     side: list[list[float]] = []
+    coupling_peak: list[list[float]] = []
     scratches: list[FloorEnvelopeScratch] = []
     long_floor_envelope = resources.long_floor_looks[analysis_mode]
+    try:
+        coupling_tone_end = int(table.seed_outer_u32[17])
+    except IndexError as error:
+        raise ValueError("long psychoacoustic table lacks coupling tone limit") from error
     for channel, (raw, logfft, specmax, coeff) in enumerate(zip(
         raw_mdct, fft, channel_specmax, coefficients
     )):
-        local_remap = build_long_psy_remap_variant(
-            raw, analysis_mode, analysis_table
-        ).remap
+        remap_result = build_long_psy_remap_variant(raw, analysis_mode, analysis_table)
+        local_remap = remap_result.remap
+        previous = stream.channels[channel].state if stream is not None else [0.0] * table.n
+        local_coupling_peak = build_coupling_peak(
+            raw,
+            remap_result.selector,
+            remap_result.base,
+            previous,
+            tone_end=coupling_tone_end,
+            enabled=len(windowed_frames) == 2,
+        )
         local_seed = build_long_floor_seed(
             logfft,
             channel_specmax=specmax,
@@ -198,6 +213,7 @@ def analyze_long_frame(
         seed.append(local_seed)
         post.append(local_post)
         side.append(local_side)
+        coupling_peak.append(local_coupling_peak)
         scratches.append(local_scratch)
     state_info = (
         stream.commit_long_state(
@@ -218,6 +234,7 @@ def analyze_long_frame(
         seed=seed,
         post=post,
         side=side,
+        coupling_peak=coupling_peak,
         scratch=scratches,
         state_info=state_info,
     )
@@ -277,9 +294,12 @@ def analyze_short_frame(
             state=specmax_state,
         )
     look = resources.short_look
+    # The two transient variants share tone curves but have distinct peak caps.
+    cap_curve = resources.short_profiles[short_variant].mask_curves[1]
     remap = [
         build_psy_remap(
             raw, q, look,
+            cap_curve=cap_curve,
             curve_offsets=resources.short_surface.remap_curve_offsets,
         )[3]
         for raw in raw_mdct
@@ -314,5 +334,6 @@ def analyze_short_frame(
         seed=seed,
         post=[list(row.post) for row in state_result.channels],
         side=[list(row.side) for row in state_result.channels],
+        coupling_peak=[[0.0] * 128 for _ in windowed_frames],
         state_result=state_result,
     )

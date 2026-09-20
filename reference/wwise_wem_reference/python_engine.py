@@ -48,7 +48,8 @@ def encode_pcm_python(
         blocksizes=profile.block_sizes,
         resources=resources.analysis,
     )
-    modes, windows = session.selected_windows(pcm.channels)
+    conditioned_pcm = session.condition_pcm(pcm.channels)
+    modes, windows = session.selected_windows(conditioned_pcm)
     audio_packets: list[bytes] = []
     for window in windows:
         analysis = session.analyze_window(window)

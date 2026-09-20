@@ -11,7 +11,9 @@ use crate::dsp::transform::mdct_forward;
 use crate::psychoacoustics::envelope::{
     make_channel_floor_envelope_scratch, shape_first_long_floor_envelope, FloorEnvelopeScratch,
 };
-use crate::psychoacoustics::remap::{build_long_psy_remap_variant, build_psy_remap};
+use crate::psychoacoustics::remap::{
+    build_coupling_peak, build_long_psy_remap_variant, build_psy_remap,
+};
 use crate::psychoacoustics::seed::{
     build_long_floor_seed, compute_spectrum_peak, update_frame_spectrum_peak,
     wwise_seed_floor_from_look, SpectrumPeakState,
@@ -33,6 +35,7 @@ pub struct LongPsyFrame {
     pub seed: Vec<Vec<f64>>,
     pub post: Vec<Vec<f64>>,
     pub side: Vec<Vec<f64>>,
+    pub coupling_peak: Vec<Vec<f64>>,
     pub scratch: Vec<FloorEnvelopeScratch>,
     pub state_info: Option<crate::psychoacoustics::short::PsyFrameControls>,
 }
@@ -50,6 +53,7 @@ pub struct ShortPsyStreamFrame {
     pub seed: Vec<Vec<f64>>,
     pub post: Vec<Vec<f64>>,
     pub side: Vec<Vec<f64>>,
+    pub coupling_peak: Vec<Vec<f64>>,
     pub state_result: ShortPsyFrameResult,
 }
 
@@ -188,12 +192,27 @@ pub fn analyze_long_frame(
     let mut seed: Vec<Vec<f64>> = Vec::new();
     let mut post: Vec<Vec<f64>> = Vec::new();
     let mut side: Vec<Vec<f64>> = Vec::new();
+    let mut coupling_peak: Vec<Vec<f64>> = Vec::new();
     let mut scratches: Vec<FloorEnvelopeScratch> = Vec::new();
+    let coupling_tone_end = table
+        .seed_outer_u32
+        .get(17)
+        .copied()
+        .ok_or(IncompleteResources {
+            reason: "long psychoacoustic table lacks coupling tone limit",
+        })? as usize;
 
     // SAFETY (per-channel partition, `parallel` feature): same argument as
     // the transform region above; specmax values are read-only inputs
     // computed before this region, and scratch copies are per-channel owned.
-    type PsychChannel = (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, FloorEnvelopeScratch);
+    type PsychChannel = (
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        FloorEnvelopeScratch,
+    );
     let channel_count = raw_mdct.len();
     let psych: Vec<PsychChannel> = channel_psych_map(channel_count, |channel_index| {
         let raw = &raw_mdct[channel_index];
@@ -201,7 +220,16 @@ pub fn analyze_long_frame(
         let specmax = channel_specmax[channel_index];
         let coeff = &coefficients[channel_index];
 
-        let local_remap = build_long_psy_remap_variant(raw, analysis_mode, analysis_table)?.remap;
+        let remap_result = build_long_psy_remap_variant(raw, analysis_mode, analysis_table)?;
+        let local_remap = remap_result.remap.clone();
+        let local_coupling_peak = build_coupling_peak(
+            raw,
+            &remap_result.selector,
+            &remap_result.base,
+            &local_scratches[channel_index].current_curve,
+            coupling_tone_end,
+            windowed_frames.len() == 2,
+        )?;
         let local_seed = build_long_floor_seed(table, logfft, specmax, global_specmax)?;
 
         let mut local_scratch = local_scratches[channel_index].clone();
@@ -218,20 +246,22 @@ pub fn analyze_long_frame(
             1,
         )?;
 
-        Ok::<(_, _, _, _, _), AnalysisError>((
+        Ok::<(_, _, _, _, _, _), AnalysisError>((
             local_remap,
             local_seed,
             local_post_side.0,
             local_post_side.1,
+            local_coupling_peak,
             local_scratch,
         ))
     })?;
 
-    for (r, s, p, sd, sc) in psych {
+    for (r, s, p, sd, cp, sc) in psych {
         remap.push(r);
         seed.push(s);
         post.push(p);
         side.push(sd);
+        coupling_peak.push(cp);
         scratches.push(sc);
     }
 
@@ -262,6 +292,7 @@ pub fn analyze_long_frame(
         seed,
         post,
         side,
+        coupling_peak,
         scratch: scratches,
         state_info,
     })
@@ -340,11 +371,19 @@ pub fn analyze_short_frame(
         }
     };
     let look = &resources.short_look;
+    // The two transient variants share tone curves but have distinct peak caps.
+    let cap_curve = &resources.short_profiles[short_variant as usize].mask_curves[1];
     let remap: Vec<Vec<f64>> = raw_mdct
         .iter()
         .map(|raw| {
-            build_psy_remap(raw, q, look, &resources.short_surface.remap_curve_offsets)
-                .map(|(_, _, _, noise_mask, _)| noise_mask)
+            build_psy_remap(
+                raw,
+                q,
+                look,
+                cap_curve,
+                &resources.short_surface.remap_curve_offsets,
+            )
+            .map(|(_, _, _, noise_mask, _)| noise_mask)
         })
         .collect::<Result<Vec<Vec<f64>>, AnalysisError>>()?;
     let seed: Vec<Vec<f64>> = fft
@@ -387,6 +426,7 @@ pub fn analyze_short_frame(
         seed,
         post,
         side,
+        coupling_peak: vec![vec![0.0; 128]; windowed_frames.len()],
         state_result,
     })
 }

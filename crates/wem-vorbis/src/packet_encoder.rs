@@ -12,8 +12,8 @@
 use crate::bitio::OggPack;
 use crate::codebook::Codebook;
 use crate::floor::{
-    floor1_curve_from_posts, floor1_wrap_with_posts, postlist_from_floor, Floor1Error,
-    FLOOR1_RANGES,
+    floor1_curve_from_posts, floor1_quant_curve_from_posts, floor1_wrap_with_posts,
+    postlist_from_floor, Floor1Error, FLOOR1_FROM_DB_LOOKUP, FLOOR1_RANGES,
 };
 use crate::floor_fit::{floor1_quantize_posts, FloorFitError};
 use crate::residue::{
@@ -56,6 +56,8 @@ pub enum PacketError {
     Residue(ResidueError),
     /// analysis channel count differs from packet mapping.
     AnalysisChannelsMismatch { want: usize, got: usize },
+    /// Stereo coupling peak rows do not match the MDCT geometry.
+    CouplingPeakGeometry,
 }
 
 impl std::fmt::Display for PacketError {
@@ -103,6 +105,9 @@ impl std::fmt::Display for PacketError {
                     f,
                     "analysis channel count differs from packet mapping ({got} != {want})"
                 )
+            }
+            PacketError::CouplingPeakGeometry => {
+                write!(f, "stereo coupling peak rows differ from MDCT geometry")
             }
         }
     }
@@ -319,6 +324,289 @@ fn apply_mapping_coupling(residuals: &mut [Vec<f64>], coupling: &[CouplingStep])
     }
 }
 
+/// Propagate floor use across mapping0 coupling pairs before residue coding.
+fn propagate_mapping_nonzero(ch_used: &mut [bool], coupling: &[CouplingStep]) {
+    for step in coupling {
+        let mag = step.mag as usize;
+        let ang = step.ang as usize;
+        if ch_used[mag] || ch_used[ang] {
+            ch_used[mag] = true;
+            ch_used[ang] = true;
+        }
+    }
+}
+
+fn lossless_couple_f32(first: f32, second: f32) -> (f32, f32) {
+    let (mut magnitude, mut angle) = if first.abs() > second.abs() {
+        (
+            first,
+            if first > 0.0 {
+                first - second
+            } else {
+                second - first
+            },
+        )
+    } else {
+        (
+            second,
+            if second > 0.0 {
+                first - second
+            } else {
+                second - first
+            },
+        )
+    };
+    if angle >= magnitude.abs() * 2.0 {
+        angle = -angle;
+        magnitude = -magnitude;
+    }
+    (magnitude, angle)
+}
+
+fn lossless_couple_i64(first: i64, second: i64) -> (i64, i64) {
+    let (mut magnitude, mut angle) = if first.abs() > second.abs() {
+        (
+            first,
+            if first > 0 {
+                first - second
+            } else {
+                second - first
+            },
+        )
+    } else {
+        (
+            second,
+            if second > 0 {
+                first - second
+            } else {
+                second - first
+            },
+        )
+    };
+    if angle >= magnitude.abs() * 2 {
+        angle = -angle;
+        magnitude = -magnitude;
+    }
+    (magnitude, angle)
+}
+
+fn point_hypot(first: f32, second: f32, reversal: f32) -> f32 {
+    let first_abs = (first * 0.94_f32).abs();
+    let second_abs = (second * 0.94_f32).abs();
+    if first > 0.0 {
+        if second > 0.0 {
+            first_abs + second_abs
+        } else if first > -second {
+            (first_abs as f64 - second_abs as f64 * reversal as f64) as f32
+        } else {
+            -(second_abs as f64 - first_abs as f64 * reversal as f64) as f32
+        }
+    } else if second < 0.0 {
+        -(first_abs + second_abs)
+    } else if -first > second {
+        -(first_abs as f64 - second_abs as f64 * reversal as f64) as f32
+    } else {
+        (second_abs as f64 - first_abs as f64 * reversal as f64) as f32
+    }
+}
+
+/// aoTuV beta 6.03 joint quantization used by Wwise's stereo profile.
+fn aotuv_stereo_residue(
+    mdct: &[Vec<f32>],
+    floor_indices: &[Vec<i64>],
+    coupling_peak: &[Vec<f32>],
+    ch_used: &[bool],
+) -> Result<Vec<Vec<i64>>, PacketError> {
+    if mdct.len() != 2 || floor_indices.len() != 2 || coupling_peak.len() != 2 || ch_used.len() != 2
+    {
+        return Err(PacketError::CouplingPeakGeometry);
+    }
+    let n = mdct[0].len();
+    if mdct.iter().any(|row| row.len() < n)
+        || floor_indices.iter().any(|row| row.len() < n)
+        || coupling_peak.iter().any(|row| row.len() < n)
+    {
+        return Err(PacketError::CouplingPeakGeometry);
+    }
+    let partition = if n == 128 { 8 } else { 32 };
+    let point_limit = n / 3;
+    let lowpass = n * 3 / 4;
+    let tonefix_end = n * 35 / 64;
+    let mut output = vec![vec![0i64; n]; 2];
+    let mut previous_residue_def = -1.0_f32;
+    let mut raw = [[0.0_f32; 32]; 2];
+    let mut quant = [[0.0_f32; 32]; 2];
+    let mut floor_energy = [[0.0_f32; 32]; 2];
+    let mut residue = [[0.0_f32; 32]; 2];
+    let mut flags = [[0i8; 32]; 2];
+
+    for begin in (0..lowpass).step_by(partition) {
+        let count = partition.min(n - begin);
+        for channel in 0..2 {
+            raw[channel][..count].fill(0.0);
+            quant[channel][..count].fill(0.0);
+            floor_energy[channel][..count].fill(0.0);
+            residue[channel][..count].fill(0.0);
+            flags[channel][..count].fill(0);
+        }
+
+        for channel in 0..2 {
+            if !ch_used[channel] {
+                floor_energy[channel].fill(1e-10_f32);
+                continue;
+            }
+            let crossing = point_limit as isize - begin as isize;
+            let (mut point, mut rephase_point, interpolate, point_step, rephase_step) =
+                if crossing > 0 {
+                    let interpolate = crossing <= count as isize;
+                    (
+                        0.0_f32,
+                        0.0_f32,
+                        interpolate,
+                        if interpolate {
+                            2.5_f32 / count as f32
+                        } else {
+                            0.0
+                        },
+                        if interpolate {
+                            0.5_f32 / count as f32
+                        } else {
+                            0.0
+                        },
+                    )
+                } else {
+                    (2.5_f32, 0.5_f32, false, 0.0, 0.0)
+                };
+            for local in 0..count {
+                let index = begin + local;
+                if interpolate {
+                    point += point_step;
+                    rephase_point += rephase_step;
+                }
+                let floor_value = FLOOR1_FROM_DB_LOOKUP
+                    [floor_indices[channel][index].clamp(0, 255) as usize]
+                    as f32;
+                let normalized = mdct[channel][index] / floor_value;
+                residue[channel][local] = normalized;
+                let threshold = (point - coupling_peak[channel][index]).max(0.0);
+                let magnitude = normalized.abs();
+                flags[channel][local] = if magnitude < threshold {
+                    if magnitude < rephase_point {
+                        0
+                    } else {
+                        -1
+                    }
+                } else {
+                    1
+                };
+                let energy = mdct[channel][index] * mdct[channel][index];
+                quant[channel][local] = energy;
+                raw[channel][local] = if mdct[channel][index] < 0.0 {
+                    -energy
+                } else {
+                    energy
+                };
+                floor_energy[channel][local] = floor_value * floor_value;
+                output[channel][index] = quantize_residue_value(normalized as f64);
+            }
+        }
+
+        if begin < tonefix_end {
+            let mut reversed_phase = 0usize;
+            let mut same_phase = 0usize;
+            let mut residue_def = 0.0_f32;
+            for local in 0..count {
+                if residue[0][local] < -0.5
+                    || residue[0][local] >= 0.5
+                    || residue[1][local] < -0.5
+                    || residue[1][local] >= 0.5
+                {
+                    let opposite = (raw[0][local] > 0.0 && raw[1][local] < 0.0)
+                        || (raw[1][local] > 0.0 && raw[0][local] < 0.0);
+                    reversed_phase += usize::from(opposite);
+                    same_phase += usize::from(!opposite);
+                    residue_def += (residue[0][local].abs() - residue[1][local].abs()).abs();
+                }
+            }
+            let active = reversed_phase + same_phase;
+            if active != 0 {
+                let current_def = residue_def / active as f32;
+                residue_def = if previous_residue_def > 0.0 {
+                    current_def * 0.5 + previous_residue_def * 0.5
+                } else {
+                    current_def
+                };
+                previous_residue_def = current_def;
+                if residue_def > 1.0 {
+                    let (left, right) = flags.split_at_mut(1);
+                    for (left_flag, right_flag) in
+                        left[0][..count].iter_mut().zip(&right[0][..count])
+                    {
+                        if *left_flag == -1 || *right_flag == -1 {
+                            *left_flag = 1;
+                        }
+                    }
+                }
+                if reversed_phase as f32 / active as f32 >= 0.34_f32 {
+                    for local in 0..count {
+                        let opposite = (raw[0][local] > 0.0 && raw[1][local] < 0.0)
+                            || (raw[1][local] > 0.0 && raw[0][local] < 0.0);
+                        if opposite && (flags[0][local] == -1 || flags[1][local] == -1) {
+                            flags[0][local] = 1;
+                        }
+                    }
+                }
+            } else {
+                previous_residue_def = -1.0;
+            }
+        }
+
+        let mut point_coupled = false;
+        for local in 0..count {
+            let index = begin + local;
+            if flags[0][local] == 1 || flags[1][local] == 1 {
+                (residue[0][local], residue[1][local]) =
+                    lossless_couple_f32(residue[0][local], residue[1][local]);
+                (output[0][index], output[1][index]) =
+                    lossless_couple_i64(output[0][index], output[1][index]);
+                flags[0][local] = 1;
+                flags[1][local] = 1;
+            } else {
+                let reversal = if index < point_limit {
+                    0.18_f32
+                } else {
+                    0.12_f32
+                };
+                raw[0][local] = point_hypot(raw[0][local], raw[1][local], reversal);
+                quant[0][local] = raw[0][local].abs();
+                raw[1][local] = 0.0;
+                quant[1][local] = 0.0;
+                flags[1][local] = 1;
+                output[1][index] = 0;
+                point_coupled = true;
+            }
+            let combined_floor = floor_energy[0][local] + floor_energy[1][local];
+            floor_energy[0][local] = combined_floor;
+            floor_energy[1][local] = combined_floor;
+        }
+
+        if point_coupled {
+            for local in 0..count {
+                if flags[0][local] != 1 {
+                    let value =
+                        ((quant[0][local] as f64) / (floor_energy[0][local] as f64)).sqrt() as f32;
+                    output[0][begin + local] = if raw[0][local] < 0.0 {
+                        -quantize_residue_value(value as f64)
+                    } else {
+                        quantize_residue_value(value as f64)
+                    };
+                }
+            }
+        }
+    }
+    Ok(output)
+}
+
 /// Silence audio packet: floor nonzero=0 for all channels → no residue
 /// (Python `pack_silence_packet`).
 pub fn pack_silence_packet(
@@ -444,6 +732,7 @@ pub fn pack_block_packet_details(
     mode: u32,
     absolute_posts: &[Option<Vec<i64>>],
     mdct: &[Vec<f32>],
+    coupling_peak: Option<&[Vec<f32>]>,
     residue_vq: bool,
     posts_are_10bit: bool,
 ) -> Result<BlockPacketResult, PacketError> {
@@ -487,6 +776,7 @@ pub fn pack_block_packet_details(
 
     let mut ch_used: Vec<bool> = Vec::with_capacity(channels as usize);
     let mut residuals: Vec<Vec<f64>> = Vec::with_capacity(channels as usize);
+    let mut floor_indices: Vec<Vec<i64>> = Vec::with_capacity(channels as usize);
     for ch in 0..channels {
         let sub = if mapping.submaps > 1 {
             mapping.chmux[ch as usize]
@@ -507,6 +797,7 @@ pub fn pack_block_packet_details(
                 })?;
                 ch_used.push(false);
                 residuals.push(vec![0.0; n_spectrum]);
+                floor_indices.push(vec![0; n_spectrum]);
             }
             Some(posts) => {
                 op.write(1, 1).map_err(|_| PacketError::ModeOutOfRange {
@@ -530,6 +821,10 @@ pub fn pack_block_packet_details(
                     floor1_curve_from_posts(&raster_posts, &pl, n_spectrum, floor.multiplier)
                         .map_err(PacketError::Floor1)?;
                 residuals.push(mdct_to_residue(&mdct[ch as usize], &curve, 1e-8));
+                floor_indices.push(
+                    floor1_quant_curve_from_posts(&raster_posts, &pl, n_spectrum, floor.multiplier)
+                        .map_err(PacketError::Floor1)?,
+                );
             }
         }
     }
@@ -546,7 +841,20 @@ pub fn pack_block_packet_details(
         // apply the exact inverse of the decoder's 4-branch coupling
         // (no-op when the mapping has no coupling steps, e.g. the 5.1
         // profile).
-        apply_mapping_coupling(&mut residuals, &mapping.coupling);
+        if channels == 2 && mapping.coupling.len() == 1 {
+            if let Some(peak) = coupling_peak {
+                let quantized = aotuv_stereo_residue(mdct, &floor_indices, peak, &ch_used)?;
+                residuals = quantized
+                    .iter()
+                    .map(|row| row.iter().map(|value| *value as f64).collect())
+                    .collect();
+            } else {
+                apply_mapping_coupling(&mut residuals, &mapping.coupling);
+            }
+        } else {
+            apply_mapping_coupling(&mut residuals, &mapping.coupling);
+        }
+        propagate_mapping_nonzero(&mut ch_used, &mapping.coupling);
         if res.residue_type == 2 {
             // Type 2 codes the flat (bin*channels+channel) domain: the
             // quantized handoff and the bit schedule both follow that
@@ -642,6 +950,7 @@ pub fn pack_block_packet(
     mode: u32,
     absolute_posts: &[Option<Vec<i64>>],
     mdct: &[Vec<f32>],
+    coupling_peak: Option<&[Vec<f32>]>,
     residue_vq: bool,
     posts_are_10bit: bool,
 ) -> Result<Vec<u8>, PacketError> {
@@ -652,6 +961,7 @@ pub fn pack_block_packet(
         mode,
         absolute_posts,
         mdct,
+        coupling_peak,
         residue_vq,
         posts_are_10bit,
     )?
@@ -670,7 +980,7 @@ mod coupling_round_trip {
     //! therefore recover (M, A) exactly. This test is the formal round-trip
     //! invariant (leftover from the 2ch/48k release).
 
-    use super::apply_mapping_coupling;
+    use super::{apply_mapping_coupling, propagate_mapping_nonzero};
     use crate::setup::CouplingStep;
 
     /// Mirror of the decoder's four-branch coupling inverse, per
@@ -714,6 +1024,15 @@ mod coupling_round_trip {
             ang_rec, ang,
             "ang mismatch for pre-coupling pair ({mag}, {ang})"
         );
+    }
+
+    #[test]
+    fn mapping_coupling_propagates_one_sided_floor_use() {
+        let coupling = vec![CouplingStep { mag: 0, ang: 1 }];
+        for mut used in [vec![true, false], vec![false, true]] {
+            propagate_mapping_nonzero(&mut used, &coupling);
+            assert_eq!(used, vec![true, true]);
+        }
     }
 
     /// Named round-trip invariant: forward coupling followed by the decoder's
@@ -778,7 +1097,7 @@ mod coupling_round_trip {
             pairs.iter().map(|(_, a)| *a).collect(),
             vec![1.25; 8],
         ];
-        let original: Vec<Vec<f64>> = residuals.iter().cloned().collect();
+        let original = residuals.clone();
 
         // Step 1 couples channels (0, 1); step 2 couples (0, 2) — the
         // decoder reverses this order.
@@ -790,11 +1109,18 @@ mod coupling_round_trip {
 
         for step in coupling.iter().rev() {
             let (mag, ang) = (step.mag as usize, step.ang as usize);
-            for j in 0..8 {
-                let (mag_stored, ang_stored) = (residuals[mag][j], residuals[ang][j]);
+            let (mag_row, ang_row) = if mag < ang {
+                let (before_ang, from_ang) = residuals.split_at_mut(ang);
+                (&mut before_ang[mag], &mut from_ang[0])
+            } else {
+                let (before_mag, from_mag) = residuals.split_at_mut(mag);
+                (&mut from_mag[0], &mut before_mag[ang])
+            };
+            for (mag_value, ang_value) in mag_row.iter_mut().zip(ang_row.iter_mut()) {
+                let (mag_stored, ang_stored) = (*mag_value, *ang_value);
                 let (mag_rec, ang_rec) = decode_branches(mag_stored, ang_stored);
-                residuals[mag][j] = mag_rec;
-                residuals[ang][j] = ang_rec;
+                *mag_value = mag_rec;
+                *ang_value = ang_rec;
             }
         }
 

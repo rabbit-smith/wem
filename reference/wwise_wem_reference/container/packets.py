@@ -127,6 +127,31 @@ def recompute_vorbis_fmt_sizes(
         fields["uMaxPacketSize"] = max(len(packet) for packet in packets[1:])
     total_frames = _optional_int(fields.get("dwTotalPCMFrames"))
     sample_rate = _optional_int(fields.get("nSamplesPerSec"))
+    blocksize0_pow = _optional_int(fields.get("uBlocksize0Pow"))
+    blocksize1_pow = _optional_int(fields.get("uBlocksize1Pow"))
+    audio_packets = packets[1:]
+    if (
+        total_frames is not None
+        and total_frames >= 0
+        and blocksize0_pow is not None
+        and blocksize1_pow is not None
+        and 0 <= blocksize0_pow < 32
+        and 0 <= blocksize1_pow < 32
+        and len(audio_packets) >= 2
+        and all(audio_packets)
+    ):
+        blocksizes = (1 << blocksize0_pow, 1 << blocksize1_pow)
+        modes = [packet[0] & 1 for packet in audio_packets]
+        rendered_frames = sum(
+            (blocksizes[previous] + blocksizes[current]) // 4
+            for previous, current in zip(modes, modes[1:])
+        )
+        terminal_excess = max(0, rendered_frames - total_frames)
+        if terminal_excess <= 0xFFFF:
+            # Wwise writes the final overlap excess twice: directly at 0x32
+            # and in the high word of the 0x24 field.
+            fields["uUnknown_0x32"] = terminal_excess
+            fields["dwUnknown_0x24"] = terminal_excess << 16
     if total_frames and sample_rate:
         fields["nAvgBytesPerSec"] = data_size * sample_rate // total_frames
     fields["wFormatTag"] = fields.get("wFormatTag", WWISE_VORBIS_FORMAT_TAG)

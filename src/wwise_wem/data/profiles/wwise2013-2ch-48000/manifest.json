@@ -62,32 +62,37 @@
     "analysis.transient": {
       "path": "analysis/transient.json",
       "schema": "wem.transient-record-family.v1",
-      "sha256": "0dfbbbab53c261862b0bafde6864f91f0fbfe9bf1199542f5698403ac2097eb2"
+      "sha256": "01bd9edc9134fea4d0c10a00eb473036c41637778e4e78996be1a5cf529f73ef"
     },
     "meta.pending": {
       "path": "pending.json",
       "schema": "wem.profile-pending.v1",
-      "sha256": "57b19a4ada04cc4ef61d940acc80aed299df4a5f1c22f17d4f9fb1aa083ca572"
+      "sha256": "085996c94be3d907bfd010cde32e2eed389c31f26536112b562e78ca7ff77baf"
     },
     "analysis.frozen-tables": {
       "path": "analysis/frozen-tables.json",
       "schema": "wem.frozen-math.v1",
       "sha256": "99a60c79cbe3d175bef9390361e9156bab892cfeb4a0409fac7127bbc6c9aa61"
     },
+    "analysis.input-conditioner": {
+      "path": "analysis/input-conditioner.json",
+      "schema": "wem.input-conditioner.v1",
+      "sha256": "c765e4b16e24790d9c1af1799efe8481d7345b80212db82fa5a79d0a86ddcf2d"
+    },
     "psychoacoustics.short-seed": {
       "path": "psychoacoustics/short-seed.json",
       "schema": "wem.seed-surface.v6",
-      "sha256": "919d948b76079ef957488ccff05fb3942ceaa0e7728829293949b4acfb86d56e"
+      "sha256": "806877e15660d873832bc9537a3f11bb2a46ce978d5d2677881eda8294683cd2"
     },
     "psychoacoustics.short-profiles": {
       "path": "psychoacoustics/short-profiles.json",
       "schema": "wem.short-psy-profiles.v1",
-      "sha256": "985f6a8bf4318db4f38885df4658b22603201d2121f18dfe83f92c76220d65bb"
+      "sha256": "01e5b021795bd82fd177364088b4264dc820a7c9053191f39061de29eaeeabc1"
     },
     "psychoacoustics.long-base": {
       "path": "psychoacoustics/long-base.json",
       "schema": "wem.psy-long-static.v1",
-      "sha256": "a4d7a90aeacf3c0c2390b38906e67c11399cc236330ee7182fc645eec0cbd174"
+      "sha256": "9843990cd8d64502458d970ed0da52feb804a0b20ccd4b1360c3d4c6dbf66728"
     },
     "psychoacoustics.long-modes": {
       "path": "psychoacoustics/long-modes.json",

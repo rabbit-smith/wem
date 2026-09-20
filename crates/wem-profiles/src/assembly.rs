@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use wem_analysis::config::{
     make_long_floor_envelope_look, make_wwise_psy_look, AnalysisProfileResources,
-    LongFloorEnvelopeLook, WwisePsySeedSurface,
+    InputConditionerConfig, LongFloorEnvelopeLook, WwisePsySeedSurface,
 };
 use wem_vorbis::codebook::Codebook;
 use wem_vorbis::setup::{parse_setup, SetupInfo};
@@ -240,6 +240,35 @@ pub fn assemble_analysis_resources(
     let transient = load_transient(manifest.resource("analysis.transient")?, quality)?;
     let short_profiles =
         load_short_psy_profiles(manifest.resource("psychoacoustics.short-profiles")?)?;
+    let input_conditioner = manifest
+        .resources()
+        .iter()
+        .find(|(name, _)| name == "analysis.input-conditioner")
+        .map(|(_, ref_)| {
+            let payload = ref_.read_json()?;
+            let object =
+                payload
+                    .as_object()
+                    .ok_or_else(|| ProfileError::ManifestFieldMalformed {
+                        reason: "input conditioner resource must be an object".to_string(),
+                    })?;
+            if object.get("schema").and_then(|value| value.as_str())
+                != Some("wem.input-conditioner.v1")
+            {
+                return Err(ProfileError::ManifestFieldMalformed {
+                    reason: "unsupported input conditioner schema".to_string(),
+                });
+            }
+            let bits = object
+                .get("dc_filter_coefficient_f32_bits")
+                .and_then(|value| value.as_u64())
+                .filter(|value| *value <= u32::MAX as u64)
+                .ok_or_else(|| ProfileError::ManifestFieldMalformed {
+                    reason: "input conditioner coefficient bits must be a u32".to_string(),
+                })? as u32;
+            InputConditionerConfig::new(f32::from_bits(bits)).map_err(ProfileError::Analysis)
+        })
+        .transpose()?;
 
     let short_look = make_wwise_psy_look(
         &short_surface,
@@ -264,6 +293,7 @@ pub fn assemble_analysis_resources(
         long_base,
         long_variants,
         long_floor_looks,
+        input_conditioner,
         frozen,
         quality, // raw quality factor, as in the Python reference
         resolved_quality.extrapolated,

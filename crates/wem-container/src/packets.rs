@@ -148,6 +148,29 @@ pub fn recompute_vorbis_fmt_sizes(
     if let Some(max) = packets.iter().skip(1).map(|p| p.len()).max() {
         fields.u_max_packet_size = max as u16;
     }
+    let audio_packets = &packets[1.min(packets.len())..];
+    if audio_packets.len() >= 2
+        && audio_packets.iter().all(|packet| !packet.is_empty())
+        && fields.u_blocksize0_pow < 32
+        && fields.u_blocksize1_pow < 32
+    {
+        let blocksizes = [
+            1u64 << fields.u_blocksize0_pow,
+            1u64 << fields.u_blocksize1_pow,
+        ];
+        let rendered_frames = audio_packets.windows(2).fold(0u64, |total, pair| {
+            let previous = (pair[0][0] & 1) as usize;
+            let current = (pair[1][0] & 1) as usize;
+            total + (blocksizes[previous] + blocksizes[current]) / 4
+        });
+        let terminal_excess = rendered_frames.saturating_sub(fields.dw_total_pcm_frames as u64);
+        if let Ok(excess) = u16::try_from(terminal_excess) {
+            // Wwise writes the final overlap excess twice: directly at 0x32
+            // and in the high word of the 0x24 field.
+            fields.u_unknown_0x32 = excess;
+            fields.dw_unknown_0x24 = u32::from(excess) << 16;
+        }
+    }
     if fields.dw_total_pcm_frames != 0 && fields.n_samples_per_sec != 0 {
         fields.n_avg_bytes_per_sec = ((data_size as u64 * fields.n_samples_per_sec as u64)
             / fields.dw_total_pcm_frames as u64) as u32;
@@ -214,5 +237,32 @@ mod tests {
         let audio = b"a";
         recompute_vorbis_fmt_sizes(&mut fields, &[setup.as_ref(), audio.as_ref()], b"");
         assert_eq!(fields.u_max_packet_size, 1);
+    }
+
+    #[test]
+    fn terminal_overlap_excess_follows_audio_modes() {
+        let mut fields = VorbisFmtFields {
+            dw_total_pcm_frames: 2304,
+            u_blocksize0_pow: 8,
+            u_blocksize1_pow: 11,
+            dw_unknown_0x24: 99,
+            u_unknown_0x32: 99,
+            ..VorbisFmtFields::DEFAULTS
+        };
+        let setup = b"setup";
+        let long = b"\x01";
+        recompute_vorbis_fmt_sizes(
+            &mut fields,
+            &[
+                setup.as_ref(),
+                long.as_ref(),
+                long.as_ref(),
+                long.as_ref(),
+                long.as_ref(),
+            ],
+            b"",
+        );
+        assert_eq!(fields.u_unknown_0x32, 768);
+        assert_eq!(fields.dw_unknown_0x24, 768 << 16);
     }
 }

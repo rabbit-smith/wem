@@ -38,7 +38,7 @@ use crate::dsp::lpc::{wwise_first_frame_lpc_prime, wwise_lpc_from_data, wwise_lp
 /// Bound: the detector end-of-stream tail spans 8192 samples past the
 /// endpoint, and its detector windows (128 wide on a 64 hop, offset by the
 /// 1024-sample prime) can reference source samples up to 8192 + 1024 =
-/// 9216 positions before the endpoint; the 4096-sample tail model and the
+/// 9216 positions before the endpoint; the at-most-2048-sample tail model and
 /// 2048-sample frame windows fit inside that.
 pub const STREAM_RING_KEEP: i64 = 9216;
 
@@ -280,11 +280,11 @@ impl StreamingPcmFeeder {
     }
 
     /// Mark the end of the stream and compute the end-of-stream tail
-    /// (8192 samples per channel, 32-tap, from the last 4096 source
-    /// samples). The remaining quanta (the tail-region ones) become
+    /// (8192 samples per channel, 32-tap, trained on the PCM remaining in the
+    /// analysis buffer at EOS, capped at one long block). The remaining quanta become
     /// consumable through
     /// [`for_each_completed_quantum`](Self::for_each_completed_quantum).
-    pub fn finish_source(&mut self) -> Result<(), AnalysisError> {
+    pub fn finish_source(&mut self, tail_training: Option<i64>) -> Result<(), AnalysisError> {
         use AnalysisError::*;
         if self.tails.is_some() {
             return Ok(());
@@ -293,13 +293,18 @@ impl StreamingPcmFeeder {
             return Err(StreamFeederSourceShort { frames: self.total });
         }
         let mut tails = Vec::with_capacity(self.channels as usize);
+        let tail_training = tail_training.unwrap_or(self.blocksizes[1]);
+        if tail_training <= TAIL_CONTEXT || tail_training > self.total {
+            return Err(StreamFeederSourceShort { frames: self.total });
+        }
+        let tail_training = tail_training as usize;
         for ring in &self.ring {
             let len = ring.len();
-            if len < 4096 {
+            if len < tail_training {
                 return Err(StreamFeederSourceShort { frames: len as i64 });
             }
             let source: Vec<f64> = ring.iter().copied().collect();
-            let coeffs = wwise_lpc_from_data(&source[len - 4096..], TAIL_ORDER)?;
+            let coeffs = wwise_lpc_from_data(&source[len - tail_training..], TAIL_ORDER)?;
             tails.push(wwise_lpc_predict(
                 &coeffs,
                 &source[len - TAIL_CONTEXT as usize..],

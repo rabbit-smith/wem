@@ -41,6 +41,7 @@ pub mod dsp {
 /// shares the batch kernel (LPC, windowing, sample views) and owns no
 /// separate numerics.
 pub mod preprocessing {
+    pub mod conditioner;
     pub mod detector_input;
     pub mod streaming;
     pub mod windowing;

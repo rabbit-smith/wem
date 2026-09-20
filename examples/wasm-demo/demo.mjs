@@ -19,11 +19,10 @@ const dlBtnEl = document.getElementById("dlbtn");
 const againEl = document.getElementById("again");
 const summaryEl = document.getElementById("summary");
 
-const profileBase = new URLSearchParams(location.search).get("profileBase")
+const query = new URLSearchParams(location.search);
+const profileBase = query.get("profileBase")
   ?? "../../src/wwise_wem/data/profiles";
-
-// bytes per pushed chunk, aligned to whole 6ch s16 frames (12 bytes)
-const CHUNK_BYTES = Math.floor((512 * 1024) / 12) * 12;
+const requestedProfile = query.get("profile");
 
 async function fetchBytes(url) {
   const res = await fetch(url);
@@ -31,13 +30,13 @@ async function fetchBytes(url) {
   return new Uint8Array(await res.arrayBuffer());
 }
 
-async function loadProfileBundle(base) {
+async function loadProfileBundle(base, requestedName) {
   const indexBytes = await fetchBytes(`${base}/index.json`);
   const index = JSON.parse(new TextDecoder().decode(indexBytes));
   if (index.schema !== "wwise-wem.profile-index.v1") {
     throw new Error(`unexpected index schema: ${index.schema}`);
   }
-  const profileName = index.default;
+  const profileName = requestedName ?? index.default;
   const entry = index.profiles?.[profileName];
   if (!entry) throw new Error(`index has no '${profileName}' entry`);
 
@@ -66,9 +65,9 @@ try {
   statusEl.textContent = "loading wasm…";
   await init(); // resolves wem_wasm_bg.wasm relative to this module
   statusEl.textContent = "loading profile…";
-  bundle = await loadProfileBundle(profileBase);
+  bundle = await loadProfileBundle(profileBase, requestedProfile);
   // resolve geometry + verify the bundle through the kernel (one-shot handle)
-  encoder = new WemEncoder(bundle.indexBytes, bundle.files);
+  encoder = new WemEncoder(bundle.profileName, bundle.indexBytes, bundle.files);
   const info = encoder.profile_info();
   statusEl.textContent =
     `ready — profile ${info.name} (${info.channels}ch @ ${info.sampleRate}Hz, ` +
@@ -114,6 +113,8 @@ async function encodeFile(file) {
   }
 
   const totalFrames = wav.frames;
+  const frameBytes = profile.channels * 2;
+  const chunkBytes = Math.floor((512 * 1024) / frameBytes) * frameBytes;
   const session = new WemSession(
     bundle.indexBytes,
     bundle.files,
@@ -126,7 +127,7 @@ async function encodeFile(file) {
     const pcm = wav.pcm;
     let offset = 0;
     while (offset < pcm.byteLength) {
-      const chunk = pcm.slice(offset, Math.min(offset + CHUNK_BYTES, pcm.byteLength));
+      const chunk = pcm.slice(offset, Math.min(offset + chunkBytes, pcm.byteLength));
       offset += chunk.byteLength;
       session.push(chunk);
       setProgress(session.pcm_frames() / totalFrames);

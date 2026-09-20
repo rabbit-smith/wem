@@ -390,16 +390,13 @@ def _vv_add_slots(offset: int, part: int, n_channels: int, dim: int):
         yield slots
 
 
-#: Encoder-only class metrics for the type-2 (flat-domain) residue template,
-#: read from the paired build `.data`: the type-2 configuration record at
-#: the build's code carries its magnitude metrics at the build's code and its angle
-#: metrics at the build's code (the golden's type-1 pair sits the same way at
-#: the build's code / the build's code relative to the build's code).  A negative angle metric
-#: disables that class's angle gate, the same convention as the validated
-#: type-1 metric table.
+#: Encoder-only class metrics for the coupled 32/44.1/48-kHz ``mid`` residue
+#: template in aoTuV beta6.03 ``lib/modes/residue_44.h``.  The Wwise type-2
+#: path uses the coupled magnitude/angle classifier even though its codebooks
+#: follow the separately configured Wwise setup packet.
 WWISE_RESIDUE_TYPE2_CLASS_METRICS: tuple[tuple[int, ...], tuple[int, ...]] = (
-    (0, 1, 1, 2, 2, 4, 4, 16, 60),
-    (-1, 30, -1, 50, -1, 80, -1, -1, -1),
+    (0, 1, 1, 2, 2, 4, 8, 16, 32),
+    (0, 0, 999, 0, 999, 4, 8, 16, 32),
 )
 
 #: Channel count of the type-2 flat classification domain. The reference
@@ -439,9 +436,7 @@ def _classify_partition_type2(
     for classification, (max_metric, angle_metric) in enumerate(
         zip(max_metrics, angle_metrics)
     ):
-        if magnitude_peak <= max_metric and (
-            angle_metric < 0 or angle_peak <= angle_metric
-        ):
+        if magnitude_peak <= max_metric and angle_peak <= angle_metric:
             return classification
     return nclass - 1
 
@@ -452,18 +447,14 @@ def _pack_classbook_entry_type2(
     """Mixed-radix classbook entry for the type-2 phrasebook.
 
     entry = c0 * nclass^(ppw-1) + ... + c_{ppw-1}; the decoder unpacks the
-    same mixed radix.  A classbook only codes a subset of the mixed-radix
-    domain (e.g. the 2ch short classbook carries classes 4..9 only); an
-    uncoded combination falls back to the smallest coded entry, matching
-    the calibrated 2ch behavior.
+    same mixed radix. A valid setup must code the complete classword domain;
+    silently substituting another entry would change the partition classes.
     """
     entry = 0
     for c in classes:
         entry = entry * nclass + (int(c) % nclass)
     if entry >= cb.entries or int(cb.lengthlist[entry]) <= 0:
-        entry = next(
-            e for e, length in enumerate(cb.lengthlist) if int(length) > 0
-        )
+        raise ValueError(f"type-2 classword entry {entry} is not coded by the phrasebook")
     cb.encode(op, entry)
 
 

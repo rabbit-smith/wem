@@ -140,7 +140,7 @@ class TransientRecord:
 
 @dataclass(frozen=True)
 class TransientRecordFamily:
-    """The static record library plus the construction constants."""
+    """The static record library plus its immutable detector surfaces."""
 
     schema: str
     n: int
@@ -149,18 +149,15 @@ class TransientRecordFamily:
     records: tuple[TransientRecord, ...]
     index_curve: tuple[float, ...]
     breakpoints: tuple[float, ...]
-    band_words: tuple[int, ...]
-    stride_words: tuple[int, ...]
-    window_divisor: float
-    window_half_addend: float
-    window_pi: float
+    window_u32: tuple[int, ...]
+    bands: tuple[TransientBandConfig, ...]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "records", tuple(self.records))
         object.__setattr__(self, "index_curve", tuple(float(v) for v in self.index_curve))
         object.__setattr__(self, "breakpoints", tuple(float(v) for v in self.breakpoints))
-        object.__setattr__(self, "band_words", tuple(int(v) for v in self.band_words))
-        object.__setattr__(self, "stride_words", tuple(int(v) for v in self.stride_words))
+        object.__setattr__(self, "window_u32", tuple(int(v) for v in self.window_u32))
+        object.__setattr__(self, "bands", tuple(self.bands))
 
 
 def load_transient_record_family(ref: ResourceRef) -> TransientRecordFamily:
@@ -235,25 +232,35 @@ def load_transient_record_family(ref: ResourceRef) -> TransientRecordFamily:
     if any(not (0.0 <= v <= float(TRANSIENT_RECORD_COUNT - 1)) for v in index_curve):
         raise ValueError("transient record-index curve leaves the record domain")
 
-    band_words = strict_u32_list(
-        data.get("band_words", {}), "values", TRANSIENT_BAND_COUNT
-    )
-    stride_words = strict_u32_list(
-        data.get("stride_words", {}), "values", TRANSIENT_BAND_COUNT
-    )
-    window_build = data.get("window_build")
-    if not isinstance(window_build, dict):
-        raise ValueError("transient record-family window_build is malformed")
-    try:
-        window_divisor = float(window_build["divisor_f64"]["value"])
-        window_half_addend = float(window_build["half_constant_f64"]["value"])
-        window_pi = float(window_build["pi_f64"]["value"])
-    except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("transient record-family window_build is malformed") from error
-    if not all(
-        math.isfinite(v) for v in (window_divisor, window_half_addend, window_pi)
-    ) or window_divisor != float(TRANSIENT_WINDOW_WORDS - 1):
-        raise ValueError("transient record-family window constants are malformed")
+    window_u32 = strict_u32_list(data, "window_u32", TRANSIENT_WINDOW_WORDS)
+    rows = data.get("bands")
+    if not isinstance(rows, list) or len(rows) != TRANSIENT_BAND_COUNT:
+        raise ValueError("transient record-family bands are malformed")
+    bands: list[TransientBandConfig] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise ValueError(f"transient record-family band {index} is malformed")
+        weights = row.get("weights_u32")
+        count = row.get("count")
+        if (
+            isinstance(count, bool)
+            or not isinstance(count, int)
+            or not isinstance(weights, list)
+            or len(weights) != count
+            or isinstance(row.get("offset"), bool)
+            or not isinstance(row.get("offset"), int)
+            or isinstance(row.get("scale_u32"), bool)
+            or not isinstance(row.get("scale_u32"), int)
+            or any(isinstance(value, bool) or not isinstance(value, int) for value in weights)
+        ):
+            raise ValueError(f"transient record-family band {index} is malformed")
+        bands.append(
+            TransientBandConfig(
+                offset=int(row["offset"]),
+                weights=tuple(_u32_f32(value) for value in weights),
+                scale=_u32_f32(int(row["scale_u32"])),
+            )
+        )
 
     raw_default = data.get("default_record_index")
     if isinstance(raw_default, bool) or not isinstance(raw_default, (int, float)):
@@ -272,11 +279,8 @@ def load_transient_record_family(ref: ResourceRef) -> TransientRecordFamily:
         records=tuple(records),
         index_curve=tuple(index_curve),
         breakpoints=tuple(breakpoints),
-        band_words=tuple(band_words),
-        stride_words=tuple(stride_words),
-        window_divisor=window_divisor,
-        window_half_addend=window_half_addend,
-        window_pi=window_pi,
+        window_u32=tuple(window_u32),
+        bands=tuple(bands),
     )
 
 
@@ -308,11 +312,8 @@ def materialize_transient_tables(
     * upper[0..3]/lower[0..3] are linearly interpolated between records
       ``v5`` and ``v5+1`` at the fractional part (f64 lerp, f32 rounding).
 
-    The window and band construction are quality-independent: the three
-    static f64 constants of the family reproduce the paired build's runtime
-    construction bit-for-bit (verified 128/128 against the 6ch profile's
-    registered window, including the [127] endpoint 0x2809aded — the old 2ch
-    materializer's forced-0 endpoint difference is intentionally corrected).
+    The window and band surfaces are quality-independent static f32 words from
+    the paired build. Materialization only selects/interpolates record fields.
     """
     if quality is None:
         index = family.default_record_index
@@ -341,31 +342,12 @@ def materialize_transient_tables(
                 b = _u32_f32(nxt[position])
                 config_words[position] = _f32_bits((1.0 - frac) * a + frac * b)
 
-    window: list[float] = []
-    for i in range(TRANSIENT_WINDOW_WORDS):
-        sine = math.sin(family.window_pi * i / family.window_divisor)
-        sine = _f32(sine)
-        window.append(_f32(sine * sine))
-
-    bands: list[TransientBandConfig] = []
-    for offset, count in zip(family.band_words, family.stride_words):
-        weights = [
-            _f32(
-                math.sin(
-                    family.window_pi * (j + family.window_half_addend) / float(count)
-                )
-            )
-            for j in range(count)
-        ]
-        scale = _f32(math.sin(family.window_pi / (2.0 * float(count))))
-        bands.append(TransientBandConfig(offset=offset, weights=tuple(weights), scale=scale))
-
     return TransientDetectorTables(
         n=family.n,
         bias=_u32_f32(base.bias_u32),
-        window=tuple(window),
+        window=tuple(_u32_f32(word) for word in family.window_u32),
         config=tuple(_u32_f32(word) for word in config_words),
-        bands=tuple(bands),
+        bands=family.bands,
     )
 
 

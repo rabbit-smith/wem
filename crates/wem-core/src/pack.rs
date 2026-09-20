@@ -77,8 +77,22 @@ pub fn pack_analysis_frame(
         .iter()
         .map(|row| row.iter().map(|value| *value as f32).collect())
         .collect();
-    let packet_result =
-        pack_block_packet_details(setup, books, channels, mode, &posts, &mdct, true, true)?;
+    let coupling_peak: Vec<Vec<f32>> = analysis
+        .coupling_peak
+        .iter()
+        .map(|row| row.iter().map(|value| *value as f32).collect())
+        .collect();
+    let packet_result = pack_block_packet_details(
+        setup,
+        books,
+        channels,
+        mode,
+        &posts,
+        &mdct,
+        Some(&coupling_peak),
+        true,
+        true,
+    )?;
     Ok(EncodedPacket {
         frame: analysis.clone(),
         posts,

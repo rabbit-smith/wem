@@ -8,10 +8,9 @@ frame boundary:
 transient histories -> mode queue -> floor-envelope channel state/history ->
 frame-global spectrum peak.
 
-It accepts PCM and immutable tables/setup objects only.  The selector exposes
-its native ``-1/0/1`` result: mapping a lookahead
-decision to an actual emitted mode belongs to the caller that owns PCM
-availability and frame readiness.
+It accepts PCM and immutable tables/setup objects only.  The session owns the
+selector's native ``-1/0/1`` lookahead decisions together with the mode-scan
+cursor, so batch and streaming callers share one transition path.
 
 This centralizes ownership; it does not waive numeric acceptance.  The
 full-stream MDCT/log boundary is word-exact through immutable trigonometric
@@ -29,10 +28,23 @@ from .psychoacoustics.pipeline import analyze_long_frame, analyze_short_frame
 from .psychoacoustics.seed import SpectrumPeakState
 from .psychoacoustics.short import ShortPsyAnalyzer
 from ..scheduling.selector import ModeSelector
-from .preprocessing.detector_input import iter_detector_quanta
+from .preprocessing.conditioner import InputConditioner
+from .preprocessing.detector_input import detector_pcm_streams
 from ..scheduling.planner import plan_mode_sequence
 from .preprocessing.windowing import WindowedFrame, iter_pcm_windows, iter_planned_pcm_windows
 from .transient.detector import TransientDetector
+
+
+@dataclass
+class _ModeScanState:
+    next_center: int = 0
+    previous_center: int = -1
+    previous_mode: int = 0
+    current_mode: int = 0
+
+    def has_source_frame(self, source_len: int) -> bool:
+        return self.previous_center < 0 or self.previous_center < source_len
+
 
 @dataclass
 class AnalysisSession:
@@ -50,10 +62,15 @@ class AnalysisSession:
     resources: AnalysisProfileResources
     _transient_detector: TransientDetector = field(init=False)
     _mode_selector: ModeSelector = field(init=False)
+    _mode_scan: _ModeScanState = field(init=False)
     _short_psy_analyzer: ShortPsyAnalyzer = field(init=False)
     _spectrum_peak: SpectrumPeakState = field(init=False)
     _next_frame_index: int = field(init=False)
     _last_frame_modes: tuple[int, int] | None = field(init=False)
+    _input_conditioner: InputConditioner | None = field(init=False)
+    _frame_transition_codes: list[int] = field(init=False)
+    _transition_codes_captured: bool = field(init=False)
+    _eos_training_samples: int = field(init=False)
 
     def __post_init__(self) -> None:
         if self.channels <= 0:
@@ -108,8 +125,25 @@ class AnalysisSession:
         # regular path.
         self._short_psy_analyzer = ShortPsyAnalyzer(self.channels, profiles=self.resources.short_profiles)
         self._spectrum_peak = SpectrumPeakState()
+        self._mode_scan = _ModeScanState()
         self._next_frame_index = 0
         self._last_frame_modes = None
+        self._input_conditioner = (
+            InputConditioner(self.channels, self.resources.input_conditioner)
+            if self.resources.input_conditioner is not None
+            else None
+        )
+        self._frame_transition_codes = []
+        self._transition_codes_captured = False
+        self._eos_training_samples = self.blocksizes[1]
+
+    def condition_pcm(self, pcm: Sequence[Sequence[float]]) -> tuple[tuple[float, ...], ...]:
+        """Condition the next contiguous PCM rows for this stream."""
+        if len(pcm) != self.channels:
+            raise ValueError("PCM channel count differs from stream")
+        if self._input_conditioner is None:
+            return tuple(tuple(row) for row in pcm)
+        return self._input_conditioner.process(pcm)
 
     def _consume_analysis_window(self, window: WindowedFrame) -> None:
         """Validate and consume one scheduler-bound analysis frame."""
@@ -170,8 +204,50 @@ class AnalysisSession:
             center=int(center), current_mode=int(current_mode), blocksizes=self.blocksizes
         )
 
+    def _scan_next_mode(self, *, eos: bool) -> tuple[int, int, int, int] | None:
+        """Advance one mode decision and preserve its scan-time profile code."""
+        state = self._mode_scan
+        prefix = self.blocksizes[1] // 2
+        status = self.mode_selection_status(
+            center=state.next_center + prefix,
+            current_mode=state.current_mode,
+        )
+        if status < 0 and not eos:
+            return None
+        following = 0 if status < 0 else status
+        self._frame_transition_codes.append(
+            self._mode_selector.transition_code(
+                center=state.next_center + prefix,
+                previous_mode=state.previous_mode,
+                current_mode=state.current_mode,
+                following_mode=following,
+                blocksizes=self.blocksizes,
+            )
+        )
+        self._transition_codes_captured = True
+        decision = (
+            state.next_center,
+            state.previous_mode,
+            state.current_mode,
+            following,
+        )
+        state.previous_center = state.next_center
+        state.next_center += (
+            self.blocksizes[state.current_mode] // 4
+            + self.blocksizes[following] // 4
+        )
+        state.previous_mode, state.current_mode = state.current_mode, following
+        return decision
+
     def transition_code(self, window: WindowedFrame) -> int:
         """Derive the psychoacoustic profile code from modes and transients."""
+        if self._transition_codes_captured:
+            if 0 <= window.index < len(self._frame_transition_codes):
+                return self._frame_transition_codes[window.index]
+            raise RuntimeError(
+                f"transition code missing for frame {window.index}; "
+                f"recorded {len(self._frame_transition_codes)}"
+            )
         # Window centers use PCM sample zero as their origin.  The detector's
         # absolute timeline starts at the reverse-LPC prefix.
         detector_center = int(window.center) + self.blocksizes[1] // 2
@@ -204,10 +280,10 @@ class AnalysisSession:
     def select_modes(self, pcm: Sequence[Sequence[float]]) -> tuple[int, ...]:
         """Run transient detection and return the emitted mode sequence.
 
-        The detector is geometry-independent, so its complete LPC-padded
-        timeline can be generated before scanning block decisions.  Selector
-        positions stay in that absolute timeline; scheduled PCM centers are
-        offset by the 1024-sample detector prefix.
+        Generate the source-backed detector timeline first, scan every mode
+        decision it can support, then build the EOS predictor from the PCM
+        still buffered at that point. Selector positions stay on the absolute
+        timeline; scheduled PCM centers are offset by the 1024-sample prefix.
         """
         if len(pcm) != self.channels:
             raise ValueError("PCM channel count differs from stream")
@@ -216,36 +292,59 @@ class AnalysisSession:
         source_len = len(pcm[0]) if pcm else 0
         if source_len < 4096 or any(len(channel) != source_len for channel in pcm):
             raise ValueError("mode selection PCM must be equal-length and at least 4096 samples")
-        for quantum in iter_detector_quanta(pcm, blocksizes=self.blocksizes):
-            self.ingest_transient_quantum(quantum)
+        hop = self._mode_selector.hop
+        detector_streams = detector_pcm_streams(
+            pcm,
+            terminal_samples=0,
+            blocksizes=self.blocksizes,
+        )
+        pre_eos_quanta = max(0, len(detector_streams[0]) // hop - 4)
+        for quantum_index in range(pre_eos_quanta):
+            start = quantum_index * hop
+            self.ingest_transient_quantum(
+                tuple(
+                    tuple(channel[start : start + self.short_bins])
+                    for channel in detector_streams
+                )
+            )
 
-        prefix = self.blocksizes[1] // 2
-        center = 0
-        current = 0
-        previous = -1
         modes: list[int] = []
-        # Emit the frame at ``center`` while the *previous* frame's center is
-        # still inside the PCM.  The final frame therefore runs one hop past
-        # the source length, and that hop is the frame's own: a long tail
-        # overshoots by a long hop, a short tail by a short hop.  A plain
-        # ``center < source_len + prefix`` bound overshoots by a fixed amount
-        # instead and emits trailing frames the paired build does not (verified
-        # against six reference streams and the 6ch golden).
-        while previous < 0 or previous < source_len:
-            status = self.mode_selection_status(
-                center=center + prefix, current_mode=current
+
+        while self._mode_scan.has_source_frame(source_len):
+            decision = self._scan_next_mode(eos=False)
+            if decision is None:
+                break
+            modes.append(decision[2])
+        self._eos_training_samples = min(
+            self.blocksizes[1],
+            self.blocksizes[1] // 2 + source_len - self._mode_scan.next_center,
+        )
+        if self._eos_training_samples <= 32:
+            raise RuntimeError("EOS LPC training window is too short")
+        detector_streams = detector_pcm_streams(
+            pcm,
+            terminal_samples=self.blocksizes[1] * 3,
+            tail_training=self._eos_training_samples,
+            blocksizes=self.blocksizes,
+        )
+        available = (len(detector_streams[0]) - self.short_bins) // hop + 1
+        for quantum_index in range(pre_eos_quanta, available):
+            start = quantum_index * hop
+            self.ingest_transient_quantum(
+                tuple(
+                    tuple(channel[start : start + self.short_bins])
+                    for channel in detector_streams
+                )
             )
-            # End of stream falls back to short mode when no additional
-            # look-ahead decision exists.  A complete normal stream remains
-            # at status 0/1 through its final emitted block.
-            following = 0 if status < 0 else status
-            modes.append(current)
-            previous = center
-            center += (
-                self.blocksizes[current] // 4
-                + self.blocksizes[following] // 4
+        while self._mode_scan.has_source_frame(source_len):
+            decision = self._scan_next_mode(eos=True)
+            if decision is None:
+                raise RuntimeError("EOS mode scan did not emit a decision")
+            modes.append(decision[2])
+        if modes and modes[-1]:
+            self._frame_transition_codes[-1] = 2 | int(
+                bool(modes[-2] if len(modes) > 1 else 0)
             )
-            current = following
         return tuple(modes)
 
     def selected_windows(
@@ -257,7 +356,11 @@ class AnalysisSession:
             modes, blocksizes=self.blocksizes, terminal_following=1
         )
         return modes, iter_planned_pcm_windows(
-            pcm, plans, blocksizes=self.blocksizes, frozen_windows=self._frozen_windows()
+            pcm,
+            plans,
+            blocksizes=self.blocksizes,
+            frozen_windows=self._frozen_windows(),
+            tail_training=self._eos_training_samples,
         )
 
     def _frozen_windows(self) -> Mapping[int, tuple[float, ...]] | None:
@@ -328,6 +431,7 @@ class AnalysisSession:
             tuple(tuple(row) for row in result.seed),
             tuple(tuple(row) for row in result.post),
             tuple(tuple(row) for row in result.side),
+            tuple(tuple(row) for row in result.coupling_peak),
         )
 
     def analyze_long(self, window: WindowedFrame) -> PsyFrame:
@@ -367,6 +471,7 @@ class AnalysisSession:
             tuple(tuple(row) for row in result.seed),
             tuple(tuple(row) for row in result.post),
             tuple(tuple(row) for row in result.side),
+            tuple(tuple(row) for row in result.coupling_peak),
         )
 
     def analyze_window(

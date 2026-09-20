@@ -330,7 +330,7 @@ mod tests {
 
     use super::*;
 
-    /// Draft-profile control points (2ch/48000 band, 13 breakpoints).
+    /// Two-channel profile control points (2ch/48000 band, 13 breakpoints).
     const BP: &[f64] = &[
         -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,
     ];
@@ -388,7 +388,7 @@ mod tests {
     fn kernel_two_step_fraction_differs_from_the_shortcut_for_large_i() {
         // The reference writes frac = i + ratio then reads f = frac - i;
         // for i > 0 that round-trip is not the identity, so pin the two-step
-        // result on the 13-breakpoint draft table (i = 6 at q = 4.0).
+        // result on the 13-breakpoint two-channel table (i = 6 at q = 4.0).
         let qnorm = normalize_quality_factor(4.0);
         assert_eq!(qnorm, 0.4000001);
         let (value, outside) = linear_frac(BP, DESC31, qnorm);

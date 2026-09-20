@@ -42,7 +42,11 @@ interface CoreSession {
 }
 
 interface CoreModule {
-  WemEncoder: new (profileIndex: Uint8Array, files: Map<string, Uint8Array>) => CoreEncoder;
+  WemEncoder: new (
+    profileName: string,
+    profileIndex: Uint8Array,
+    files: Map<string, Uint8Array>,
+  ) => CoreEncoder;
   WemSession: new (
     profileIndex: Uint8Array,
     files: Map<string, Uint8Array>,
@@ -258,11 +262,12 @@ function WemErrorLike(codeMessage: string): Error & { code: string } {
  * Load (and kernel-verify) one profile bundle from bytes.
  *
  * The kernel's bytes entry re-checks every resource's SHA-256 on load
- * and selects the index `default` profile; a failing bundle throws
+ * and selects the requested profile; a failing bundle throws
  * `WEM_ERR_PROFILE_NOT_FOUND` / `WEM_ERR_STATE_ERROR` / `WEM_ERR_INTERNAL`.
  * The bundle carries a resolved encoder handle for one-shot encodes.
  */
 export async function loadProfileBundle(
+  profileName: string,
   indexBytes: Uint8Array | ArrayBuffer,
   files: Map<string, Uint8Array | ArrayBuffer> | Record<string, Uint8Array | ArrayBuffer>,
 ): Promise<ProfileBundle & { readonly encoder: CoreEncoder }> {
@@ -271,7 +276,7 @@ export async function loadProfileBundle(
     indexBytes instanceof Uint8Array ? indexBytes : new Uint8Array(indexBytes);
   const filesMap = normalizeFiles(files);
   // Throws (with a WEM_ERR_* code) when the bundle fails verification.
-  const encoder = new coreModule.WemEncoder(index, filesMap);
+  const encoder = new coreModule.WemEncoder(profileName, index, filesMap);
   const info = encoder.profile_info();
   return {
     indexBytes: index,
@@ -303,7 +308,7 @@ export async function parseWav(wavBytes: Uint8Array | ArrayBuffer): Promise<Pars
  * One-shot encode: WAV bytes -> complete WEM container.
  *
  * The WAV is parsed by the kernel (`parse_pcm16`); PCM geometry must
- * match the profile (6ch/44100 for the bundled profile), otherwise
+ * match the selected profile, otherwise
  * `WEM_ERR_GEOMETRY_MISMATCH` / `WEM_ERR_INPUT_TOO_SHORT` is thrown.
  */
 export async function encodeWav(

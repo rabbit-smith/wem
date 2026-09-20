@@ -45,6 +45,7 @@ pub fn iter_planned_pcm_windows(
     plans: &[FramePlan],
     blocksizes: &[i64],
     frozen_windows: Option<&HashMap<i64, Vec<f32>>>,
+    tail_training: Option<i64>,
 ) -> Result<Vec<WindowedFrame>, AnalysisError> {
     if plans.is_empty() {
         return Ok(Vec::new());
@@ -94,12 +95,16 @@ pub fn iter_planned_pcm_windows(
         .collect();
 
     // EOF uses the regular-direction 32-tap predictor.
-    let tail_count = blocksizes.iter().copied().max().unwrap_or(0);
+    let tail_count = tail_training.unwrap_or_else(|| blocksizes.iter().copied().max().unwrap_or(0));
+    if tail_count <= 32 || tail_count > source_len {
+        return Err(AnalysisError::PcmFeederShort { frames: source_len });
+    }
+    let tail_training = tail_count as usize;
     let tails: Vec<Vec<f64>> = channels
         .iter()
         .map(|channel| {
             let len = channel.len();
-            let coeffs = wwise_lpc_from_data(&channel[len - 4096..], 32)
+            let coeffs = wwise_lpc_from_data(&channel[len - tail_training..], 32)
                 .expect("tail LPC coefficients (validated above)");
             wwise_lpc_predict(&coeffs, &channel[len - 32..], tail_count)
                 .expect("tail LPC prediction (validated above)")
@@ -175,12 +180,13 @@ pub fn iter_pcm_windows(
     blocksizes: &[i64],
     terminal_following: i64,
     frozen_windows: Option<&HashMap<i64, Vec<f32>>>,
+    tail_training: Option<i64>,
 ) -> Result<Vec<WindowedFrame>, AnalysisError> {
     let plans = plan_mode_sequence(modes, blocksizes, terminal_following).map_err(|e| match e {
         wem_scheduling::PlannerError::BlockSizeCount => AnalysisError::WindowBlockSizeInvalid,
         _ => AnalysisError::FramePlanIntervalMismatch,
     })?;
-    iter_planned_pcm_windows(pcm, &plans, blocksizes, frozen_windows)
+    iter_planned_pcm_windows(pcm, &plans, blocksizes, frozen_windows, tail_training)
 }
 
 #[cfg(test)]
@@ -189,15 +195,15 @@ mod tests {
 
     #[test]
     fn rejects_empty_plans_and_pcm() {
-        assert!(iter_planned_pcm_windows(&[], &[], &[256, 2048], None).is_ok());
+        assert!(iter_planned_pcm_windows(&[], &[], &[256, 2048], None, None).is_ok());
         let plans = wem_scheduling::plan_mode_sequence(&[0], &[256, 2048], 1).expect("plan");
-        assert!(iter_planned_pcm_windows(&[], &plans, &[256, 2048], None).is_err());
+        assert!(iter_planned_pcm_windows(&[], &plans, &[256, 2048], None, None).is_err());
     }
 
     #[test]
     fn rejects_short_pcm() {
         let pcm: Vec<Vec<f64>> = vec![vec![0.0f64; 100]];
         let plans = wem_scheduling::plan_mode_sequence(&[0], &[256, 2048], 1).expect("plan");
-        assert!(iter_planned_pcm_windows(&pcm, &plans, &[256, 2048], None).is_err());
+        assert!(iter_planned_pcm_windows(&pcm, &plans, &[256, 2048], None, None).is_err());
     }
 }

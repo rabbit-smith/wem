@@ -55,6 +55,32 @@ pub fn load_transient_tables(ref_: &ResourceRef) -> Result<TransientDetectorTabl
         ProfileError::TransientConfigMalformed,
     )?;
 
+    let bands = load_bands(&data)?;
+
+    let bias_bits = u32_masked(
+        data.get("bias_u32")
+            .ok_or(ProfileError::TransientFieldMissing { field: "bias_u32" })?,
+    )
+    .ok_or(ProfileError::TransientFieldMissing { field: "bias_u32" })?;
+
+    Ok(TransientDetectorTables {
+        n: 128,
+        bias: f32::from_bits(bias_bits),
+        window: window_u32
+            .iter()
+            .map(|bits| f32::from_bits(*bits))
+            .collect(),
+        config: config_u32
+            .iter()
+            .map(|bits| f32::from_bits(*bits))
+            .collect(),
+        bands,
+    })
+}
+
+fn load_bands(
+    data: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Vec<TransientBandConfig>, ProfileError> {
     let rows = data
         .get("bands")
         .and_then(serde_json::Value::as_array)
@@ -96,25 +122,7 @@ pub fn load_transient_tables(ref_: &ResourceRef) -> Result<TransientDetectorTabl
         });
     }
 
-    let bias_bits = u32_masked(
-        data.get("bias_u32")
-            .ok_or(ProfileError::TransientFieldMissing { field: "bias_u32" })?,
-    )
-    .ok_or(ProfileError::TransientFieldMissing { field: "bias_u32" })?;
-
-    Ok(TransientDetectorTables {
-        n: 128,
-        bias: f32::from_bits(bias_bits),
-        window: window_u32
-            .iter()
-            .map(|bits| f32::from_bits(*bits))
-            .collect(),
-        config: config_u32
-            .iter()
-            .map(|bits| f32::from_bits(*bits))
-            .collect(),
-        bands,
-    })
+    Ok(bands)
 }
 
 /// A JSON field that must be a list of exactly `expected_len` stored u32s.
@@ -203,7 +211,7 @@ pub struct TransientRecord {
     pub config_u32: [u32; TRANSIENT_RECORD_WORDS],
 }
 
-/// The static record library plus the construction constants
+/// The static record library plus its immutable detector surfaces
 /// (Python `TransientRecordFamily`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransientRecordFamily {
@@ -218,16 +226,10 @@ pub struct TransientRecordFamily {
     pub index_curve: Vec<f64>,
     /// Shared quality-axis breakpoints (13 points, strictly increasing).
     pub breakpoints: Vec<f64>,
-    /// Per-band word counts (12 values) for the band construction.
-    pub band_words: Vec<u32>,
-    /// Per-band stride words (12 values) for the band construction.
-    pub stride_words: Vec<u32>,
-    /// Window construction divisor f64 (127.0).
-    pub window_divisor: f64,
-    /// Window construction half addend f64 (0.5).
-    pub window_half_addend: f64,
-    /// Widened PI constant f64 (3.1415927410125732) used at runtime.
-    pub window_pi: f64,
+    /// Static detector window words from the paired build.
+    pub window_u32: Vec<u32>,
+    /// Static detector band descriptors from the paired build.
+    pub bands: Vec<TransientBandConfig>,
 }
 
 /// Load and validate the record-family resource
@@ -366,36 +368,13 @@ pub fn load_transient_record_family(
         });
     }
 
-    let band_words = strict_u32_list_from(
-        data.get("band_words")
-            .and_then(serde_json::Value::as_object),
-        "band_words",
+    let window_u32 = u32_field(
+        &data,
+        "window_u32",
+        TRANSIENT_WINDOW_WORDS as usize,
+        ProfileError::TransientWindowMalformed,
     )?;
-    let stride_words = strict_u32_list_from(
-        data.get("stride_words")
-            .and_then(serde_json::Value::as_object),
-        "stride_words",
-    )?;
-
-    let window_build = data
-        .get("window_build")
-        .and_then(serde_json::Value::as_object)
-        .ok_or(ProfileError::TransientRecordFamilyWindowConstants)?;
-    let window_const = |key: &str| -> Result<f64, ProfileError> {
-        window_build
-            .get(key)
-            .and_then(serde_json::Value::as_object)
-            .and_then(|block| block.get("value"))
-            .and_then(serde_json::Value::as_f64)
-            .filter(|v| v.is_finite())
-            .ok_or(ProfileError::TransientRecordFamilyWindowConstants)
-    };
-    let window_divisor = window_const("divisor_f64")?;
-    let window_half_addend = window_const("half_constant_f64")?;
-    let window_pi = window_const("pi_f64")?;
-    if window_divisor != (TRANSIENT_WINDOW_WORDS - 1) as f64 {
-        return Err(ProfileError::TransientRecordFamilyWindowConstants);
-    }
+    let bands = load_bands(&data)?;
 
     let default_record_index = data
         .get("default_record_index")
@@ -414,11 +393,8 @@ pub fn load_transient_record_family(
         records,
         index_curve,
         breakpoints,
-        band_words,
-        stride_words,
-        window_divisor,
-        window_half_addend,
-        window_pi,
+        window_u32,
+        bands,
     })
 }
 
@@ -438,11 +414,8 @@ pub fn load_transient_record_family(
 /// * upper[0..3]/lower[0..3] are linearly interpolated between records
 ///   `v5` and `v5+1` at the fractional part (f64 lerp, f32 rounding).
 ///
-/// The window and band construction are quality-independent: the three
-/// static f64 constants of the family reproduce the paired build's runtime
-/// construction bit-for-bit (verified 128/128 against the 6ch profile's
-/// registered window, including the [127] endpoint 0x2809aded - the old 2ch
-/// materializer's forced-0 endpoint difference is intentionally corrected).
+/// The window and band surfaces are quality-independent static f32 words from
+/// the paired build. Materialization only selects/interpolates record fields.
 pub fn materialize_transient_tables(
     family: &TransientRecordFamily,
     quality: Option<f64>,
@@ -483,38 +456,19 @@ pub fn materialize_transient_tables(
         }
     }
 
-    let mut window: Vec<f32> = Vec::with_capacity(TRANSIENT_WINDOW_WORDS as usize);
-    for i in 0..TRANSIENT_WINDOW_WORDS {
-        let s = (family.window_pi * i as f64 / family.window_divisor).sin();
-        let s32 = s as f32;
-        window.push((s32 as f64 * s32 as f64) as f32);
-    }
-
-    let mut bands = Vec::with_capacity(TRANSIENT_BAND_COUNT);
-    for (offset, count) in family.band_words.iter().zip(family.stride_words.iter()) {
-        let mut weights = Vec::with_capacity(*count as usize);
-        for j in 0..*count {
-            let value =
-                (family.window_pi * (j as f64 + family.window_half_addend) / *count as f64).sin();
-            weights.push(value as f32);
-        }
-        let scale = (family.window_pi / (2.0 * *count as f64)).sin() as f32;
-        bands.push(TransientBandConfig {
-            offset: *offset as i64,
-            weights,
-            scale,
-        });
-    }
-
     Ok(TransientDetectorTables {
         n: family.n as i64,
         bias: f32::from_bits(base.bias_u32),
-        window,
+        window: family
+            .window_u32
+            .iter()
+            .map(|bits| f32::from_bits(*bits))
+            .collect(),
         config: config_words
             .iter()
             .map(|bits| f32::from_bits(*bits))
             .collect(),
-        bands,
+        bands: family.bands.clone(),
     })
 }
 
@@ -541,22 +495,4 @@ pub fn load_transient(
         return materialize_transient_tables(&load_transient_record_family(ref_)?, quality);
     }
     Err(ProfileError::TransientSchemaChanged)
-}
-
-/// A strict u32 word list under a `{file_off, values}` block (band/stride
-/// words), mapped onto the record-family word error.
-fn strict_u32_list_from(
-    block: Option<&serde_json::Map<String, serde_json::Value>>,
-    field: &'static str,
-) -> Result<Vec<u32>, ProfileError> {
-    let err = || ProfileError::TransientRecordFamilyWords { field };
-    let values = block
-        .and_then(|block| block.get("values"))
-        .and_then(serde_json::Value::as_array)
-        .filter(|values| values.len() == TRANSIENT_BAND_COUNT)
-        .ok_or_else(err)?;
-    values
-        .iter()
-        .map(|value| u32_masked(value).ok_or_else(err))
-        .collect()
 }

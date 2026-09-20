@@ -26,7 +26,7 @@ use pyo3::prelude::*;
 use pyo3::type_object::PyTypeInfo;
 use pyo3::types::{PyBytes, PyDict};
 
-use wem_core::encoder::{EncodeResult as WemEncodeResult, Encoder as WemEncoder, Pcm16};
+use wem_core::encoder::{DataDir, EncodeResult as WemEncodeResult, Encoder as WemEncoder, Pcm16};
 use wem_core::error::EncoderError;
 use wem_core::stream::{ProfileRef, StreamPacket, StreamSession as WemStreamSession};
 
@@ -76,35 +76,6 @@ fn error_to_pyerr(err: EncoderError) -> PyErr {
 /// used so the error pipeline stays single-sourced).
 fn binding_state_error(message: String) -> PyErr {
     error_to_pyerr(EncoderError::StateError { message })
-}
-
-// ---------------------------------------------------------------------------
-// Data-directory scoping
-// ---------------------------------------------------------------------------
-
-/// Temporarily point the kernel's documented `WEM_DATA_DIR` override at one
-/// profiles directory for the duration of a single construction call.
-///
-/// The GIL is held for the whole call, and every kernel call that reads
-/// this variable (profile loading) also only runs under the GIL from this
-/// binding, so the scoped mutation cannot race with other binding calls.
-struct DataDirGuard(Option<std::ffi::OsString>);
-
-impl DataDirGuard {
-    fn set(profiles_dir: &str) -> Self {
-        let previous = std::env::var_os("WEM_DATA_DIR");
-        std::env::set_var("WEM_DATA_DIR", profiles_dir);
-        Self(previous)
-    }
-}
-
-impl Drop for DataDirGuard {
-    fn drop(&mut self) {
-        match self.0.take() {
-            Some(previous) => std::env::set_var("WEM_DATA_DIR", previous),
-            None => std::env::remove_var("WEM_DATA_DIR"),
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -214,17 +185,17 @@ impl PyEncoder {
     #[new]
     #[pyo3(signature = (profile_name, data_dir=None, quality=None))]
     fn new(profile_name: &str, data_dir: Option<&str>, quality: Option<f64>) -> PyResult<Self> {
-        // The kernel's own entry points; `data_dir` scopes the kernel's
-        // documented WEM_DATA_DIR override, otherwise the kernel default
-        // (WEM_DATA_DIR or the repository layout) applies. `quality`, when
+        // The kernel's own entry points; `data_dir` is passed explicitly,
+        // otherwise the kernel default applies. `quality`, when
         // given, binds the quality factor to the resolved profile before
         // assembly (the Python facade forwards `EncoderProfile.quality`
         // here); omitted quality keeps the historical bytes exactly.
         let inner = match data_dir {
-            Some(dir) => {
-                let _guard = DataDirGuard::set(dir);
-                WemEncoder::from_profile_quality(profile_name, quality)
-            }
+            Some(dir) => WemEncoder::from_profile_quality_in(
+                &DataDir::from_profiles_dir(dir),
+                profile_name,
+                quality,
+            ),
             None => WemEncoder::from_profile_quality(profile_name, quality),
         }
         .map_err(error_to_pyerr)?;
@@ -563,7 +534,7 @@ else:
     }
 
     #[test]
-    fn encoder_data_dir_option_scopes_kernel_lookup() {
+    fn encoder_data_dir_option_selects_profile_tree() {
         Python::with_gil(|py| {
             let profiles_dir = repo_root()
                 .join("src/wwise_wem/data/profiles")
@@ -591,7 +562,7 @@ else:
                 Some(&globals),
                 None,
             )
-            .expect("data_dir scoping");
+            .expect("explicit data_dir selection");
         });
     }
 

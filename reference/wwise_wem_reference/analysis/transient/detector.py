@@ -131,18 +131,20 @@ def wwise_psy_mask(
     )
     slot = history.cursor
     if slot:
-        history.energy_sum = _f32(history.energy_sum + energy)
-        history.last_energy = _f32(history.last_energy + energy)
+        average_source = _f32(history.last_energy + energy)
+        history.last_energy = average_source
+        history.energy_sum = _f32(energy + history.energy_sum)
     else:
-        history.energy_sum = _f32(energy + history.last_energy)
-        history.last_energy = energy
-    history.energy_sum = _f32(history.energy_sum - history.energy_ring[slot])
+        average_source = _f32(energy + history.energy_sum)
+        history.last_energy = average_source
+        history.energy_sum = energy
+    history.last_energy = _f32(history.last_energy - history.energy_ring[slot])
     history.energy_ring[slot] = energy
     history.cursor += 1
     if history.cursor >= 15:
         history.cursor = 0
 
-    avg = _f32(history.energy_sum * 0.0625)
+    avg = _f32(average_source * 0.0625)
     descending_floor = _f32(0.5 * wwise_float_log(abs(avg)) - 15.0)
     out: list[float] = []
     for i in range(len(spectrum) // 2):

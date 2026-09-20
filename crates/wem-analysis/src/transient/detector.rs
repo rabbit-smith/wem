@@ -153,21 +153,25 @@ pub fn wwise_psy_mask(
             + spectrum[2] * 0.2 * spectrum[2],
     );
     let slot = history.cursor;
-    if slot != 0 {
-        history.energy_sum = f32_of(history.energy_sum + energy);
-        history.last_energy = f32_of(history.last_energy + energy);
+    let average_source = if slot != 0 {
+        let value = f32_of(history.last_energy + energy);
+        history.last_energy = value;
+        history.energy_sum = f32_of(energy + history.energy_sum);
+        value
     } else {
-        history.energy_sum = f32_of(energy + history.last_energy);
-        history.last_energy = energy;
-    }
-    history.energy_sum = f32_of(history.energy_sum - history.energy_ring[slot]);
+        let value = f32_of(energy + history.energy_sum);
+        history.last_energy = value;
+        history.energy_sum = energy;
+        value
+    };
+    history.last_energy = f32_of(history.last_energy - history.energy_ring[slot]);
     history.energy_ring[slot] = energy;
     history.cursor += 1;
     if history.cursor >= 15 {
         history.cursor = 0;
     }
 
-    let avg = f32_of(history.energy_sum * 0.0625);
+    let avg = f32_of(average_source * 0.0625);
     let mut descending_floor = f32_of(0.5 * wwise_float_log(avg.abs()) - 15.0);
     let mut out = Vec::with_capacity(spectrum.len() / 2);
     for i in 0..(spectrum.len() / 2) {

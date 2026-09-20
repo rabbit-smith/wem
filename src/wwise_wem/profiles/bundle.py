@@ -156,8 +156,8 @@ class RuntimeResourceManifest:
 class ProfileBundle:
     """Complete immutable profile identity and its runtime resource set.
 
-    Draft bundles (setup pending corpus export, e.g. the 2ch/48000 profile)
-    carry ``setup_available == False`` and a manifest-declared
+    Draft bundles that still await a setup export carry
+    ``setup_available == False`` and a manifest-declared
     ``pending_reason``; their setup-dependent accessors raise instead of
     silently forging a setup.
     """
@@ -210,6 +210,22 @@ class ProfileBundle:
 
     def verify_all(self) -> None:
         self.runtime_manifest.verify_all()
+
+
+def installed_profile_names(
+    resource: str = DEFAULT_INDEX,
+    *,
+    package: str = PACKAGE,
+) -> tuple[str, ...]:
+    """Return the complete profile inventory declared by an index."""
+    index_path = normalize_resource_path(resource)
+    index = _read_json(package, index_path, "index")
+    if index.get("schema") != INDEX_SCHEMA:
+        raise ValueError(f"unsupported profile index schema {index.get('schema')!r}")
+    profiles = _mapping(index.get("profiles"), "index.profiles")
+    if not profiles:
+        raise ValueError("profile index profiles must be a non-empty object")
+    return tuple(_string(name, "index profile name") for name in profiles)
 
 
 @lru_cache(maxsize=None)

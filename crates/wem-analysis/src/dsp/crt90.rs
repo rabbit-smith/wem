@@ -349,13 +349,11 @@ pub fn cilog(x: f64) -> f64 {
 mod tests {
     use super::*;
 
-    const TAU_HINT: f64 = 0.785_398_163_397_4483;
-
     #[test]
     fn atan_basic_values() {
         // known anchors for the atan series (sanity only; parity test locks bits)
         let a = ciatan(1.0);
-        assert!((a - TAU_HINT).abs() < 1e-15, "{a}");
+        assert!((a - std::f64::consts::FRAC_PI_4).abs() < 1e-15, "{a}");
         assert!(ciatan(0.0).abs() <= f64::from_bits(1)); // tiny path is identity (±0)
         assert_eq!(ciatan(-1.0), -a);
     }
