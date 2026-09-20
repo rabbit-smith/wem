@@ -5,6 +5,35 @@ use crate::bitio::OggPack;
 use crate::codebook::Codebook;
 use crate::setup::ResidueSetup;
 
+mod sealed {
+    pub trait Sealed {}
+
+    impl Sealed for f32 {}
+    impl Sealed for f64 {}
+}
+
+/// A supported spectrum sample consumed at the codec's normative f32 boundary.
+///
+/// This trait is sealed because the packet path only defines deterministic
+/// conversion semantics for the two built-in floating-point carriers.
+pub trait F32Sample: sealed::Sealed + Copy {
+    fn as_f32(self) -> f32;
+}
+
+impl F32Sample for f32 {
+    #[inline]
+    fn as_f32(self) -> f32 {
+        self
+    }
+}
+
+impl F32Sample for f64 {
+    #[inline]
+    fn as_f32(self) -> f32 {
+        self as f32
+    }
+}
+
 /// Residue packing errors (Python: `ValueError` family).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResidueError {
@@ -18,6 +47,27 @@ pub enum ResidueError {
     BookIndexOutOfRange { book_id: i64, books: usize },
     /// The phrasebook does not code a class combination required by the setup.
     UnencodableClassword { entry: i64, entries: i64 },
+    /// Residue partitions must contain at least one scalar.
+    InvalidPartitionSize,
+    /// Type-2 residue requires at least one channel.
+    InvalidChannelCount,
+    /// Residue rows and use flags do not cover the declared channels.
+    ChannelLayoutMismatch {
+        channels: usize,
+        residual_rows: usize,
+        use_flags: usize,
+    },
+    /// The setup's per-class tables do not cover every declared class.
+    ClassTablesTooShort {
+        classifications: usize,
+        cascades: usize,
+        stage_books: usize,
+    },
+    /// A stage codebook vector does not tile one partition exactly.
+    IncompatibleBookDimension {
+        partition_size: usize,
+        dimension: usize,
+    },
 }
 
 impl std::fmt::Display for ResidueError {
@@ -38,6 +88,35 @@ impl std::fmt::Display for ResidueError {
                     "type-2 classword entry {entry} is not coded in 0..{entries}"
                 )
             }
+            ResidueError::InvalidPartitionSize => {
+                write!(f, "residue partition size must be positive")
+            }
+            ResidueError::InvalidChannelCount => {
+                write!(f, "type-2 residue channel count must be positive")
+            }
+            ResidueError::ChannelLayoutMismatch {
+                channels,
+                residual_rows,
+                use_flags,
+            } => write!(
+                f,
+                "residue channel layout needs {channels} rows and flags, got {residual_rows} rows and {use_flags} flags"
+            ),
+            ResidueError::ClassTablesTooShort {
+                classifications,
+                cascades,
+                stage_books,
+            } => write!(
+                f,
+                "residue setup declares {classifications} classes but has {cascades} cascades and {stage_books} stage-book rows"
+            ),
+            ResidueError::IncompatibleBookDimension {
+                partition_size,
+                dimension,
+            } => write!(
+                f,
+                "residue partition size {partition_size} is not divisible by codebook dimension {dimension}"
+            ),
         }
     }
 }
@@ -57,6 +136,9 @@ const WWISE_RESIDUE_44_LOW_UN_METRICS_AVG: [i64; 7] = [-1, 25, -1, 45, -1, -1, -
 pub fn partitions_to_read(residue: &ResidueSetup, n_spectrum: Option<usize>) -> i64 {
     let mut end = residue.end;
     let part = residue.partition_size;
+    if part == 0 {
+        return 0;
+    }
     if let Some(n) = n_spectrum {
         if end > n as u64 {
             end = n as u64;
@@ -100,13 +182,19 @@ pub fn classify_partition(samples: &[f64], nclass: u64) -> Result<i64, ResidueEr
     if nclass != 8 {
         return Err(ResidueError::UnsupportedClassCount { nclass });
     }
-    let values: Vec<i64> = samples.iter().map(|s| quantize_residue_value(*s)).collect();
-    if values.is_empty() {
+    if samples.is_empty() {
         return Ok(0);
     }
-    let peak = values.iter().map(|value| value.abs()).max().unwrap_or(0);
-    let sum_abs: i64 = values.iter().map(|value| value.abs()).sum();
-    let average_x100 = 100 * sum_abs / values.len() as i64;
+    let mut peak = 0i64;
+    let mut sum_abs = 0i64;
+    for sample in samples {
+        let magnitude = quantize_residue_value(*sample)
+            .checked_abs()
+            .unwrap_or(i64::MAX);
+        peak = peak.max(magnitude);
+        sum_abs = sum_abs.saturating_add(magnitude);
+    }
+    let average_x100 = sum_abs.saturating_mul(100) / samples.len() as i64;
     for classification in 0..WWISE_RESIDUE_44_LOW_UN_METRICS_MAX.len() {
         let max_metric = WWISE_RESIDUE_44_LOW_UN_METRICS_MAX[classification];
         let avg_metric = WWISE_RESIDUE_44_LOW_UN_METRICS_AVG[classification];
@@ -124,6 +212,36 @@ fn book_or_err(books: &[Codebook], book_id: i64) -> Result<&Codebook, ResidueErr
             book_id,
             books: books.len(),
         })
+}
+
+fn validate_class_tables(residue: &ResidueSetup) -> Result<(), ResidueError> {
+    let classifications = usize::try_from(residue.classifications).unwrap_or(usize::MAX);
+    if classifications == 0
+        || residue.cascades.len() < classifications
+        || residue.books.len() < classifications
+    {
+        return Err(ResidueError::ClassTablesTooShort {
+            classifications,
+            cascades: residue.cascades.len(),
+            stage_books: residue.books.len(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_channel_layout(
+    residuals: &[Vec<i64>],
+    ch_used: &[bool],
+    channels: usize,
+) -> Result<(), ResidueError> {
+    if residuals.len() < channels || ch_used.len() != channels {
+        return Err(ResidueError::ChannelLayoutMismatch {
+            channels,
+            residual_rows: residuals.len(),
+            use_flags: ch_used.len(),
+        });
+    }
+    Ok(())
 }
 
 /// Pack classwords classifications as mixed-radix classbook entry
@@ -172,6 +290,9 @@ pub fn pack_residue_silent(
     n_channels: u32,
     n_spectrum: Option<usize>,
 ) -> Result<(), ResidueError> {
+    if residue.partition_size == 0 {
+        return Err(ResidueError::InvalidPartitionSize);
+    }
     if residue.cascades.first().copied().unwrap_or(0) != 0 {
         return Err(ResidueError::SilentRequiresEmptyCascade);
     }
@@ -207,6 +328,11 @@ pub fn pack_residue_vq(
     let begin = residue.begin as usize;
     let end = residue.end as usize;
     let part = residue.partition_size as usize;
+    if part == 0 {
+        return Err(ResidueError::InvalidPartitionSize);
+    }
+    validate_class_tables(residue)?;
+    validate_channel_layout(residuals, ch_used, ch_used.len())?;
     let npart = partitions_to_read(residue, n_spectrum);
     if npart <= 0 || !ch_used.iter().any(|&u| u) {
         return Ok(());
@@ -226,12 +352,8 @@ pub fn pack_residue_vq(
             // Wwise's mapping-forward path converts the floor-divided MDCT to
             // integer residue before both classing and VQ.  Keep the mutable
             // work surface numeric for `best_vq` while preserving those
-            // exact integral inputs.
-            // exact integral inputs (Python: float(quantize_residue_value(v))).
-            let mut row: Vec<f64> = residuals[ch]
-                .iter()
-                .map(|&value| quantize_residue_value(value as f64) as f64)
-                .collect();
+            // exact integral inputs (Python: float(value)).
+            let mut row: Vec<f64> = residuals[ch].iter().map(|&value| value as f64).collect();
             // ensure length
             if row.len() < end {
                 row.resize(end, 0.0);
@@ -274,6 +396,8 @@ pub fn pack_residue_vq(
     // Interleave the phrasebook with stage 0 exactly as _01forward does.
     // This matters for bit identity: phrase entries are not a contiguous
     // prefix followed by all VQ vectors.
+    let mut class_group = Vec::with_capacity(classwords);
+    let mut vq_target = Vec::new();
     for s in 0..8u32 {
         for i in (0..npart as usize).step_by(classwords.max(1)) {
             if s == 0 {
@@ -281,17 +405,16 @@ pub fn pack_residue_vq(
                     if !ch_used[j] {
                         continue;
                     }
-                    let group: Vec<i64> = (0..classwords)
-                        .map(|k| {
-                            let idx = i + k;
-                            if idx < npart as usize {
-                                partword[j][idx]
-                            } else {
-                                0
-                            }
-                        })
-                        .collect();
-                    pack_classbook_entry(op, cb, &group, nclass)?;
+                    class_group.clear();
+                    class_group.extend((0..classwords).map(|k| {
+                        let idx = i + k;
+                        if idx < npart as usize {
+                            partword[j][idx]
+                        } else {
+                            0
+                        }
+                    }));
+                    pack_classbook_entry(op, cb, &class_group, nclass)?;
                 }
             }
 
@@ -311,18 +434,21 @@ pub fn pack_residue_vq(
                     }
                     let book = book_or_err(books, book_id)?;
                     let dim = book.dim() as usize;
+                    if dim == 0 || !part.is_multiple_of(dim) {
+                        return Err(ResidueError::IncompatibleBookDimension {
+                            partition_size: part,
+                            dimension: dim,
+                        });
+                    }
                     let off = begin + partition * part;
                     // Scratch VQ target: reused across dim steps of this
                     // partition instead of a per-chunk allocation, with the
                     // same zero-padding semantics as before.
-                    let mut vq_target: Vec<f64> = Vec::with_capacity(dim);
+                    vq_target.clear();
+                    vq_target.reserve(dim);
                     for v in (0..part).step_by(dim.max(1)) {
-                        let take = (off + v + dim).min(work[j].len()) - off - v;
                         vq_target.clear();
-                        vq_target.extend_from_slice(&work[j][off + v..off + v + take]);
-                        if vq_target.len() < dim {
-                            vq_target.resize(dim, 0.0);
-                        }
+                        vq_target.extend_from_slice(&work[j][off + v..off + v + dim]);
                         let entry = book.best_vq(&vq_target).map_err(|_| {
                             ResidueError::BookIndexOutOfRange {
                                 book_id,
@@ -380,7 +506,9 @@ pub fn classify_partition_type2(
     let mut magnitude_peak = 0i64;
     let mut angle_peak = 0i64;
     for (index, sample) in samples_flat.iter().enumerate() {
-        let magnitude = quantize_residue_value(*sample).abs();
+        let magnitude = quantize_residue_value(*sample)
+            .checked_abs()
+            .unwrap_or(i64::MAX);
         if index % channels == 0 {
             if magnitude > magnitude_peak {
                 magnitude_peak = magnitude;
@@ -428,34 +556,38 @@ fn pack_classbook_entry_type2(
         })
 }
 
-/// Pack residue type 2 (the libvorbis res2_inverse flat-domain layout)
-/// (Python `pack_residue_type2`).
-///
-/// Type 2 codes the residue on the flat (bin * n_channels + channel)
-/// domain: one class per partition shared across all channels, classword
-/// written once per partition-group, VQ vectors slot-major over
-/// (bin, channel). Mirrors the decoder's res2_inverse bit schedule
-/// (scripts/decode_wem.py::decode_residue_type2), so encoded packets
-/// close strictly against that published decoder.
-///
-/// `residuals[ch][bin]`: coupled residue rows (floor-divided MDCT, mapping0
-/// coupling already applied).
-#[allow(clippy::too_many_arguments)] // signature mirrors Python pack_residue_type2
-pub fn pack_residue_type2(
+/// Integer-domain type-2 packer used after the mapping-forward quantizer.
+/// Keeping this boundary explicit avoids converting integer residue to float
+/// and quantizing it again before VQ.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn pack_residue_type2_quantized(
     op: &mut OggPack,
     residue: &ResidueSetup,
     books: &[Codebook],
-    residuals: &[Vec<f64>],
+    residuals: &[Vec<i64>],
     ch_used: &[bool],
     n_spectrum: usize,
     n_channels: usize,
     long_block: bool,
 ) -> Result<(), ResidueError> {
+    if n_channels == 0 {
+        return Err(ResidueError::InvalidChannelCount);
+    }
+    if residue.classifications != (TYPE2_CLASS_MAGNITUDE_METRICS.len() + 1) as u64 {
+        return Err(ResidueError::UnsupportedClassCount {
+            nclass: residue.classifications,
+        });
+    }
+    validate_class_tables(residue)?;
+    validate_channel_layout(residuals, ch_used, n_channels)?;
     let max_end = n_spectrum * n_channels;
     let begin = residue.begin as usize;
     let end = (residue.end as usize).min(max_end);
     let span = end.saturating_sub(begin);
     let part = residue.partition_size as usize;
+    if part == 0 {
+        return Err(ResidueError::InvalidPartitionSize);
+    }
     let partvals = if span > 0 { span / part } else { 0 };
     if partvals == 0 || !ch_used.iter().any(|&u| u) {
         return Ok(());
@@ -468,16 +600,12 @@ pub fn pack_residue_type2(
     let ppw = if cb.dim() > 0 { cb.dim() as usize } else { 1 };
     let partwords = partvals.div_ceil(ppw);
 
-    // working residual copies (mutable), quantized as the forward path does
+    // VQ subtracts floating-point codebook entries from the integer-domain
+    // starting values, so materialize the mutable float workspace once.
     let mut work: Vec<Vec<f64>> = Vec::with_capacity(n_channels);
     for ch in 0..n_channels {
         if ch_used[ch] {
-            work.push(
-                residuals[ch]
-                    .iter()
-                    .map(|value| quantize_residue_value(*value) as f64)
-                    .collect(),
-            );
+            work.push(residuals[ch].iter().map(|value| *value as f64).collect());
         } else {
             work.push(Vec::new());
         }
@@ -487,6 +615,7 @@ pub fn pack_residue_type2(
     // flat (bin*ch + ch) order so the metric sees the values the VQ stages
     // will write (mirror of the _vv_add_slots layout)
     let mut partword: Vec<Vec<i64>> = vec![vec![0i64; ppw]; partwords];
+    let mut flat = Vec::with_capacity(part);
     // `lw`/`k` double as the partition-group index pair of the 2-D
     // partword, so range loops are intentional (clippy's iter_mut
     // suggestion would walk rows, not columns).
@@ -498,7 +627,7 @@ pub fn pack_residue_type2(
                 break;
             }
             let off = begin + p * part;
-            let mut flat = Vec::with_capacity(part);
+            flat.clear();
             for f in off..off + part {
                 let bin_idx = f / n_channels;
                 let ch_idx = f % n_channels;
@@ -510,6 +639,8 @@ pub fn pack_residue_type2(
         }
     }
 
+    let mut slots = Vec::new();
+    let mut target = Vec::new();
     #[allow(clippy::needless_range_loop)]
     for s in 0..8u32 {
         for lw in 0..partwords {
@@ -541,7 +672,8 @@ pub fn pack_residue_type2(
                 let m = (off + part) / n_channels;
                 let mut chptr = 0usize;
                 while i < m {
-                    let mut slots = Vec::with_capacity(dim);
+                    slots.clear();
+                    slots.reserve(dim);
                     for _ in 0..dim {
                         if i >= m {
                             break;
@@ -553,7 +685,8 @@ pub fn pack_residue_type2(
                             i += 1;
                         }
                     }
-                    let mut target = vec![0.0f64; dim];
+                    target.clear();
+                    target.resize(dim, 0.0);
                     for (j, &(bin_idx, ch_idx)) in slots.iter().enumerate() {
                         if ch_idx < work.len() && bin_idx < work[ch_idx].len() {
                             target[j] = work[ch_idx][bin_idx];
@@ -592,7 +725,7 @@ pub fn pack_residue_type2(
 
 /// Multiplicative floor: residue = mdct / floor_amp (vorbis convention)
 /// (Python `mdct_to_residue`).
-pub fn mdct_to_residue(mdct: &[f32], floor_amp: &[f64], floor_eps: f64) -> Vec<f64> {
+pub fn mdct_to_residue<S: F32Sample>(mdct: &[S], floor_amp: &[f64], floor_eps: f64) -> Vec<f64> {
     let n = mdct.len().min(floor_amp.len());
     let mut out = Vec::with_capacity(mdct.len());
     for i in 0..n {
@@ -600,11 +733,11 @@ pub fn mdct_to_residue(mdct: &[f32], floor_amp: &[f64], floor_eps: f64) -> Vec<f
         if f.abs() < floor_eps {
             out.push(0.0);
         } else {
-            out.push((mdct[i] as f64) / f);
+            out.push((mdct[i].as_f32() as f64) / f);
         }
     }
     if mdct.len() > n {
-        out.extend(mdct[n..].iter().map(|v| *v as f64));
+        out.extend(mdct[n..].iter().map(|value| value.as_f32() as f64));
     }
     out
 }
@@ -664,5 +797,56 @@ mod tests {
         assert_eq!(classify_partition_type2(&[3.0, 5.0], 10, 2, false), 6);
         assert_eq!(classify_partition_type2(&[10.0, 13.0], 10, 2, false), 7);
         assert_eq!(classify_partition_type2(&[40.0, 15.0], 10, 2, false), 9);
+    }
+
+    #[test]
+    fn malformed_residue_inputs_return_errors() {
+        let mut residue = ResidueSetup {
+            residue_type: 1,
+            begin: 0,
+            end: 16,
+            partition_size: 8,
+            classifications: 8,
+            classbook: 0,
+            cascades: vec![0; 8],
+            books: vec![[-1; 8]; 8],
+            bit_start: 0,
+            bit_end: 0,
+        };
+        let mut op = OggPack::new(16);
+        let err = pack_residue_vq(&mut op, &residue, &[], &[], &[true], Some(16))
+            .expect_err("missing residue row must be rejected");
+        assert!(matches!(err, ResidueError::ChannelLayoutMismatch { .. }));
+
+        residue.cascades.clear();
+        let err = pack_residue_vq(&mut op, &residue, &[], &[vec![0; 16]], &[true], Some(16))
+            .expect_err("short class tables must be rejected");
+        assert!(matches!(err, ResidueError::ClassTablesTooShort { .. }));
+
+        residue.residue_type = 2;
+        residue.classifications = 1;
+        residue.cascades = vec![0];
+        residue.books = vec![[-1; 8]];
+        let err = pack_residue_type2_quantized(
+            &mut op,
+            &residue,
+            &[],
+            &[vec![0; 16]],
+            &[true],
+            16,
+            1,
+            false,
+        )
+        .expect_err("unsupported type-2 class count must be rejected");
+        assert_eq!(err, ResidueError::UnsupportedClassCount { nclass: 1 });
+    }
+
+    #[test]
+    fn extreme_classifier_input_saturates_without_panicking() {
+        assert_eq!(classify_partition(&[f64::NEG_INFINITY], 8).unwrap(), 7);
+        assert_eq!(
+            classify_partition_type2(&[f64::NEG_INFINITY, 0.0], 10, 2, false),
+            9
+        );
     }
 }

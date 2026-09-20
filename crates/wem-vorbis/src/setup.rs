@@ -400,7 +400,7 @@ pub fn pack_setup(info: &SetupInfo) -> Vec<u8> {
         pack_mode(&mut op, md);
     }
     // trailing zero bits already in buffer; round up to byte
-    op.get_buffer()
+    op.into_buffer()
 }
 
 /// Parse a Wwise Vorbis setup packet (Python `parse_setup`).

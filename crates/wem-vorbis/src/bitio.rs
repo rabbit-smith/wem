@@ -69,7 +69,7 @@ impl<'a> BitReader<'a> {
     }
 }
 
-/// LSB-first bit packer mirroring the x86 struct layout (Python `OggPack`).
+/// LSB-first bit packer (Python `OggPack`).
 ///
 /// Bits are accumulated in a u64 (LSB-first) and flushed as whole bytes the
 /// moment 8 bits are ready; the emitted byte stream is bit-identical to the
@@ -77,8 +77,6 @@ impl<'a> BitReader<'a> {
 #[derive(Debug)]
 pub struct OggPack {
     buffer: Vec<u8>,
-    /// Number of complete bytes emitted into the buffer.
-    ptr: usize,
     /// Pending bits, LSB-first.
     acc: u64,
     /// Valid bit count in `acc` (always < 8 after a flush).
@@ -86,13 +84,10 @@ pub struct OggPack {
 }
 
 impl OggPack {
-    /// Allocate `initial` bytes of zeroed storage.
+    /// Reserve space for approximately `initial` output bytes.
     pub fn new(initial: usize) -> Self {
-        let mut buffer = vec![0u8; initial.max(1)];
-        buffer[0] = 0;
         Self {
-            buffer,
-            ptr: 0,
+            buffer: Vec::with_capacity(initial.max(1)),
             acc: 0,
             accbits: 0,
         }
@@ -114,11 +109,7 @@ impl OggPack {
         self.acc |= v << self.accbits;
         self.accbits += bits;
         while self.accbits >= 8 {
-            if self.ptr + 1 >= self.buffer.len() {
-                self.buffer.resize(self.buffer.len() + 256, 0);
-            }
-            self.buffer[self.ptr] = (self.acc & 0xFF) as u8;
-            self.ptr += 1;
+            self.buffer.push((self.acc & 0xFF) as u8);
             self.acc >>= 8;
             self.accbits -= 8;
         }
@@ -127,7 +118,7 @@ impl OggPack {
 
     /// Bytes consumed so far (rounded up).
     pub fn bytes_used(&self) -> usize {
-        self.ptr + (self.accbits + 7) as usize / 8
+        self.buffer.len() + (self.accbits + 7) as usize / 8
     }
 
     /// Return the packed bytes.
@@ -135,21 +126,26 @@ impl OggPack {
     /// Pending bits (the final partial byte) live in the accumulator, not the
     /// buffer, so they are appended here instead of read back from storage.
     pub fn get_buffer(&self) -> Vec<u8> {
-        let mut out = self.buffer[..self.ptr].to_vec();
+        let mut out = self.buffer.clone();
         if self.accbits > 0 {
             out.push((self.acc & 0xFF) as u8);
         }
         out
     }
 
+    /// Finish packing and return the owned byte buffer without copying it.
+    pub fn into_buffer(mut self) -> Vec<u8> {
+        if self.accbits > 0 {
+            self.buffer.push((self.acc & 0xFF) as u8);
+        }
+        self.buffer
+    }
+
     /// Reset to the start of the buffer (Python `reset`).
     pub fn reset(&mut self) {
-        self.ptr = 0;
+        self.buffer.clear();
         self.acc = 0;
         self.accbits = 0;
-        if !self.buffer.is_empty() {
-            self.buffer[0] = 0;
-        }
     }
 }
 

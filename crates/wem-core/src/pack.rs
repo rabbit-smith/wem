@@ -8,8 +8,8 @@
 
 use wem_analysis::model::PsyFrame;
 use wem_vorbis::codebook::Codebook;
-use wem_vorbis::floor_fit::floor1_fit_wwise;
-use wem_vorbis::packet_encoder::{pack_block_packet_details, PacketError};
+use wem_vorbis::floor_fit::floor1_fit_wwise_carriers;
+use wem_vorbis::packet_encoder::{pack_block_packet, pack_block_packet_details, PacketError};
 use wem_vorbis::setup::SetupInfo;
 
 /// Packet bytes plus the unwrapped 10-bit floor posts used to create them
@@ -28,6 +28,75 @@ pub struct EncodedPacket {
     pub quantized_residue: Vec<Vec<i64>>,
 }
 
+fn fit_floor_posts(
+    setup: &SetupInfo,
+    analysis: &PsyFrame,
+    channels: u32,
+) -> Result<Vec<Option<Vec<i64>>>, PacketError> {
+    let ch = channels as usize;
+    let row_counts = [
+        analysis.post.len(),
+        analysis.raw_mdct().len(),
+        analysis.side.len(),
+        analysis.coupling_peak.len(),
+    ];
+    if let Some(got) = row_counts.into_iter().find(|count| *count != ch) {
+        return Err(PacketError::AnalysisChannelsMismatch { want: ch, got });
+    }
+    let mode = analysis.window().current() as u32;
+    let mode_config = setup
+        .modes
+        .get(mode as usize)
+        .ok_or(PacketError::ModeOutOfRange {
+            mode,
+            modes: setup.nmodes,
+        })?;
+    let mapping =
+        setup
+            .maps
+            .get(mode_config.mapping as usize)
+            .ok_or(PacketError::MappingOutOfRange {
+                mapping: mode_config.mapping,
+                maps: setup.nmaps,
+            })?;
+    let mut posts = Vec::with_capacity(ch);
+    for (channel, (post_curve, raw_curve)) in analysis
+        .post
+        .iter()
+        .zip(analysis.raw_mdct().iter())
+        .enumerate()
+    {
+        let submap = if mapping.submaps > 1 {
+            *mapping
+                .chmux
+                .get(channel)
+                .ok_or(PacketError::ChannelMuxTooShort {
+                    got: mapping.chmux.len(),
+                    want: ch,
+                })?
+        } else {
+            0
+        };
+        let floor_index =
+            *mapping
+                .floors
+                .get(submap as usize)
+                .ok_or(PacketError::FloorMapTooShort {
+                    got: mapping.floors.len(),
+                    want: mapping.submaps as usize,
+                })?;
+        let floor = setup
+            .floors
+            .get(floor_index as usize)
+            .ok_or(PacketError::FloorIndexOutOfRange { index: floor_index })?;
+        posts.push(
+            floor1_fit_wwise_carriers(post_curve, raw_curve, floor, Some(raw_curve.len()))
+                .map_err(PacketError::FloorFit)?,
+        );
+    }
+    Ok(posts)
+}
+
 /// Fit floor1 curves and pack floor/residue for one analysis frame
 /// (Python `pack_analysis_frame`).
 ///
@@ -41,55 +110,16 @@ pub fn pack_analysis_frame(
     analysis: &PsyFrame,
     channels: u32,
 ) -> Result<EncodedPacket, PacketError> {
-    let ch = channels as usize;
-    if analysis.post.len() != ch || analysis.side.len() != ch {
-        return Err(PacketError::AnalysisChannelsMismatch {
-            want: ch,
-            got: analysis.post.len(),
-        });
-    }
+    let posts = fit_floor_posts(setup, analysis, channels)?;
     let mode = analysis.window().current() as u32;
-    let mapping = &setup.maps[setup.modes[mode as usize].mapping as usize];
-    let mut posts: Vec<Option<Vec<i64>>> = Vec::with_capacity(ch);
-    for (channel, (post_curve, raw_curve)) in analysis
-        .post
-        .iter()
-        .zip(analysis.raw_mdct().iter())
-        .enumerate()
-    {
-        let submap = if mapping.submaps > 1 {
-            mapping.chmux[channel]
-        } else {
-            0
-        };
-        let floor = &setup.floors[mapping.floors[submap as usize] as usize];
-        // The analysis rows carry f32 values in f64 carriers; recover the
-        // exact f32 bit patterns for the fit (Python float boundary).
-        let post_f32: Vec<f32> = post_curve.iter().map(|value| *value as f32).collect();
-        let raw_f32: Vec<f32> = raw_curve.iter().map(|value| *value as f32).collect();
-        posts.push(
-            floor1_fit_wwise(&post_f32, &raw_f32, floor, Some(raw_f32.len()))
-                .map_err(PacketError::FloorFit)?,
-        );
-    }
-    let mdct: Vec<Vec<f32>> = analysis
-        .side
-        .iter()
-        .map(|row| row.iter().map(|value| *value as f32).collect())
-        .collect();
-    let coupling_peak: Vec<Vec<f32>> = analysis
-        .coupling_peak
-        .iter()
-        .map(|row| row.iter().map(|value| *value as f32).collect())
-        .collect();
     let packet_result = pack_block_packet_details(
         setup,
         books,
         channels,
         mode,
         &posts,
-        &mdct,
-        Some(&coupling_peak),
+        &analysis.side,
+        Some(&analysis.coupling_peak),
         true,
         true,
     )?;
@@ -99,4 +129,27 @@ pub fn pack_analysis_frame(
         packet: packet_result.packet,
         quantized_residue: packet_result.quantized_residue,
     })
+}
+
+/// Pack one analysis frame for the production encoder without retaining the
+/// diagnostic frame and residue snapshots returned by [`pack_analysis_frame`].
+#[doc(hidden)]
+pub fn pack_analysis_packet(
+    setup: &SetupInfo,
+    books: &[Codebook],
+    analysis: &PsyFrame,
+    channels: u32,
+) -> Result<Vec<u8>, PacketError> {
+    let posts = fit_floor_posts(setup, analysis, channels)?;
+    pack_block_packet(
+        setup,
+        books,
+        channels,
+        analysis.window().current() as u32,
+        &posts,
+        &analysis.side,
+        Some(&analysis.coupling_peak),
+        true,
+        true,
+    )
 }

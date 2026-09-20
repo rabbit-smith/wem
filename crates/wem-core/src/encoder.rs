@@ -29,7 +29,7 @@ use wem_vorbis::codebook::Codebook;
 use wem_vorbis::setup::SetupInfo;
 
 use crate::error::{EncoderError, InternalError};
-use crate::pack::pack_analysis_frame;
+use crate::pack::pack_analysis_packet;
 
 /// Minimum PCM frames for one encode (Python: 4096-frame lower bound).
 pub const MIN_PCM_FRAMES: u32 = 4096;
@@ -551,13 +551,13 @@ impl Encoder {
         let mut audio_packets: Vec<Vec<u8>> = Vec::with_capacity(windows.len());
         for window in windows {
             let analysis = session.analyze_window(window, None)?;
-            let packet = pack_analysis_frame(
+            let packet = pack_analysis_packet(
                 &self.resources.setup,
                 &self.resources.codebooks,
                 &analysis,
                 channels,
             )?;
-            audio_packets.push(packet.packet);
+            audio_packets.push(packet);
         }
         if audio_packets.len() != modes.len() {
             return Err(EncoderError::Internal(InternalError::Invariant {

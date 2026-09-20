@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use wem_analysis::session::AnalysisSession;
 use wem_container::wem::build_vorbis_wem;
-use wem_core::pack::pack_analysis_frame;
+use wem_core::pack::pack_analysis_packet;
 use wem_core::{Encoder, Pcm16, MIN_PCM_FRAMES};
 
 fn main() {
@@ -65,14 +65,13 @@ fn main() {
     let audio_packets: Vec<Vec<u8>> = analyses
         .iter()
         .map(|analysis| {
-            pack_analysis_frame(
+            pack_analysis_packet(
                 encoder.setup(),
                 encoder.codebooks(),
                 analysis,
                 encoder.profile().channels() as u32,
             )
             .expect("frame packs")
-            .packet
         })
         .collect();
     let vorbis_packing_ms = start.elapsed().as_secs_f64() * 1e3;

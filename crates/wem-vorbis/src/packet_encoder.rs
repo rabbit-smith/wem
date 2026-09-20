@@ -17,8 +17,8 @@ use crate::floor::{
 };
 use crate::floor_fit::{floor1_quantize_posts, FloorFitError};
 use crate::residue::{
-    mdct_to_residue, pack_residue_silent, pack_residue_type2, pack_residue_vq,
-    quantize_residue_value, ResidueError,
+    mdct_to_residue, pack_residue_silent, pack_residue_type2_quantized, pack_residue_vq,
+    quantize_residue_value, F32Sample, ResidueError,
 };
 use crate::setup::CouplingStep;
 use crate::setup::{ilog, SetupInfo};
@@ -58,6 +58,26 @@ pub enum PacketError {
     AnalysisChannelsMismatch { want: usize, got: usize },
     /// Stereo coupling peak rows do not match the MDCT geometry.
     CouplingPeakGeometry,
+    /// Channel mux row is shorter than the declared channel count.
+    ChannelMuxTooShort { got: usize, want: usize },
+    /// Floor map is shorter than the declared submap count.
+    FloorMapTooShort { got: usize, want: usize },
+    /// Mapping declares no residue submap.
+    MissingResidueSubmap,
+    /// Floor multiplier has no range table entry.
+    FloorMultiplierOutOfRange { multiplier: u64 },
+    /// Floor class arrays do not contain the referenced class.
+    FloorClassOutOfRange { class: usize },
+    /// Mapping coupling references a missing channel.
+    CouplingChannelOutOfRange { channel: usize, channels: usize },
+    /// Coupled residue rows have different lengths.
+    CouplingRowLengthMismatch,
+    /// A coupling step references the same channel twice.
+    CouplingChannelsEqual { channel: usize },
+    /// Analysis produced a non-finite sample at the packet boundary.
+    NonFiniteAnalysisSample { channel: usize, bin: usize },
+    /// Integer-domain stereo coupling exceeded its representable range.
+    ResidueCouplingOverflow,
 }
 
 impl std::fmt::Display for PacketError {
@@ -109,6 +129,37 @@ impl std::fmt::Display for PacketError {
             PacketError::CouplingPeakGeometry => {
                 write!(f, "stereo coupling peak rows differ from MDCT geometry")
             }
+            PacketError::ChannelMuxTooShort { got, want } => {
+                write!(f, "channel mux row has {got} entries, expected {want}")
+            }
+            PacketError::FloorMapTooShort { got, want } => {
+                write!(f, "floor map has {got} entries, expected {want}")
+            }
+            PacketError::MissingResidueSubmap => write!(f, "mapping has no residue submap"),
+            PacketError::FloorMultiplierOutOfRange { multiplier } => {
+                write!(f, "floor multiplier {multiplier} has no range table")
+            }
+            PacketError::FloorClassOutOfRange { class } => {
+                write!(f, "floor class {class} is structurally incomplete")
+            }
+            PacketError::CouplingChannelOutOfRange { channel, channels } => {
+                write!(f, "coupling channel {channel} out of range 0..{channels}")
+            }
+            PacketError::CouplingRowLengthMismatch => {
+                write!(f, "coupled residue rows have different lengths")
+            }
+            PacketError::CouplingChannelsEqual { channel } => {
+                write!(f, "coupling step references channel {channel} twice")
+            }
+            PacketError::NonFiniteAnalysisSample { channel, bin } => {
+                write!(
+                    f,
+                    "analysis sample at channel {channel}, bin {bin} is not finite"
+                )
+            }
+            PacketError::ResidueCouplingOverflow => {
+                write!(f, "integer stereo coupling exceeded the residue range")
+            }
         }
     }
 }
@@ -130,28 +181,47 @@ fn pick_subclass_cval(
     y_slice: &[i64],
     books: &[Codebook],
 ) -> Result<u64, PacketError> {
-    let cbits = floor.class_subs[cl as usize];
-    let cdim = floor.class_dims[cl as usize];
-    let csub = (1u64 << cbits) - 1;
-    let sbooks = &floor.subclass_books[cl as usize];
+    let class = cl as usize;
+    let cbits = *floor
+        .class_subs
+        .get(class)
+        .ok_or(PacketError::FloorClassOutOfRange { class })?;
+    let cdim = *floor
+        .class_dims
+        .get(class)
+        .ok_or(PacketError::FloorClassOutOfRange { class })?;
+    let csub = 1u64
+        .checked_shl(cbits as u32)
+        .ok_or(PacketError::FloorClassOutOfRange { class })?
+        - 1;
+    let sbooks = floor
+        .subclass_books
+        .get(class)
+        .ok_or(PacketError::FloorClassOutOfRange { class })?;
     if cbits == 0 {
         return Ok(0);
     }
     let mut best = 0u64;
     let mut best_score = -1i64;
-    let mut limit = 1u64 << (cbits * cdim);
-    // cap search for large dims
-    if limit > 4096 {
-        limit = 4096;
-    }
+    let exponent = cbits.saturating_mul(cdim);
+    let limit = if exponent >= 12 {
+        4096
+    } else {
+        1u64 << exponent
+    };
     for cval in 0..limit {
         let mut t = cval;
         let mut score = 0i64;
         let mut ok = true;
         for j in 0..cdim {
-            let book_id = sbooks[(t & csub) as usize];
+            let book_id = *sbooks
+                .get((t & csub) as usize)
+                .ok_or(PacketError::FloorClassOutOfRange { class })?;
             t >>= cbits;
-            let y = y_slice[j as usize];
+            let y = *y_slice.get(j as usize).ok_or(PacketError::BadYLength {
+                got: y_slice.len(),
+                want: cdim as usize,
+            })?;
             if book_id < 0 {
                 if y != 0 {
                     ok = false;
@@ -159,7 +229,9 @@ fn pick_subclass_cval(
                 }
                 score += 1;
             } else {
-                let b = &books[book_id as usize];
+                let b = books
+                    .get(book_id as usize)
+                    .ok_or(PacketError::SubclassBookIndexOutOfRange { book_id })?;
                 if b.entry_is_used(y) {
                     score += 2;
                 } else if b.has_used_within_two(y) {
@@ -190,6 +262,12 @@ pub fn pack_audio_header(
     mode: u32,
 ) -> Result<(), PacketError> {
     let nmodes = setup.nmodes;
+    if mode as u64 >= nmodes || setup.modes.get(mode as usize).is_none() {
+        return Err(PacketError::ModeOutOfRange {
+            mode,
+            modes: nmodes,
+        });
+    }
     let mode_bits = if nmodes > 1 { ilog(nmodes - 1) } else { 0 };
     if mode_bits != 0 {
         op.write(mode as u64, mode_bits)
@@ -219,7 +297,11 @@ pub fn pack_floor1_body(
         .floors
         .get(floor_index as usize)
         .ok_or(PacketError::FloorIndexOutOfRange { index: floor_index })?;
-    let rng = FLOOR1_RANGES[floor.multiplier as usize];
+    let rng = *FLOOR1_RANGES.get(floor.multiplier as usize).ok_or(
+        PacketError::FloorMultiplierOutOfRange {
+            multiplier: floor.multiplier,
+        },
+    )?;
     let ybits = ilog(rng - 1);
     let nvals = 2 + floor.x_list.len();
     if Y.len() != nvals {
@@ -246,30 +328,56 @@ pub fn pack_floor1_body(
     let mut ppos = 2usize;
     for &p in &floor.partition_classes {
         let cl = p as usize;
-        let cdim = floor.class_dims[cl];
-        let cbits = floor.class_subs[cl];
-        let csub = (1u64 << cbits) - 1;
-        let y_slice = &Y[ppos..ppos + cdim as usize];
+        let cdim = *floor
+            .class_dims
+            .get(cl)
+            .ok_or(PacketError::FloorClassOutOfRange { class: cl })?;
+        let cbits = *floor
+            .class_subs
+            .get(cl)
+            .ok_or(PacketError::FloorClassOutOfRange { class: cl })?;
+        let csub = 1u64
+            .checked_shl(cbits as u32)
+            .ok_or(PacketError::FloorClassOutOfRange { class: cl })?
+            - 1;
+        let y_slice = Y
+            .get(ppos..ppos + cdim as usize)
+            .ok_or(PacketError::BadYLength {
+                got: Y.len(),
+                want: ppos + cdim as usize,
+            })?;
         let mut cval;
         if cbits != 0 {
             cval = pick_subclass_cval(floor, cl as u64, y_slice, books)?;
-            let mb = floor.class_masterbooks[cl]
+            let mb = floor
+                .class_masterbooks
+                .get(cl)
+                .ok_or(PacketError::FloorClassOutOfRange { class: cl })?
                 .ok_or(PacketError::MasterBookMissing { class: cl as u64 })?
                 as usize;
-            let entry = nearest_used_entry(&books[mb], cval as i64)?;
-            books[mb]
+            let master = books
+                .get(mb)
+                .ok_or(PacketError::MasterBookIndexOutOfRange { book_id: mb as u64 })?;
+            let entry = nearest_used_entry(master, cval as i64)?;
+            master
                 .encode(op, entry)
                 .map_err(|_| PacketError::MasterBookIndexOutOfRange { book_id: cval })?;
         } else {
             cval = 0;
         }
         for j in 0..cdim {
-            let book_id = floor.subclass_books[cl][(cval & csub) as usize];
+            let book_id = *floor
+                .subclass_books
+                .get(cl)
+                .and_then(|row| row.get((cval & csub) as usize))
+                .ok_or(PacketError::FloorClassOutOfRange { class: cl })?;
             cval >>= cbits;
             if book_id >= 0 {
-                let entry = nearest_used_entry(&books[book_id as usize], y_slice[j as usize])?;
-                books[book_id as usize]
-                    .encode(op, entry)
+                let book = books
+                    .get(book_id as usize)
+                    .ok_or(PacketError::SubclassBookIndexOutOfRange { book_id })?;
+                let entry = nearest_used_entry(book, y_slice[j as usize])?;
+                book.encode(op, entry)
                     .map_err(|_| PacketError::SubclassBookIndexOutOfRange { book_id })?;
             }
             // book_id < 0 ⇒ residual forced 0 (no bits)
@@ -293,47 +401,87 @@ pub fn pack_floor1_body(
 /// - M > 0 and A >= M: store (A, M - A)
 /// - M <= 0 and A > M: store (M, A - M)
 /// - M <= 0 and A <= M: store (A, A - M)
-fn apply_mapping_coupling(residuals: &mut [Vec<f64>], coupling: &[CouplingStep]) {
-    if coupling.is_empty() {
-        return;
-    }
+fn apply_mapping_coupling(
+    residuals: &mut [Vec<f64>],
+    coupling: &[CouplingStep],
+) -> Result<(), PacketError> {
     for step in coupling {
         let mag = step.mag as usize;
         let ang = step.ang as usize;
-        for j in 0..residuals[mag].len() {
-            let m_value = residuals[mag][j];
-            let a_value = residuals[ang][j];
+        if mag >= residuals.len() {
+            return Err(PacketError::CouplingChannelOutOfRange {
+                channel: mag,
+                channels: residuals.len(),
+            });
+        }
+        if ang >= residuals.len() {
+            return Err(PacketError::CouplingChannelOutOfRange {
+                channel: ang,
+                channels: residuals.len(),
+            });
+        }
+        if mag == ang {
+            return Err(PacketError::CouplingChannelsEqual { channel: mag });
+        }
+        let (mag_row, ang_row) = if mag < ang {
+            let (before_ang, from_ang) = residuals.split_at_mut(ang);
+            (&mut before_ang[mag], &mut from_ang[0])
+        } else {
+            let (before_mag, from_mag) = residuals.split_at_mut(mag);
+            (&mut from_mag[0], &mut before_mag[ang])
+        };
+        if mag_row.len() != ang_row.len() {
+            return Err(PacketError::CouplingRowLengthMismatch);
+        }
+        for (magnitude, angle) in mag_row.iter_mut().zip(ang_row.iter_mut()) {
+            let m_value = *magnitude;
+            let a_value = *angle;
             if m_value > 0.0 {
                 if a_value < m_value {
-                    residuals[mag][j] = m_value;
-                    residuals[ang][j] = m_value - a_value;
+                    *magnitude = m_value;
+                    *angle = m_value - a_value;
                 } else {
-                    residuals[mag][j] = a_value;
-                    residuals[ang][j] = m_value - a_value;
+                    *magnitude = a_value;
+                    *angle = m_value - a_value;
                 }
+            } else if a_value > m_value {
+                *magnitude = m_value;
+                *angle = a_value - m_value;
             } else {
-                if a_value > m_value {
-                    residuals[mag][j] = m_value;
-                    residuals[ang][j] = a_value - m_value;
-                } else {
-                    residuals[mag][j] = a_value;
-                    residuals[ang][j] = a_value - m_value;
-                }
+                *magnitude = a_value;
+                *angle = a_value - m_value;
             }
         }
     }
+    Ok(())
 }
 
 /// Propagate floor use across mapping0 coupling pairs before residue coding.
-fn propagate_mapping_nonzero(ch_used: &mut [bool], coupling: &[CouplingStep]) {
+fn propagate_mapping_nonzero(
+    ch_used: &mut [bool],
+    coupling: &[CouplingStep],
+) -> Result<(), PacketError> {
     for step in coupling {
         let mag = step.mag as usize;
         let ang = step.ang as usize;
+        if mag >= ch_used.len() {
+            return Err(PacketError::CouplingChannelOutOfRange {
+                channel: mag,
+                channels: ch_used.len(),
+            });
+        }
+        if ang >= ch_used.len() {
+            return Err(PacketError::CouplingChannelOutOfRange {
+                channel: ang,
+                channels: ch_used.len(),
+            });
+        }
         if ch_used[mag] || ch_used[ang] {
             ch_used[mag] = true;
             ch_used[ang] = true;
         }
     }
+    Ok(())
 }
 
 fn lossless_couple_f32(first: f32, second: f32) -> (f32, f32) {
@@ -363,31 +511,39 @@ fn lossless_couple_f32(first: f32, second: f32) -> (f32, f32) {
     (magnitude, angle)
 }
 
-fn lossless_couple_i64(first: i64, second: i64) -> (i64, i64) {
-    let (mut magnitude, mut angle) = if first.abs() > second.abs() {
+fn lossless_couple_i64(first: i64, second: i64) -> Result<(i64, i64), PacketError> {
+    let (mut magnitude, angle) = if first.unsigned_abs() > second.unsigned_abs() {
         (
             first,
             if first > 0 {
-                first - second
+                first.checked_sub(second)
             } else {
-                second - first
+                second.checked_sub(first)
             },
         )
     } else {
         (
             second,
             if second > 0 {
-                first - second
+                first.checked_sub(second)
             } else {
-                second - first
+                second.checked_sub(first)
             },
         )
     };
-    if angle >= magnitude.abs() * 2 {
-        angle = -angle;
-        magnitude = -magnitude;
+    let mut angle = angle.ok_or(PacketError::ResidueCouplingOverflow)?;
+    let threshold = magnitude
+        .checked_abs()
+        .and_then(|value| value.checked_mul(2));
+    if threshold.is_some_and(|limit| angle >= limit) {
+        angle = angle
+            .checked_neg()
+            .ok_or(PacketError::ResidueCouplingOverflow)?;
+        magnitude = magnitude
+            .checked_neg()
+            .ok_or(PacketError::ResidueCouplingOverflow)?;
     }
-    (magnitude, angle)
+    Ok((magnitude, angle))
 }
 
 fn point_hypot(first: f32, second: f32, reversal: f32) -> f32 {
@@ -411,10 +567,10 @@ fn point_hypot(first: f32, second: f32, reversal: f32) -> f32 {
 }
 
 /// aoTuV beta 6.03 joint quantization used by Wwise's stereo profile.
-fn aotuv_stereo_residue(
-    mdct: &[Vec<f32>],
+fn aotuv_stereo_residue<S: F32Sample>(
+    mdct: &[Vec<S>],
     floor_indices: &[Vec<i64>],
-    coupling_peak: &[Vec<f32>],
+    coupling_peak: &[Vec<S>],
     ch_used: &[bool],
 ) -> Result<Vec<Vec<i64>>, PacketError> {
     if mdct.len() != 2 || floor_indices.len() != 2 || coupling_peak.len() != 2 || ch_used.len() != 2
@@ -486,9 +642,22 @@ fn aotuv_stereo_residue(
                 let floor_value = FLOOR1_FROM_DB_LOOKUP
                     [floor_indices[channel][index].clamp(0, 255) as usize]
                     as f32;
-                let normalized = mdct[channel][index] / floor_value;
+                let mdct_value = mdct[channel][index].as_f32();
+                let peak_value = coupling_peak[channel][index].as_f32();
+                let normalized = mdct_value / floor_value;
+                let energy = mdct_value * mdct_value;
+                if !mdct_value.is_finite()
+                    || !peak_value.is_finite()
+                    || !normalized.is_finite()
+                    || !energy.is_finite()
+                {
+                    return Err(PacketError::NonFiniteAnalysisSample {
+                        channel,
+                        bin: index,
+                    });
+                }
                 residue[channel][local] = normalized;
-                let threshold = (point - coupling_peak[channel][index]).max(0.0);
+                let threshold = (point - peak_value).max(0.0);
                 let magnitude = normalized.abs();
                 flags[channel][local] = if magnitude < threshold {
                     if magnitude < rephase_point {
@@ -499,13 +668,8 @@ fn aotuv_stereo_residue(
                 } else {
                     1
                 };
-                let energy = mdct[channel][index] * mdct[channel][index];
                 quant[channel][local] = energy;
-                raw[channel][local] = if mdct[channel][index] < 0.0 {
-                    -energy
-                } else {
-                    energy
-                };
+                raw[channel][local] = if mdct_value < 0.0 { -energy } else { energy };
                 floor_energy[channel][local] = floor_value * floor_value;
                 output[channel][index] = quantize_residue_value(normalized as f64);
             }
@@ -565,10 +729,13 @@ fn aotuv_stereo_residue(
         for local in 0..count {
             let index = begin + local;
             if flags[0][local] == 1 || flags[1][local] == 1 {
-                (residue[0][local], residue[1][local]) =
-                    lossless_couple_f32(residue[0][local], residue[1][local]);
+                let coupled_float = lossless_couple_f32(residue[0][local], residue[1][local]);
+                if !coupled_float.0.is_finite() || !coupled_float.1.is_finite() {
+                    return Err(PacketError::ResidueCouplingOverflow);
+                }
+                (residue[0][local], residue[1][local]) = coupled_float;
                 (output[0][index], output[1][index]) =
-                    lossless_couple_i64(output[0][index], output[1][index]);
+                    lossless_couple_i64(output[0][index], output[1][index])?;
                 flags[0][local] = 1;
                 flags[1][local] = 1;
             } else {
@@ -622,7 +789,7 @@ pub fn pack_silence_packet(
             modes: setup.nmodes,
         })?;
     }
-    Ok(op.get_buffer())
+    Ok(op.into_buffer())
 }
 
 /// Pack mode + floor1 bodies; optional silent residue (class0 only)
@@ -662,11 +829,24 @@ pub fn pack_floor_only_packet(
     let mut ch_count = 0u32;
     for ch in 0..channels {
         let sub = if mapping.submaps > 1 {
-            mapping.chmux[ch as usize]
+            *mapping
+                .chmux
+                .get(ch as usize)
+                .ok_or(PacketError::ChannelMuxTooShort {
+                    got: mapping.chmux.len(),
+                    want: channels as usize,
+                })?
         } else {
             0
         };
-        let floor_index = mapping.floors[sub as usize];
+        let floor_index =
+            *mapping
+                .floors
+                .get(sub as usize)
+                .ok_or(PacketError::FloorMapTooShort {
+                    got: mapping.floors.len(),
+                    want: mapping.submaps as usize,
+                })?;
         let y = curves.get(ch as usize).and_then(|row| row.as_ref());
         match y {
             None => {
@@ -681,8 +861,16 @@ pub fn pack_floor_only_packet(
                     modes: setup.nmodes,
                 })?;
                 if absolute_posts {
-                    let pl = postlist_from_floor(&setup.floors[floor_index as usize]);
-                    let rng = FLOOR1_RANGES[setup.floors[floor_index as usize].multiplier as usize];
+                    let floor = setup
+                        .floors
+                        .get(floor_index as usize)
+                        .ok_or(PacketError::FloorIndexOutOfRange { index: floor_index })?;
+                    let pl = postlist_from_floor(floor);
+                    let rng = *FLOOR1_RANGES.get(floor.multiplier as usize).ok_or(
+                        PacketError::FloorMultiplierOutOfRange {
+                            multiplier: floor.multiplier,
+                        },
+                    )?;
                     let wrapped = crate::floor::floor1_wrap(y, &pl, rng as i64)
                         .map_err(PacketError::Floor1)?;
                     pack_floor1_body(&mut op, setup, floor_index, books, &wrapped)?;
@@ -695,17 +883,18 @@ pub fn pack_floor_only_packet(
         }
     }
     if any_nz && silent_residue {
-        let res_index = mapping.residues[0];
-        pack_residue_silent(
-            &mut op,
-            &setup.residues[res_index as usize],
-            books,
-            ch_count,
-            n_spectrum,
-        )
-        .map_err(PacketError::Residue)?;
+        let res_index = *mapping
+            .residues
+            .first()
+            .ok_or(PacketError::MissingResidueSubmap)?;
+        let residue = setup
+            .residues
+            .get(res_index as usize)
+            .ok_or(PacketError::ResidueIndexOutOfRange { index: res_index })?;
+        pack_residue_silent(&mut op, residue, books, ch_count, n_spectrum)
+            .map_err(PacketError::Residue)?;
     }
-    Ok(op.get_buffer())
+    Ok(op.into_buffer())
 }
 
 /// Encoded packet and the exact integer residue rows supplied to VQ
@@ -724,19 +913,20 @@ pub struct BlockPacketResult {
 /// `floor1_fit_wwise`; the packet encoder then applies the format's
 /// multiplier shift before wrapping. `mdct[ch]`: MDCT spectrum for
 /// residual = mdct/floor_amp.
-#[allow(clippy::too_many_arguments)] // signature mirrors Python pack_block_packet_details
-pub fn pack_block_packet_details(
+#[allow(clippy::too_many_arguments)]
+fn pack_block_packet_impl<S: F32Sample>(
     setup: &SetupInfo,
     books: &[Codebook],
     channels: u32,
     mode: u32,
     absolute_posts: &[Option<Vec<i64>>],
-    mdct: &[Vec<f32>],
-    coupling_peak: Option<&[Vec<f32>]>,
+    mdct: &[Vec<S>],
+    coupling_peak: Option<&[Vec<S>]>,
     residue_vq: bool,
     posts_are_10bit: bool,
+    collect_residue: bool,
 ) -> Result<BlockPacketResult, PacketError> {
-    let mut op = OggPack::new(8192);
+    let mut op = OggPack::new(1024);
     pack_audio_header(&mut op, setup, mode)?;
     let md = setup
         .modes
@@ -752,19 +942,13 @@ pub fn pack_block_packet_details(
             mapping: md.mapping,
             maps: setup.nmaps,
         })?;
-    let n_spectrum = if !mdct.is_empty() {
-        mdct[0].len()
-    } else if md.blockflag != 0 {
-        1024
-    } else {
-        128
-    };
-    if mdct.len() > 1 && mdct.len() != channels as usize {
+    if mdct.len() != channels as usize {
         return Err(PacketError::MdctRowCount {
             got: mdct.len(),
             want: channels as usize,
         });
     }
+    let n_spectrum = mdct.first().map_or(0, Vec::len);
     for (ch, row) in mdct.iter().enumerate() {
         if row.len() < n_spectrum {
             return Err(PacketError::MdctTooShort {
@@ -773,17 +957,43 @@ pub fn pack_block_packet_details(
             });
         }
     }
+    let stereo_peak = if channels == 2 && mapping.coupling.len() == 1 {
+        coupling_peak
+    } else {
+        None
+    };
 
     let mut ch_used: Vec<bool> = Vec::with_capacity(channels as usize);
-    let mut residuals: Vec<Vec<f64>> = Vec::with_capacity(channels as usize);
-    let mut floor_indices: Vec<Vec<i64>> = Vec::with_capacity(channels as usize);
+    let mut residuals: Vec<Vec<f64>> = if stereo_peak.is_some() {
+        Vec::new()
+    } else {
+        Vec::with_capacity(channels as usize)
+    };
+    let mut floor_indices: Vec<Vec<i64>> = if stereo_peak.is_some() {
+        Vec::with_capacity(channels as usize)
+    } else {
+        Vec::new()
+    };
     for ch in 0..channels {
         let sub = if mapping.submaps > 1 {
-            mapping.chmux[ch as usize]
+            *mapping
+                .chmux
+                .get(ch as usize)
+                .ok_or(PacketError::ChannelMuxTooShort {
+                    got: mapping.chmux.len(),
+                    want: channels as usize,
+                })?
         } else {
             0
         };
-        let floor_index = mapping.floors[sub as usize];
+        let floor_index =
+            *mapping
+                .floors
+                .get(sub as usize)
+                .ok_or(PacketError::FloorMapTooShort {
+                    got: mapping.floors.len(),
+                    want: mapping.submaps as usize,
+                })?;
         let floor = setup
             .floors
             .get(floor_index as usize)
@@ -796,8 +1006,11 @@ pub fn pack_block_packet_details(
                     modes: setup.nmodes,
                 })?;
                 ch_used.push(false);
-                residuals.push(vec![0.0; n_spectrum]);
-                floor_indices.push(vec![0; n_spectrum]);
+                if stereo_peak.is_some() {
+                    floor_indices.push(vec![0; n_spectrum]);
+                } else {
+                    residuals.push(vec![0.0; n_spectrum]);
+                }
             }
             Some(posts) => {
                 op.write(1, 1).map_err(|_| PacketError::ModeOutOfRange {
@@ -805,7 +1018,11 @@ pub fn pack_block_packet_details(
                     modes: setup.nmodes,
                 })?;
                 let pl = postlist_from_floor(floor);
-                let rng = FLOOR1_RANGES[floor.multiplier as usize];
+                let rng = *FLOOR1_RANGES.get(floor.multiplier as usize).ok_or(
+                    PacketError::FloorMultiplierOutOfRange {
+                        multiplier: floor.multiplier,
+                    },
+                )?;
                 let packet_posts = if posts_are_10bit {
                     floor1_quantize_posts(posts, floor.multiplier).map_err(PacketError::Floor1)?
                 } else {
@@ -815,23 +1032,38 @@ pub fn pack_block_packet_details(
                     .map_err(PacketError::Floor1)?;
                 pack_floor1_body(&mut op, setup, floor_index, books, &y)?;
                 ch_used.push(true);
-                // amplitude floor curve for residual
-                // use unwrapped absolute posts (fit output already absolute)
-                let curve =
-                    floor1_curve_from_posts(&raster_posts, &pl, n_spectrum, floor.multiplier)
-                        .map_err(PacketError::Floor1)?;
-                residuals.push(mdct_to_residue(&mdct[ch as usize], &curve, 1e-8));
-                floor_indices.push(
-                    floor1_quant_curve_from_posts(&raster_posts, &pl, n_spectrum, floor.multiplier)
+                if stereo_peak.is_some() {
+                    floor_indices.push(
+                        floor1_quant_curve_from_posts(
+                            &raster_posts,
+                            &pl,
+                            n_spectrum,
+                            floor.multiplier,
+                        )
                         .map_err(PacketError::Floor1)?,
-                );
+                    );
+                } else {
+                    // Use the unwrapped fit posts to build the multiplicative
+                    // floor needed by the uncoupled residue path.
+                    let curve =
+                        floor1_curve_from_posts(&raster_posts, &pl, n_spectrum, floor.multiplier)
+                            .map_err(PacketError::Floor1)?;
+                    residuals.push(mdct_to_residue(&mdct[ch as usize], &curve, 1e-8));
+                }
             }
         }
     }
 
-    let mut quantized_residue = vec![vec![0i64; n_spectrum]; channels as usize];
+    let mut quantized_residue = if collect_residue {
+        vec![vec![0i64; n_spectrum]; channels as usize]
+    } else {
+        Vec::new()
+    };
     if ch_used.iter().any(|&u| u) {
-        let res_index = mapping.residues[0];
+        let res_index = *mapping
+            .residues
+            .first()
+            .ok_or(PacketError::MissingResidueSubmap)?;
         let res = setup
             .residues
             .get(res_index as usize)
@@ -841,54 +1073,52 @@ pub fn pack_block_packet_details(
         // apply the exact inverse of the decoder's 4-branch coupling
         // (no-op when the mapping has no coupling steps, e.g. the 5.1
         // profile).
-        if channels == 2 && mapping.coupling.len() == 1 {
-            if let Some(peak) = coupling_peak {
-                let quantized = aotuv_stereo_residue(mdct, &floor_indices, peak, &ch_used)?;
-                residuals = quantized
-                    .iter()
-                    .map(|row| row.iter().map(|value| *value as f64).collect())
-                    .collect();
-            } else {
-                apply_mapping_coupling(&mut residuals, &mapping.coupling);
-            }
+        let mut mapped_quantized = None;
+        if let Some(peak) = stereo_peak {
+            mapped_quantized = Some(aotuv_stereo_residue(mdct, &floor_indices, peak, &ch_used)?);
         } else {
-            apply_mapping_coupling(&mut residuals, &mapping.coupling);
+            apply_mapping_coupling(&mut residuals, &mapping.coupling)?;
         }
-        propagate_mapping_nonzero(&mut ch_used, &mapping.coupling);
+        propagate_mapping_nonzero(&mut ch_used, &mapping.coupling)?;
         if res.residue_type == 2 {
             // Type 2 codes the flat (bin*channels+channel) domain: the
             // quantized handoff and the bit schedule both follow that
             // layout.
             let end_flat = (res.end as usize).min(n_spectrum * channels as usize);
-            quantized_residue = residuals
-                .iter()
-                .enumerate()
-                .zip(ch_used.iter())
-                .map(|((ch_index, row), &used)| {
-                    row.iter()
-                        .enumerate()
-                        .map(|(index, value)| {
-                            let flat = index * channels as usize + ch_index;
-                            if used && res.begin as usize <= flat && flat < end_flat {
-                                quantize_residue_value(*value)
-                            } else {
-                                0
-                            }
-                        })
-                        .collect()
-                })
-                .collect();
-            pack_residue_type2(
+            let mut coded_residue = match mapped_quantized.take() {
+                Some(rows) => rows,
+                None => residuals
+                    .iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(|value| quantize_residue_value(*value))
+                            .collect()
+                    })
+                    .collect(),
+            };
+            for (channel, row) in coded_residue.iter_mut().enumerate() {
+                let used = ch_used[channel];
+                for (index, value) in row.iter_mut().enumerate() {
+                    let flat = index * channels as usize + channel;
+                    if !used || flat < res.begin as usize || flat >= end_flat {
+                        *value = 0;
+                    }
+                }
+            }
+            pack_residue_type2_quantized(
                 &mut op,
                 res,
                 books,
-                &residuals,
+                &coded_residue,
                 &ch_used,
                 n_spectrum,
                 channels as usize,
                 md.blockflag != 0,
             )
             .map_err(PacketError::Residue)?;
+            if collect_residue {
+                quantized_residue = coded_residue;
+            }
         } else {
             // Materialize the integer residue handoff once. The residue
             // packer accepts numeric rows and its own integer
@@ -896,22 +1126,24 @@ pub fn pack_block_packet_details(
             // classification and VQ.
             let begin = res.begin as usize;
             let end = (res.end as usize).min(n_spectrum);
-            quantized_residue = residuals
-                .iter()
-                .zip(ch_used.iter())
-                .map(|(row, &used)| {
-                    row.iter()
-                        .enumerate()
-                        .map(|(index, value)| {
-                            if used && begin <= index && index < end {
-                                quantize_residue_value(*value)
-                            } else {
-                                0
-                            }
-                        })
-                        .collect()
-                })
-                .collect();
+            quantized_residue = match mapped_quantized {
+                Some(rows) => rows,
+                None => residuals
+                    .iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(|value| quantize_residue_value(*value))
+                            .collect()
+                    })
+                    .collect(),
+            };
+            for (row, &used) in quantized_residue.iter_mut().zip(ch_used.iter()) {
+                for (index, value) in row.iter_mut().enumerate() {
+                    if !used || index < begin || index >= end {
+                        *value = 0;
+                    }
+                }
+            }
             if residue_vq {
                 pack_residue_vq(
                     &mut op,
@@ -935,26 +1167,25 @@ pub fn pack_block_packet_details(
         }
     }
     Ok(BlockPacketResult {
-        packet: op.get_buffer(),
+        packet: op.into_buffer(),
         quantized_residue,
     })
 }
 
-/// Encode one audio block and return only its packet bytes
-/// (Python `pack_block_packet`).
-#[allow(clippy::too_many_arguments)] // signature mirrors Python pack_block_packet
-pub fn pack_block_packet(
+/// Full short/long audio packet with diagnostic residue details.
+#[allow(clippy::too_many_arguments)] // stable diagnostic surface mirrors Python
+pub fn pack_block_packet_details<S: F32Sample>(
     setup: &SetupInfo,
     books: &[Codebook],
     channels: u32,
     mode: u32,
     absolute_posts: &[Option<Vec<i64>>],
-    mdct: &[Vec<f32>],
-    coupling_peak: Option<&[Vec<f32>]>,
+    mdct: &[Vec<S>],
+    coupling_peak: Option<&[Vec<S>]>,
     residue_vq: bool,
     posts_are_10bit: bool,
-) -> Result<Vec<u8>, PacketError> {
-    Ok(pack_block_packet_details(
+) -> Result<BlockPacketResult, PacketError> {
+    pack_block_packet_impl(
         setup,
         books,
         channels,
@@ -964,6 +1195,35 @@ pub fn pack_block_packet(
         coupling_peak,
         residue_vq,
         posts_are_10bit,
+        true,
+    )
+}
+
+/// Encode one audio block and return only its packet bytes
+/// (Python `pack_block_packet`).
+#[allow(clippy::too_many_arguments)] // signature mirrors Python pack_block_packet
+pub fn pack_block_packet<S: F32Sample>(
+    setup: &SetupInfo,
+    books: &[Codebook],
+    channels: u32,
+    mode: u32,
+    absolute_posts: &[Option<Vec<i64>>],
+    mdct: &[Vec<S>],
+    coupling_peak: Option<&[Vec<S>]>,
+    residue_vq: bool,
+    posts_are_10bit: bool,
+) -> Result<Vec<u8>, PacketError> {
+    Ok(pack_block_packet_impl(
+        setup,
+        books,
+        channels,
+        mode,
+        absolute_posts,
+        mdct,
+        coupling_peak,
+        residue_vq,
+        posts_are_10bit,
+        false,
     )?
     .packet)
 }
@@ -980,7 +1240,10 @@ mod coupling_round_trip {
     //! therefore recover (M, A) exactly. This test is the formal round-trip
     //! invariant (leftover from the 2ch/48k release).
 
-    use super::{apply_mapping_coupling, propagate_mapping_nonzero};
+    use super::{
+        aotuv_stereo_residue, apply_mapping_coupling, lossless_couple_i64,
+        propagate_mapping_nonzero, PacketError,
+    };
     use crate::setup::CouplingStep;
 
     /// Mirror of the decoder's four-branch coupling inverse, per
@@ -1013,7 +1276,7 @@ mod coupling_round_trip {
     fn assert_round_trip(mag: f64, ang: f64) {
         let mut residuals: Vec<Vec<f64>> = vec![vec![mag], vec![ang]];
         let coupling = vec![CouplingStep { mag: 0, ang: 1 }];
-        apply_mapping_coupling(&mut residuals, &coupling);
+        apply_mapping_coupling(&mut residuals, &coupling).unwrap();
         let (mag_stored, ang_stored) = (residuals[0][0], residuals[1][0]);
         let (mag_rec, ang_rec) = decode_branches(mag_stored, ang_stored);
         assert_eq!(
@@ -1030,7 +1293,7 @@ mod coupling_round_trip {
     fn mapping_coupling_propagates_one_sided_floor_use() {
         let coupling = vec![CouplingStep { mag: 0, ang: 1 }];
         for mut used in [vec![true, false], vec![false, true]] {
-            propagate_mapping_nonzero(&mut used, &coupling);
+            propagate_mapping_nonzero(&mut used, &coupling).unwrap();
             assert_eq!(used, vec![true, true]);
         }
     }
@@ -1105,7 +1368,7 @@ mod coupling_round_trip {
             CouplingStep { mag: 0, ang: 1 },
             CouplingStep { mag: 0, ang: 2 },
         ];
-        apply_mapping_coupling(&mut residuals, &coupling);
+        apply_mapping_coupling(&mut residuals, &coupling).unwrap();
 
         for step in coupling.iter().rev() {
             let (mag, ang) = (step.mag as usize, step.ang as usize);
@@ -1132,5 +1395,28 @@ mod coupling_round_trip {
                 );
             }
         }
+    }
+
+    #[test]
+    fn coupling_rejects_unrepresentable_integer_result() {
+        assert_eq!(
+            lossless_couple_i64(i64::MAX, i64::MIN),
+            Err(PacketError::ResidueCouplingOverflow)
+        );
+    }
+
+    #[test]
+    fn stereo_quantizer_rejects_non_finite_analysis() {
+        let mut left = vec![0.0_f32; 128];
+        left[0] = f32::INFINITY;
+        let mdct = vec![left, vec![0.0; 128]];
+        let floor_indices = vec![vec![0; 128], vec![0; 128]];
+        let peaks = vec![vec![0.0_f32; 128], vec![0.0; 128]];
+        let err = aotuv_stereo_residue(&mdct, &floor_indices, &peaks, &[true, true])
+            .expect_err("non-finite MDCT must be rejected");
+        assert_eq!(
+            err,
+            PacketError::NonFiniteAnalysisSample { channel: 0, bin: 0 }
+        );
     }
 }

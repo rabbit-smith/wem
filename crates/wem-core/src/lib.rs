@@ -10,8 +10,8 @@
 //!   (Python `application/encoder.py`); the filesystem entry is
 //!   `from_profile`, the threadless (bytes) entry is `from_profile_bytes`
 //! * [`encoder::Pcm16`] / [`encoder::EncodeResult`] — typed I/O models
-//! * [`pack::pack_analysis_frame`] — frame-level floor-fit + packet
-//!   assembly (Python `pack_analysis_frame`, relocated here)
+//! * [`pack::pack_analysis_frame`] — frame-level floor-fit and packet
+//!   diagnostics
 //! * [`stream::StreamSession`] — the core streaming lifecycle
 //!   (Init -> chunk* -> Finish) with true incremental emission and
 //!   bounded input memory; shared by the C ABI, PyO3 and

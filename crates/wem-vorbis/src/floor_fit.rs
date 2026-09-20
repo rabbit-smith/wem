@@ -62,6 +62,26 @@ pub const FLOOR1_WWISE_FIT_PARAMS_LONG: FloorFitParams = FloorFitParams {
 /// Python `_DB_QUANT_SCALE`.
 const DB_QUANT_SCALE: f64 = 7.314285755157471;
 
+trait CurveSample: Copy {
+    fn reference_value(self) -> f64;
+}
+
+impl CurveSample for f32 {
+    #[inline]
+    fn reference_value(self) -> f64 {
+        self as f64
+    }
+}
+
+impl CurveSample for f64 {
+    #[inline]
+    fn reference_value(self) -> f64 {
+        // Analysis stores f32 values in f64 carriers. Keep the normative f32
+        // boundary while avoiding a temporary converted row.
+        (self as f32) as f64
+    }
+}
+
 /// Apply Wwise's dB quantization rule: truncate, then clamp (Python
 /// `_wwise_db_quant`).
 fn wwise_db_quant(db: f64) -> i64 {
@@ -90,25 +110,20 @@ struct FloorFitAcc {
     xa: i64,
     ya: i64,
     x2a: i64,
-    y2a: i64,
     xya: i64,
     an: i64,
     xb: i64,
     yb: i64,
     x2b: i64,
-    /// Python accumulates y2b in the accumulator but never reads it; kept for
-    /// field parity with `_FloorFitAcc`.
-    #[allow(dead_code)]
-    y2b: i64,
     xyb: i64,
     bn: i64,
 }
 
 /// Accumulate floor-fit statistics over an inclusive interval
 /// (Python `_accumulate_fit`).
-fn accumulate_fit(
-    quantized_curve: &[f32],
-    floor_curve: &[f32],
+fn accumulate_fit<Q: CurveSample, F: CurveSample>(
+    quantized_curve: &[Q],
+    floor_curve: &[F],
     x0: i64,
     x1: i64,
     n: usize,
@@ -120,13 +135,11 @@ fn accumulate_fit(
         xa: 0,
         ya: 0,
         x2a: 0,
-        y2a: 0,
         xya: 0,
         an: 0,
         xb: 0,
         yb: 0,
         x2b: 0,
-        y2b: 0,
         xyb: 0,
         bn: 0,
     };
@@ -136,24 +149,24 @@ fn accumulate_fit(
     }
     let atten = params.twofitatten;
     for x in x0..=end {
-        let quantized = wwise_db_quant(quantized_curve[x as usize] as f64);
+        let quantized = wwise_db_quant(quantized_curve[x as usize].reference_value());
         if quantized == 0 {
             continue;
         }
         // The primary bucket contains fitted-floor values at or below the raw
         // MDCT curve plus attenuation. The complementary bucket is secondary.
-        if (floor_curve[x as usize] as f64) + atten >= (quantized_curve[x as usize] as f64) {
+        if floor_curve[x as usize].reference_value() + atten
+            >= quantized_curve[x as usize].reference_value()
+        {
             acc.xa += x;
             acc.ya += quantized;
             acc.x2a += x * x;
-            acc.y2a += quantized * quantized;
             acc.xya += x * quantized;
             acc.an += 1;
         } else {
             acc.xb += x;
             acc.yb += quantized;
             acc.x2b += x * x;
-            acc.y2b += quantized * quantized;
             acc.xyb += x * quantized;
             acc.bn += 1;
         }
@@ -172,16 +185,12 @@ fn fit_line(fits: &[FloorFitAcc], y0: i64, y1: i64, params: &FloorFitParams) -> 
     let mut x2b = 0.0f64;
     let mut xyb = 0.0f64;
     let mut bn = 0.0f64;
-    // Python's `_fit_line` accumulates y2b into the weighted sums but never
-    // reads it; keep the assignment for exact accumulator parity.
-    let mut y2b = 0.0f64;
     for acc in fits {
         // Weight the primary bucket using its sample-count denominator.
         let weight = ((acc.bn + acc.an) as f64) * params.twofitweight / ((acc.an + 1) as f64) + 1.0;
         xb += acc.xb as f64 + acc.xa as f64 * weight;
         yb += acc.yb as f64 + acc.ya as f64 * weight;
         x2b += acc.x2b as f64 + acc.x2a as f64 * weight;
-        y2b += acc.y2b as f64 + acc.y2a as f64 * weight;
         xyb += acc.xyb as f64 + acc.xya as f64 * weight;
         bn += acc.bn as f64 + acc.an as f64 * weight;
     }
@@ -192,7 +201,6 @@ fn fit_line(fits: &[FloorFitAcc], y0: i64, y1: i64, params: &FloorFitParams) -> 
         xb += x0 as f64;
         yb += y0 as f64;
         x2b += x0 as f64 * x0 as f64;
-        y2b += y0 as f64 * y0 as f64;
         xyb += y0 as f64 * x0 as f64;
         bn += 1.0;
     }
@@ -200,14 +208,9 @@ fn fit_line(fits: &[FloorFitAcc], y0: i64, y1: i64, params: &FloorFitParams) -> 
         xb += x1 as f64;
         yb += y1 as f64;
         x2b += x1 as f64 * x1 as f64;
-        y2b += y1 as f64 * y1 as f64;
         xyb += y1 as f64 * x1 as f64;
         bn += 1.0;
     }
-    // Python's `_fit_line` accumulates y2b but never reads it; keep the
-    // assignment for exact accumulator parity.
-    let _ = y2b;
-
     let denom = bn * x2b - xb * xb;
     if denom <= 0.0 {
         return (0, 0, true);
@@ -225,13 +228,13 @@ fn fit_line(fits: &[FloorFitAcc], y0: i64, y1: i64, params: &FloorFitParams) -> 
 
 /// Return whether the fitted line exceeds the local error bounds
 /// (Python `_inspect_error`).
-fn inspect_error(
+fn inspect_error<Q: CurveSample, F: CurveSample>(
     x0: i64,
     x1: i64,
     y0: i64,
     y1: i64,
-    quantized_curve: &[f32],
-    floor_curve: &[f32],
+    quantized_curve: &[Q],
+    floor_curve: &[F],
     params: &FloorFitParams,
 ) -> bool {
     let adx = x1 - x0;
@@ -245,11 +248,12 @@ fn inspect_error(
     let mut x = x0;
     let mut y = y0;
     let mut err = 0i64;
-    let val = wwise_db_quant(quantized_curve[x as usize] as f64);
+    let val = wwise_db_quant(quantized_curve[x as usize].reference_value());
     let d0 = y - val;
     let mut mse = d0 * d0;
     let mut count = 1i64;
-    if (quantized_curve[x as usize] as f64) <= (floor_curve[x as usize] as f64) + params.twofitatten
+    if quantized_curve[x as usize].reference_value()
+        <= floor_curve[x as usize].reference_value() + params.twofitatten
         && ((y as f64) + params.maxover < val as f64 || (y as f64) - params.maxunder > val as f64)
     {
         return true;
@@ -264,12 +268,12 @@ fn inspect_error(
         } else {
             y += base;
         }
-        let val = wwise_db_quant(quantized_curve[x as usize] as f64);
+        let val = wwise_db_quant(quantized_curve[x as usize].reference_value());
         let d = y - val;
         mse += d * d;
         count += 1;
-        if (quantized_curve[x as usize] as f64)
-            <= (floor_curve[x as usize] as f64) + params.twofitatten
+        if quantized_curve[x as usize].reference_value()
+            <= floor_curve[x as usize].reference_value() + params.twofitatten
             && val != 0
             && ((y as f64) + params.maxover < val as f64
                 || (y as f64) - params.maxunder > val as f64)
@@ -325,6 +329,26 @@ fn propagate_high_neighbor(local_hi: &mut [usize], sortpos: usize, high: usize, 
 pub fn floor1_fit_wwise(
     fitted_floor_curve: &[f32],
     raw_mdct_curve: &[f32],
+    floor: &Floor1Setup,
+    n: Option<usize>,
+) -> Result<Option<Vec<i64>>, FloorFitError> {
+    floor1_fit_wwise_impl(fitted_floor_curve, raw_mdct_curve, floor, n)
+}
+
+/// Fit analysis curves stored as f32-valued f64 carriers without allocating
+/// converted rows. Every sample is still rounded through f32 at the boundary.
+pub fn floor1_fit_wwise_carriers(
+    fitted_floor_curve: &[f64],
+    raw_mdct_curve: &[f64],
+    floor: &Floor1Setup,
+    n: Option<usize>,
+) -> Result<Option<Vec<i64>>, FloorFitError> {
+    floor1_fit_wwise_impl(fitted_floor_curve, raw_mdct_curve, floor, n)
+}
+
+fn floor1_fit_wwise_impl<Q: CurveSample, F: CurveSample>(
+    fitted_floor_curve: &[Q],
+    raw_mdct_curve: &[F],
     floor: &Floor1Setup,
     n: Option<usize>,
 ) -> Result<Option<Vec<i64>>, FloorFitError> {

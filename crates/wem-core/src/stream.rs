@@ -58,7 +58,7 @@ use wem_scheduling::{append_samples, emit_block, required_samples, FramePlan, Sc
 
 use crate::encoder::{EncodeResult, EncodeStats, Encoder, MIN_PCM_FRAMES};
 use crate::error::{EncoderError, InternalError};
-use crate::pack::pack_analysis_frame;
+use crate::pack::pack_analysis_packet;
 
 /// Profile selection reference.
 ///
@@ -133,12 +133,10 @@ struct StreamPipeline {
     planner_state: Option<SchedulerState>,
     /// Emitted frame plans (frame k's plan at index k).
     plans: Vec<FramePlan>,
-    /// For every pending plan (indices `plans.len()..modes.len()-1`), the
-    /// frame center at the start of its mode-loop iteration. The batch loop
-    /// continues once more exactly while this center is below `source_len`,
-    /// which is unknowable until `finish`; the plan's `following` is deferred
-    /// until that endpoint decision is available.
-    pending_origins: Vec<i64>,
+    /// Frame center for the one mode decision awaiting a plan. Planning is
+    /// deliberately serialized: the pending decision must be emitted or
+    /// resolved as terminal before another mode scan can run.
+    pending_origin: Option<i64>,
     /// Frames fully analyzed and packed so far.
     frames_done: i64,
     /// Audio packets in encoding order.
@@ -170,7 +168,7 @@ impl StreamPipeline {
             modes: Vec::new(),
             planner_state: None,
             plans: Vec::new(),
-            pending_origins: Vec::new(),
+            pending_origin: None,
             frames_done: 0,
             audio_packets: Vec::new(),
             setup_emitted: false,
@@ -217,6 +215,11 @@ impl StreamPipeline {
     /// `following` stays in `current_mode`; plan emission is separate
     /// (the batch `terminal_following` rule may override it at EOS).
     fn mode_iteration(&mut self, eos: bool) -> Result<bool, EncoderError> {
+        if self.pending_origin.is_some() {
+            return Err(EncoderError::Internal(InternalError::Invariant {
+                message: "mode scan ran while a frame plan was pending",
+            }));
+        }
         let decision = self
             .session
             .scan_next_mode(eos)
@@ -225,14 +228,12 @@ impl StreamPipeline {
             return Ok(false);
         };
         self.modes.push(decision.current);
-        self.pending_origins.push(decision.center);
+        self.pending_origin = Some(decision.center);
         Ok(true)
     }
 
     fn pending_origin(&self) -> Result<i64, EncoderError> {
-        self.pending_origins
-            .first()
-            .copied()
+        self.pending_origin
             .ok_or(EncoderError::Internal(InternalError::Invariant {
                 message: "mode sequence is missing its pending frame origin",
             }))
@@ -276,9 +277,8 @@ impl StreamPipeline {
             emit_block(&state, following, &self.blocksizes).map_err(|_| invariant())?;
         self.planner_state = Some(state);
         self.plans.push(plan);
-        // Plan emission is strictly in order: each one consumes the
-        // front pending-origin entry (the center of its deciding scan).
-        self.pending_origins.remove(0);
+        // Plan emission consumes the only outstanding mode decision.
+        self.pending_origin = None;
         Ok(())
     }
 
@@ -326,14 +326,13 @@ impl StreamPipeline {
             .session
             .analyze_window(windowed, None)
             .map_err(|error| EncoderError::Internal(InternalError::Analysis(error)))?;
-        let packet = pack_analysis_frame(
+        pack_analysis_packet(
             encoder.setup(),
             encoder.codebooks(),
             &analysis,
             self.channels as u32,
         )
-        .map_err(|error| EncoderError::Internal(InternalError::Packet(error)))?;
-        Ok(packet.packet)
+        .map_err(|error| EncoderError::Internal(InternalError::Packet(error)))
     }
 
     /// Emit every frame and plan that is fully determined so far.
@@ -426,7 +425,6 @@ impl StreamPipeline {
                     .finalize_terminal_transition(previous_mode, self.modes[index as usize])
                     .map_err(|error| EncoderError::Internal(InternalError::Analysis(error)))?;
                 self.emit_plan(index, 1)?;
-                self.pending_origins.clear();
                 break;
             }
             // index == modes.len(): mirror the batch loop's `previous <

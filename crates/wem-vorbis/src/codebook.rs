@@ -210,7 +210,7 @@ impl StaticCodebook {
         // Wwise stores maptype as one bit: zero or non-zero.
         write(if self.maptype != 0 { 1 } else { 0 }, 1);
         if self.maptype == 0 {
-            return op.get_buffer();
+            return op.into_buffer();
         }
 
         write((self.q_min as u64) & 0xFFFF_FFFF, 32);
@@ -229,7 +229,7 @@ impl StaticCodebook {
                 write(av & mask, bits);
             }
         }
-        op.get_buffer()
+        op.into_buffer()
     }
 }
 
@@ -484,6 +484,9 @@ impl Codebook {
         table: Option<String>,
         index: Option<i64>,
     ) -> Result<Self, CodebookError> {
+        if sc.dim < 1 {
+            return Err(CodebookError::DimTooSmall { dim: sc.dim });
+        }
         let codelist = make_codewords(&sc.lengthlist)?;
         let tree = build_decode_tree(&codelist, &sc.lengthlist)?;
         let mut valuallist = None;
