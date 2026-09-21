@@ -94,7 +94,9 @@ class ProjectCleanlinessTests(unittest.TestCase):
         self.assertEqual(failures, [])
 
     def test_formal_project_surfaces_have_no_provenance_markers(self):
-        surfaces = [ROOT / "pyproject.toml", ROOT / "README.md", ROOT / "docs" / "domain-model.md"]
+        surfaces = [ROOT / "pyproject.toml", ROOT / "README.md"]
+        # Every document under docs/ is reached by the recursive scan below, so
+        # naming one explicitly here only goes stale when it moves.
         surfaces.extend(sorted((ROOT / "docs").rglob("*.md")))
         surfaces.extend(sorted((ROOT / ".github").rglob("*.yml")))
         failures: list[str] = []
