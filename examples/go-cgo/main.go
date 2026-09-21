@@ -5,6 +5,11 @@
 // through wem_encode_pcm16_interleaved and writes the container bytes.
 // The kernel does all the work; this program only moves bytes.
 //
+// The encoder configuration is one structured selection (include/wem.h
+// `WemProfile`): a Wwise generation plus the PCM geometry read from the
+// WAV header. cgo mirrors that struct 1:1, so the selection crosses the
+// boundary as a borrowed pointer — no profile name, no data directory.
+//
 // Usage:
 //
 //	go run . -wav tests/fixtures/input.wav -out out.wem
@@ -53,9 +58,6 @@ import (
 	"os"
 	"unsafe"
 )
-
-// The one installed exact profile (README: the supported profile table).
-const profileName = "wwise2013-6ch-44100"
 
 // wav holds one parsed signed-16 PCM WAV file.
 type wav struct {
@@ -118,14 +120,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	profile := C.CString(profileName)
-	defer C.free(unsafe.Pointer(profile))
+	// The structured selection: Wwise 2013 at the geometry the WAV header
+	// declares. WemVersion codes are stable and append-only.
+	profile := C.WemProfile{
+		version:     C.WEM_WWISE_2013,
+		channels:    C.int32_t(w.channels),
+		sample_rate: C.int32_t(w.sampleRate),
+	}
 
 	var sink C.wem_buf_t
 	frames := C.size_t(len(w.data)) / (C.size_t(w.channels) * 2)
 	code := C.wem_encode_pcm16_interleaved(
-		(*C.char)(profile),
-		nil,
+		&profile,
 		(*C.int16_t)(unsafe.Pointer(&w.data[0])),
 		frames,
 		C.WemWriteCb(C.wem_buf_write),

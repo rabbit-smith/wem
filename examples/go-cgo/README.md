@@ -10,6 +10,12 @@ This is the canonical example of the integration rule pinned in
 writing a shim over the C ABI — never a second transport, never a
 language-specific kernel path.
 
+The encoder configuration is one structured selection: the sample reads
+`channels` and `sample_rate` out of the WAV header and passes them, with
+the Wwise generation `C.WEM_WWISE_2013`, as a `C.WemProfile` by pointer.
+cgo mirrors the header's declarations 1:1, so the shell has no profile
+name, no profile directory, and no environment variable.
+
 ## Build (three steps)
 
 1. Build the C ABI core surface:
@@ -51,5 +57,6 @@ language-specific kernel path.
 
 - `go.mod` declares `go 1.26` (released); CI pins 1.26 via setup-go.
 - The sample is single-shot by design; the streaming API
-  (`wem_session_new` / `push` / `finish`) is exercised by the Rust
-  integration tests (`crates/wem-capi/tests/capi_e2e.rs`).
+  (`wem_session_new` over the same `WemProfile *`, then `push` /
+  `finish`) is exercised by the Rust integration tests
+  (`crates/wem-capi/tests/capi_e2e.rs`).
