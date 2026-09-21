@@ -233,6 +233,48 @@ void wem_session_free(WemSession *session);
  *    defined by the kernel and pinned by the golden contracts.
  */
 
+/*
+ * APPENDIX: MIGRATING FROM REVISION 1
+ *
+ * Informative, not contract: the normative text is above.
+ *
+ * The three profile-taking entries lost their `profile_name` + `data_dir`
+ * argument pair and gained one borrowed `const WemProfile *`:
+ *
+ *   revision 1                                    revision 2
+ *   ----------                                    ----------
+ *   wem_encoder_new(name, dir, &enc)              wem_encoder_new(&prof, &enc)
+ *
+ *   wem_encode_pcm16_interleaved(                 wem_encode_pcm16_interleaved(
+ *       name, dir, pcm, frames, wb, ud)               &prof, pcm, frames, wb, ud)
+ *
+ *   wem_session_new(                              wem_session_new(
+ *       name, dir, wb, pb, ud, &session)              &prof, wb, pb, ud, &session)
+ *
+ * `wem_encoder_encode`, `wem_encoder_free`, `wem_session_push`,
+ * `wem_session_finish` and `wem_session_free` are unchanged, as is every
+ * WemError value, the lifecycle, and the reply framing.
+ *
+ * Building the selection: the generation is the WEM_WWISE_2013 code and the
+ * two geometry fields are the channel count and sample rate the client was
+ * about to encode anyway. A client that used to name a profile it installed
+ * can read exactly those three numbers from that profile's manifest —
+ * `key.generation` ("2013.2" names WEM_WWISE_2013), `key.channels`,
+ * `key.sample_rate`. A NULL or empty `data_dir` simply disappears: the
+ * library always uses the profiles compiled into it, which is why there is
+ * no directory argument left to pass.
+ *
+ * The struct is borrowed only for the duration of the call, so a stack value
+ * is enough:
+ *
+ *   WemProfile profile = { WEM_WWISE_2013, 6, 44100 };
+ *   WemEncoder *encoder = NULL;
+ *   WemError code = wem_encoder_new(&profile, &encoder);
+ *
+ * A selection naming a configuration this library does not carry is
+ * WEM_ERR_PROFILE_NOT_FOUND, and never falls back to another one.
+ */
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
