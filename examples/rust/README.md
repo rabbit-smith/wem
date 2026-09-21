@@ -9,5 +9,5 @@ cargo run --manifest-path examples/rust/Cargo.toml -- \
   input.pcm output.wem wwise2013-2ch-48000 48000 2
 ```
 
-The example resolves the packaged profiles from this checkout explicitly, so it
-does not depend on `WEM_DATA_DIR` or the current directory.
+Profiles are compiled into the kernel, so this command has no profile-path or
+environment setup.

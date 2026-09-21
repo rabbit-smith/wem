@@ -146,9 +146,8 @@ WemError wem_encoder_encode(const WemEncoder *encoder, const int16_t *pcm,
                             void *user_data);
 
 /* One-shot convenience: profile + PCM in, container bytes out via
- * write_cb. `data_dir` selects an explicit profile tree without changing
- * process state; NULL/"" uses the kernel default (environment or repository
- * layout). */
+ * write_cb. NULL/"" `data_dir` uses the profiles compiled into this library.
+ * A non-empty `data_dir` is an explicit development/test override. */
 WemError wem_encode_pcm16_interleaved(const char *profile_name,
                                       const char *data_dir,
                                       const int16_t *pcm, size_t frames,

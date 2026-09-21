@@ -379,6 +379,9 @@ impl EncoderProfile {
                 })?;
         let bundle = match setup_path.backend() {
             ResourceBackend::Fs(data) => load_profile_bundle(data, Some(&self.name), false),
+            ResourceBackend::Static { .. } => {
+                crate::embedded::load_embedded_profile_bundle(Some(&self.name))
+            }
             ResourceBackend::Bytes { .. } => {
                 return Err(ProfileError::InstalledBundleMismatch {
                     profile: self.name.clone(),

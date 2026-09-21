@@ -53,7 +53,7 @@ use wem_analysis::preprocessing::streaming::StreamingPcmFeeder;
 use wem_analysis::preprocessing::windowing::WindowedFrame;
 use wem_analysis::session::AnalysisSession;
 use wem_profiles::data::DataDir;
-use wem_profiles::registry::installed_registry;
+use wem_profiles::registry::{embedded_registry, installed_registry, ProfileRegistry};
 use wem_scheduling::{append_samples, emit_block, required_samples, FramePlan, SchedulerState};
 
 use crate::encoder::{EncodeResult, EncodeStats, Encoder, MIN_PCM_FRAMES};
@@ -493,8 +493,8 @@ impl StreamSession {
         ref_: &ProfileRef,
         quality: Option<f64>,
     ) -> Result<(), EncoderError> {
-        let data = DataDir::from_env()?;
-        self.init_profile_quality_in(&data, ref_, quality)
+        let registry = embedded_registry()?;
+        self.init_profile_quality_with_registry(None, registry, ref_, quality)
     }
 
     /// Open the session on one installed profile from an explicit data tree
@@ -503,6 +503,17 @@ impl StreamSession {
     pub fn init_profile_quality_in(
         &mut self,
         data: &DataDir,
+        ref_: &ProfileRef,
+        quality: Option<f64>,
+    ) -> Result<(), EncoderError> {
+        let registry = installed_registry(data)?;
+        self.init_profile_quality_with_registry(Some(data), registry, ref_, quality)
+    }
+
+    fn init_profile_quality_with_registry(
+        &mut self,
+        data: Option<&DataDir>,
+        registry: ProfileRegistry,
         ref_: &ProfileRef,
         quality: Option<f64>,
     ) -> Result<(), EncoderError> {
@@ -518,7 +529,6 @@ impl StreamSession {
                 });
             }
         }
-        let registry = installed_registry(data)?;
         let wanted = ref_.setup_sha256.to_lowercase();
         if wanted.is_empty() {
             return Err(EncoderError::ProfileNotFound {
@@ -554,7 +564,10 @@ impl StreamSession {
                 .map_err(|error| EncoderError::Internal(InternalError::Profile(error)))?,
             None => profile,
         };
-        let encoder = Encoder::from_profile_model_in(data, &profile, None)?;
+        let encoder = match data {
+            Some(data) => Encoder::from_profile_model_in(data, &profile, None)?,
+            None => Encoder::from_profile_model(&profile, None)?,
+        };
         let pipeline = StreamPipeline::new(&encoder)?;
         self.encoder = Some(encoder);
         self.pipeline = Some(pipeline);
@@ -599,10 +612,9 @@ impl StreamSession {
     }
 
     /// Open a streaming session by installed profile name from the default
-    /// profile data tree.
+    /// embedded profile bundle.
     pub fn for_profile(name: &str) -> Result<Self, EncoderError> {
-        let data = DataDir::from_env()?;
-        Self::for_profile_in(&data, name)
+        Self::from_encoder(Encoder::from_profile(name)?)
     }
 
     /// Open a streaming session by installed profile name from an explicit

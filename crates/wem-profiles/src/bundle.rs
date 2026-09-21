@@ -460,6 +460,22 @@ pub fn load_profile_bundle_from_bytes(
     )
 }
 
+/// Load a compile-time embedded profile bundle without filesystem I/O or an
+/// up-front copy of every resource.
+pub fn load_profile_bundle_from_static_bytes(
+    index: &[u8],
+    files: &'static [(&'static str, &'static [u8])],
+    profile: Option<&str>,
+    verify_all: bool,
+) -> Result<ProfileBundle, ProfileError> {
+    load_profile_bundle_with(
+        index,
+        ResourceBackend::Static { files },
+        profile,
+        verify_all,
+    )
+}
+
 /// Shared index -> manifest -> bundle core; both entry points funnel here.
 ///
 /// * `profile` selects an index entry; `None` uses the index `default`.

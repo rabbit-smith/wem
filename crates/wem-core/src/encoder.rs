@@ -21,10 +21,11 @@ use wem_profiles::assembly::assemble_encoder_profile_resources;
 use wem_profiles::assembly::EncoderProfileResources;
 use wem_profiles::bundle::{load_profile_bundle, load_profile_bundle_from_bytes, ProfileBundle};
 pub use wem_profiles::data::DataDir;
+use wem_profiles::embedded::load_embedded_profile_bundle;
 use wem_profiles::error::ProfileError;
 use wem_profiles::model::ContainerMetadata;
 use wem_profiles::model::EncoderProfile;
-use wem_profiles::registry::ProfileRegistry;
+use wem_profiles::registry::{embedded_registry, ProfileRegistry};
 use wem_vorbis::codebook::Codebook;
 use wem_vorbis::setup::SetupInfo;
 
@@ -307,8 +308,14 @@ impl Encoder {
     /// quality curves (a missing quality-curves resource is a clear
     /// configuration error, never a silent fallback).
     pub fn from_profile_quality(name: &str, quality: Option<f64>) -> Result<Self, EncoderError> {
-        let data = DataDir::from_env()?;
-        Self::from_profile_quality_in(&data, name, quality)
+        let bundle = load_embedded_named_bundle(name)?;
+        let mut profile = bundle.to_encoder_profile()?;
+        if let Some(quality) = quality {
+            profile = profile
+                .with_quality(quality)
+                .map_err(|error| EncoderError::Internal(InternalError::Profile(error)))?;
+        }
+        Self::from_profile_and_bundle(&profile, None, &bundle)
     }
 
     /// Load one installed profile from an explicit profile data tree and
@@ -341,8 +348,8 @@ impl Encoder {
         profile: &EncoderProfile,
         container: Option<ContainerPlan>,
     ) -> Result<Self, EncoderError> {
-        let data = DataDir::from_env()?;
-        Self::from_profile_model_in(&data, profile, container)
+        let bundle = load_embedded_named_bundle(profile.name())?;
+        Self::from_profile_and_bundle(profile, container, &bundle)
     }
 
     /// Construct from an encoder profile using an explicit profile data
@@ -646,8 +653,9 @@ pub fn resolve_profile_by_geometry(
     channels: i64,
     sample_rate: i64,
 ) -> Result<Encoder, EncoderError> {
-    let data = DataDir::from_env()?;
-    resolve_profile_by_geometry_in(&data, channels, sample_rate)
+    let registry = embedded_registry()?;
+    let profile = registry.resolve_geometry(channels, sample_rate)?;
+    Encoder::from_profile_model(profile, None)
 }
 
 /// Resolve a profile by PCM geometry from an explicit profile data tree.
@@ -663,6 +671,18 @@ pub fn resolve_profile_by_geometry_in(
 
 fn load_named_bundle(data: &DataDir, name: &str) -> Result<ProfileBundle, EncoderError> {
     match load_profile_bundle(data, Some(name), false) {
+        Ok(bundle) => Ok(bundle),
+        Err(ProfileError::ProfileNotInIndex { .. }) | Err(ProfileError::UnknownProfile { .. }) => {
+            Err(EncoderError::ProfileNotFound {
+                requested: name.to_string(),
+            })
+        }
+        Err(error) => Err(EncoderError::Internal(InternalError::Profile(error))),
+    }
+}
+
+fn load_embedded_named_bundle(name: &str) -> Result<ProfileBundle, EncoderError> {
+    match load_embedded_profile_bundle(Some(name)) {
         Ok(bundle) => Ok(bundle),
         Err(ProfileError::ProfileNotInIndex { .. }) | Err(ProfileError::UnknownProfile { .. }) => {
             Err(EncoderError::ProfileNotFound {

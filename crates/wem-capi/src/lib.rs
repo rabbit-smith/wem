@@ -210,7 +210,7 @@ fn encode_with(
 /// (include/wem.h `wem_encoder_new`).
 ///
 /// `data_dir` selects an explicit profile tree without changing process
-/// environment; NULL uses the kernel default. On
+/// environment; NULL uses the profiles compiled into the library. On
 /// `WEM_OK`, `*out_encoder` owns the handle; on error it is set to NULL.
 ///
 /// # Safety
@@ -305,8 +305,8 @@ pub unsafe extern "C" fn wem_encoder_encode(
 /// bytes (include/wem.h `wem_encode_pcm16_interleaved`).
 ///
 /// `pcm` must hold `frames * channels` little-endian signed-16 samples
-/// (interleaved, `channels` from the profile); `data_dir` NULL uses the
-/// kernel default. Output goes through `write_cb` in bounded blocks —
+/// (interleaved, `channels` from the profile); `data_dir` NULL uses profiles
+/// compiled into the library. Output goes through `write_cb` in bounded blocks —
 /// callback-style output, so there is no container size limit.
 ///
 /// # Safety

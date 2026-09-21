@@ -2,7 +2,7 @@
 
 Standalone implementation of Wwise Vorbis WAV→WEM encoding: a Rust kernel
 behind a Python facade, with the C ABI as the canonical core surface. Runtime
-code uses PCM plus immutable packaged profile tables. The first exact profile
+code uses PCM plus immutable profile tables compiled into the kernel. The first exact profile
 targets Wwise 2013.2 6ch/44.1kHz; a second profile covers the 2ch/48k paired-build
 generation; further generations can be added as additional profiles.
 

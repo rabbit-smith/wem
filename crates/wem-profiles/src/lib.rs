@@ -23,6 +23,7 @@ pub mod book_ids;
 pub mod bundle;
 pub mod codebooks;
 pub mod data;
+pub mod embedded;
 pub mod error;
 pub mod frozen;
 pub mod key;
@@ -39,11 +40,12 @@ pub use assembly::{
 };
 pub use book_ids::{BookTable, BookTables, T219_COUNT, T282_COUNT, T97_COUNT};
 pub use bundle::{
-    load_profile_bundle, load_profile_bundle_from_bytes, ProfileBundle, RuntimeResourceManifest,
-    BUNDLE_SCHEMA, INDEX_SCHEMA,
+    load_profile_bundle, load_profile_bundle_from_bytes, load_profile_bundle_from_static_bytes,
+    ProfileBundle, RuntimeResourceManifest, BUNDLE_SCHEMA, INDEX_SCHEMA,
 };
 pub use codebooks::{load_codebook, load_setup_codebooks, resolve_book_id, ResolvedBook};
 pub use data::DataDir;
+pub use embedded::{embedded_profile_names, load_embedded_profile_bundle};
 pub use error::ProfileError;
 pub use frozen::load_frozen_tables;
 pub use key::{ProfileKey, WWISE2013_6CH_44100_SETUP_IDENTITY, WWISE_GENERATION};
@@ -53,8 +55,8 @@ pub use quality::{
     QUALITY_CURVES_INTERPOLATION, QUALITY_CURVES_RESOURCE, QUALITY_CURVES_SCHEMA,
 };
 pub use registry::{
-    installed_registry, load_wem_profile, load_wem_profile_quality, resolve_wem_profile,
-    resolve_wem_profile_quality, ProfileRegistry,
+    embedded_registry, installed_registry, load_wem_profile, load_wem_profile_quality,
+    resolve_wem_profile, resolve_wem_profile_quality, ProfileRegistry,
 };
 pub use resources::{normalize_resource_path, ResourceBackend, ResourceRef};
 pub use transform::load_mdct_looks;

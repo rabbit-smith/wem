@@ -2,9 +2,8 @@
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
 
-use wem_core::encoder::{DataDir, Encoder, Pcm16};
+use wem_core::encoder::{Encoder, Pcm16};
 
 fn usage(program: &str) -> ! {
     eprintln!(
@@ -27,10 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pcm = fs::read(input)?;
     let pcm = Pcm16::from_interleaved_le(sample_rate, channels, &pcm)?;
 
-    let profiles =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../src/wwise_wem/data/profiles");
-    let data_dir = DataDir::from_profiles_dir(profiles);
-    let encoder = Encoder::from_profile_in(&data_dir, &profile)?;
+    let encoder = Encoder::from_profile(&profile)?;
     let result = encoder.encode_pcm(&pcm)?;
     fs::write(&output, &result.data)?;
 

@@ -12,8 +12,6 @@ runtime asset, and a missing one surfaces as the ordinary
 
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
 from typing import Any
 
 import wwise_wem._core as _core
@@ -94,28 +92,9 @@ class Encoder:
             rows.append(values)
         return rows
 
-    def _profile_data_dir(self) -> str | None:
-        """Locate the installed profile tree for the native kernel.
-
-        The kernel resolves ``WEM_DATA_DIR`` or its build-time repository
-        layout; passing the explicit directory keeps facade behavior
-        identical from a source tree, an installed site-packages, or any
-        current directory.
-        """
-        spec = importlib.util.find_spec("wwise_wem")
-        origin = getattr(spec, "origin", None) if spec is not None else None
-        if not isinstance(origin, str) or not origin:
-            return None
-        candidate = Path(origin).resolve().parent / "data" / "profiles"
-        return str(candidate) if candidate.is_dir() else None
-
     def _backend(self) -> Any:
         if self._core_backend is None:
-            self._core_backend = _core.Encoder(
-                self.profile.name,
-                self._profile_data_dir(),
-                self.profile.quality,
-            )
+            self._core_backend = _core.Encoder(self.profile.name, self.profile.quality)
         return self._core_backend
 
     def encode_pcm16_interleaved(

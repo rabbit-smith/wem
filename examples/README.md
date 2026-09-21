@@ -13,7 +13,8 @@ profile loader, or DSP implementation.
 
 The Python facade selects a profile from a WAV's channel count and sample rate.
 The lower-level examples take a profile name and signed-16 PCM because their
-inputs have no self-describing header. The installed exact profiles are
+inputs have no self-describing header. Profiles are compiled into every native
+library and no profile directory or environment variable is required. The exact profiles are
 `wwise2013-6ch-44100` and `wwise2013-2ch-48000`.
 
 All examples require at least 4096 frames. The Go, C, Rust, and WebAssembly
