@@ -13,22 +13,22 @@
 
 #![allow(clippy::excessive_precision)]
 
+use wem_profiles::selection::{WwiseProfile, WwiseVersion};
 use wem_profiles::transient::{load_transient, load_transient_record_family};
-use wem_profiles::{linear_frac, load_profile_bundle, normalize_quality_factor, DataDir};
+use wem_profiles::{bundle_for_selection, linear_frac, normalize_quality_factor};
 
-fn data_dir() -> DataDir {
-    DataDir::from_profiles_dir(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .join("src/wwise_wem/data/profiles")
-            .canonicalize()
-            .expect("profiles directory resolves"),
-    )
+fn selection(version: WwiseVersion, channels: i64, sample_rate: i64) -> WwiseProfile {
+    WwiseProfile::new(version, channels, sample_rate).expect("positive selection geometry")
+}
+
+/// The verified bundle for one selection: the public, name-free intake.
+fn bundle_for(channels: i64, sample_rate: i64) -> wem_profiles::ProfileBundle {
+    bundle_for_selection(selection(WwiseVersion::Wwise2013, channels, sample_rate))
+        .expect("installed selection resolves")
 }
 
 fn family() -> wem_profiles::transient::TransientRecordFamily {
-    let bundle = load_profile_bundle(&data_dir(), Some("wwise2013-2ch-48000"), false)
-        .expect("2ch bundle loads");
+    let bundle = bundle_for(2, 48_000);
     let ref_ = bundle
         .runtime_manifest()
         .resource("analysis.transient")
@@ -178,8 +178,7 @@ fn materialized_window_matches_the_six_ch_registered_window() {
     let fam = family();
     let t2 = load_transient_tables_from(&fam, None).expect("2ch materialize");
 
-    let b6 = load_profile_bundle(&data_dir(), Some("wwise2013-6ch-44100"), false)
-        .expect("6ch bundle loads");
+    let b6 = bundle_for(6, 44_100);
     let ref6 = b6
         .runtime_manifest()
         .resource("analysis.transient")

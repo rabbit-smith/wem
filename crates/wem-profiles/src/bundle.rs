@@ -414,7 +414,13 @@ fn build_bundle_fields(
 ///
 /// * `profile` selects an index entry; `None` uses the index `default`.
 /// * `verify_all` runs SHA-256 verification over every logical resource.
-pub fn load_profile_bundle(
+///
+/// Crate-internal intake: a profile name plus a profile tree is exactly what
+/// the caller-facing surface must not accept
+/// ([`bundle_for_selection`](crate::bundle_for_selection) is the one public
+/// way to obtain a bundle). The development filesystem seam is exercised by
+/// the in-crate loader suite.
+pub(crate) fn load_profile_bundle(
     data: &DataDir,
     profile: Option<&str>,
     verify_all: bool,
@@ -442,7 +448,12 @@ pub fn load_profile_bundle(
 /// Both entry points funnel through the same core ([`load_profile_bundle_with`]),
 /// so schema checks, SHA-256 identity checks, and path-safety rejections
 /// apply identically — rejection conditions cannot drift between the two.
-pub fn load_profile_bundle_from_bytes(
+///
+/// Crate-internal: index/manifest bytes are an intake the caller-facing
+/// surface never accepts. The in-crate loader suite is its only consumer, so
+/// it stays compiled (and validated) in every build.
+#[allow(dead_code)]
+pub(crate) fn load_profile_bundle_from_bytes(
     index: &[u8],
     files: impl IntoIterator<Item = (String, Vec<u8>)>,
     profile: Option<&str>,
@@ -462,7 +473,10 @@ pub fn load_profile_bundle_from_bytes(
 
 /// Load a compile-time embedded profile bundle without filesystem I/O or an
 /// up-front copy of every resource.
-pub fn load_profile_bundle_from_static_bytes(
+///
+/// Crate-internal, like the other two entries: the compiled-in bundle is
+/// reached from outside through [`bundle_for_selection`](crate::registry::bundle_for_selection).
+pub(crate) fn load_profile_bundle_from_static_bytes(
     index: &[u8],
     files: &'static [(&'static str, &'static [u8])],
     profile: Option<&str>,

@@ -40,7 +40,11 @@ pub(crate) fn validate_logical_key(key: &str) -> Result<&str, ProfileError> {
 ///
 /// Rejects exactly what Python `normalize_resource_path` rejects: empty
 /// text, backslashes, absolute paths, and empty/`.`/`..` segments.
-pub fn normalize_resource_path(path: &str) -> Result<PathBuf, ProfileError> {
+///
+/// Crate-internal: a caller-supplied path is an intake the public surface
+/// never takes. Both the key validator above and this normalizer are
+/// exercised by the in-crate resource-path rejection suite.
+pub(crate) fn normalize_resource_path(path: &str) -> Result<PathBuf, ProfileError> {
     validate_logical_key(path).map(PathBuf::from)
 }
 
@@ -86,16 +90,18 @@ pub(crate) fn logical_relative<'a>(key: &'a str, parent: &str) -> &'a str {
 
 /// Where a resource's bytes come from.
 ///
-/// * [`ResourceBackend::Fs`] — the standard filesystem backend: files live
-///   under the profiles directory of a [`DataDir`] (Python's
-///   `importlib.resources` path).
-/// * [`ResourceBackend::Bytes`] — in-memory bytes, keyed by
-///   profiles-directory-relative POSIX path. The threadless (e.g.
-///   wasm32-unknown-unknown) entry point: no filesystem access, while the
-///   SHA-256 / schema / path-safety validation is shared with the filesystem
-///   path ([`ResourceRef::read_bytes`] runs the same digest check either way).
+/// * `Fs` — the standard filesystem backend: files live under the profiles
+///   directory of a `DataDir` (Python's `importlib.resources` path).
+/// * `Bytes` — in-memory bytes, keyed by profiles-directory-relative POSIX
+///   path. The threadless (e.g. wasm32-unknown-unknown) entry point: no
+///   filesystem access, while the SHA-256 / schema / path-safety validation
+///   is shared with the filesystem path ([`ResourceRef::read_bytes`] runs the
+///   same digest check either way).
+///
+/// Crate-internal: how a resource is sourced is an implementation detail of
+/// the profile intake, never part of a caller-facing signature.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ResourceBackend {
+pub(crate) enum ResourceBackend {
     /// Filesystem backend rooted at one profile data tree.
     Fs(DataDir),
     /// In-memory backend: profiles-dir-relative POSIX path -> file bytes.
@@ -123,14 +129,18 @@ pub struct ResourceRef {
 
 impl ResourceRef {
     /// Validate package/identity and normalize; mirrors Python `__post_init__`.
-    pub fn new(data: DataDir, path: &str, sha256: &str) -> Result<Self, ProfileError> {
+    ///
+    /// Crate-internal constructor: it takes a profile tree. The in-crate
+    /// loader suite is its consumer.
+    #[allow(dead_code)]
+    pub(crate) fn new(data: DataDir, path: &str, sha256: &str) -> Result<Self, ProfileError> {
         Self::with_backend(ResourceBackend::Fs(data), path, sha256)
     }
 
     /// Construct against an explicit byte source (shared validator; used by
     /// the in-memory entry point). Same path / digest rejection rules as
     /// [`ResourceRef::new`].
-    pub fn with_backend(
+    pub(crate) fn with_backend(
         backend: ResourceBackend,
         path: &str,
         sha256: &str,
@@ -150,7 +160,7 @@ impl ResourceRef {
     }
 
     /// The byte source this reference resolves against.
-    pub fn backend(&self) -> &ResourceBackend {
+    pub(crate) fn backend(&self) -> &ResourceBackend {
         &self.backend
     }
 
@@ -167,8 +177,8 @@ impl ResourceRef {
 
     /// Read bytes, verifying SHA-256 (Python `read_bytes`).
     ///
-    /// The read source is the [`ResourceBackend`]; the SHA-256 check below
-    /// applies identically to both filesystem and in-memory sources, so the
+    /// The read source is the resource backend; the SHA-256 check below
+    /// applies identically to the filesystem and the in-memory sources, so the
     /// two entry points cannot drift in what they accept or reject.
     pub fn read_bytes(&self) -> Result<Vec<u8>, ProfileError> {
         let payload = match &self.backend {

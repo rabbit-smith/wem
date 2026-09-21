@@ -76,6 +76,27 @@ checksum mismatch is an error. The built-in path is self-contained: it reads
 packaged profile resources and never reads a reference WEM. Golden expected
 outputs are test assets, not runtime inputs.
 
+## Access boundary
+
+The intake is crate-private in the Rust kernel. `load_profile_bundle`,
+`load_profile_bundle_from_bytes`, the `DataDir`, the `ResourceBackend` and the
+name-keyed entry addressing are all `pub(crate)`: a library user cannot name a
+profile, point at a profile tree, or hand over index/manifest bytes at all.
+
+The one public way to obtain a bundle is selection-keyed —
+`bundle_for_selection(WwiseProfile) -> Result<ProfileBundle, ProfileError>` —
+which resolves against the bundle compiled into the library under the same
+exactly-one rule as the encoder. It exists because the stage and analysis
+parity suites need a profile's *materials*, not its bytes, and they test layers
+outside this crate.
+
+The development-tree loader therefore keeps its coverage through unit tests
+inside the crate, where `pub(crate)` is reachable; the filesystem loader and
+the digest-chain rejection cases are exercised there, not from an external
+integration test. The Python package carries its own loader
+(`wwise_wem.profiles.bundle`), because the wheel's zip-import digest-chain gate
+must run where the native extension is absent.
+
 ## Frozen transcendental tables
 
 Each profile freezes its complete runtime transcendental domain into

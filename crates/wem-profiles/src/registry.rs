@@ -1,9 +1,11 @@
 //! Installed Wwise Vorbis encoder profiles and exact profile registry
 //! (Python: `profiles/registry.py`).
 //!
-//! Rust callers build the registry lazily from a caller-provided [`DataDir`].
+//! The caller-facing selector is one [`WwiseProfile`], resolved against the
+//! registry compiled into this library; the crate-internal development tree
+//! is a loader-suite seam, never a caller input.
 
-use crate::bundle::load_profile_bundle;
+use crate::bundle::{load_profile_bundle, ProfileBundle};
 use crate::data::DataDir;
 use crate::embedded::{embedded_profile_names, load_embedded_profile_bundle};
 use crate::error::ProfileError;
@@ -138,7 +140,11 @@ impl ProfileRegistry {
 /// Complete profiles and draft profiles (setup pending corpus export) are
 /// both listed; draft entries carry `setup_available == false` plus the
 /// manifest-declared `pending_reason`, and never match a setup digest.
-pub fn installed_registry(data: &DataDir) -> Result<ProfileRegistry, ProfileError> {
+///
+/// Crate-internal: it takes a profile tree. The in-crate loader suite is its
+/// consumer; callers resolve against the compiled-in registry.
+#[allow(dead_code)]
+pub(crate) fn installed_registry(data: &DataDir) -> Result<ProfileRegistry, ProfileError> {
     let names = index_profile_names(data)?;
     let mut profiles = Vec::with_capacity(names.len());
     for name in names {
@@ -146,6 +152,33 @@ pub fn installed_registry(data: &DataDir) -> Result<ProfileRegistry, ProfileErro
         profiles.push(bundle.to_encoder_profile()?);
     }
     ProfileRegistry::new(profiles)
+}
+
+/// The verified profile bundle for one structured selection, resolved against
+/// the bundle compiled into this library.
+///
+/// Resolution is exactly [`ProfileRegistry::resolve_selection`]: generation,
+/// channels and sample rate all participate, and a selection that no installed
+/// profile satisfies, or that more than one satisfies, is an error — never a
+/// first-match pick. The returned bundle is fully verified: every logical
+/// resource digest is checked on the way in, so a caller that has a bundle has
+/// already proven the payload → manifest SHA → index SHA chain.
+///
+/// This is the only way a caller outside this crate obtains a
+/// [`ProfileBundle`]; its signature carries no profile name, no path and no
+/// index or manifest bytes.
+pub fn bundle_for_selection(selection: WwiseProfile) -> Result<ProfileBundle, ProfileError> {
+    let registry = embedded_registry()?;
+    let resolved = registry.resolve_selection(selection)?;
+    // Name-keyed index addressing stays crate-internal: the name is the one
+    // the registry just resolved for this selection, never a caller input.
+    let bundle = load_embedded_profile_bundle(Some(resolved.name()))?;
+    if bundle.key() != resolved.key() {
+        return Err(ProfileError::InstalledBundleMismatch {
+            profile: resolved.name().to_string(),
+        });
+    }
+    Ok(bundle)
 }
 
 /// Build the registry from profiles compiled into this library.

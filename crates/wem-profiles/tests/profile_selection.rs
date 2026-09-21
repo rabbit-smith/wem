@@ -165,6 +165,39 @@ fn the_free_resolvers_agree_with_the_registry() {
 }
 
 #[test]
+fn the_bundle_intake_resolves_what_the_registry_resolves() {
+    // The one public way to a bundle takes a structured selection and no
+    // name, path or bytes; it must agree with the registry's own exactly-one
+    // resolution for every installed configuration.
+    let registry = wem_profiles::embedded_registry().expect("embedded registry");
+    for selection in [six(), stereo()] {
+        let resolved = registry
+            .resolve_selection(selection)
+            .expect("selection resolves");
+        let bundle = wem_profiles::bundle_for_selection(selection).expect("bundle resolves");
+        assert_eq!(bundle.key(), resolved.key());
+        assert_eq!(bundle.name(), resolved.name());
+        assert_eq!(
+            bundle.setup().expect("setup ref").sha256(),
+            resolved.setup_sha256()
+        );
+        assert_eq!(bundle.container_metadata(), resolved.container_metadata());
+    }
+}
+
+#[test]
+fn an_unsatisfiable_selection_has_no_bundle_either() {
+    // The bundle intake is the same exactly-one rule: an unsatisfiable
+    // selection is an error, never a first-match pick.
+    let selection =
+        WwiseProfile::new(WwiseVersion::Wwise2013, 3, 44_100).expect("positive geometry");
+    match wem_profiles::bundle_for_selection(selection).unwrap_err() {
+        ProfileError::NoProfileForSelection { channels, .. } => assert_eq!(channels, 3),
+        other => panic!("expected NoProfileForSelection, got {other:?}"),
+    }
+}
+
+#[test]
 fn an_unsatisfiable_selection_lists_what_is_installed() {
     // Installed rates on the wrong channel count, and an uninstalled rate on
     // an installed channel count: neither may fall back to a neighbour.
