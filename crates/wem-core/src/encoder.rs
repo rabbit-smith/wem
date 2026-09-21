@@ -348,8 +348,8 @@ impl Encoder {
     }
 
     /// Load one installed profile from an explicit profile data tree and
-    /// optionally bind a quality factor. This entry never reads or mutates
-    /// `WEM_DATA_DIR`.
+    /// optionally bind a quality factor. The tree is the one passed in: the
+    /// kernel resolves no profile data from the process environment.
     pub fn from_profile_quality_in(
         data: &DataDir,
         name: &str,
@@ -382,7 +382,7 @@ impl Encoder {
     }
 
     /// Construct from an encoder profile using an explicit profile data
-    /// tree. This entry never reads or mutates `WEM_DATA_DIR`.
+    /// tree. The tree is the one passed in, never an ambient default.
     pub fn from_profile_model_in(
         data: &DataDir,
         profile: &EncoderProfile,

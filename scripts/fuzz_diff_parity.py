@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import os
 import random
 import struct
 import sys
@@ -318,11 +317,9 @@ def main() -> int:
         print(f"  {error}", file=sys.stderr)
         return 2
 
-    # The kernel resolves profile data from WEM_DATA_DIR or the repository
-    # layout; pin it explicitly so the script is cwd-independent.
-    profiles_dir = REPO / "src" / "wwise_wem" / "data" / "profiles"
-    os.environ["WEM_DATA_DIR"] = str(profiles_dir)
-
+    # The native kernel carries its profile bundle at compile time, so the
+    # script needs no data-directory environment of its own; the profiles
+    # below are read from the installed package for comparison only.
     from wwise_wem.profiles.registry import load_wem_profile
 
     profile = load_wem_profile(PROFILE_NAME)

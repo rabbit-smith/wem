@@ -499,8 +499,8 @@ impl StreamSession {
     }
 
     /// Open the session on one installed profile from an explicit data tree
-    /// and optionally bind a quality factor. This entry never reads or
-    /// mutates `WEM_DATA_DIR`.
+    /// and optionally bind a quality factor. The tree is the one passed in,
+    /// never an ambient default.
     pub fn init_profile_quality_in(
         &mut self,
         data: &DataDir,

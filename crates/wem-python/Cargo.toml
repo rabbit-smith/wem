@@ -31,8 +31,8 @@ crate-type = ["cdylib", "rlib"]
 #                       symbols from the host instead of linking libpython.
 pyo3 = { version = "0.25.1", features = ["abi3-py310", "auto-initialize"] }
 # The kernel is consumed through its public surface only (zero drift):
-# wem-core for Encoder / StreamSession / error classes. Profile loading uses
-# the kernel's own entry points (WEM_DATA_DIR / repo-layout DataDir).
+# wem-core for Encoder / StreamSession / error classes. Profile selection is
+# the structured one, resolved against the bundle compiled into the kernel.
 wem-core = { path = "../wem-core" }
 
 [dev-dependencies]

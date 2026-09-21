@@ -37,8 +37,11 @@ for path_entry in os.environ["WEM_SRC"].split(os.pathsep):
     sys.path.insert(0, path_entry)
 from pathlib import Path
 from wwise_wem import encode
+from wwise_wem_reference._tmath import start_recording, write_recording
+# The record directory arrives as an explicit argument (argv[0] is "-c"),
+# never through the environment.
+start_recording(sys.argv[1])
 result = encode(Path(os.environ["WEM_INPUT"]))
-from wwise_wem_reference._tmath import write_recording
 counts = write_recording()
 print(",".join(f"{k}={v}" for k, v in sorted(counts.items())))
 """
@@ -122,20 +125,19 @@ class FrozenTableEqualityTests(unittest.TestCase):
 class FrozenLiveCallTests(unittest.TestCase):
     def test_encode_with_frozen_tables_makes_zero_live_transcendentals(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            record_dir = os.path.join(directory, "capture")
+            record_dir = os.path.join(directory, "recording")
             wav_path = os.path.join(directory, "small.wav")
             _write_small_wav(wav_path)
             environment = dict(os.environ)
             environment.update(
                 {
-                    "WEM_TMATH_RECORD": record_dir,
                     "WEM_SRC": str(ROOT / "src") + os.pathsep + str(ROOT / "reference"),
                     "WEM_INPUT": wav_path,
                     "PYTHONDONTWRITEBYTECODE": "1",
                 }
             )
             completed = subprocess.run(
-                [sys.executable, "-c", _SUBPROCESS_ENCODE],
+                [sys.executable, "-c", _SUBPROCESS_ENCODE, record_dir],
                 env=environment,
                 capture_output=True,
                 text=True,

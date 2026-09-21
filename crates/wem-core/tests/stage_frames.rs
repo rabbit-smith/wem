@@ -212,7 +212,11 @@ fn stage_frames_packet_parity_all_28_representatives() {
 
     let stages = stages_dir();
     let res = {
-        let data = DataDir::from_env().expect("WEM data dir resolves");
+        let data = DataDir::from_profiles_dir(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join("src/wwise_wem/data/profiles"),
+        );
         let bundle = load_profile_bundle(&data, None, false).expect("installed profile loads");
         assemble_encoder_profile_resources(&bundle, None, None).expect("assembly succeeds")
     };

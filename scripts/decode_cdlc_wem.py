@@ -23,7 +23,7 @@ Two synthesis paths:
   * default (deterministic, pure numpy float64) — independently reproduces
     the community oracle at correlation 1.000000, max int16 delta <= 2 LSB,
     and strict packet closure on all 294,485 packets;
-  * ``WEM_DECODE_LIBVORBUS_EXACT=1`` — mirrors libvorbis 1.3.7 float32 DSP
+  * ``--libvorbis-exact`` — mirrors libvorbis 1.3.7 float32 DSP
     bit-for-bit (uses the system libvorbis for the inverse MDCT and
     compiles a tiny C helper on first use).  Opt-in only, because it binds
     the output to the local libvorbis build and is not byte-stable across
@@ -32,14 +32,13 @@ Two synthesis paths:
 Usage:
     python3 scripts/decode_wem.py --self-check
     python3 scripts/decode_wem.py --segments [--stats out.json]
-    WEM_DECODE_LIBVORBUS_EXACT=1 python3 scripts/decode_wem.py --segments
+    python3 scripts/decode_wem.py --segments --libvorbis-exact
 """
 from __future__ import annotations
 
 import argparse
 import ctypes
 import json
-import os
 import struct
 import sys
 import time
@@ -92,6 +91,11 @@ DEFAULT_PROFILE = "wwise2013-2ch-48000"
 DEFAULT_CORPUS = _REPO_ROOT / "corpus" / "paired-build-probe" / "the long paired input"
 DEFAULT_OUT_DIR = _REPO_ROOT / "corpus" / "paired-build-probe" / "out"
 SAMPLE_RATE = 48000
+
+# Set from `--libvorbis-exact` in `main()`. Module-level so the decode helpers
+# below need no extra parameter; the decode script reads no environment
+# variable, so which synthesis path ran is always visible in the command line.
+_LIBVORBIS_EXACT = False
 
 
 class ResidueEOP(Exception):
@@ -1295,14 +1299,14 @@ def run_decode_2ch(
     community oracle (vgmstream) at correlation 1.000000 with max int16
     delta <= 2 LSB and strict packet closure on all 294,485 packets.
 
-    With ``WEM_DECODE_LIBVORBUS_EXACT=1`` the libvorbis 1.3.7 float32 clone
+    With ``--libvorbis-exact`` the libvorbis 1.3.7 float32 clone
     is used instead: f32 codebook values, f32 residue/coupling/floor, the
     system libvorbis mdct_backward (ctypes), the vorbis_synthesis_blockin
     OLA, and vgmstream's (int)(x*32767.0f) int16 conversion — byte-exact
     against that local build, at the cost of environment sensitivity.
     Falls back to the numpy path when libvorbis or a C compiler is missing.
     """
-    if not os.environ.get("WEM_DECODE_LIBVORBUS_EXACT"):
+    if not _LIBVORBIS_EXACT:
         result = run_decode_2ch_kernel_f64(ctx, audio_packets)
         result["libv_f32"] = False
         return result
@@ -1780,9 +1784,17 @@ def main() -> int:
     parser.add_argument("--profile", default=DEFAULT_PROFILE)
     parser.add_argument("--self-check", action="store_true")
     parser.add_argument("--segments", action="store_true")
+    parser.add_argument(
+        "--libvorbis-exact",
+        action="store_true",
+        help="mirror the local libvorbis 1.3.7 float32 DSP instead of numpy",
+    )
     parser.add_argument("--stats", type=Path, default=None)
     parser.add_argument("--segment-seconds", type=float, default=32.0)
     args = parser.parse_args()
+
+    global _LIBVORBIS_EXACT
+    _LIBVORBIS_EXACT = args.libvorbis_exact
 
     if args.self_check:
         return run_self_check()
@@ -1814,7 +1826,7 @@ def main() -> int:
     # after changing decode logic (see corpus/paired-build/out/FINDINGS_R2B.md §D).
     cache_tag = (
         "v6_libvf32"
-        if os.environ.get("WEM_DECODE_LIBVORBUS_EXACT")
+        if _LIBVORBIS_EXACT
         else "v6_numpy_f64"
     )
     pcm_cache = DEFAULT_OUT_DIR / f"_pcm_cache_{args.wem.name}_{len(raw)}_{cache_tag}.npz"

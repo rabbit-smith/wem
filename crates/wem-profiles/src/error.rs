@@ -10,8 +10,6 @@ pub enum ProfileError {
     // ------------------------------------------------------------------
     // data directory / resource identity
     // ------------------------------------------------------------------
-    /// `WEM_DATA_DIR` is unset and no repo-root layout was found.
-    DataDirNotFound,
     /// Unsafe package-relative resource path (empty, backslash, absolute,
     /// or empty/`.`/`..` segment).
     UnsafePath { path: String },
@@ -348,7 +346,6 @@ impl std::fmt::Display for ProfileError {
         // One line per variant; keep stable for logs and tests.
         use ProfileError::*;
         match self {
-            DataDirNotFound => write!(f, "WEM data directory not found (set WEM_DATA_DIR or run inside the repository)"),
             UnsafePath { path } => write!(f, "unsafe package resource path: {path:?}"),
             InvalidSha256 { value } => write!(f, "resource SHA-256 must contain 64 hex digits: {value:?}"),
             MissingResource { path } => write!(f, "missing package resource {path}"),

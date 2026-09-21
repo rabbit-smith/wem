@@ -3,9 +3,11 @@
 //!
 //! One [`WwiseProfile`] names the encoder configuration a caller wants
 //! without exposing how the kernel stores it: a Wwise generation plus the PCM
-//! geometry. Profile names, profile directories, profile index/manifest bytes
-//! and the `WEM_DATA_DIR` environment variable are implementation details of
-//! this crate and never reach a caller-facing signature.
+//! geometry. Profile names, profile directories and profile index/manifest
+//! bytes are implementation details of this crate and never reach a
+//! caller-facing signature; the runtime resolves against the bundle compiled
+//! into the library, so there is no ambient path or environment variable to
+//! point it at a tree.
 //!
 //! Both types are part of the cross-language contract: the C ABI spells them
 //! `WemVersion` / `WemProfile` in `include/wem.h`, the Python binding

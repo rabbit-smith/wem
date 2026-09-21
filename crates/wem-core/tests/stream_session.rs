@@ -309,38 +309,26 @@ fn drive_giant_chunk() {
 // --- Child-process worker tests ---
 //
 // These do the real streaming work, but only when the parent memory gate
-// forks them as a child (WEM_RSS_WORKER=1). In a normal test run they
-// no-op immediately, so parallel `#[test]` threads never contaminate each
-// other's RSS. The parent reads each child's peak via wait4().ru_maxrss.
+// spawns them with libtest's own `--ignored --exact <name>` arguments. They
+// are `#[ignore]`d so a normal `#[test]` run reports them without executing
+// them, and parallel threads never contaminate each other's RSS. The parent
+// reads each child's peak via wait4().ru_maxrss.
 #[test]
+#[ignore = "child worker: the memory gate runs it with --ignored --exact"]
 fn stream_memory_rss_worker_duration_300() {
-    stream_worker(WorkerMode::Duration(300));
+    drive_duration_stream(300);
 }
 
 #[test]
+#[ignore = "child worker: the memory gate runs it with --ignored --exact"]
 fn stream_memory_rss_worker_duration_600() {
-    stream_worker(WorkerMode::Duration(600));
+    drive_duration_stream(600);
 }
 
 #[test]
+#[ignore = "child worker: the memory gate runs it with --ignored --exact"]
 fn stream_memory_rss_worker_giant_chunk() {
-    stream_worker(WorkerMode::Giant);
-}
-
-enum WorkerMode {
-    Duration(i64),
-    Giant,
-}
-
-fn stream_worker(mode: WorkerMode) {
-    // Real work only when invoked as a child worker by the parent gate.
-    if std::env::var("WEM_RSS_WORKER").as_deref().ok() != Some("1") {
-        return;
-    }
-    match mode {
-        WorkerMode::Duration(d) => drive_duration_stream(d),
-        WorkerMode::Giant => drive_giant_chunk(),
-    }
+    drive_giant_chunk();
 }
 
 // --- Parent memory gate (forks workers, reads their peak RSS) ---
@@ -417,8 +405,12 @@ fn macos_child_peak_rss(exe: &std::path::Path, worker: &str) -> Option<Result<us
     }
 
     let mut cmd = std::process::Command::new(exe);
-    cmd.arg(worker); // test-name filter: only this worker runs
-    cmd.env("WEM_RSS_WORKER", "1");
+    // Test-name filter selects the worker; `--ignored` is what lets the
+    // `#[ignore]`d worker actually run. Both are libtest arguments, so the
+    // child needs no environment of its own.
+    cmd.arg("--ignored");
+    cmd.arg("--exact");
+    cmd.arg(worker);
     cmd.stdout(std::process::Stdio::null());
     cmd.stderr(std::process::Stdio::null());
     let child = match cmd.spawn() {

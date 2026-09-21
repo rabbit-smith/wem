@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Capture the live transcendental input domain for the exact Wwise 2013.2 profile.
 
-Runs one full fixture encoding with ``WEM_TMATH_RECORD`` enabled (the variable
-must be set before importing the package, which this script guarantees), writes
-per-site ``(input bits, output bits)`` records under
+Runs one full fixture encoding with the site recorder switched on (this script
+turns it on explicitly, before the encoding runs), writes per-site
+``(input bits, output bits)`` records under
 ``tests/data/stage-golden/transcendental/``, then reports:
 
 - unique input count per site (0 = site not on the live path);
@@ -17,7 +17,6 @@ Usage: python3 scripts/record_tmath.py [output-dir]
 from __future__ import annotations
 
 import json
-import os
 import struct
 import sys
 from pathlib import Path
@@ -25,11 +24,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "tests/data/stage-golden/transcendental"
 
-os.environ["WEM_TMATH_RECORD"] = str(OUT_DIR)
 sys.path.insert(0, str(ROOT / "src"))
 
 from wwise_wem import encode  # noqa: E402
-from wwise_wem_reference._tmath import write_recording  # noqa: E402
+from wwise_wem_reference._tmath import start_recording, write_recording  # noqa: E402
+
+# Switch the site recorder on before the encoding whose domain is recorded.
+start_recording(OUT_DIR)
 
 
 def read_pairs(path: Path) -> list[tuple[float, float]]:

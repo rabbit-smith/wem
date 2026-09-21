@@ -1,23 +1,26 @@
 """Named entry points for every runtime transcendental call in the encoder.
 
 This module is the deterministic-math seam for the Wwise 2013.2 bit-exact
-profile.  Production calls forward to the host libm unchanged; setting
-``WEM_TMATH_RECORD=<directory>`` additionally records deduplicated
-``(float64 input bits, float64 output bits)`` pairs per site as compact
-16-byte binary files so the live input domain of each call site becomes an
-auditable contract asset for cross-implementation verification.
+profile.  Production calls forward to the host libm unchanged.
+
+:func:`start_recording` switches on an additional per-site record of
+deduplicated ``(float64 input bits, float64 output bits)`` pairs, written as
+compact 16-byte binary files so the live input domain of each call site becomes
+an auditable contract asset for cross-implementation verification.  Recording
+is opt-in through that call — this module reads no environment variable, so a
+recorded domain is always something a caller asked for explicitly.  The
+recorded *values* are the same either way: recording observes calls, it never
+changes them.
 
 Site names are stable identities; renaming one is a contract change.
 """
 from __future__ import annotations
 
 import math
-import os
 import struct
 from pathlib import Path
 from typing import Callable
 
-_RECORD_DIR = os.environ.get("WEM_TMATH_RECORD", "")
 _PACK = struct.pack
 
 _SITE_NAMES = (
@@ -32,6 +35,9 @@ _SITE_NAMES = (
     "transform.window_long.sin",
 )
 
+# Set only by `start_recording`; `None` means the wrappers below are pass-through.
+_recording_dir: Path | None = None
+
 
 class _SiteRecorder:
     __slots__ = ("seen", "calls")
@@ -43,7 +49,20 @@ class _SiteRecorder:
 
 _recorders: dict[str, _SiteRecorder] = {name: _SiteRecorder() for name in _SITE_NAMES}
 
-RECORDED_SITES: tuple[str, ...] = _SITE_NAMES if _RECORD_DIR else ()
+
+def start_recording(directory: str | Path) -> None:
+    """Record every site call's bit pairs into ``directory``.
+
+    Must be called before the encoding whose domain is being recorded; the
+    flush is :func:`write_recording`.
+    """
+    global _recording_dir
+    _recording_dir = Path(directory)
+
+
+def recording_sites() -> tuple[str, ...]:
+    """The site names being recorded right now (empty when recording is off)."""
+    return _SITE_NAMES if _recording_dir is not None else ()
 
 
 def math_bits(value: float) -> int:
@@ -53,10 +72,10 @@ def math_bits(value: float) -> int:
 
 def _make(site: str, fn: Callable[[float], float]) -> Callable[[float], float]:
     recorder = _recorders[site]
-    if not _RECORD_DIR:
-        return fn
 
     def tracked(value: float) -> float:
+        if _recording_dir is None:
+            return fn(value)
         recorder.calls += 1
         result = fn(value)
         recorder.seen[math_bits(value)] = math_bits(result)
@@ -78,10 +97,14 @@ window_long_sin_f64 = _make("transform.window_long.sin", math.sin)
 
 
 def write_recording() -> dict[str, int]:
-    """Flush recorded site pairs to ``$WEM_TMATH_RECORD``; returns per-site counts."""
-    if not _RECORD_DIR:
+    """Flush recorded site pairs to the directory given to :func:`start_recording`.
+
+    Returns the per-site unique-input counts; an empty mapping when recording
+    was never switched on.
+    """
+    directory = _recording_dir
+    if directory is None:
         return {}
-    directory = Path(_RECORD_DIR)
     directory.mkdir(parents=True, exist_ok=True)
     counts: dict[str, int] = {}
     for name, recorder in _recorders.items():
