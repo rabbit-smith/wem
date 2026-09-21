@@ -21,8 +21,9 @@ import hashlib
 import unittest
 from pathlib import Path
 
+from wwise_wem import WwiseProfile, WwiseVersion
 from wwise_wem.application.encoder import Encoder
-from wwise_wem.profiles.registry import load_wem_profile
+from wwise_wem.profiles.registry import resolve_selection
 from wwise_wem import _core as core_module
 from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem.model import PcmBuffer
@@ -33,11 +34,15 @@ ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "tests" / "fixtures"
 INPUT = FIXTURES / "input.wav"
 REFERENCE = FIXTURES / "reference.wem"
-PROFILE_NAME = "wwise2013-6ch-44100"
+SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
+PROFILE = resolve_selection(SELECTION)
+KERNEL_METADATA_SOURCE = "profile:6ch/44100Hz/2013"
+
 EXPECTED_SHA256 = (
     "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247"
 )
-STEREO_PROFILE_NAME = "wwise2013-2ch-48000"
+STEREO_SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 2, 48000)
+STEREO_PROFILE = resolve_selection(STEREO_SELECTION)
 STEREO_EXPECTED_SHA256 = (
     "4e944dd43000e6738e4399af8851789cd8f90a0004100ff38e8e2b2ed61f3654"
 )
@@ -96,13 +101,12 @@ def _synthetic_stereo_pcm(frames: int = 16384) -> PcmBuffer:
 class CoreOracleGoldenTests(unittest.TestCase):
     def test_reference_input_matches_golden_on_facade_and_oracle(self):
         pcm = read_pcm_wav(INPUT)
-        profile = load_wem_profile(PROFILE_NAME)
         golden = REFERENCE.read_bytes()
 
         # Single execution path: the facade runs the native kernel.
-        facade = Encoder(profile).encode_pcm(pcm)
-        oracle_result = _oracle_encode(pcm, profile)
-        direct_core = core_module.Encoder(PROFILE_NAME).encode_pcm(
+        facade = Encoder(SELECTION).encode_pcm(pcm)
+        oracle_result = _oracle_encode(pcm, PROFILE)
+        direct_core = core_module.Encoder(SELECTION).encode_pcm(
             pcm.sample_rate, _rows_from_pcm(pcm)
         )
 
@@ -118,21 +122,23 @@ class CoreOracleGoldenTests(unittest.TestCase):
         self.assertEqual(facade.sha256, direct_core.sha256())
         # One execution path: the stats surface carries no provenance tag.
         self.assertNotIn("engine", facade.stats.to_dict())
+        # The whole stats surface agrees, provenance label included: the
+        # oracle and the kernel name the same selection the same way.
         self.assertEqual(
             facade.stats.to_dict(),
             oracle_result.stats.to_dict(),
         )
+        self.assertEqual(facade.stats.metadata_source, KERNEL_METADATA_SOURCE)
 
     def test_boundary_length_inputs_are_byte_identical_between_facade_and_oracle(
         self,
     ):
-        profile = load_wem_profile(PROFILE_NAME)
         for frames in BOUNDARY_FRAME_COUNTS:
             with self.subTest(frames=frames):
                 pcm = _synthetic_pcm(frames)
 
-                oracle = _oracle_encode(pcm, profile)
-                native = Encoder(profile).encode_pcm(pcm)
+                oracle = _oracle_encode(pcm, PROFILE)
+                native = Encoder(SELECTION).encode_pcm(pcm)
 
                 self.assertEqual(oracle.data, native.data)
                 self.assertEqual(oracle.sha256, native.sha256)
@@ -142,14 +148,16 @@ class CoreOracleGoldenTests(unittest.TestCase):
                     oracle.stats.to_dict(),
                     native.stats.to_dict(),
                 )
+                self.assertEqual(
+                    native.stats.metadata_source, KERNEL_METADATA_SOURCE
+                )
 
     def test_stereo_profile_has_a_pinned_native_oracle_byte_contract(self):
-        profile = load_wem_profile(STEREO_PROFILE_NAME)
         pcm = _synthetic_stereo_pcm()
 
-        oracle = _oracle_encode(pcm, profile)
-        native = Encoder(profile).encode_pcm(pcm)
-        direct_core = core_module.Encoder(STEREO_PROFILE_NAME).encode_pcm(
+        oracle = _oracle_encode(pcm, STEREO_PROFILE)
+        native = Encoder(STEREO_SELECTION).encode_pcm(pcm)
+        direct_core = core_module.Encoder(STEREO_SELECTION).encode_pcm(
             pcm.sample_rate, _rows_from_pcm(pcm)
         )
 

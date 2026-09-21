@@ -124,13 +124,27 @@ def _verify_wheel_contents(wheel: Path, contract: dict[str, object]) -> None:
 
 
 def _facade_metadata_smoke(contract: dict[str, object]) -> str:
+    """Metadata-path smoke shared by the zip and installed import paths.
+
+    The profile is resolved by key (generation, channels, sample rate) over
+    the bundle inventory the index declares, never by a profile name; the
+    digest chain (payload -> manifest SHA -> index SHA) is verified by
+    ``load_profile_bundle`` plus ``verify_all``.  The native selector types
+    are deliberately out of reach here: an abi3 extension cannot be imported
+    from inside a zip, so this smoke never touches ``wwise_wem._core``.
+    """
     return (
         "import wwise_wem; "
         f"assert wwise_wem.__all__=={contract['root_exports']!r}; "
-        "from wwise_wem.profiles.registry import resolve_wem_profile; "
-        "from wwise_wem.profiles.bundle import load_profile_bundle; "
-        "p=resolve_wem_profile(6,44100); "
-        "b=load_profile_bundle(); b.verify_all(); "
+        "from wwise_wem.profiles.bundle import installed_profile_names, "
+        "load_profile_bundle; "
+        "installed=[load_profile_bundle(profile=n, verify_all=False) "
+        "for n in installed_profile_names()]; "
+        "matches=[b for b in installed "
+        "if (b.key.generation,b.key.channels,b.key.sample_rate)"
+        "==('2013.2',6,44100)]; "
+        "assert len(matches)==1, matches; "
+        "b=matches[0]; b.verify_all(); "
         "assert b.runtime_manifest.resource('vorbis.setup')==b.setup; "
         "assert set(b.runtime_manifest.resources)=={"
         "'vorbis.setup','vorbis.codebooks.t97','vorbis.codebooks.t219',"
@@ -138,9 +152,9 @@ def _facade_metadata_smoke(contract: dict[str, object]) -> str:
         "'psychoacoustics.short-profiles','psychoacoustics.short-seed',"
         "'psychoacoustics.long-base','psychoacoustics.long-modes',"
         "'analysis.frozen-tables'}; "
-        "assert p.name=='wwise2013-6ch-44100'; "
-        "assert len(p.setup_packet())==201; "
-        "print(p.name, len(p.setup_packet()), len(b.runtime_manifest.resources))"
+        "assert len(b.setup_packet())==201; "
+        "print(b.key.generation, b.key.channels, b.key.sample_rate, "
+        "len(b.setup_packet()), len(b.runtime_manifest.resources))"
     )
 
 

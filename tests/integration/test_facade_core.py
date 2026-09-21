@@ -21,8 +21,8 @@ import hashlib
 import unittest
 from pathlib import Path
 
+from wwise_wem import WwiseProfile, WwiseVersion
 from wwise_wem.application.encoder import Encoder
-from wwise_wem.profiles.registry import load_wem_profile
 from wwise_wem import _core as core_module
 from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem.application.models import EncodeResult, EncodeStats
@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "tests" / "fixtures"
 INPUT = FIXTURES / "input.wav"
 REFERENCE = FIXTURES / "reference.wem"
-PROFILE_NAME = "wwise2013-6ch-44100"
+SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
 EXPECTED_SHA256 = (
     "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247"
 )
@@ -43,7 +43,7 @@ EXPECTED_STATS = {
     "short_packets": 77,
     "long_packets": 128,
     "bytes": 108771,
-    "metadata_source": f"profile:{PROFILE_NAME}",
+    "metadata_source": "profile:6ch/44100Hz/2013",
 }
 
 
@@ -57,11 +57,10 @@ class FacadeIsCoreTests(unittest.TestCase):
 
     def test_facade_bytes_match_the_raw_core_binding_and_golden(self):
         pcm = read_pcm_wav(INPUT)
-        profile = load_wem_profile(PROFILE_NAME)
         reference = REFERENCE.read_bytes()
 
-        result = Encoder(profile).encode_pcm(pcm)
-        direct = core_module.Encoder(PROFILE_NAME).encode_pcm(
+        result = Encoder(SELECTION).encode_pcm(pcm)
+        direct = core_module.Encoder(SELECTION).encode_pcm(
             pcm.sample_rate, _rows_from_pcm(pcm)
         )
 
@@ -88,15 +87,13 @@ class FacadeIsCoreTests(unittest.TestCase):
     def test_stats_surface_has_no_provenance_field(self):
         # The single execution path needs no provenance tag: the result
         # stats expose only encoding facts.
-        profile = load_wem_profile(PROFILE_NAME)
-        result = Encoder(profile).encode_pcm(read_pcm_wav(INPUT))
+        result = Encoder(SELECTION).encode_pcm(read_pcm_wav(INPUT))
         self.assertIsInstance(result, EncodeResult)
         self.assertIsInstance(result.stats, EncodeStats)
         self.assertFalse(hasattr(result.stats, "engine"))
         self.assertNotIn("engine", result.stats.to_dict())
 
     def test_error_paths_are_facade_invariants(self):
-        profile = load_wem_profile(PROFILE_NAME)
         short = PcmBuffer(
             44100,
             tuple(tuple(0.0 for _ in range(100)) for _ in range(6)),
@@ -107,28 +104,27 @@ class FacadeIsCoreTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "at least 4096 frames"):
-            Encoder(profile).encode_pcm(short)
+            Encoder(SELECTION).encode_pcm(short)
         with self.assertRaisesRegex(
             ValueError, "differs from encoder profile"
         ):
-            Encoder(profile).encode_pcm(geometry)
+            Encoder(SELECTION).encode_pcm(geometry)
 
     def test_out_of_domain_pcm_raises_plain_value_error(self):
-        profile = load_wem_profile(PROFILE_NAME)
         # 4095.0 * 32768 is outside the signed-16 range: out of domain.
         pcm = PcmBuffer(
             44100,
             tuple(tuple(4095.0 for _ in range(4096)) for _ in range(6)),
         )
         with self.assertRaisesRegex(ValueError, "integer signed-16 sample"):
-            Encoder(profile).encode_pcm(pcm)
+            Encoder(SELECTION).encode_pcm(pcm)
         # A fractional float is out of domain the same way.
         pcm = PcmBuffer(
             44100,
             tuple(tuple(0.1 for _ in range(4096)) for _ in range(6)),
         )
         with self.assertRaisesRegex(ValueError, "integer signed-16 sample"):
-            Encoder(profile).encode_pcm(pcm)
+            Encoder(SELECTION).encode_pcm(pcm)
 
 
 if __name__ == "__main__":

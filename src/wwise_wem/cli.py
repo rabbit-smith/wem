@@ -8,7 +8,6 @@ from pathlib import Path
 from . import WwiseProfile, WwiseVersion
 from .adapters.wav import read_pcm_wav
 from .api import encode
-from .profiles.registry import load_wem_profile, profile_names
 
 
 def _parse_wwise_version(text: str) -> WwiseVersion:
@@ -22,30 +21,17 @@ def _parse_wwise_version(text: str) -> WwiseVersion:
         ) from error
 
 
-def _installed_wwise_version(profile_name: str) -> WwiseVersion:
-    """The Wwise generation of one installed profile."""
-    generation = load_wem_profile(profile_name).key.generation
-    try:
-        return WwiseVersion.from_generation(generation)
-    except ValueError as error:
-        raise ValueError(
-            f"installed profile {profile_name!r} has an unsupported Wwise "
-            f"generation {generation!r}"
-        ) from error
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Encode a supported PCM WAV to a Wwise 2013.2 Vorbis WEM."
     )
     parser.add_argument("wav", type=Path)
-    parser.add_argument("--profile", choices=profile_names())
     parser.add_argument("--quality", type=float, help="psy quality factor")
     parser.add_argument(
         "--wwise-version",
         default="2013",
         metavar="GENERATION",
-        help="Wwise generation of the selected profile (2013 or 2013.2)",
+        help="Wwise generation to encode for (2013 or 2013.2)",
     )
     parser.add_argument("--channels", type=int, help="assert input channel count")
     parser.add_argument("--sample-rate", type=int, help="assert input sample rate")
@@ -70,22 +56,7 @@ def main() -> None:
             f"--sample-rate={args.sample_rate} differs from WAV ({pcm.sample_rate})"
         )
 
-    selection: str | WwiseProfile
-    if args.profile is not None:
-        # The named profile is the selection; the requested generation must
-        # agree with the generation that profile is installed under.
-        installed = _installed_wwise_version(args.profile)
-        if installed != version:
-            parser.error(
-                f"--wwise-version {version.label} differs from profile "
-                f"{args.profile!r} ({installed.generation})"
-            )
-        selection = args.profile
-    else:
-        # No named profile: the requested generation plus the input geometry
-        # is the whole selection, handed to the kernel as one WwiseProfile.
-        selection = WwiseProfile(version, pcm.channel_count, pcm.sample_rate)
-
+    selection = WwiseProfile(version, pcm.channel_count, pcm.sample_rate)
     result = encode(pcm, profile=selection, quality=args.quality)
     digest = result.sha256
     if args.expect_sha256 and digest.lower() != args.expect_sha256.lower():

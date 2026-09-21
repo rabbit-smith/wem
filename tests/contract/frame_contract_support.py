@@ -13,12 +13,13 @@ import struct
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from tests.analysis_resource_support import installed_profile_bundle
+from wwise_wem import WwiseProfile, WwiseVersion
 from wwise_wem_reference.vorbis.packet_encoder import pack_analysis_frame
 from wwise_wem_reference.profiles.assembly import assemble_encoder_profile_resources
-from wwise_wem.profiles.bundle import load_profile_bundle
 from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem_reference.analysis.session import AnalysisSession
-from wwise_wem.profiles.registry import load_wem_profile, resolve_wem_profile
+from wwise_wem.profiles.registry import resolve_selection
 
 
 SCHEMA = "wwise-wem.frame-contract.v1"
@@ -132,21 +133,27 @@ def first_nested_word_difference(
     return None
 
 
-def build_frame_contract(wav: Path, *, profile: str | None = None) -> dict[str, Any]:
-    """Run the real encoder and return its compact per-frame contract."""
+def build_frame_contract(
+    wav: Path, *, selection: WwiseProfile | None = None
+) -> dict[str, Any]:
+    """Run the real encoder and return its compact per-frame contract.
+
+    ``selection`` is a structured ``WwiseProfile``; with none the installed
+    generation is selected for the geometry read from the WAV.
+    """
     pcm_buffer = read_pcm_wav(Path(wav))
     sample_rate = pcm_buffer.sample_rate
     pcm_frames = pcm_buffer.frame_count
     pcm = pcm_buffer.channels
     channels = pcm_buffer.channel_count
-    selected = (
-        load_wem_profile(profile)
-        if profile is not None
-        else resolve_wem_profile(channels, sample_rate)
-    )
+    if selection is None:
+        selection = WwiseProfile(WwiseVersion.DEFAULT, channels, sample_rate)
+    selected = resolve_selection(selection)
     setup_packet = selected.setup_packet()
     resources = assemble_encoder_profile_resources(
-        load_profile_bundle(profile=selected.name, verify_all=False),
+        installed_profile_bundle(
+            selected.channels, selected.sample_rate, selected.key.generation
+        ),
         setup_packet=setup_packet,
     )
     setup = resources.setup
@@ -266,11 +273,12 @@ def first_frame_contract_difference(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("wav", type=Path)
-    parser.add_argument("--profile")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--compare", type=Path)
     args = parser.parse_args()
-    frame_contract = build_frame_contract(args.wav, profile=args.profile)
+    # The installed generation plus the geometry read from the WAV is the
+    # whole selection, exactly as on the package command line.
+    frame_contract = build_frame_contract(args.wav)
     if args.compare:
         expected = json.loads(args.compare.read_text())
         difference = first_frame_contract_difference(expected, frame_contract)

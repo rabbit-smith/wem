@@ -36,8 +36,9 @@ import wwise_wem_reference.python_engine as reference_engine_module
 from wwise_wem_reference.analysis.session import AnalysisSession
 from wwise_wem_reference.container.model import ContainerPlan
 from wwise_wem_reference.container.wem import load_wem_parts_bytes
+from wwise_wem import WwiseProfile, WwiseVersion
 from wwise_wem.adapters.wav import read_pcm_wav
-from wwise_wem.profiles.registry import load_wem_profile, resolve_wem_profile
+from wwise_wem.profiles.registry import resolve_selection
 
 
 SCHEMA = "wwise-wem.stage-golden.v1"
@@ -373,16 +374,22 @@ def stage_capture() -> Iterator[_StageCapture]:
 
 
 def build_stage_golden(
-    wav: Path, *, profile: str | None = None
+    wav: Path, *, selection: WwiseProfile | None = None
 ) -> tuple[dict[str, Any], dict[str, bytes]]:
-    """Run the reference oracle and return (stage index, raw dump blobs)."""
+    """Run the reference oracle and return (stage index, raw dump blobs).
+
+    ``selection`` is a structured ``WwiseProfile``; with none the installed
+    generation is selected for the geometry read from the WAV.  The index
+    header still records the resolved profile's bundle identity, which is
+    part of the versioned asset contract.
+    """
     wav = Path(wav)
     pcm = read_pcm_wav(wav)
-    profile_obj = (
-        load_wem_profile(profile)
-        if profile is not None
-        else resolve_wem_profile(pcm.channel_count, pcm.sample_rate)
-    )
+    if selection is None:
+        selection = WwiseProfile(
+            WwiseVersion.DEFAULT, pcm.channel_count, pcm.sample_rate
+        )
+    profile_obj = resolve_selection(selection)
 
     with stage_capture() as capture:
         capture.record_encode_inputs(profile_obj, pcm)

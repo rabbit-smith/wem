@@ -19,6 +19,11 @@ INDEX_SCHEMA = "wwise-wem.profile-index.v1"
 BUNDLE_SCHEMA = "wwise-wem.profile-manifest.v1"
 MANIFEST_SCHEMA = BUNDLE_SCHEMA
 WWISE_GENERATION = "2013.2"
+# The short spelling of the same generation, as it appears in messages, on a
+# command line, and in the kernel's `metadata_source`; mirrors the kernel's
+# `WwiseVersion::label()` (the oracle and the tooling cannot read that type,
+# because they must also run where the native extension is absent).
+WWISE_GENERATION_LABEL = "2013"
 
 
 @dataclass(frozen=True, order=True)

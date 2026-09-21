@@ -33,11 +33,12 @@ result = encode(source, *, profile=None, quality=None)
   format.
 
 Plain `bytes` are rejected because raw PCM geometry cannot be inferred safely.
-With no `profile`, the encoder selects the installed profile matching the input
-channel count and sample rate. `profile="wwise2013-6ch-44100"` or
-`profile="wwise2013-2ch-48000"` selects one explicitly, and a `WwiseProfile`
-selects one structurally (see [Profile selection](#profile-selection)).
-`quality` is an optional finite profile interpolation value.
+`profile` is a `WwiseProfile(version, channels, sample_rate)` selection
+(see [Profile selection](#profile-selection)); with `profile=None` the encoder
+selects the installed generation's configuration for the input channel count
+and sample rate. Profile names, profile directories, and geometry-only lookups
+are not part of the interface. `quality` is an optional finite profile
+interpolation value.
 
 All inputs require at least 4096 frames. Unsupported source or field types raise
 `TypeError`; invalid values, unsupported geometry, profile mismatches, and kernel
@@ -46,10 +47,12 @@ configuration errors raise `ValueError`. File access errors retain their standar
 
 ## Profile selection
 
-`profile` also accepts a `WwiseProfile(version, channels, sample_rate)`
-selection: one Wwise generation plus the PCM geometry to encode. The kernel
-resolves it against the configurations compiled into the extension, so an
-unsatisfiable selection is an error, never a substituted default.
+`profile` is a `WwiseProfile(version, channels, sample_rate)` selection: one
+Wwise generation plus the PCM geometry to encode. It is handed straight to the
+kernel, which resolves it against the configurations compiled into the
+extension, so an unsatisfiable selection is an error, never a substituted
+default — and there is exactly one authority on which configuration a
+selection denotes.
 
 ```python
 from wwise_wem import WwiseProfile, WwiseVersion, encode
@@ -68,6 +71,8 @@ two spellings. `WwiseProfile` is immutable, hashable, and compares by value;
 
 A selection no installed profile satisfies raises `ValueError`, as do a
 non-positive channel count or sample rate and an unrecognized version spelling.
+A selection that more than one installed configuration satisfies is rejected as
+ambiguous rather than satisfied by a first match.
 
 ## Input types
 
@@ -140,21 +145,21 @@ wwise-wem INPUT.wav --output OUTPUT.wem [OPTIONS]
 python -m wwise_wem INPUT.wav --output OUTPUT.wem [OPTIONS]
 ```
 
-Supported options are `--profile`, `--quality`, `--wwise-version`,
-`--channels`, `--sample-rate`, `--expect-sha256`, and required `--output`.
+Supported options are `--quality`, `--wwise-version`, `--channels`,
+`--sample-rate`, `--expect-sha256`, and required `--output`.
 `--wwise-version` takes the short label `2013` or the full generation `2013.2`
-and participates in the selection: with `--profile` it must agree with the
-generation that profile is installed under, and without one it forms the
-selection together with the WAV geometry. An unrecognized value is rejected as
-an argument error, without reading the WAV. The CLI parses the WAV once,
+and defaults to `2013`; it forms the whole selection together with the WAV
+geometry, which the CLI reads from the input. An unrecognized value is rejected
+as an argument error, without reading the WAV. The CLI parses the WAV once,
 applies optional geometry assertions to that `PcmBuffer`, and passes the same
-buffer to `encode`.
+buffer and the selection to `encode`.
 
 ## Execution path
 
 Every byte-producing Python call uses the in-package native extension
 `wwise_wem._core`, which carries the complete checksummed profile bundle at
-compile time. Callers never provide a profile directory or set an environment
-variable. The package manifests remain metadata for profile selection and
-inspection; the native runtime does not assemble a profile from fragments. The
-pure-Python implementation under `reference/` is a development-time oracle only.
+compile time. Callers never provide a profile name, a profile directory, or an
+environment variable. The package manifests remain metadata for inspection and
+for the development-tree resolution used by the oracle and the tooling; the
+native runtime does not assemble a profile from fragments. The pure-Python
+implementation under `reference/` is a development-time oracle only.

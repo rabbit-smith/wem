@@ -3,14 +3,14 @@
 
 The in-package extension is the facade's single execution path; this
 smoke proves, from the Python side:
-  1. the streaming path (StreamSession: start -> 5 uneven chunks -> finish)
-     reproduces tests/fixtures/reference.wem byte-for-byte;
+  1. the streaming path (StreamSession.for_selection -> 5 uneven chunks ->
+     finish) reproduces tests/fixtures/reference.wem byte-for-byte;
   2. the one-shot path (Encoder.encode_pcm, list-of-lists and memoryview
      forms) reproduces the same reference byte-for-byte;
   3. the error surface maps wem-core rejections to WemEncoderError codes.
 
 Usage:
-  .venv/bin/python scripts/native_smoke.py
+  PYTHONPATH=src .venv/bin/python scripts/native_smoke.py
 
 Exit code 0 on success, 1 on any failure.
 """
@@ -22,9 +22,13 @@ import struct
 import sys
 from pathlib import Path
 
+from wwise_wem import WwiseProfile, WwiseVersion
+
 REPO = Path(__file__).resolve().parents[1]
 FIXTURES = REPO / "tests" / "fixtures"
-PROFILE_NAME = "wwise2013-6ch-44100"
+SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
+UNINSTALLED_SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 2, 44100)
+PROFILE_METADATA_SOURCE = "profile:6ch/44100Hz/2013"
 SETUP_SHA256 = (
     "3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3"
 )
@@ -91,8 +95,7 @@ def main() -> int:
     # --- 1) streaming path: 5 uneven chunks -------------------------------
     cuts = [0, 17000, 40500, 70600, 85600, total_frames]
     step = 2 * channels
-    session = native.StreamSession()
-    session.start(SETUP_SHA256, name=PROFILE_NAME)
+    session = native.StreamSession.for_selection(SELECTION)
     packets = []
     chunk_sizes = []
     for i in range(len(cuts) - 1):
@@ -120,6 +123,10 @@ def main() -> int:
         "seq 0 packet is embedded in the reference container",
         setup != b"" and setup in reference,
     )
+    check(
+        "seq 0 packet reproduces the selected profile setup",
+        sha256_hex(setup) == SETUP_SHA256 and len(setup) == 201,
+    )
 
     # --- 2) one-shot path: list of lists ----------------------------------
     values = struct.unpack(f"<{total_frames * channels}h", interleaved)
@@ -127,7 +134,7 @@ def main() -> int:
         [values[f * channels + c] for f in range(total_frames)]
         for c in range(channels)
     ]
-    result = native.Encoder(PROFILE_NAME).encode_pcm(sample_rate, rows)
+    result = native.Encoder(SELECTION).encode_pcm(sample_rate, rows)
     print(f"encode_pcm(lists).sha256(): {result.sha256()}")
     check("encode_pcm(lists) sha256 matches reference", result.sha256() == ref_sha)
     check("encode_pcm(lists) bytes equal reference.wem", bytes(result.data) == reference)
@@ -135,38 +142,41 @@ def main() -> int:
     check("stats.bytes_out", result.bytes_out == len(reference))
     check("stats.pcm_frames", result.pcm_frames == total_frames)
     check("stats.channels", result.channels == channels)
-    check("stats.metadata_source", result.metadata_source == f"profile:{PROFILE_NAME}")
+    check(
+        "stats.metadata_source",
+        result.metadata_source == PROFILE_METADATA_SOURCE,
+    )
 
     # --- 3) one-shot path: 2-D signed-16 memoryview ------------------------
     cm_bytes = b"".join(
         struct.pack("<h", v) for v in (values[f * channels + c] for c in range(channels) for f in range(total_frames))
     )
     mv = memoryview(cm_bytes).cast("h", [channels, total_frames])
-    result_mv = native.Encoder(PROFILE_NAME).encode_pcm(sample_rate, mv)
+    result_mv = native.Encoder(SELECTION).encode_pcm(sample_rate, mv)
     print(f"encode_pcm(memoryview).sha256(): {result_mv.sha256()}")
     check("encode_pcm(memoryview) sha256 matches reference", result_mv.sha256() == ref_sha)
     check("encode_pcm(memoryview) bytes equal reference.wem", bytes(result_mv.data) == reference)
 
     # --- 4) error mapping --------------------------------------------------
     try:
-        native.Encoder("definitely-not-installed")
+        native.Encoder(UNINSTALLED_SELECTION)
     except native.WemEncoderError as e:
         check(
-            "unknown profile -> PROFILE_NOT_FOUND",
-            e.code == "PROFILE_NOT_FOUND" and "definitely-not-installed" in str(e),
+            "unsatisfiable selection -> PROFILE_NOT_FOUND",
+            e.code == "PROFILE_NOT_FOUND" and "2ch/44100Hz" in str(e),
         )
     else:
-        check("unknown profile -> PROFILE_NOT_FOUND", False)
+        check("unsatisfiable selection -> PROFILE_NOT_FOUND", False)
 
     s = native.StreamSession()
     try:
         s.push(b"\x00" * 12)
     except native.WemEncoderError as e:
-        check("push before start -> STATE_ERROR", e.code == "STATE_ERROR")
+        check("push before open -> STATE_ERROR", e.code == "STATE_ERROR")
     else:
-        check("push before start -> STATE_ERROR", False)
+        check("push before open -> STATE_ERROR", False)
 
-    enc = native.Encoder(PROFILE_NAME)
+    enc = native.Encoder(SELECTION)
     try:
         enc.encode_pcm(sample_rate, [[0] * 100 for _ in range(channels)])
     except native.WemEncoderError as e:

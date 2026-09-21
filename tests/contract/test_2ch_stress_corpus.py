@@ -9,10 +9,10 @@ import wave
 from pathlib import Path
 
 from tests.contract.wem_byte_contract import assert_wem_equal
-from tests.two_channel_corpus_support import render_wav
+from tests.two_channel_corpus_support import corpus_selection, render_wav
 from wwise_wem import _core
 from wwise_wem.application.encoder import Encoder
-from wwise_wem.profiles.registry import load_wem_profile
+from wwise_wem.profiles.registry import resolve_selection
 from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem_reference.container.wem import load_wem_parts_bytes
 from wwise_wem_reference.python_engine import ContainerPlan, encode_pcm_python
@@ -25,7 +25,8 @@ MANIFEST = json.loads((CORPUS / "manifest.json").read_text(encoding="utf-8"))
 
 class TwoChannelStressCorpusTests(unittest.TestCase):
     def test_real_builds_are_byte_exact(self) -> None:
-        profile = load_wem_profile(MANIFEST["profile"])
+        selection = corpus_selection(MANIFEST["profile"])
+        profile = resolve_selection(selection)
         self.assertEqual(MANIFEST["schema"], "wem.2ch-stress-corpus.v2")
 
         for case in MANIFEST["cases"]:
@@ -34,7 +35,7 @@ class TwoChannelStressCorpusTests(unittest.TestCase):
                 input_bytes = input_path.read_bytes()
                 reference = (CORPUS / case["reference"]).read_bytes()
                 pcm = read_pcm_wav(input_path)
-                current = bytes(Encoder(profile).encode_pcm(pcm).data)
+                current = bytes(Encoder(selection).encode_pcm(pcm).data)
                 oracle = bytes(
                     encode_pcm_python(
                         profile=profile,
@@ -68,8 +69,7 @@ class TwoChannelStressCorpusTests(unittest.TestCase):
                 prefix_bytes = sum(chunk_frames) * frame_bytes
                 chunks = [frames * frame_bytes for frames in chunk_frames]
                 chunks.append(len(interleaved) - prefix_bytes)
-                stream = _core.StreamSession()
-                stream.start(profile.setup_sha256, profile.name)
+                stream = _core.StreamSession.for_selection(selection)
                 offset = 0
                 for size in chunks:
                     stream.push(interleaved[offset : offset + size])

@@ -9,9 +9,13 @@ import unittest
 import zipfile
 from pathlib import Path
 
+from wwise_wem import WwiseProfile, WwiseVersion
 from wwise_wem.profiles.bundle import load_profile_bundle
 from wwise_wem.profiles.resources import ResourceRef, normalize_resource_path
-from wwise_wem.profiles.registry import load_wem_profile
+from wwise_wem.profiles.registry import resolve_selection
+
+
+SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
 
 
 def _sha(payload: bytes) -> str:
@@ -20,7 +24,7 @@ def _sha(payload: bytes) -> str:
 
 def _zip_package(path: Path, package: str, mutate=None) -> None:
     setup = b"minimal setup packet"
-    installed = load_wem_profile("wwise2013-6ch-44100")
+    installed = resolve_selection(SELECTION)
     manifest = {
         "schema": "wwise-wem.profile-manifest.v1",
         "name": "zip-profile",
@@ -56,7 +60,7 @@ def _zip_package(path: Path, package: str, mutate=None) -> None:
 class ProfileBundleTests(unittest.TestCase):
     def test_installed_bundle_validates_all_runtime_resources(self) -> None:
         bundle = load_profile_bundle()
-        self.assertEqual(bundle.name, "wwise2013-6ch-44100")
+        self.assertEqual(bundle.key.generation, "2013.2")
         self.assertEqual((bundle.key.channels, bundle.key.sample_rate), (6, 44100))
         self.assertEqual(bundle.block_sizes, (256, 2048))
         self.assertEqual(len(bundle.setup_packet()), 201)

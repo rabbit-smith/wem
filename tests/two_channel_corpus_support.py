@@ -7,7 +7,10 @@ import json
 import math
 import struct
 from pathlib import Path
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
+
+if TYPE_CHECKING:
+    from wwise_wem import WwiseProfile
 
 
 RATE = 48_000
@@ -103,3 +106,21 @@ def verify_or_write_inputs(
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
+
+
+def corpus_selection(profile_key: str) -> WwiseProfile:
+    """The structured selection one corpus manifest pins.
+
+    A manifest stores the installed profile's index key; the selection is
+    derived from that key's generation and geometry, so the corpora never
+    pick a profile by name.
+    """
+    from wwise_wem import WwiseProfile, WwiseVersion
+    from wwise_wem.profiles.bundle import load_profile_bundle
+
+    key = load_profile_bundle(profile=profile_key, verify_all=False).key
+    return WwiseProfile(
+        WwiseVersion.from_generation(key.generation),
+        key.channels,
+        key.sample_rate,
+    )

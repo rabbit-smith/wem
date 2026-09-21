@@ -22,7 +22,7 @@ class GoldenEncoderTests(unittest.TestCase):
         self.assertEqual(stats.short_packets, 77)
         self.assertEqual(stats.long_packets, 128)
         self.assertEqual(stats.bytes, 108771)
-        self.assertEqual(stats.metadata_source, "profile:wwise2013-6ch-44100")
+        self.assertEqual(stats.metadata_source, "profile:6ch/44100Hz/2013")
 
 
 if __name__ == "__main__":

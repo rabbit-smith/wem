@@ -42,8 +42,9 @@ Path("output.wem").write_bytes(result.data)
 print(result.stats.audio_packets, result.stats.bytes, result.sha256)
 ```
 
-The profile is chosen from the WAV geometry. To assert that geometry instead of
-trusting it, and to pin the expected result:
+The configuration is selected from the WAV geometry for the installed Wwise
+generation. To assert that geometry instead of trusting it, and to pin the
+expected result:
 
 ```bash
 wwise-wem tests/fixtures/input.wav --output output.wem \
@@ -66,19 +67,20 @@ deterministic and matches the reference implementation after conversion.
 Plain `bytes` are rejected: raw PCM geometry cannot be inferred safely. Every
 input needs at least 4096 frames.
 
-## Profiles
+## Profile selection
 
-| Profile | Wwise | PCM | Channels | Rate | Blocks |
+| Selection | Wwise | PCM | Channels | Rate | Blocks |
 | --- | --- | --- | ---: | ---: | ---: |
-| `wwise2013-6ch-44100` | 2013.2 | signed 16-bit | 6 (5.1) | 44100 | 256/2048 |
-| `wwise2013-2ch-48000` | 2013.2 | signed 16-bit | 2 | 48000 | 256/2048 |
+| `Wwise2013, 6, 44100` | 2013.2 | signed 16-bit | 6 (5.1) | 44100 | 256/2048 |
+| `Wwise2013, 2, 48000` | 2013.2 | signed 16-bit | 2 | 48000 | 256/2048 |
 
-Both registered profiles are byte-exact against their paired builds; see
+Both installed configurations are byte-exact against their paired builds; see
 [`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md) and
 [`../roadmap.md`](../roadmap.md) for the evidence and its limits.
 
-Select explicitly instead of by geometry, either with a structured selection
-(the spelling the kernel itself takes) or by profile name:
+A selection is one Wwise generation plus the PCM geometry, and it is the only
+explicit form — profile names, profile directories, and geometry-only lookups
+are not part of the interface:
 
 ```python
 from wwise_wem import WwiseProfile, WwiseVersion, encode
@@ -93,11 +95,12 @@ result = encode(
 wwise-wem input.wav --output output.wem --wwise-version 2013.2
 ```
 
-`profile="wwise2013-6ch-44100"` and `--profile wwise2013-6ch-44100` remain
-supported and name an installed profile directly. `quality` / `--quality`
-applies an optional finite interpolation over the profile's quality curves. A
-selection or channel/rate key that matches no installed profile is a
-`ValueError`, never an approximation.
+`profile=None` (the default) selects the installed generation's configuration
+for the input geometry; `--wwise-version` defaults to `2013` and does the same
+on the command line. `quality` / `--quality` applies an optional finite
+interpolation over the selected configuration's quality curves. A selection
+that matches no installed configuration — or more than one — is a
+`ValueError`, never an approximation and never a first match.
 
 ## CLI reference
 
@@ -108,9 +111,8 @@ python -m wwise_wem INPUT.wav --output OUTPUT.wem [OPTIONS]
 
 | Option | Meaning |
 | --- | --- |
-| `--profile NAME` | Select a profile explicitly |
 | `--quality FLOAT` | Profile quality interpolation |
-| `--wwise-version GENERATION` | Wwise generation (`2013` or `2013.2`); selects or validates it |
+| `--wwise-version GENERATION` | Wwise generation (`2013` or `2013.2`, default `2013`); with the WAV geometry this is the whole selection |
 | `--channels N` | Assert the WAV channel count |
 | `--sample-rate HZ` | Assert the WAV sample rate |
 | `--expect-sha256 HEX` | Fail unless the encoded WEM matches this digest |
@@ -141,10 +143,11 @@ binding is a thin parallel shell over it that owns no numerics.
 | Go | cgo over the C ABI | [`../../examples/go-cgo/`](../../examples/go-cgo/) |
 | Node / browser | wasm-bindgen shell | [`../../js/README.md`](../../js/README.md), [`../../examples/wasm-demo/`](../../examples/wasm-demo/) |
 
-Profiles are compiled into every native library, so no binding needs a profile
-directory or an environment variable. The lower-level bindings take one
-structured selection (Wwise generation plus PCM channel count and sample rate)
-alongside signed-16 PCM, because their inputs carry no self-describing header.
+Profiles are compiled into every native library, so no binding takes a profile
+name, a profile directory, or an environment variable. The lower-level
+bindings take one structured selection (Wwise generation plus PCM channel count
+and sample rate) alongside signed-16 PCM, because their inputs carry no
+self-describing header.
 See [`../../examples/README.md`](../../examples/README.md) for the runnable set.
 
 ## Check an install

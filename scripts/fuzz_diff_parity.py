@@ -34,7 +34,6 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 FIXTURES = REPO / "tests" / "fixtures"
-PROFILE_NAME = "wwise2013-6ch-44100"
 CHANNELS = 6
 SAMPLE_RATE = 44100
 EXPECTED_REFERENCE_SHA256 = (
@@ -59,7 +58,6 @@ FULL_SEED_BASE = 20130712
 # the complete set, so the PR set is a strict subset of the full set.  A
 # separate seed family (302407xx) keeps the 2ch items disjoint from the
 # 6ch differential seeds (201307xx).
-TWO_CH_PROFILE = "wwise2013-2ch-48000"
 TWO_CH_SAMPLE_RATE = 48000
 _TWO_CH_48K_SEEDS = (
     30240701,
@@ -139,10 +137,17 @@ def _random_chunks(seed: int, frames: int, channels: int) -> list[slice]:
     ]
 
 
+def _selection(channels: int, sample_rate: int):
+    """The structured selection for one parity geometry (no profile names)."""
+    from wwise_wem import WwiseProfile, WwiseVersion
+
+    return WwiseProfile(WwiseVersion.WWISE2013, channels, sample_rate)
+
+
 def _golden_case(native) -> None:
     """Oracle == native == accepted reference WEM, three-way on the fixture."""
     from wwise_wem.adapters.wav import read_pcm_wav
-    from wwise_wem.profiles.registry import load_wem_profile
+    from wwise_wem.profiles.registry import resolve_selection
 
     from wwise_wem_reference import python_engine
     from wwise_wem_reference.container.model import ContainerPlan
@@ -153,7 +158,8 @@ def _golden_case(native) -> None:
             f"reference.wem fixture drifted: {_sha256_hex(reference)}"
         )
 
-    profile = load_wem_profile(PROFILE_NAME)
+    selection = _selection(CHANNELS, SAMPLE_RATE)
+    profile = resolve_selection(selection)
     pcm = read_pcm_wav(FIXTURES / "input.wav")
 
     container = ContainerPlan.from_profile(profile)
@@ -165,7 +171,7 @@ def _golden_case(native) -> None:
     rows = [
         [int(sample * 32768.0) for sample in row] for row in pcm.channels
     ]
-    native_result = native.Encoder(PROFILE_NAME).encode_pcm(SAMPLE_RATE, rows)
+    native_result = native.Encoder(selection).encode_pcm(SAMPLE_RATE, rows)
     native_bytes = bytes(native_result.data)
 
     if not (oracle_bytes == reference == native_bytes):
@@ -188,7 +194,7 @@ def _differential_case(
     profile,
     channels: int,
     sample_rate: int,
-    profile_name: str,
+    selection,
     quality: float | None = None,
 ) -> None:
     """Oracle one-shot vs native streaming with a random chunk split.
@@ -224,9 +230,7 @@ def _differential_case(
     )
     oracle_bytes = bytes(oracle.data)
 
-    setup_sha = profile.setup_sha256
-    session = native.StreamSession()
-    session.start(setup_sha, name=profile_name, quality=quality)
+    session = native.StreamSession.for_selection(selection, quality=quality)
     for chunk in chunks:
         session.push(pcm_bytes[chunk])
     complete = session.finish()
@@ -319,12 +323,16 @@ def main() -> int:
 
     # The native kernel carries its profile bundle at compile time, so the
     # script needs no data-directory environment of its own; the profiles
-    # below are read from the installed package for comparison only.
-    from wwise_wem.profiles.registry import load_wem_profile
+    # below are read from the installed package for comparison only. Both
+    # sides select with the same structured selection: the oracle through the
+    # package resolver, the native side through the kernel.
+    from wwise_wem.profiles.registry import resolve_selection
 
-    profile = load_wem_profile(PROFILE_NAME)
+    selection = _selection(CHANNELS, SAMPLE_RATE)
+    profile = resolve_selection(selection)
     # The 2ch/48k geometry item uses its own installed profile.
-    two_ch_profile = load_wem_profile(TWO_CH_PROFILE)
+    two_ch_selection = _selection(2, TWO_CH_SAMPLE_RATE)
+    two_ch_profile = resolve_selection(two_ch_selection)
     two_ch_seeds = (
         PR_TWO_CH_SEEDS if args.pr else FULL_TWO_CH_SEEDS
     )
@@ -346,7 +354,7 @@ def main() -> int:
             profile,
             CHANNELS,
             SAMPLE_RATE,
-            PROFILE_NAME,
+            selection,
         )
         elapsed = time.monotonic() - started
         print(
@@ -366,7 +374,7 @@ def main() -> int:
             two_ch_profile,
             2,
             TWO_CH_SAMPLE_RATE,
-            TWO_CH_PROFILE,
+            two_ch_selection,
         )
         elapsed = time.monotonic() - started
         print(
@@ -384,10 +392,10 @@ def main() -> int:
             seed,
             MIN_FRAMES,
             args.max_frames,
-            load_wem_profile(TWO_CH_PROFILE, quality=quality),
+            resolve_selection(two_ch_selection, quality=quality),
             2,
             TWO_CH_SAMPLE_RATE,
-            TWO_CH_PROFILE,
+            two_ch_selection,
             quality=quality,
         )
         elapsed = time.monotonic() - started

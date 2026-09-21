@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 def encode(
     source: str | PathLike[str] | PcmBuffer | RawPcm,
     *,
-    profile: str | WwiseProfile | None = None,
+    profile: WwiseProfile | None = None,
     quality: float | None = None,
 ) -> EncodeResult:
     """Encode a WAV path, an in-memory PCM buffer, or typed raw PCM.
@@ -24,18 +24,17 @@ def encode(
     WAV format is detected from the RIFF header. Raw bytes require a
     :class:`RawPcm` wrapper because their geometry cannot be inferred.
 
-    ``profile`` is an installed profile name (``"wwise2013-6ch-44100"``) or a
-    :class:`WwiseProfile` selection (Wwise generation plus PCM geometry); the
-    kernel resolves a selection against the configurations it carries, so an
-    unsatisfiable one is rejected there instead of being guessed. With no
-    ``profile`` the installed profile matching the input geometry is used.
+    ``profile`` is a :class:`WwiseProfile` selection (Wwise generation plus
+    PCM geometry); it is handed straight to the kernel, which resolves it
+    against the configurations it carries, so an unsatisfiable selection is
+    rejected there instead of being guessed. With no ``profile`` the
+    installed generation's configuration for the input geometry is selected.
     Implementation imports stay local so importing the package remains cheap.
     """
-    from ._core import WwiseProfile
+    from ._core import WwiseProfile, WwiseVersion
     from .adapters.raw import _normalize_pcm16_bytes
     from .adapters.wav import _read_wav_pcm16_bytes
     from .application.encoder import Encoder
-    from .profiles.registry import load_wem_profile, resolve_wem_profile
 
     pcm: PcmBuffer | None = None
     if isinstance(source, PcmBuffer):
@@ -59,14 +58,12 @@ def encode(
     else:
         raise TypeError("source must be a path, PcmBuffer, or RawPcm")
 
-    if isinstance(profile, WwiseProfile):
-        encoder = Encoder.for_selection(profile, quality=quality)
-    elif profile is not None:
-        encoder = Encoder(load_wem_profile(profile, quality=quality))
-    else:
-        encoder = Encoder(
-            resolve_wem_profile(channels, sample_rate, quality=quality)
-        )
+    selection = (
+        WwiseProfile(WwiseVersion.DEFAULT, channels, sample_rate)
+        if profile is None
+        else profile
+    )
+    encoder = Encoder(selection, quality=quality)
     if pcm is not None:
         return encoder.encode_pcm(pcm)
     if payload is None:

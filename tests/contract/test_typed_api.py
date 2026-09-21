@@ -11,8 +11,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 import wwise_wem
-from wwise_wem import EncodeResult, EncodeStats, PcmBuffer, RawPcm, encode
-from wwise_wem.profiles.registry import load_wem_profile
+from wwise_wem import (
+    EncodeResult,
+    EncodeStats,
+    PcmBuffer,
+    RawPcm,
+    WwiseProfile,
+    WwiseVersion,
+    encode,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -21,33 +28,49 @@ ROOT = Path(__file__).resolve().parents[2]
 def _result() -> EncodeResult:
     return EncodeResult(
         b"RIFF",
-        EncodeStats(16, 6, 2, 1, 1, 4, "profile:wwise2013-6ch-44100"),
+        EncodeStats(16, 6, 2, 1, 1, 4, "profile:6ch/44100Hz/2013"),
     )
 
 
 class TypedApiTests(unittest.TestCase):
-    def test_path_input_reads_header_and_uses_named_profile(self) -> None:
+    def test_path_input_reads_header_and_forwards_the_selection(self) -> None:
         payload = b"\0\0" * 6
-        profile = load_wem_profile("wwise2013-6ch-44100")
+        selection = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
         expected = _result()
         with (
             patch(
                 "wwise_wem.adapters.wav._read_wav_pcm16_bytes",
                 return_value=(44100, 6, payload),
             ) as read,
-            patch("wwise_wem.profiles.registry.load_wem_profile", return_value=profile) as load,
             patch("wwise_wem.application.encoder.Encoder") as encoder_type,
         ):
             encoder_type.return_value.encode_pcm16_interleaved.return_value = expected
-            result = encode(Path("input.audio"), profile=profile.name)
+            result = encode(Path("input.audio"), profile=selection, quality=5.0)
 
         read.assert_called_once_with(Path("input.audio"))
-        load.assert_called_once_with(profile.name, quality=None)
-        encoder_type.assert_called_once_with(profile)
+        encoder_type.assert_called_once_with(selection, quality=5.0)
         encoder_type.return_value.encode_pcm16_interleaved.assert_called_once_with(
             payload,
             sample_rate=44100,
             channels=6,
+        )
+        self.assertIs(result, expected)
+
+    def test_automatic_selection_comes_from_the_input_geometry(self) -> None:
+        payload = b"\0\0" * 6
+        expected = _result()
+        with (
+            patch(
+                "wwise_wem.adapters.wav._read_wav_pcm16_bytes",
+                return_value=(44100, 6, payload),
+            ),
+            patch("wwise_wem.application.encoder.Encoder") as encoder_type,
+        ):
+            encoder_type.return_value.encode_pcm16_interleaved.return_value = expected
+            result = encode(Path("input.audio"))
+
+        encoder_type.assert_called_once_with(
+            WwiseProfile(WwiseVersion.DEFAULT, 6, 44100), quality=None
         )
         self.assertIs(result, expected)
 

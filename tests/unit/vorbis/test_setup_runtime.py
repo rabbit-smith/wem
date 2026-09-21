@@ -15,18 +15,19 @@ from wwise_wem_reference.profiles.psychoacoustics.long_tables import (
 )
 from wwise_wem_reference.profiles.psychoacoustics.long_variants import load_long_variant
 from wwise_wem_reference.profiles.psychoacoustics.short_tables import load_short_psy_profiles
-from wwise_wem.profiles.registry import (
-    WWISE2013_6CH_44100,
-    load_wem_profile,
-    resolve_wem_profile,
-)
+from wwise_wem import WwiseProfile, WwiseVersion
+from wwise_wem.profiles.registry import resolve_selection
 from wwise_wem.profiles.bundle import load_profile_bundle
 from tests.codebook_resource_support import installed_codebook_tables
 
 
+SIX_CHANNEL_SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
+SIX_CHANNEL_PROFILE = resolve_selection(SIX_CHANNEL_SELECTION)
+
+
 class SetupRuntimeTests(unittest.TestCase):
     def test_profile_setup_parse_pack_roundtrip(self):
-        packet = WWISE2013_6CH_44100.setup_packet()
+        packet = SIX_CHANNEL_PROFILE.setup_packet()
         setup = parse_setup(packet, channels=6)
         self.assertTrue(setup["parse_complete"])
         self.assertEqual(
@@ -49,7 +50,7 @@ class SetupRuntimeTests(unittest.TestCase):
 
     def test_setup_truncation_and_ilog_edges(self):
         self.assertEqual([ilog(value) for value in (0, 1, 2, 3, 4, 255)], [0, 1, 2, 2, 3, 8])
-        packet = WWISE2013_6CH_44100.setup_packet()
+        packet = SIX_CHANNEL_PROFILE.setup_packet()
         for truncated in (b"", packet[:1], packet[:-1]):
             with self.subTest(length=len(truncated)):
                 with self.assertRaisesRegex(EOFError, "out of bits"):
@@ -96,17 +97,16 @@ class SetupRuntimeTests(unittest.TestCase):
             )
 
     def test_profile_resolution_and_checksum_errors(self):
-        self.assertIs(load_wem_profile(WWISE2013_6CH_44100.name), WWISE2013_6CH_44100)
-        self.assertIs(resolve_wem_profile(6, 44100), WWISE2013_6CH_44100)
-        with self.assertRaisesRegex(ValueError, "unknown WEM profile"):
-            load_wem_profile("missing")
-        with self.assertRaisesRegex(ValueError, "no Wwise 2013.2 profile"):
-            resolve_wem_profile(2, 44100)
+        self.assertIs(
+            resolve_selection(SIX_CHANNEL_SELECTION), SIX_CHANNEL_PROFILE
+        )
+        with self.assertRaisesRegex(ValueError, "no installed Wwise 2013 profile"):
+            resolve_selection(WwiseProfile(WwiseVersion.WWISE2013, 2, 44100))
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "setup.bin"
             path.write_bytes(b"different")
-            changed = replace(WWISE2013_6CH_44100, setup_path=path)
+            changed = replace(SIX_CHANNEL_PROFILE, setup_path=path)
             with self.assertRaisesRegex(ValueError, "setup checksum differs"):
                 changed.setup_packet()
 

@@ -7,12 +7,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from wwise_wem import WwiseProfile, WwiseVersion
 from wwise_wem.application.models import EncodeResult, EncodeStats
 from wwise_wem.model import PcmBuffer
 
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 ROOT = Path(__file__).resolve().parents[2]
+SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
 
 
 def _result() -> EncodeResult:
@@ -26,7 +28,7 @@ def _result() -> EncodeResult:
             short_packets=1,
             long_packets=1,
             bytes=len(data),
-            metadata_source="profile:wwise2013-6ch-44100",
+            metadata_source="profile:6ch/44100Hz/2013",
         ),
     )
 
@@ -63,8 +65,8 @@ class CliTests(unittest.TestCase):
             argv = [
                 "wwise-wem",
                 "input.wav",
-                "--profile",
-                "wwise2013-6ch-44100",
+                "--wwise-version",
+                "2013.2",
                 "--channels",
                 "6",
                 "--sample-rate",
@@ -87,7 +89,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(output.read_bytes(), result.data)
         encode.assert_called_once_with(
             pcm,
-            profile="wwise2013-6ch-44100",
+            profile=SELECTION,
             quality=None,
         )
         printed.assert_called_once()
@@ -105,8 +107,8 @@ class CliTests(unittest.TestCase):
             argv = [
                 "wwise-wem",
                 "input.wav",
-                "--profile",
-                "wwise2013-6ch-44100",
+                "--wwise-version",
+                "2013",
                 "--quality",
                 "6",
                 "--output",
@@ -122,9 +124,31 @@ class CliTests(unittest.TestCase):
 
                 main()
             self.assertEqual(output.read_bytes(), result.data)
-        encode.assert_called_once_with(
-            pcm, profile="wwise2013-6ch-44100", quality=6.0
-        )
+        encode.assert_called_once_with(pcm, profile=SELECTION, quality=6.0)
+
+    def test_bad_wwise_version_is_an_argument_error_before_the_wav_is_read(
+        self,
+    ) -> None:
+        with (
+            patch(
+                "sys.argv",
+                [
+                    "wwise-wem",
+                    "input.wav",
+                    "--wwise-version",
+                    "2014",
+                    "--output",
+                    "unused.wem",
+                ],
+            ),
+            patch("wwise_wem.cli.read_pcm_wav") as read,
+        ):
+            from wwise_wem.cli import main
+
+            with self.assertRaises(SystemExit) as exit_status:
+                main()
+        self.assertEqual(exit_status.exception.code, 2)
+        read.assert_not_called()
 
     def test_hash_failure_does_not_create_output(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

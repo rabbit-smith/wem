@@ -3,32 +3,34 @@ from __future__ import annotations
 from tests.analysis_resource_support import installed_analysis_resources
 
 import unittest
-from dataclasses import replace
 from unittest.mock import patch
 
-from wwise_wem import encode
-from wwise_wem.application.encoder import Encoder
+from wwise_wem import WwiseProfile, WwiseVersion, encode
 from wwise_wem.application.models import EncodeResult, EncodeStats
 from wwise_wem_reference.analysis.preprocessing.detector_input import iter_detector_quanta
 from wwise_wem_reference.analysis.session import AnalysisSession
-from wwise_wem.profiles.registry import load_wem_profile
+
+
+SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
 
 
 class ProfileRuntimeFlowTests(unittest.TestCase):
-    def test_selected_profile_manifest_and_blocks_reach_stream(self):
-        selected = load_wem_profile("wwise2013-6ch-44100")
+    def test_explicit_selection_reaches_the_kernel_unresolved(self):
+        # Single authority: an explicit selection goes to the kernel as it
+        # is.  The package-side selection resolver is oracle/tooling only
+        # and must not be consulted on the encoding path.
         payload = b"\0\0" * 6
         captured = []
 
         class FakeEncoder:
-            def __init__(self, profile):
-                captured.append(profile)
+            def __init__(self, selection, *, quality=None):
+                captured.append((selection, quality))
 
             def encode_pcm16_interleaved(self, data, *, sample_rate, channels):
                 self.input = (data, sample_rate, channels)
                 return EncodeResult(
                     b"wem",
-                    EncodeStats(1, 6, 0, 0, 0, 3, f"profile:{selected.name}"),
+                    EncodeStats(1, 6, 0, 0, 0, 3, "profile:6ch/44100Hz/2013"),
                 )
 
         with (
@@ -36,39 +38,47 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
                 "wwise_wem.adapters.wav._read_wav_pcm16_bytes",
                 return_value=(44100, 6, payload),
             ),
-            patch(
-                "wwise_wem.profiles.registry.load_wem_profile",
-                return_value=selected,
-            ) as load,
+            patch("wwise_wem.profiles.registry.resolve_selection") as resolve,
             patch("wwise_wem.application.encoder.Encoder", FakeEncoder),
         ):
-            result = encode("input.wav", profile="test-profile")
+            result = encode("input.wav", profile=SELECTION, quality=3.0)
 
-        load.assert_called_once_with("test-profile", quality=None)
-        self.assertEqual(captured, [selected])
+        resolve.assert_not_called()
+        self.assertEqual(captured, [(SELECTION, 3.0)])
         self.assertEqual(result.data, b"wem")
-        self.assertEqual(result.stats.metadata_source, f"profile:{selected.name}")
+        self.assertEqual(result.stats.metadata_source, "profile:6ch/44100Hz/2013")
 
-    def test_manifest_failure_precedes_setup_and_analysis(self):
-        profile = load_wem_profile("wwise2013-6ch-44100")
-        with patch(
-            "wwise_wem.application.encoder.load_profile_bundle",
-            side_effect=ValueError("runtime manifest checksum differs"),
-        ):
-            with self.assertRaisesRegex(ValueError, "runtime manifest checksum"):
-                Encoder(profile)
+    def test_automatic_selection_is_the_input_geometry(self):
+        # No explicit profile: the installed generation plus the geometry
+        # read from the input is the whole selection.
+        payload = b"\0\0" * 6
+        captured = []
 
-    def test_unknown_runtime_bundle_is_rejected_before_setup(self):
-        profile = replace(
-            load_wem_profile("wwise2013-6ch-44100"),
-            setup_sha256="0" * 64,
-            key=replace(
-                load_wem_profile("wwise2013-6ch-44100").key,
-                quality_setup_identity="sha256:" + "0" * 64,
+        class FakeEncoder:
+            def __init__(self, selection, *, quality=None):
+                captured.append((selection, quality))
+
+            def encode_pcm16_interleaved(self, data, *, sample_rate, channels):
+                self.input = (data, sample_rate, channels)
+                return EncodeResult(
+                    b"wem",
+                    EncodeStats(1, 6, 0, 0, 0, 3, "profile:6ch/44100Hz/2013"),
+                )
+
+        with (
+            patch(
+                "wwise_wem.adapters.wav._read_wav_pcm16_bytes",
+                return_value=(44100, 6, payload),
             ),
+            patch("wwise_wem.application.encoder.Encoder", FakeEncoder),
+        ):
+            result = encode("input.wav")
+
+        self.assertEqual(
+            captured,
+            [(WwiseProfile(WwiseVersion.DEFAULT, 6, 44100), None)],
         )
-        with self.assertRaisesRegex(ValueError, "differs from installed profile"):
-            Encoder(profile)
+        self.assertEqual(result.data, b"wem")
 
     def test_detector_quanta_forwards_explicit_blocksizes(self):
         streams = ((0.0,) * 128,)
@@ -117,19 +127,6 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
                 blocksizes=(128, 1024),
                 resources=installed_analysis_resources(),
             )
-
-    def test_profile_block_capability_rejection_precedes_setup_parse(self):
-        base = load_wem_profile("wwise2013-6ch-44100")
-        metadata = replace(
-            base.container_metadata,
-            uBlocksize0Pow=7,
-            uBlocksize1Pow=10,
-        )
-        profile = replace(base, block_sizes=(128, 1024), container_metadata=metadata)
-        with patch("wwise_wem.application.encoder.load_profile_bundle") as load_bundle:
-            with self.assertRaisesRegex(ValueError, "supports 256/2048"):
-                Encoder(profile)
-        load_bundle.assert_not_called()
 
 
 if __name__ == "__main__":

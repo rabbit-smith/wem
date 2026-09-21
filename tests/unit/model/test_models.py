@@ -10,7 +10,13 @@ from wwise_wem.model import (
     PcmBuffer,
     RawPcm,
 )
-from wwise_wem.profiles.registry import WWISE2013_6CH_44100
+from wwise_wem import WwiseProfile, WwiseVersion
+from wwise_wem.profiles.registry import resolve_selection
+
+
+SIX_CHANNEL_PROFILE = resolve_selection(
+    WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
+)
 
 
 class PcmBufferTests(unittest.TestCase):
@@ -37,7 +43,7 @@ class PcmBufferTests(unittest.TestCase):
 
 class ContainerMetadataTests(unittest.TestCase):
     def test_profile_fmt_roundtrip_returns_fresh_dict(self):
-        profile_fmt = WWISE2013_6CH_44100.container_metadata.to_fmt_dict()
+        profile_fmt = SIX_CHANNEL_PROFILE.container_metadata.to_fmt_dict()
         metadata = ContainerMetadata.from_fmt_dict(profile_fmt)
         first = metadata.to_fmt_dict(frame_count=1234)
         second = metadata.to_fmt_dict(frame_count=1234)
@@ -52,12 +58,12 @@ class ContainerMetadataTests(unittest.TestCase):
             metadata.nChannels = 2
 
     def test_rejects_invalid_geometry_and_frame_count(self):
-        values = WWISE2013_6CH_44100.container_metadata.to_fmt_dict()
+        values = SIX_CHANNEL_PROFILE.container_metadata.to_fmt_dict()
         values["nChannels"] = 0
         with self.assertRaisesRegex(ValueError, "nChannels"):
             ContainerMetadata.from_fmt_dict(values)
         metadata = ContainerMetadata.from_fmt_dict(
-            WWISE2013_6CH_44100.container_metadata.to_fmt_dict()
+            SIX_CHANNEL_PROFILE.container_metadata.to_fmt_dict()
         )
         with self.assertRaisesRegex(ValueError, "frame_count"):
             metadata.to_fmt_dict(frame_count=-1)
@@ -82,9 +88,9 @@ class EncodeResultTests(unittest.TestCase):
             "short_packets": 2,
             "long_packets": 1,
             "bytes": 4,
-            "metadata_source": "profile:wwise2013-6ch-44100",
+            "metadata_source": "profile:6ch/44100Hz/2013",
         }
-        stats = EncodeStats(4096, 6, 3, 2, 1, 4, "profile:wwise2013-6ch-44100")
+        stats = EncodeStats(4096, 6, 3, 2, 1, 4, "profile:6ch/44100Hz/2013")
         self.assertEqual(stats.to_dict(), expected)
         result = EncodeResult(b"WEM!", stats)
         self.assertEqual(result.stats, stats)

@@ -9,74 +9,44 @@ runtime asset, and a missing one surfaces as the ordinary
 :class:`ImportError` that the Python import machinery raises for
 ``wwise_wem._core``.
 
-Two equivalent constructions mirror the kernel: :meth:`Encoder.__init__`
-owns one installed profile (resolved from its installed bundle), and
-:meth:`Encoder.for_selection` owns a structured ``WwiseProfile`` selection
-(resolved by the kernel against the configurations it carries).
+One construction path mirrors the kernel: an :class:`Encoder` owns one
+structured ``WwiseProfile`` selection (a Wwise generation plus the PCM
+geometry), which the kernel resolves against the configurations it carries.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import wwise_wem._core as _core
-from ..profiles.bundle import load_profile_bundle
-from ..profiles.model import EncoderProfile
 from ..model import PcmBuffer
 from .models import EncodeResult, EncodeStats
-
-if TYPE_CHECKING:
-    from .._core import WwiseProfile
 
 
 class Encoder:
     """Own immutable codec inputs and run one complete encode per PCM buffer."""
 
-    def __init__(self, profile: EncoderProfile) -> None:
-        if not isinstance(profile, EncoderProfile):
-            raise TypeError("profile must be EncoderProfile")
-        if tuple(profile.block_sizes) != (256, 2048):
-            raise ValueError(
-                "selected profile block geometry is unsupported; "
-                "the installed runtime supports 256/2048 blocks"
-            )
-
-        bundle = load_profile_bundle(profile=profile.name, verify_all=False)
-        if bundle.key != profile.key:
-            raise ValueError("selected profile differs from installed profile bundle")
-        if profile.setup_sha256 != bundle.setup.sha256:
-            raise ValueError(
-                f"selected profile {profile.name} differs from installed profile setup"
-            )
-
-        self.profile: EncoderProfile | None = profile
-        self.selection: WwiseProfile | None = None
-        self._quality: float | None = profile.quality
-        self._core_backend: Any = None
-
-    @classmethod
-    def for_selection(
-        cls,
-        selection: WwiseProfile,
+    def __init__(
+        self,
+        selection: _core.WwiseProfile,
         *,
         quality: float | None = None,
-    ) -> Encoder:
+    ) -> None:
         """Own a structured profile selection resolved by the kernel.
 
         ``selection`` names a Wwise generation plus the PCM geometry; the
         kernel resolves it against the profiles compiled into the extension,
         so an unsatisfiable selection is rejected there and never replaced by
-        a default.  ``quality`` binds the quality factor exactly as
-        ``load_wem_profile(name, quality=...)`` does.
+        a default.  ``quality`` binds the quality factor before assembly:
+        with a quality value the kernel interpolates the selected profile's
+        quality curves, and without one the historical bytes are reproduced
+        exactly.
         """
         if not isinstance(selection, _core.WwiseProfile):
             raise TypeError("selection must be WwiseProfile")
-        encoder = cls.__new__(cls)
-        encoder.profile = None
-        encoder.selection = selection
-        encoder._quality = quality
-        encoder._core_backend = None
-        return encoder
+        self.selection: _core.WwiseProfile = selection
+        self._quality = quality
+        self._core_backend: Any = None
 
     def encode_pcm(self, pcm: PcmBuffer) -> EncodeResult:
         """Encode one independent PCM buffer into a complete WEM.
@@ -126,26 +96,11 @@ class Encoder:
     @property
     def _geometry(self) -> tuple[int, int]:
         """The selected PCM geometry as ``(channels, sample_rate)``."""
-        if self.selection is not None:
-            return (self.selection.channels, self.selection.sample_rate)
-        if self.profile is None:
-            raise RuntimeError(
-                "encoder carries neither an installed profile nor a selection"
-            )
-        return (self.profile.channels, self.profile.sample_rate)
+        return (self.selection.channels, self.selection.sample_rate)
 
     def _backend(self) -> Any:
         if self._core_backend is None:
-            selection = self.selection
-            profile = self.profile
-            if selection is not None:
-                self._core_backend = _core.Encoder(selection, self._quality)
-            elif profile is not None:
-                self._core_backend = _core.Encoder(profile.name, self._quality)
-            else:
-                raise RuntimeError(
-                    "encoder carries neither an installed profile nor a selection"
-                )
+            self._core_backend = _core.Encoder(self.selection, self._quality)
         return self._core_backend
 
     def encode_pcm16_interleaved(
@@ -178,10 +133,10 @@ class Encoder:
     def _encode_pcm_core(self, pcm: PcmBuffer, rows: list[list[int]]) -> EncodeResult:
         """Run one encode on the native kernel and fill the Python DTOs.
 
-        The quality factor owned by the encoder is forwarded to the kernel:
-        with a quality value the kernel interpolates the selected profile's
-        quality curves during assembly; without one the historical bytes are
-        reproduced exactly.
+        The quality factor owned by the encoder is forwarded to the kernel;
+        the profile identity in the result is the kernel's, so the reported
+        metadata source always names the configuration that actually produced
+        the bytes.
         """
         try:
             result = self._backend().encode_pcm(pcm.sample_rate, rows)
@@ -197,7 +152,6 @@ class Encoder:
         return self._result_from_core(result)
 
     def _result_from_core(self, result: Any) -> EncodeResult:
-        profile = self.profile
         stats = EncodeStats(
             pcm_frames=int(result.pcm_frames),
             channels=int(result.channels),
@@ -205,13 +159,7 @@ class Encoder:
             short_packets=int(result.short_packets),
             long_packets=int(result.long_packets),
             bytes=int(result.bytes_out),
-            # An installed profile is named here; a structured selection is
-            # named by the kernel, which resolved it against its bundle.
-            metadata_source=(
-                f"profile:{profile.name}"
-                if profile is not None
-                else str(result.metadata_source)
-            ),
+            metadata_source=str(result.metadata_source),
         )
         return EncodeResult(bytes(result.data), stats)
 

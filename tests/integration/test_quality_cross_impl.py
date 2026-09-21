@@ -10,8 +10,8 @@ Proves the Python/Rust quality mechanism stays aligned end to end:
   configuration error — with a stale or bypassed kernel the encode would
   silently ignore the quality);
 * with no quality the facade keeps the historical golden bytes;
-* quality-bound profiles are additive copies: the registry instance is
-  never mutated.
+* a bound quality is an additive copy: the resolved profile is never
+  mutated.
 """
 from __future__ import annotations
 
@@ -19,16 +19,17 @@ import hashlib
 import unittest
 from pathlib import Path
 
+from wwise_wem import WwiseProfile, WwiseVersion
 from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem.application.encoder import Encoder
-from wwise_wem.profiles.registry import load_wem_profile, resolve_wem_profile
+from wwise_wem.profiles.registry import resolve_selection
 from wwise_wem_reference.profiles.quality import (
     QUALITY_NORMALIZE_CLAMP,
     _linear_frac,
     normalize_quality_factor,
 )
 
-_PROFILE_NAME = "wwise2013-6ch-44100"
+_SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
 _GOLDEN_WEM_SHA256 = "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247"
 _FIXTURE_WAV = (
     Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "input.wav"
@@ -61,31 +62,25 @@ class QualityCrossImplementationTests(unittest.TestCase):
         # quality through the facade must therefore surface the kernel's
         # configuration error (proof the quality reaches the kernel's
         # assembly — a kernel that ignores quality would encode instead).
-        profile = load_wem_profile(_PROFILE_NAME, quality=4.0)
-        self.assertEqual(profile.quality, 4.0)
         pcm = read_pcm_wav(_FIXTURE_WAV)
-        encoder = Encoder(profile)
+        encoder = Encoder(_SELECTION, quality=4.0)
         with self.assertRaisesRegex(ValueError, "quality-curves"):
             encoder.encode_pcm(pcm)
 
     def test_facade_quality_none_keeps_the_golden_bytes(self):
-        profile = load_wem_profile(_PROFILE_NAME)
-        self.assertIsNone(profile.quality)
         pcm = read_pcm_wav(_FIXTURE_WAV)
-        result = Encoder(profile).encode_pcm(pcm)
+        result = Encoder(_SELECTION).encode_pcm(pcm)
         self.assertEqual(
             hashlib.sha256(result.data).hexdigest(), _GOLDEN_WEM_SHA256
         )
 
-    def test_profile_quality_copy_never_mutates_the_registry(self):
-        base = load_wem_profile(_PROFILE_NAME)
-        bound = load_wem_profile(_PROFILE_NAME, quality=9.0)
+    def test_selection_quality_copy_never_mutates_the_resolved_profile(self):
+        base = resolve_selection(_SELECTION)
+        bound = resolve_selection(_SELECTION, quality=9.0)
         self.assertEqual(bound.quality, 9.0)
         self.assertIsNone(base.quality)
-        self.assertIs(load_wem_profile(_PROFILE_NAME), base)
-        geometry = resolve_wem_profile(6, 44100, quality=3.0)
-        self.assertEqual(geometry.quality, 3.0)
-        self.assertIsNone(resolve_wem_profile(6, 44100).quality)
+        self.assertIs(resolve_selection(_SELECTION), base)
+        self.assertEqual(resolve_selection(_SELECTION, quality=3.0).quality, 3.0)
 
 
 if __name__ == "__main__":

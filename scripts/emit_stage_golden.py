@@ -41,10 +41,26 @@ def main() -> None:
         default=ROOT / "tests" / "data" / "stage-golden" / "stages",
         help="asset directory (default: tests/data/stage-golden/stages)",
     )
-    parser.add_argument("--profile", default=None, help="encoder profile name")
+    parser.add_argument(
+        "--wwise-version",
+        default=None,
+        help="Wwise generation (2013 or 2013.2); default: the installed one",
+    )
     args = parser.parse_args()
 
-    index_doc, dumps = build_stage_golden(args.wav, profile=args.profile)
+    selection = None
+    if args.wwise_version is not None:
+        from wwise_wem import WwiseProfile, WwiseVersion  # noqa: PLC0415
+        from wwise_wem.adapters.wav import read_pcm_wav  # noqa: PLC0415
+
+        pcm = read_pcm_wav(args.wav)
+        selection = WwiseProfile(
+            WwiseVersion.parse(args.wwise_version),
+            pcm.channel_count,
+            pcm.sample_rate,
+        )
+
+    index_doc, dumps = build_stage_golden(args.wav, selection=selection)
     summary = write_stage_golden(index_doc, dumps, args.out)
     summary.update(
         {

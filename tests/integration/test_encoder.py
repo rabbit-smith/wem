@@ -3,22 +3,21 @@
 The facade's byte-producing path is the native kernel
 (``wwise_wem._core``); byte-exact behavior is covered by the golden,
 core-oracle parity, and extended-input suites.  This file keeps the
-facade-level invariants that hold before any kernel work: profile
-ownership, input validation order, and the installed-profile bundle
-check.
+facade-level invariants that hold before any kernel work: selection
+ownership, input validation order, and an unsatisfiable selection.
 """
 
 from __future__ import annotations
 
 import unittest
-from dataclasses import replace
 
+from wwise_wem import WwiseProfile, WwiseVersion
 from wwise_wem.application.encoder import Encoder
 from wwise_wem.model import PcmBuffer
-from wwise_wem.profiles.registry import load_wem_profile
 
 
-PROFILE_NAME = "wwise2013-6ch-44100"
+SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
+UNINSTALLED_SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 2, 44100)
 
 
 def _pcm(*, channels: int = 6, rate: int = 44100, frames: int = 4096) -> PcmBuffer:
@@ -37,16 +36,17 @@ def _pcm(*, channels: int = 6, rate: int = 44100, frames: int = 4096) -> PcmBuff
 
 
 class EncoderFacadeTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.profile = load_wem_profile(PROFILE_NAME)
+    def test_constructor_owns_the_selection(self) -> None:
+        encoder = Encoder(SELECTION)
 
-    def test_constructor_owns_profile(self) -> None:
-        encoder = Encoder(self.profile)
+        self.assertIs(encoder.selection, SELECTION)
 
-        self.assertIs(encoder.profile, self.profile)
+    def test_constructor_rejects_a_non_selection(self) -> None:
+        with self.assertRaisesRegex(TypeError, "selection must be WwiseProfile"):
+            Encoder("wwise2013-6ch-44100")  # type: ignore[arg-type]
 
     def test_geometry_and_input_type_fail_before_encode(self) -> None:
-        encoder = Encoder(self.profile)
+        encoder = Encoder(SELECTION)
         with self.assertRaisesRegex(TypeError, "PcmBuffer"):
             encoder.encode_pcm("pcm")  # type: ignore[arg-type]
         with self.assertRaisesRegex(ValueError, "differs from encoder profile"):
@@ -59,7 +59,7 @@ class EncoderFacadeTests(unittest.TestCase):
     def test_out_of_domain_samples_fail_before_encode(self) -> None:
         # Out-of-domain floats are rejected by the facade itself, as a
         # plain ValueError, before the kernel is reached.
-        encoder = Encoder(self.profile)
+        encoder = Encoder(SELECTION)
         pcm = PcmBuffer(
             44100,
             tuple(tuple(4095.0 for _ in range(4096)) for _ in range(6)),
@@ -67,17 +67,12 @@ class EncoderFacadeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "integer signed-16 sample"):
             encoder.encode_pcm(pcm)
 
-    def test_unknown_runtime_bundle_fails_before_setup_parse(self) -> None:
-        profile = replace(
-            self.profile,
-            setup_sha256="0" * 64,
-            key=replace(
-                self.profile.key,
-                quality_setup_identity="sha256:" + "0" * 64,
-            ),
-        )
-        with self.assertRaisesRegex(ValueError, "differs from installed profile"):
-            Encoder(profile)
+    def test_unsatisfiable_selection_fails_before_any_bytes(self) -> None:
+        # The kernel owns profile resolution: a selection no installed
+        # configuration satisfies is a plain ValueError before any encode.
+        encoder = Encoder(UNINSTALLED_SELECTION)
+        with self.assertRaisesRegex(ValueError, "2ch/44100Hz"):
+            encoder.encode_pcm(_pcm(channels=2, rate=44100))
 
 
 if __name__ == "__main__":

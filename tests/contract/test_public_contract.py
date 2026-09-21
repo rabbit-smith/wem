@@ -14,13 +14,13 @@ import unittest
 import wave
 from pathlib import Path
 
-from wwise_wem import encode
+from wwise_wem import WwiseProfile, WwiseVersion, encode
 
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 INPUT = FIXTURES / "input.wav"
-PROFILE = "wwise2013-6ch-44100"
+SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
 
 
 class PublicEncodeContractTests(unittest.TestCase):
@@ -35,7 +35,7 @@ class PublicEncodeContractTests(unittest.TestCase):
             target.setparams(params)
             target.writeframes(pcm)
         cls.automatic_result = encode(cls.short_input)
-        cls.explicit_result = encode(cls.short_input, profile=PROFILE)
+        cls.explicit_result = encode(cls.short_input, profile=SELECTION)
 
     @classmethod
     def tearDownClass(cls):
@@ -65,7 +65,7 @@ class PublicEncodeContractTests(unittest.TestCase):
                 target.setsampwidth(2)
                 target.setframerate(44100)
                 target.writeframes(b"\0" * (4096 * 2 * 2))
-            with self.assertRaisesRegex(ValueError, "no Wwise 2013.2 profile"):
+            with self.assertRaisesRegex(ValueError, "2ch/44100Hz"):
                 encode(path)
 
     def test_unsupported_eight_bit_wav_is_an_error(self):
@@ -94,15 +94,15 @@ class PublicCliContractTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("usage:", result.stdout)
         for option in (
-            "--profile",
             "--wwise-version",
+            "--quality",
             "--channels",
             "--sample-rate",
             "--output",
             "--expect-sha256",
         ):
             self.assertIn(option, result.stdout)
-        self.assertIn(PROFILE, result.stdout)
+        self.assertNotIn("--profile", result.stdout)
 
     def test_output_is_required(self):
         result = self.run_cli(str(INPUT))

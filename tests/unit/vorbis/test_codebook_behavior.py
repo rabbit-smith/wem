@@ -11,7 +11,11 @@ from tests.codebook_resource_support import installed_codebook_tables
 from wwise_wem_reference.vorbis.bitio import OggPack
 from wwise_wem_reference.vorbis.setup import parse_setup
 from wwise_wem_reference.vorbis.codebook import StaticCodebook, make_codewords
-from wwise_wem.profiles.registry import resolve_wem_profile
+from wwise_wem import WwiseProfile, WwiseVersion
+from wwise_wem.profiles.registry import resolve_selection
+
+
+SIX_CHANNEL_SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
 
 
 class CodebookBehaviorTests(unittest.TestCase):
@@ -57,7 +61,7 @@ class CodebookBehaviorTests(unittest.TestCase):
         self.assertEqual(codebook.pack(), expected.get_buffer())
 
     def test_setup_books_encode_decode_and_vq(self) -> None:
-        profile = resolve_wem_profile(6, 44100)
+        profile = resolve_selection(SIX_CHANNEL_SELECTION)
         setup = parse_setup(profile.setup_packet(), channels=6)
         tables = installed_codebook_tables()
         books = load_setup_codebooks(setup["book_ids"], tables)

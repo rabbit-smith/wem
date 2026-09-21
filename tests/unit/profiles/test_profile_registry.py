@@ -5,18 +5,24 @@ import json
 import unittest
 from unittest.mock import patch
 
+from wwise_wem import WwiseProfile, WwiseVersion
 from wwise_wem.model import ContainerMetadata
-from wwise_wem.profiles.bundle import DEFAULT_INDEX, PACKAGE, ProfileKey, load_profile_bundle
-from wwise_wem.profiles.model import EncoderProfile
-from wwise_wem.profiles.registry import (
-    WWISE2013_2CH_48000,
-    WWISE2013_6CH_44100,
-    load_wem_profile,
-    profile_names,
-    resolve_wem_profile,
+from wwise_wem.profiles.bundle import (
+    DEFAULT_INDEX,
+    PACKAGE,
+    ProfileKey,
+    installed_profile_names,
+    load_profile_bundle,
 )
+from wwise_wem.profiles.model import EncoderProfile
+from wwise_wem.profiles.registry import resolve_selection
 from wwise_wem.profiles.resources import ResourceRef, resource_traversable
 import wwise_wem.profiles.registry as registry_module
+
+
+SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
+TWO_CHANNEL_SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 2, 48000)
+UNINSTALLED_SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 2, 44100)
 
 
 class InstalledProfileTests(unittest.TestCase):
@@ -30,51 +36,65 @@ class InstalledProfileTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             ProfileKey(2, 48000)  # type: ignore[call-arg]
 
-    def test_installed_profiles_come_from_the_checked_index(self) -> None:
+    def test_every_index_profile_resolves_by_its_manifest_key(self) -> None:
         index = json.loads(
             resource_traversable(PACKAGE, DEFAULT_INDEX).read_text(encoding="utf-8")
         )
-        self.assertEqual(profile_names(), tuple(sorted(index["profiles"])))
-        for name in profile_names():
+        self.assertEqual(
+            set(installed_profile_names()), set(index["profiles"])
+        )
+        for name in installed_profile_names():
             bundle = load_profile_bundle(profile=name, verify_all=False)
-            profile = load_wem_profile(name)
+            selection = WwiseProfile(
+                WwiseVersion.from_generation(bundle.key.generation),
+                bundle.key.channels,
+                bundle.key.sample_rate,
+            )
+            profile = resolve_selection(selection)
             self.assertIsInstance(profile, EncoderProfile)
             self.assertIsInstance(profile.container_metadata, ContainerMetadata)
             self.assertIsInstance(profile.setup_path, ResourceRef)
             self.assertEqual(profile.key, bundle.key)
             self.assertEqual(profile.setup_sha256, bundle.setup.sha256)
 
-    def test_name_and_geometry_resolution_share_cached_profiles(self) -> None:
-        self.assertIs(load_wem_profile("wwise2013-6ch-44100"), resolve_wem_profile(6, 44100))
-        self.assertIs(load_wem_profile("wwise2013-2ch-48000"), resolve_wem_profile(2, 48000))
-        self.assertIs(WWISE2013_6CH_44100, resolve_wem_profile(6, 44100))
-        self.assertIs(WWISE2013_2CH_48000, resolve_wem_profile(2, 48000))
+    def test_resolution_is_cached_and_geometry_independent(self) -> None:
+        self.assertIs(resolve_selection(SELECTION), resolve_selection(SELECTION))
+        self.assertIs(
+            resolve_selection(TWO_CHANNEL_SELECTION),
+            resolve_selection(TWO_CHANNEL_SELECTION),
+        )
+        self.assertIsNot(
+            resolve_selection(SELECTION), resolve_selection(TWO_CHANNEL_SELECTION)
+        )
 
     def test_resolution_errors_are_explicit(self) -> None:
-        with self.assertRaisesRegex(ValueError, "unknown WEM profile"):
-            load_wem_profile("missing")
-        with self.assertRaisesRegex(ValueError, "no Wwise 2013.2 profile"):
-            resolve_wem_profile(2, 44100)
-
-    def test_geometry_resolution_rejects_ambiguous_profiles(self) -> None:
-        base = load_wem_profile("wwise2013-2ch-48000")
-        duplicate = dataclasses.replace(base, name="duplicate-2ch-profile")
-        with patch.dict(
-            registry_module._INSTALLED_PROFILES,
-            {duplicate.name: duplicate},
+        with self.assertRaisesRegex(
+            ValueError, "no installed Wwise 2013 profile for 2ch/44100Hz"
         ):
-            with self.assertRaisesRegex(ValueError, "multiple .* profiles match"):
-                resolve_wem_profile(2, 48000)
+            resolve_selection(UNINSTALLED_SELECTION)
+        with self.assertRaisesRegex(ValueError, "installed: "):
+            resolve_selection(WwiseProfile(WwiseVersion.WWISE2013, 4, 48000))
+
+    def test_ambiguous_selection_is_never_resolved_by_first_match(self) -> None:
+        base = resolve_selection(TWO_CHANNEL_SELECTION)
+        duplicate = dataclasses.replace(base, name="duplicate-2ch-profile")
+        with patch.object(
+            registry_module,
+            "_installed_profiles",
+            return_value=(base, duplicate),
+        ):
+            with self.assertRaisesRegex(ValueError, "ambiguous"):
+                resolve_selection(TWO_CHANNEL_SELECTION)
 
     def test_quality_binding_is_pure_and_finite(self) -> None:
-        base = load_wem_profile("wwise2013-6ch-44100")
-        bound = load_wem_profile(base.name, quality=4.0)
+        base = resolve_selection(SELECTION)
+        bound = resolve_selection(SELECTION, quality=4.0)
         self.assertIsNot(base, bound)
         self.assertEqual(bound.quality, 4.0)
         self.assertIsNone(base.quality)
         for value in (float("nan"), float("inf")):
             with self.assertRaisesRegex(ValueError, "finite"):
-                load_wem_profile(base.name, quality=value)
+                resolve_selection(SELECTION, quality=value)
 
 
 if __name__ == "__main__":

@@ -25,11 +25,11 @@ import wave
 from pathlib import Path
 
 import wwise_wem as W
-from wwise_wem import _core as core_mod
+from wwise_wem import WwiseProfile, WwiseVersion, _core as core_mod
 from wwise_wem.adapters.raw import read_raw_pcm
 from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem.application.models import EncodeResult
-from wwise_wem.profiles.registry import load_wem_profile
+from wwise_wem.profiles.registry import resolve_selection
 from wwise_wem_reference import python_engine
 from wwise_wem_reference.container.model import ContainerPlan
 
@@ -37,7 +37,9 @@ ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "tests" / "fixtures"
 INPUT = FIXTURES / "input.wav"
 REFERENCE = FIXTURES / "reference.wem"
-PROFILE_NAME = "wwise2013-6ch-44100"
+SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
+PROFILE = resolve_selection(SELECTION)
+KERNEL_METADATA_SOURCE = "profile:6ch/44100Hz/2013"
 
 
 def _synthetic_int16(frames: int, channels: int = 6) -> list[int]:
@@ -184,7 +186,7 @@ class ExtendedInputDomainTests(unittest.TestCase):
         # 2ch/44100 is not a registered profile (the 2ch profile is 48000):
         # unsupported geometry must still fail with the explicit rejection.
         values = _synthetic_int16(4096, channels=2)
-        with self.assertRaisesRegex(ValueError, "no Wwise 2013.2 profile"):
+        with self.assertRaisesRegex(ValueError, "2ch/44100Hz"):
             W.encode(W.RawPcm(_int16_bytes(values), 44100, 2, "s16le"))
 
 
@@ -198,10 +200,9 @@ class ExtendedInputConsistencyTests(unittest.TestCase):
     """
 
     def _oracle_encode(self, pcm) -> EncodeResult:
-        profile = load_wem_profile(PROFILE_NAME)
         return python_engine.encode_pcm_python(
-            profile=profile,
-            container=ContainerPlan.from_profile(profile),
+            profile=PROFILE,
+            container=ContainerPlan.from_profile(PROFILE),
             pcm=pcm,
         )
 
@@ -209,9 +210,9 @@ class ExtendedInputConsistencyTests(unittest.TestCase):
         pcm = read_pcm_wav(INPUT)
         golden = REFERENCE.read_bytes()
 
-        facade = W.encode(INPUT, profile=PROFILE_NAME)
+        facade = W.encode(INPUT, profile=SELECTION)
         oracle = self._oracle_encode(pcm)
-        direct_core = core_mod.Encoder(PROFILE_NAME).encode_pcm(
+        direct_core = core_mod.Encoder(SELECTION).encode_pcm(
             44100,
             [[int(sample * 32768.0) for sample in row] for row in pcm.channels],
         )
@@ -264,6 +265,11 @@ class ExtendedInputConsistencyTests(unittest.TestCase):
                     self.assertEqual(
                         facade_result.stats.to_dict(),
                         oracle_result.stats.to_dict(),
+                        label,
+                    )
+                    self.assertEqual(
+                        facade_result.stats.metadata_source,
+                        KERNEL_METADATA_SOURCE,
                         label,
                     )
 

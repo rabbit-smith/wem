@@ -17,6 +17,7 @@ import struct
 import unittest
 from pathlib import Path
 
+from tests.analysis_resource_support import installed_profile_bundle
 from wwise_wem.profiles.bundle import load_profile_bundle
 from wwise_wem_reference.profiles.quality import (
     _linear_frac,
@@ -211,14 +212,11 @@ class DispatchAndRegressionTests(unittest.TestCase):
         # the schema branch is quality-independent).
         from wwise_wem_reference.profiles.transient import load_transient_tables
 
-        bundle = load_profile_bundle(profile="wwise2013-6ch-44100", verify_all=False)
+        bundle = installed_profile_bundle(6, 44100)
         ref = bundle.runtime_manifest.resources["analysis.transient"]
-        data = json.loads(
-            (
-                _ROOT
-                / "src/wwise_wem/data/profiles/wwise2013-6ch-44100/analysis/transient.json"
-            ).read_text(encoding="utf-8")
-        )
+        # Read through the checksum-addressed resource: the payload digest is
+        # verified rather than assumed.
+        data = ref.read_json()
         self.assertEqual(data["schema"], "wem.transient-detector-table.v1")
         tables = load_transient_tables(ref)
         self.assertEqual(
