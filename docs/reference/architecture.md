@@ -121,13 +121,11 @@ build (2013.2 conversion plug-in, geometry materializer at module offset
 Locks: `tests/contract/test_geometry_materializer_contract.py` asserts
 builder == registered bytes on the 6ch authority, and the generated Rust
 suites (`crates/wem-analysis/tests/*_parity.rs`) assert kernel == builder bit
-for bit on both geometries. On 2ch the five short surfaces are registered
-from that mechanism, with the geometry read from the paired build running at
+for bit on both geometries. On 2ch the five short surfaces are registered from
+that mechanism, with the geometry read from the paired build running at
 48000 Hz; the twelve long surfaces are likewise registered from the mechanism
-and read-verified, and any change to either set still requires a regenerated
-contract. Provenance detail lives in
-docs/profiles.md, the roadmap (docs/roadmap.md) and the corpus adjudication
-ledger.
+and read-verified. Any change to either set requires a regenerated contract.
+Per-field provenance is in [`profiles.md`](profiles.md).
 
 ## Acceptance boundaries
 

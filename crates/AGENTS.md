@@ -5,7 +5,7 @@ stage (scheduling, analysis, Vorbis coding, container assembly) runs here.
 Python (PyO3) and the C ABI are thin shells over `wem-core`; nothing
 numerically hot stays on the wrapper side.
 
-## Crate map and allowed edges (acyclic; mirrors docs/architecture.md)
+## Crate map and allowed edges (acyclic; mirrors docs/reference/architecture.md)
 
 ```
 wem-profiles  → (types of wem-vorbis/wem-analysis/wem-container; sole resource owner)
@@ -72,7 +72,7 @@ wem-python    → wem-core (PyO3 binding; no numerics)
   unknown profile, out-of-domain lookup).
 - `unsafe` is prohibited without a comment proving why bit-exactness or FFI
   requires it; assume "not needed" until proven otherwise.
-- Naming follows `docs/domain-model.md` terms (`FramePlan`, `AnalysisSession`,
+- Naming follows `docs/reference/domain-model.md` terms (`FramePlan`, `AnalysisSession`,
   `AudioPacket`, `WemContainer`, `FrozenMathTables`); no parallel vocabularies.
 - Hot loops: no per-sample allocation, no `Vec` returns from inner stages where a
   scratch buffer exists; keep scratch ownership at the session boundary.

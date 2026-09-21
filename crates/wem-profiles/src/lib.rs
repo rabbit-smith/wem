@@ -3,7 +3,7 @@
 //!
 //! This crate is the only owner of packaged calibration resources, checksum
 //! verification, codebook assembly, and calibrated table loaders
-//! (docs/architecture.md). Mirrors the Python `wwise_wem/profiles` package.
+//! (docs/reference/architecture.md). Mirrors the Python `wwise_wem/profiles` package.
 //!
 //! Entry points:
 //! * [`DataDir`] — where the profile tree lives (WEM_DATA_DIR / repo layout)

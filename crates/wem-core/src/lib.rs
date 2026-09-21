@@ -2,7 +2,7 @@
 //!
 //! This is the only crate allowed to assemble profiles, analysis, packet
 //! encoding, and containers into the complete WAV-to-WEM use case
-//! (docs/architecture.md). Mirrors the Python `wwise_wem/application`
+//! (docs/reference/architecture.md). Mirrors the Python `wwise_wem/application`
 //! package plus the package-root API shell.
 //!
 //! Public surface:

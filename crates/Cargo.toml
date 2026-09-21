@@ -1,6 +1,6 @@
 # Rust workspace for the bit-exact WEM encoder kernel.
 #
-# Dependency direction (locked by docs/architecture.md):
+# Dependency direction (locked by docs/reference/architecture.md):
 #   wem-scheduling        - no sibling dependencies (pure plans/policies)
 #   wem-analysis          - depends on wem-scheduling; resource-free typed models + DSP
 #   wem-vorbis            - depends on wem-analysis; bitstream/codebook/setup primitives

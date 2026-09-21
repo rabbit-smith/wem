@@ -16,7 +16,7 @@ kernel is verified against it, never the reverse.
    `wwise_wem_reference._tmath` is prohibited in encoder paths; all such
    calls go through the named site entries and, for exact-profile paths,
    through `FrozenMathTables` injection. New runtime transcendental inputs
-   require the record → freeze workflow first (see `docs/profiles.md`).
+   require the record → freeze workflow first (see `docs/reference/profiles.md`).
 3. **One-call rule: the single execution path is `wwise_wem._core`.**
    Byte-producing code imports the in-package native extension directly
    (a plain top-level `from .. import _core` in
@@ -30,7 +30,7 @@ kernel is verified against it, never the reverse.
    distribution contract test); facade code never restates it.
    The reference oracle is test-only: production code in this package
    never imports `wwise_wem_reference`.
-4. **Layer boundaries.** Follow `docs/architecture.md` import rules; `analysis`,
+4. **Layer boundaries.** Follow `docs/reference/architecture.md` import rules; `analysis`,
    `vorbis`, `container` never read package resources; `profiles` is the only
    loader. Receiving typed tables is the only configuration mechanism.
 5. **Fail loudly.** Input/boundary errors are explicit `ValueError`s at the
@@ -39,7 +39,7 @@ kernel is verified against it, never the reverse.
 
 ## Compatibility surfaces
 
-- Package root exports (`docs/public-interface.md`) are an exact contract;
+- Package root exports (`docs/reference/public-interface.md`) are an exact contract;
   changing them requires explicit human approval. Internal module paths are
   not contract.
 - `_f32` statement placement is normative for the Rust port — when touching a

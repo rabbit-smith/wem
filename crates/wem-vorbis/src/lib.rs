@@ -3,7 +3,7 @@
 //!
 //! Mirrors the Python `wwise_wem/vorbis` package: `bitio.py`, `codebook.py`,
 //! `setup.py`. This crate never imports application, profiles, or container
-//! code (docs/architecture.md).
+//! code (docs/reference/architecture.md).
 
 pub mod bitio;
 pub mod codebook;

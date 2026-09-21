@@ -11,7 +11,7 @@ file first; subtree rules live in the child `AGENTS.md` files listed below.
 | Golden WEM `SHA-256 17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247` | `make golden` |
 | 205-frame per-frame hash contract | `make frame-contract` |
 | Per-frame × per-stage pipeline hashes + representative raw dumps | `make stage-contract` (`tests/data/stage-golden/`) |
-| Package-root public exports (see `docs/public-interface.md`) | distribution + wheel smoke |
+| Package-root public exports (see `docs/reference/public-interface.md`) | distribution + wheel smoke |
 | Geometry-materializer parity: ported builder == registered 6ch surfaces == kernel `psy_geom*` | `tests/contract/test_geometry_materializer_contract.py` + `cargo test -p wem-analysis` parity suites |
 | Profile data digest chain: payload → manifest SHA → index SHA | `bundle.verify_all`, wheel smoke |
 
@@ -47,7 +47,7 @@ Any refactor is valid only while every gate above still passes unchanged.
 ## Dependency direction
 
 The import graph is one-directional and acyclic; the authoritative rule list is
-`docs/architecture.md`. Summary: `scheduling` imports nothing downstream;
+`docs/reference/architecture.md`. Summary: `scheduling` imports nothing downstream;
 `analysis`/`vorbis`/`container` never open package resources; `profiles` is the
 sole resource owner; one application/core layer alone assembles the use case.
 This applies identically to Python (oracle) and Rust (kernel) crates.
@@ -93,6 +93,7 @@ Adding any file under `src/wwise_wem/` or packaged data requires:
 | Python reference implementation | [`reference/AGENTS.md`](reference/AGENTS.md) |
 | Contracts & assets | [`tests/AGENTS.md`](tests/AGENTS.md) |
 | Tooling scripts | [`scripts/AGENTS.md`](scripts/AGENTS.md) |
+| Documentation set | [`docs/README.md`](docs/README.md) |
 
 ## Integration topology (normative)
 
@@ -117,10 +118,17 @@ Adding any file under `src/wwise_wem/` or packaged data requires:
 
 ## Governing documents
 
-`docs/architecture.md` (layers), `docs/domain-model.md` (vocabulary — use these
-terms in code and messages), `docs/profiles.md` (profile & frozen-table
-ownership), `docs/public-interface.md` (compatibility surface). Vocabulary from
+`docs/reference/architecture.md` (layers), `docs/reference/domain-model.md` (vocabulary — use these
+terms in code and messages), `docs/reference/profiles.md` (profile & frozen-table
+ownership), `docs/reference/public-interface.md` (compatibility surface). Vocabulary from
 the domain model is normative; do not invent parallel names for defined concepts.
+
+The rest of the set is split by purpose: `docs/guides/` holds task instructions,
+`docs/findings/` holds the evidence record for a completed result (root causes,
+accounting, retractions, trust boundary), and `docs/methodology/` holds reusable
+method. Before chasing any divergence from the paired build, read
+`docs/methodology/byte-exact-diagnosis.md`; when such a chase concludes, write
+the result into `docs/findings/` rather than into the roadmap.
 
 ## Knowledge gate
 

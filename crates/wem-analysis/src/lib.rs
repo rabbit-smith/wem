@@ -1,7 +1,7 @@
 //! WEM encoder analysis domain: DSP, transient detection, and psychoacoustic
 //! analysis over typed, checksum-verified resource models.
 //!
-//! This crate is resource-free by design (docs/architecture.md): it never
+//! This crate is resource-free by design (docs/reference/architecture.md): it never
 //! opens package resources and never imports the profiles crate. It receives
 //! typed configuration exclusively (see `config`).
 //!

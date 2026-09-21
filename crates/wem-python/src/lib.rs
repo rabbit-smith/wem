@@ -12,7 +12,7 @@
 //!   shells) and its message carries the kernel diagnostic
 //!   (`EncoderError` Display text).
 //!
-//! Design rules (docs/architecture.md, crates/AGENTS.md):
+//! Design rules (docs/reference/architecture.md, crates/AGENTS.md):
 //! * No second implementation: validation, profile loading, checksums and
 //!   encoding all run in wem-core / wem-profiles public APIs. This layer
 //!   only converts Python values to kernel types and kernel errors to

@@ -30,8 +30,8 @@ this package at runtime.
 2. **No direct transcendentals.** `math.sin/cos/log/log10/pow/exp` outside
    `wwise_wem_reference._tmath` is prohibited in encoder paths; all such
    calls go through the named site entries and, for exact-profile paths,
-   through `FrozenMathTables` injection (see `docs/profiles.md`).
-3. **Layer boundaries.** Follow `docs/architecture.md` import rules inside
+   through `FrozenMathTables` injection (see `docs/reference/profiles.md`).
+3. **Layer boundaries.** Follow `docs/reference/architecture.md` import rules inside
    this tree: `analysis`, `vorbis`, `container` never read package
    resources; the reference `profiles` loaders are the only resource
    readers besides the facade's installed-profile bundle loader.

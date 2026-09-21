@@ -1,7 +1,7 @@
 //! WEM encoder scheduling domain: immutable frame plans and mode-selection
 //! policy. This crate is the bottom of the dependency chain and must never
 //! import analysis, profiles, vorbis, or container crates
-//! (see `docs/architecture.md`).
+//! (see `docs/reference/architecture.md`).
 //!
 //! Mirrors the Python `wwise_wem/scheduling` package layout.
 

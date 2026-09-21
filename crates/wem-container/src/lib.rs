@@ -1,6 +1,6 @@
 //! WEM encoder container domain: RIFF/WEM models and codecs.
 //!
-//! Per docs/architecture.md this crate does not import application,
+//! Per docs/reference/architecture.md this crate does not import application,
 //! profiles, or analysis code; it works on plain bytes only. Mirrors the
 //! Python `wwise_wem/container` package (`riff.py`, `fmt.py`, `packets.py`,
 //! `wem.py`).
