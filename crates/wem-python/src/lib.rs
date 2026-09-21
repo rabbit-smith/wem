@@ -4,8 +4,8 @@
 //! repository-root maturin wheel installs it as `wwise_wem/_core.abi3.so`) — a thin, zero-drift shell over
 //! the kernel:
 //!
-//! * [`Encoder`] — one-shot PCM-to-WEM encode (`wem_core::encoder::Encoder`)
-//! * [`StreamSession`] — the core streaming lifecycle
+//! * `Encoder` — one-shot PCM-to-WEM encode (`wem_core::encoder::Encoder`)
+//! * `StreamSession` — the core streaming lifecycle
 //!   (Init -> chunks* -> Finish; `wem_core::stream::StreamSession`)
 //! * [`WwiseVersion`] / [`WwiseProfile`] — the structured profile selector
 //!   (`wem_core::{WwiseVersion, WwiseProfile}`; C ABI `WemVersion` /

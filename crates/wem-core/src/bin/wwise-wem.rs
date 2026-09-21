@@ -1,7 +1,7 @@
 //! wwise-wem: encode a signed-16 PCM WAV into a Wwise Vorbis WEM.
 //!
 //! Usage:
-//!   wwise-wem <input.wav> [--output <path>] [--wwise-version <label>] [--time]
+//!   `wwise-wem <input.wav> [--output <path>] [--wwise-version <label>] [--time]`
 //!
 //! * `--output` defaults to stdout (use "-" explicitly for stdout).
 //! * `--wwise-version` selects the Wwise generation (default: the installed

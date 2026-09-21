@@ -33,7 +33,7 @@ use wem_core::{WwiseProfile, WwiseVersion};
 /// Revision 2 replaced the `profile_name` + `data_dir` argument pair of
 /// `wem_encoder_new`, `wem_encode_pcm16_interleaved` and `wem_session_new`
 /// with one `const WemProfile *` selection. The header and this crate are
-/// pinned together by [`tests::header_matches_this_crate`].
+/// pinned together by the `header_matches_this_crate` integration test.
 pub const ABI_REVISION: u32 = 2;
 
 /// Callback that receives output bytes in blocks: the one-shot container

@@ -283,8 +283,8 @@ pub fn pack_audio_header(
 /// (Python `pack_floor1_body`).
 ///
 /// `Y` must be *wrapped residuals* as produced by `floor1_wrap`, not
-/// absolute post heights. Endpoints Y[0]/Y[1] are absolute quant values;
-/// interior Y[i] are prediction residuals (0 ⇒ "use predicted").
+/// absolute post heights. Endpoints `Y[0]`/`Y[1]` are absolute quant values;
+/// interior `Y[i]` are prediction residuals (0 ⇒ "use predicted").
 #[allow(non_snake_case)]
 pub fn pack_floor1_body(
     op: &mut OggPack,

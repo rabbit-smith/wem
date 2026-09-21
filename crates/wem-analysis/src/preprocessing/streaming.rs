@@ -1,7 +1,9 @@
 //! Incremental PCM feeder for the true streaming path.
 //!
-//! The batch paths ([`detector_input::iter_detector_quanta`] and
-//! [`windowing::iter_planned_pcm_windows`]) materialize from the complete
+//! The batch paths ([`iter_detector_quanta`](crate::preprocessing::detector_input::iter_detector_quanta)
+//! and
+//! [`iter_planned_pcm_windows`](crate::preprocessing::windowing::iter_planned_pcm_windows))
+//! materialize from the complete
 //! source in memory. [`StreamingPcmFeeder`] shares the exact same kernel —
 //! the same LPC functions, the same sample-selection views — but retains
 //! only a bounded window, so input memory stays O(ring + tail) instead of
@@ -17,12 +19,15 @@
 //! * the end-of-stream tail (8192 samples per channel), computed once by
 //!   [`StreamingPcmFeeder::finish_source`] from the last 4096 samples.
 //!
-//! Detector quanta are handed out **as they complete**: [`push`](Self::push)
+//! Detector quanta are handed out **as they complete**:
+//! [`StreamingPcmFeeder::push`]
 //! returns the windows whose 128-sample detector intervals end inside the
 //! appended chunk, extracted before the ring evicts anything, so a single
 //! huge chunk never loses its early quanta. Rejection conditions and float
 //! semantics track the batch paths: every selected sample goes through the
-//! same views that [`windowing::iter_planned_pcm_windows`] selects
+//! same views that
+//! [`iter_planned_pcm_windows`](crate::preprocessing::windowing::iter_planned_pcm_windows)
+//! selects
 //! (negative index → prime, source → retained samples, tail → tail
 //! prediction).
 
@@ -326,7 +331,8 @@ impl StreamingPcmFeeder {
 
     /// One detector quantum (128 samples per channel) at hop position
     /// `quantum`, exactly the window the batch
-    /// [`detector_input::iter_detector_quanta`] yields.
+    /// [`iter_detector_quanta`](crate::preprocessing::detector_input::iter_detector_quanta)
+    /// yields.
     ///
     /// `None` when the quantum window is not materializable from the
     /// retained views (source samples already handed out and evicted).
@@ -373,7 +379,8 @@ impl StreamingPcmFeeder {
 
     /// One frame plan's raw channel-major rows on the PCM timeline,
     /// applying the exact sample views of
-    /// [`windowing::iter_planned_pcm_windows`]: negative indices from the
+    /// [`iter_planned_pcm_windows`](crate::preprocessing::windowing::iter_planned_pcm_windows):
+    /// negative indices from the
     /// frame-windowing prime (prefill 128), source indices from the
     /// retained ring, indices past the endpoint from the EOS tail (0.0
     /// where the batch code emits 0.0).

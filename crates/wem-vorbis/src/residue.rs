@@ -37,7 +37,7 @@ impl F32Sample for f64 {
 /// Residue packing errors (Python: `ValueError` family).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResidueError {
-    /// Silent residue requires cascade[0] == 0 (Python check).
+    /// Silent residue requires `cascade[0] == 0` (Python check).
     SilentRequiresEmptyCascade,
     /// The bounded classifier only supports the installed 8-class profile;
     /// other setups would need the encoder-only metric table / log10 path
@@ -282,7 +282,7 @@ fn pack_classbook_entry(
 /// Pack a silent residue: all partitions class 0 (Python
 /// `pack_residue_silent`).
 ///
-/// Requires cascade[0] == 0 (no stage books) so no VQ follows.
+/// Requires `cascade[0] == 0` (no stage books) so no VQ follows.
 pub fn pack_residue_silent(
     op: &mut OggPack,
     residue: &ResidueSetup,

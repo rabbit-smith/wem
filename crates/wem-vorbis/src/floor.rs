@@ -483,7 +483,7 @@ fn render_line_from_db(n: usize, x0: i64, x1: i64, y0: i64, y1: i64, d: &mut [f6
 /// `floor1_inverse2`, Python `floor1_curve_from_posts`).
 ///
 /// Absolute posts (0x8000 = skip / predicted-only) × multiplier → quant
-/// 0..255, then amp = FLOOR1_fromdB_LOOKUP[q]. Output is linear amplitude
+/// 0..255, then amp = `FLOOR1_fromdB_LOOKUP[q]`. Output is linear amplitude
 /// (starts as 1.0 and is multiplied along active segments; inactive tail
 /// holds the final level).
 pub fn floor1_curve_from_posts(
