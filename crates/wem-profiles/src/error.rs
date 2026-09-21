@@ -5,6 +5,14 @@
 //! the reject/accept behavior must not.
 
 /// Error raised by any profile resource, bundle, registry, or table loader.
+///
+/// Variants are append-only: a shipped variant is never renumbered, renamed,
+/// or repurposed, so a consumer can match on them exhaustively across
+/// revisions. Variants without a producing site are the exception — they are
+/// removed rather than kept as dead surface: `NoProfileForGeometry`,
+/// `AmbiguousProfileGeometry`, `TemplateSetupNoInstalledProfile` and
+/// `UnknownProfile` went that way, superseded by the structured-selection
+/// errors `NoProfileForSelection` / `AmbiguousProfileSelection`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProfileError {
     // ------------------------------------------------------------------
@@ -126,27 +134,6 @@ pub enum ProfileError {
     UnknownProfileKey { key: String },
     /// resolve by channels without a sample rate.
     ResolveSampleRateRequired,
-    /// No installed profile for the geometry.
-    NoProfileForGeometry {
-        channels: i64,
-        sample_rate: i64,
-        installed: String,
-    },
-    /// Multiple profiles share the geometry.
-    AmbiguousProfileGeometry {
-        channels: i64,
-        sample_rate: i64,
-        names: String,
-    },
-    /// Unknown profile name (Python: "unknown WEM profile").
-    UnknownProfile { name: String, available: String },
-    /// Template setup SHA-256 matches no installed profile.
-    TemplateSetupNoInstalledProfile {
-        setup_sha256: String,
-        channels: i64,
-        sample_rate: i64,
-        installed: String,
-    },
     /// Runtime manifest differs from the installed bundle.
     InstalledBundleMismatch { profile: String },
     // ------------------------------------------------------------------
@@ -392,16 +379,6 @@ impl std::fmt::Display for ProfileError {
             RegistryDuplicateName { name } => write!(f, "duplicate profile name: {name}"),
             UnknownProfileKey { key } => write!(f, "unknown WEM profile key {key}"),
             ResolveSampleRateRequired => write!(f, "sample_rate is required when resolving by channels"),
-            NoProfileForGeometry { channels, sample_rate, installed } => {
-                write!(f, "no Wwise 2013.2 profile for {channels}ch/{sample_rate}Hz; installed: {installed}")
-            }
-            AmbiguousProfileGeometry { channels, sample_rate, names } => {
-                write!(f, "profile geometry {channels}ch/{sample_rate}Hz is ambiguous: {names}; resolve with a complete ProfileKey")
-            }
-            UnknownProfile { name, available } => write!(f, "unknown WEM profile {name:?}; available={available}"),
-            TemplateSetupNoInstalledProfile { setup_sha256, channels, sample_rate, installed } => {
-                write!(f, "template setup SHA-256 {setup_sha256} has no installed profile for {channels}ch/{sample_rate}Hz; installed: {installed}")
-            }
             InstalledBundleMismatch { profile } => write!(f, "profile {profile} differs from installed profile bundle"),
             UnknownWwiseVersion { code } => write!(f, "unknown Wwise version code {code}"),
             UnsupportedWwiseGeneration { generation } => write!(f, "unsupported Wwise generation {generation:?}"),
