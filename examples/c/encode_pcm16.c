@@ -35,9 +35,9 @@ fail:
 }
 
 int main(int argc, char **argv) {
-  if (argc != 6) {
+  if (argc != 5) {
     fprintf(stderr,
-            "usage: %s INPUT.pcm OUTPUT.wem PROFILE CHANNELS PROFILES_DIR\n",
+            "usage: %s INPUT.pcm OUTPUT.wem PROFILE CHANNELS\n",
             argv[0]);
     return 2;
   }
@@ -73,7 +73,7 @@ int main(int argc, char **argv) {
 
   size_t frames = input_len / bytes_per_frame;
   WemError error = wem_encode_pcm16_interleaved(
-      argv[3], argv[5], (const int16_t *)input, frames, write_file, output);
+      argv[3], NULL, (const int16_t *)input, frames, write_file, output);
   int close_error = fclose(output);
   free(input);
   if (error != WEM_OK || close_error != 0) {

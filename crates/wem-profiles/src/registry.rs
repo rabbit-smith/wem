@@ -5,6 +5,7 @@
 
 use crate::bundle::load_profile_bundle;
 use crate::data::DataDir;
+use crate::embedded::{embedded_profile_names, load_embedded_profile_bundle};
 use crate::error::ProfileError;
 use crate::key::{ProfileKey, WWISE_GENERATION};
 use crate::model::EncoderProfile;
@@ -183,6 +184,17 @@ pub fn installed_registry(data: &DataDir) -> Result<ProfileRegistry, ProfileErro
     ProfileRegistry::new(profiles)
 }
 
+/// Build the registry from profiles compiled into this library.
+pub fn embedded_registry() -> Result<ProfileRegistry, ProfileError> {
+    let names = embedded_profile_names()?;
+    let mut profiles = Vec::with_capacity(names.len());
+    for name in names {
+        let bundle = load_embedded_profile_bundle(Some(&name))?;
+        profiles.push(bundle.to_encoder_profile()?);
+    }
+    ProfileRegistry::new(profiles)
+}
+
 /// The profile names registered in the package index, in deterministic
 /// (sorted) order.
 fn index_profile_names(data: &DataDir) -> Result<Vec<String>, ProfileError> {
@@ -216,8 +228,7 @@ pub fn load_wem_profile_quality(
     name: &str,
     quality: Option<f64>,
 ) -> Result<EncoderProfile, ProfileError> {
-    let data = DataDir::from_env()?;
-    let registry = installed_registry(&data)?;
+    let registry = embedded_registry()?;
     let available = registry
         .list()
         .iter()
@@ -254,8 +265,7 @@ pub fn resolve_wem_profile_quality(
     sample_rate: i64,
     quality: Option<f64>,
 ) -> Result<EncoderProfile, ProfileError> {
-    let data = DataDir::from_env()?;
-    let registry = installed_registry(&data)?;
+    let registry = embedded_registry()?;
     let profile = registry.resolve_geometry(channels, sample_rate)?;
     match quality {
         None => Ok(profile.clone()),

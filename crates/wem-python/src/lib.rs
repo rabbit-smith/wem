@@ -26,7 +26,7 @@ use pyo3::prelude::*;
 use pyo3::type_object::PyTypeInfo;
 use pyo3::types::{PyBytes, PyDict};
 
-use wem_core::encoder::{DataDir, EncodeResult as WemEncodeResult, Encoder as WemEncoder, Pcm16};
+use wem_core::encoder::{EncodeResult as WemEncodeResult, Encoder as WemEncoder, Pcm16};
 use wem_core::error::EncoderError;
 use wem_core::stream::{ProfileRef, StreamPacket, StreamSession as WemStreamSession};
 
@@ -183,22 +183,13 @@ struct PyEncoder {
 #[pymethods]
 impl PyEncoder {
     #[new]
-    #[pyo3(signature = (profile_name, data_dir=None, quality=None))]
-    fn new(profile_name: &str, data_dir: Option<&str>, quality: Option<f64>) -> PyResult<Self> {
-        // The kernel's own entry points; `data_dir` is passed explicitly,
-        // otherwise the kernel default applies. `quality`, when
-        // given, binds the quality factor to the resolved profile before
-        // assembly (the Python facade forwards `EncoderProfile.quality`
-        // here); omitted quality keeps the historical bytes exactly.
-        let inner = match data_dir {
-            Some(dir) => WemEncoder::from_profile_quality_in(
-                &DataDir::from_profiles_dir(dir),
-                profile_name,
-                quality,
-            ),
-            None => WemEncoder::from_profile_quality(profile_name, quality),
-        }
-        .map_err(error_to_pyerr)?;
+    #[pyo3(signature = (profile_name, quality=None))]
+    fn new(profile_name: &str, quality: Option<f64>) -> PyResult<Self> {
+        // Profiles are compiled into the kernel. `quality`, when given,
+        // binds the quality factor before assembly; omitted quality keeps the
+        // historical bytes exactly.
+        let inner =
+            WemEncoder::from_profile_quality(profile_name, quality).map_err(error_to_pyerr)?;
         Ok(Self { inner })
     }
 
@@ -550,35 +541,22 @@ else:
     }
 
     #[test]
-    fn encoder_data_dir_option_selects_profile_tree() {
+    fn encoder_loads_embedded_profile() {
         Python::with_gil(|py| {
-            let profiles_dir = repo_root()
-                .join("src/wwise_wem/data/profiles")
-                .to_string_lossy()
-                .to_string();
             let m = import_module(py).unwrap();
             let globals = PyDict::new(py);
             globals.set_item("m", m).unwrap();
-            globals.set_item("profiles_dir", profiles_dir).unwrap();
             globals.set_item("profile", PROFILE_NAME).unwrap();
             py.run(
                 c_str!(
                     r#"
-# Explicit data_dir: the kernel must still find the installed profile.
-enc = m.Encoder(profile, profiles_dir)
-# A bogus data_dir must fail through the kernel's own error path.
-try:
-    m.Encoder(profile, "/definitely/not/a/profiles/dir")
-except m.WemEncoderError as e:
-    assert e.code in ("PROFILE_NOT_FOUND", "INTERNAL"), e.code
-else:
-    raise AssertionError("expected WemEncoderError")
+enc = m.Encoder(profile)
 "#
                 ),
                 Some(&globals),
                 None,
             )
-            .expect("explicit data_dir selection");
+            .expect("embedded profile selection");
         });
     }
 

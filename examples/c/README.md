@@ -10,8 +10,7 @@ cc -std=c11 -Wall -Wextra -Werror \
   -Iinclude examples/c/encode_pcm16.c \
   -Lcrates/target/release -lwem_capi \
   -Wl,-rpath,"$PWD/crates/target/release" -o wem-c-example
-./wem-c-example input.pcm output.wem wwise2013-2ch-48000 2 \
-  src/wwise_wem/data/profiles
+./wem-c-example input.pcm output.wem wwise2013-2ch-48000 2
 ```
 
 The callback writes each output block directly to the target file. See

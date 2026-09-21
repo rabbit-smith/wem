@@ -103,6 +103,11 @@ pub enum ResourceBackend {
     /// Duplicate paths collapse with last-one-wins, mirroring how the
     /// Python zip-based import resolves repeated member names.
     Bytes { files: BTreeMap<String, Vec<u8>> },
+    /// Compile-time embedded profile bytes. They are copied only when a
+    /// resource is decoded, not once for the whole bundle at startup.
+    Static {
+        files: &'static [(&'static str, &'static [u8])],
+    },
 }
 
 /// Immutable package resource identity validated by SHA-256
@@ -183,6 +188,13 @@ impl ResourceRef {
                         path: self.path.clone(),
                     })?
             }
+            ResourceBackend::Static { files } => files
+                .iter()
+                .find_map(|(path, bytes)| (*path == self.path).then_some(*bytes))
+                .map(Vec::from)
+                .ok_or_else(|| ProfileError::MissingResource {
+                    path: self.path.clone(),
+                })?,
         };
         let mut hasher = Sha256::new();
         hasher.update(&payload);

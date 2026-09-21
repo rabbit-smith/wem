@@ -110,6 +110,8 @@ The CLI parses the WAV once, applies optional geometry assertions to that
 ## Execution path
 
 Every byte-producing Python call uses the in-package native extension
-`wwise_wem._core`. Packaged profile manifests select one complete, checksummed
-bundle; the runtime does not assemble a profile from fragments. The pure-Python
-implementation under `reference/` is a development-time oracle only.
+`wwise_wem._core`, which carries the complete checksummed profile bundle at
+compile time. Callers never provide a profile directory or set an environment
+variable. The package manifests remain metadata for profile selection and
+inspection; the native runtime does not assemble a profile from fragments. The
+pure-Python implementation under `reference/` is a development-time oracle only.

@@ -3,6 +3,7 @@ name = "wem-profiles"
 description = "WEM encoder profile identity, registry, and packaged-resource loading/verification."
 version.workspace = true
 edition.workspace = true
+build = "build.rs"
 
 [dependencies]
 sha2 = { workspace = true }
