@@ -150,7 +150,13 @@ fn reference_wem() -> Vec<u8> {
 
 fn read_fixture_pcm() -> (Vec<u8>, usize, usize) {
     let wav = read_pcm16(&fixtures_dir().join("input.wav")).expect("input.wav reads");
-    (wav.interleaved_le_bytes(), wav.frames(), wav.channels())
+    // The helper hands owned bytes to its callers, so the WAV's borrow is
+    // copied here.
+    (
+        wav.interleaved_le_bytes().to_vec(),
+        wav.frames(),
+        wav.channels(),
+    )
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {

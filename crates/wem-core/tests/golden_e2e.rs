@@ -87,7 +87,9 @@ fn golden_encode_is_byte_identical_to_reference_wem() {
 
 fn fixture_le_bytes() -> Vec<u8> {
     let wav = read_pcm16(&fixtures_dir().join("input.wav")).expect("input.wav reads");
-    wav.interleaved_le_bytes()
+    // The streaming cases slice the bytes repeatedly, so they take an owned
+    // copy of the WAV's borrow.
+    wav.interleaved_le_bytes().to_vec()
 }
 
 #[test]
@@ -161,8 +163,8 @@ fn input_too_short_rejects_4095_frames() {
     let wav = read_pcm16(&fixtures_dir().join("input.wav")).expect("input.wav reads");
     let frames = 4095usize;
     let samples_per_frame = wav.channels() * 2;
-    let bytes: Vec<u8> = wav.interleaved_le_bytes()[0..frames * samples_per_frame].to_vec();
-    let pcm = Pcm16::from_interleaved_le(44100, 6, &bytes).expect("pcm parses");
+    let bytes = &wav.interleaved_le_bytes()[0..frames * samples_per_frame];
+    let pcm = Pcm16::from_interleaved_le(44100, 6, bytes).expect("pcm parses");
     let encoder = Encoder::new(fixture_selection()).expect("selection resolves");
     match encoder.encode_pcm(&pcm) {
         Err(EncoderError::InputTooShort { want, got }) => {
@@ -281,7 +283,7 @@ fn chunk_partial_frame_is_a_geometry_mismatch() {
 #[test]
 fn encode_result_length_and_write_to_round_trip() {
     let pcm =
-        Pcm16::from_interleaved_le(44_100, 6, &fixture_le_bytes()).expect("fixture PCM parses");
+        Pcm16::from_interleaved_le(44_100, 6, fixture_le_bytes()).expect("fixture PCM parses");
     let result = Encoder::new(fixture_selection())
         .expect("encoder builds")
         .encode_pcm(&pcm)

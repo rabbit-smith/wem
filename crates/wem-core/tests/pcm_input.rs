@@ -51,15 +51,15 @@ fn channel_major_from_interleaved(interleaved: &[u8], channels: usize) -> Vec<u8
 
 #[test]
 fn interleaved_pcm_rejects_unrepresentable_channel_count() {
-    let error = Pcm16::from_interleaved_le(48_000, usize::MAX, &[0, 0])
+    let error = Pcm16::from_interleaved_le(48_000, usize::MAX, [0, 0])
         .expect_err("channel-byte multiplication must be checked");
     assert!(matches!(error, EncoderError::StateError { .. }));
 
-    let error = Pcm16::from_interleaved_le(48_000, usize::MAX / 2, &[])
+    let error = Pcm16::from_interleaved_le(48_000, usize::MAX / 2, [])
         .expect_err("empty PCM must be rejected before channel allocation");
     assert!(matches!(error, EncoderError::StateError { .. }));
 
-    let error = Pcm16::from_channel_major_le(48_000, usize::MAX, &[0, 0])
+    let error = Pcm16::from_channel_major_le(48_000, usize::MAX, [0, 0])
         .expect_err("channel-byte multiplication must be checked here too");
     assert!(matches!(error, EncoderError::StateError { .. }));
 }
@@ -67,11 +67,11 @@ fn interleaved_pcm_rejects_unrepresentable_channel_count() {
 #[test]
 fn interleaved_pcm_rejects_zero_channels_and_partial_frames() {
     assert!(matches!(
-        Pcm16::from_interleaved_le(48_000, 0, &[]),
+        Pcm16::from_interleaved_le(48_000, 0, []),
         Err(EncoderError::StateError { .. })
     ));
     assert!(matches!(
-        Pcm16::from_interleaved_le(48_000, 2, &[0, 0, 0]),
+        Pcm16::from_interleaved_le(48_000, 2, [0, 0, 0]),
         Err(EncoderError::GeometryMismatch { .. })
     ));
 }
@@ -84,31 +84,31 @@ fn interleaved_pcm_rejects_zero_channels_and_partial_frames() {
 fn channel_major_pcm_rejects_malformed_geometry() {
     // Zero channels.
     assert!(matches!(
-        Pcm16::from_channel_major_le(48_000, 0, &[]),
+        Pcm16::from_channel_major_le(48_000, 0, []),
         Err(EncoderError::StateError { .. })
     ));
     assert!(matches!(
-        Pcm16::from_channel_major_le(48_000, 0, &[0, 0]),
+        Pcm16::from_channel_major_le(48_000, 0, [0, 0]),
         Err(EncoderError::StateError { .. })
     ));
     // Zero frames (empty byte buffer).
     assert!(matches!(
-        Pcm16::from_channel_major_le(48_000, 2, &[]),
+        Pcm16::from_channel_major_le(48_000, 2, []),
         Err(EncoderError::StateError { .. })
     ));
     // 6 bytes into 2-channel frames of 4 bytes: a trailing partial frame.
     assert!(matches!(
-        Pcm16::from_channel_major_le(48_000, 2, &[0, 0, 0, 0, 0, 0]),
+        Pcm16::from_channel_major_le(48_000, 2, [0, 0, 0, 0, 0, 0]),
         Err(EncoderError::GeometryMismatch { .. })
     ));
     // Non-positive rates are rejected, exactly as `new` rejects them.
     for sample_rate in [0, -44_100] {
         assert!(matches!(
-            Pcm16::from_channel_major_le(sample_rate, 2, &[0, 0, 0, 0]),
+            Pcm16::from_channel_major_le(sample_rate, 2, [0, 0, 0, 0]),
             Err(EncoderError::StateError { .. })
         ));
         assert!(matches!(
-            Pcm16::from_interleaved_le(sample_rate, 2, &[0, 0, 0, 0]),
+            Pcm16::from_interleaved_le(sample_rate, 2, [0, 0, 0, 0]),
             Err(EncoderError::StateError { .. })
         ));
     }
@@ -151,10 +151,12 @@ fn the_three_pcm_shapes_share_one_float_row_view() {
     }
 
     let row_pcm = Pcm16::new(sample_rate, values).expect("rows build");
+    // The byte buffers were built for this one comparison: they are handed
+    // over by value, which is the shape the kernel now accepts.
     let channel_pcm =
-        Pcm16::from_channel_major_le(sample_rate, channels, &channel_major).expect("bytes build");
+        Pcm16::from_channel_major_le(sample_rate, channels, channel_major).expect("bytes build");
     let interleaved_pcm =
-        Pcm16::from_interleaved_le(sample_rate, channels, &interleaved).expect("bytes build");
+        Pcm16::from_interleaved_le(sample_rate, channels, interleaved).expect("bytes build");
 
     // Geometry is reported identically by every shape.
     for pcm in [&row_pcm, &channel_pcm, &interleaved_pcm] {
@@ -193,7 +195,7 @@ fn the_three_pcm_shapes_encode_to_identical_containers() {
     assert_eq!(wav.channels(), 6);
     assert_eq!(wav.sample_rate(), 44_100);
     let interleaved = wav.interleaved_le_bytes();
-    let channel_major = channel_major_from_interleaved(&interleaved, wav.channels());
+    let channel_major = channel_major_from_interleaved(interleaved, wav.channels());
 
     let rows: Vec<Vec<i16>> = (0..wav.channels())
         .map(|channel| {
@@ -207,9 +209,9 @@ fn the_three_pcm_shapes_encode_to_identical_containers() {
         .collect();
 
     let row_pcm = Pcm16::new(44_100, rows).expect("rows build");
-    let channel_pcm = Pcm16::from_channel_major_le(44_100, wav.channels(), &channel_major)
+    let channel_pcm = Pcm16::from_channel_major_le(44_100, wav.channels(), channel_major)
         .expect("channel-major bytes build");
-    let interleaved_pcm = Pcm16::from_interleaved_le(44_100, wav.channels(), &interleaved)
+    let interleaved_pcm = Pcm16::from_interleaved_le(44_100, wav.channels(), interleaved)
         .expect("interleaved bytes build");
     assert_eq!(row_pcm, channel_pcm);
     assert_eq!(row_pcm, interleaved_pcm);
@@ -265,11 +267,11 @@ fn wrong_profile_geometry_rejects_every_pcm_shape() {
         ),
         (
             "channel-major bytes",
-            Pcm16::from_channel_major_le(48_000, 2, &channel_major).expect("bytes build"),
+            Pcm16::from_channel_major_le(48_000, 2, channel_major).expect("bytes build"),
         ),
         (
             "interleaved bytes",
-            Pcm16::from_interleaved_le(48_000, 2, &interleaved).expect("bytes build"),
+            Pcm16::from_interleaved_le(48_000, 2, interleaved).expect("bytes build"),
         ),
     ];
     for (name, pcm) in shapes {

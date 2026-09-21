@@ -430,7 +430,14 @@ pub fn wem_parse_wav(wav: &[u8]) -> Result<JsValue, JsValue> {
     );
     set(&obj, "channels", JsValue::from_f64(wav16.channels() as f64));
     set(&obj, "frames", JsValue::from_f64(wav16.frames() as f64));
-    set(&obj, "pcm", JsValue::from(wav16.interleaved_le_bytes()));
+    // The WAV lends its bytes; JS must own them, so this hands over a copy
+    // as the `Uint8Array` payload (the `Vec` is moved into the JS value, not
+    // duplicated Rust-side).
+    set(
+        &obj,
+        "pcm",
+        JsValue::from(wav16.interleaved_le_bytes().to_vec()),
+    );
     Ok(JsValue::from(obj))
 }
 

@@ -172,8 +172,10 @@ fn pcm_from_memoryview(sample_rate: i64, arg: &Bound<'_, PyAny>) -> PyResult<Pcm
     // `abi3-py310` limited API, where the buffer protocol only becomes
     // available at 3.11. Reading the buffer without a copy therefore needs
     // either an abi3 floor of 3.11 or a kernel input type that borrows
-    // bytes instead of owning them.
-    Pcm16::from_channel_major_le(sample_rate, channels, &raw).map_err(error_to_pyerr)
+    // bytes instead of owning them. What it is not is a second copy: `raw`
+    // is handed to the kernel by value, so the bytes move into the input
+    // type's storage instead of being duplicated into it.
+    Pcm16::from_channel_major_le(sample_rate, channels, raw).map_err(error_to_pyerr)
 }
 
 // ---------------------------------------------------------------------------
@@ -642,7 +644,9 @@ mod tests {
         let wav = wem_core::usecases::wav::read_pcm16(&fixtures_dir().join("input.wav"))
             .expect("input.wav reads");
         (
-            wav.interleaved_le_bytes(),
+            // Owned here: the WAV keeps its own bytes and this tuple is a
+            // fixture copy handed to the Python-side calls.
+            wav.interleaved_le_bytes().to_vec(),
             wav.sample_rate(),
             wav.channels(),
             wav.frames(),

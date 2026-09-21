@@ -149,20 +149,24 @@ impl Pcm16 {
     /// at least one channel, at least one frame, and a byte length that is an
     /// exact multiple of the frame width. A trailing partial frame is a
     /// geometry violation (GEOMETRY_MISMATCH).
+    ///
+    /// `bytes` is `impl Into<Vec<u8>>`: a caller that already owns the buffer
+    /// hands it over without a copy, and one holding only a borrow (a slice
+    /// over client memory, or `Wav16`'s `&self`) passes `&[u8]` and pays the
+    /// one copy that owning the samples costs.
     pub fn from_channel_major_le(
         sample_rate: i64,
         channel_count: usize,
-        bytes: &[u8],
+        bytes: impl Into<Vec<u8>>,
     ) -> Result<Self, EncoderError> {
-        let frame_count = byte_geometry(channel_count, bytes)?;
+        let bytes = bytes.into();
+        let frame_count = byte_geometry(channel_count, &bytes)?;
         validate_sample_rate(sample_rate)?;
         Ok(Self {
             sample_rate,
             channel_count,
             frame_count: frame_count as i64,
-            storage: PcmStorage::ChannelMajorLe {
-                bytes: bytes.to_vec(),
-            },
+            storage: PcmStorage::ChannelMajorLe { bytes },
         })
     }
 
@@ -171,20 +175,22 @@ impl Pcm16 {
     ///
     /// The byte length must be a multiple of `2 * channel_count`; a trailing
     /// partial frame is a geometry violation (GEOMETRY_MISMATCH).
+    ///
+    /// `bytes` is `impl Into<Vec<u8>>`, exactly as
+    /// [`Pcm16::from_channel_major_le`].
     pub fn from_interleaved_le(
         sample_rate: i64,
         channel_count: usize,
-        bytes: &[u8],
+        bytes: impl Into<Vec<u8>>,
     ) -> Result<Self, EncoderError> {
-        let frame_count = byte_geometry(channel_count, bytes)?;
+        let bytes = bytes.into();
+        let frame_count = byte_geometry(channel_count, &bytes)?;
         validate_sample_rate(sample_rate)?;
         Ok(Self {
             sample_rate,
             channel_count,
             frame_count: frame_count as i64,
-            storage: PcmStorage::InterleavedLe {
-                bytes: bytes.to_vec(),
-            },
+            storage: PcmStorage::InterleavedLe { bytes },
         })
     }
 

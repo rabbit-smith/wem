@@ -8,18 +8,26 @@
 ///
 /// Hand-rolled to keep the dependency surface locked: it reads the RIFF
 /// chunk list, requires a PCM (`format 1`) 16-bit `fmt ` chunk and a
-/// `data` chunk, and returns the interleaved samples.
+/// `data` chunk, and keeps the interleaved sample bytes as they stand in
+/// the file.
 use std::path::Path;
 
 use crate::error::EncoderError;
 
 /// One uncompressed signed-16 PCM WAV file.
+///
+/// The `data` chunk's own form is interleaved little-endian signed-16 bytes,
+/// so that is what is stored: nothing re-encodes a decoded copy of the
+/// samples. Both consumers read this one shape — the streaming API lends the
+/// slice out, and `to_pcm16` hands it to the kernel, which decodes it exactly
+/// once on the way to the analysis boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Wav16 {
     sample_rate: i64,
     channels: usize,
-    /// Interleaved samples (frames * channels, in file order).
-    samples: Vec<i16>,
+    /// The `data` chunk's interleaved little-endian signed-16 bytes, trimmed
+    /// to whole samples (an odd trailing byte is not a sample).
+    data: Vec<u8>,
 }
 
 impl Wav16 {
@@ -33,31 +41,33 @@ impl Wav16 {
 
     pub fn frames(&self) -> usize {
         // `channels` is structurally non-zero: the parser rejects
-        // zero-channel files, and the field is private.
-        self.samples.len() / self.channels
+        // zero-channel files and the field is private.
+        self.data.len() / (self.channels * 2)
     }
 
-    /// Interleaved little-endian signed-16 PCM bytes (the interleaved wire
-    /// form of the streaming API).
-    pub fn interleaved_le_bytes(&self) -> Vec<u8> {
-        self.samples
-            .iter()
-            .flat_map(|value| value.to_le_bytes())
-            .collect()
+    /// The `data` chunk's interleaved little-endian signed-16 PCM bytes (the
+    /// interleaved wire form of the streaming API) — a borrow of the file's
+    /// own form, so the name stays honest without a `to_` prefix.
+    pub fn interleaved_le_bytes(&self) -> &[u8] {
+        &self.data
     }
 
-    /// Convert into a [`Pcm16`](crate::encoder::Pcm16) with channel-major
-    /// rows (Python `read_pcm_wav` -> `PcmBuffer` normalization is applied
-    /// later at the analysis boundary).
+    /// Convert into a [`Pcm16`](crate::encoder::Pcm16) in that same
+    /// interleaved little-endian shape (Python `read_pcm_wav` -> `PcmBuffer`
+    /// normalization is applied later at the analysis boundary).
+    ///
+    /// Takes `&self` because the borrow is what the caller has: `Pcm16` owns
+    /// its samples, so this copies the file's bytes into that storage.
     pub fn to_pcm16(&self) -> Result<crate::encoder::Pcm16, EncoderError> {
-        let frames = self.frames();
-        let mut channels = vec![Vec::with_capacity(frames); self.channels];
-        for frame in 0..frames {
-            for channel in 0..self.channels {
-                channels[channel].push(self.samples[frame * self.channels + channel]);
-            }
-        }
-        crate::encoder::Pcm16::new(self.sample_rate, channels)
+        // Only whole frames are a PCM buffer: a data chunk whose last frame is
+        // cut short contributes the frames before it, exactly as the frame
+        // count above reports.
+        let whole_frames = self.frames() * self.channels * 2;
+        crate::encoder::Pcm16::from_interleaved_le(
+            self.sample_rate,
+            self.channels,
+            &self.data[..whole_frames],
+        )
     }
 }
 
@@ -132,14 +142,14 @@ pub fn parse_pcm16(raw: &[u8]) -> Result<Wav16, EncoderError> {
             message: "encoder input WAV must contain at least one frame".into(),
         });
     }
-    let mut samples = Vec::with_capacity(frames * channels);
-    for pair in data.chunks_exact(2) {
-        samples.push(i16::from_le_bytes([pair[0], pair[1]]));
-    }
+    // The file's own form, taken as it is: the bytes are the samples, so no
+    // decode pass runs here. Only a trailing odd byte is dropped — it is half
+    // of a sample and was never one.
+    let whole_samples = (data.len() / 2) * 2;
     Ok(Wav16 {
         sample_rate,
         channels,
-        samples,
+        data: data[..whole_samples].to_vec(),
     })
 }
 
@@ -187,7 +197,10 @@ mod tests {
         assert_eq!(wav.channels(), 1);
         assert_eq!(wav.sample_rate(), 44100);
         assert_eq!(wav.frames(), 3);
-        assert_eq!(wav.samples, vec![1, -2, 3]);
+        // The data chunk of `make_wav` is the little-endian encoding of the
+        // samples `[1, -2, 3]`. `Wav16` keeps exactly those bytes, so
+        // asserting them asserts the decode — with no encoder in the loop.
+        assert_eq!(wav.interleaved_le_bytes(), &[1, 0, 0xFE, 0xFF, 3, 0][..]);
         let pcm = wav.to_pcm16().expect("pcm16 converts");
         assert_eq!(pcm.frame_count(), 3);
         assert_eq!(pcm.channel_count(), 1);
@@ -197,8 +210,15 @@ mod tests {
     fn skips_odd_intermediate_chunks() {
         let wav = parse_pcm16(&make_wav(1, 16, 2, true)).expect("junk chunk handled");
         assert_eq!(wav.channels(), 2);
-        // 6 bytes of data = 3 interleaved i16 samples.
-        assert_eq!(wav.samples, vec![1, -2, 3]);
+        // 6 bytes of data = 3 interleaved i16 samples `[1, -2, 3]`, held as
+        // the file's own little-endian bytes.
+        assert_eq!(wav.interleaved_le_bytes(), &[1, 0, 0xFE, 0xFF, 3, 0][..]);
+        // Two channels of 4 bytes hold one whole frame: the frame count, and
+        // the samples `to_pcm16` hands over, stop at that boundary.
+        assert_eq!(wav.frames(), 1);
+        let pcm = wav.to_pcm16().expect("whole frames convert");
+        assert_eq!(pcm.frame_count(), 1);
+        assert_eq!(pcm.channel_count(), 2);
     }
 
     #[test]

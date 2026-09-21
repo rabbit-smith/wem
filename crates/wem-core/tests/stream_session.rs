@@ -130,7 +130,8 @@ fn chunk_strategies(len: usize, channels: i64) -> Vec<(String, Vec<usize>)> {
 #[test]
 fn stream_bytes_match_encode_pcm_across_chunking_strategies() {
     let wav = read_pcm16(&fixtures_dir().join("input.wav")).expect("input.wav reads");
-    let le_bytes: Vec<u8> = wav.interleaved_le_bytes();
+    // A borrow of the WAV's own bytes: every strategy slices them.
+    let le_bytes: &[u8] = wav.interleaved_le_bytes();
     let channels = wav.channels();
 
     let encoder = Encoder::new(fixture_selection()).expect("fs encoder builds");
@@ -138,7 +139,7 @@ fn stream_bytes_match_encode_pcm_across_chunking_strategies() {
     let reference = encoder.encode_pcm(&pcm).expect("encode runs");
 
     for (name, cuts) in chunk_strategies(le_bytes.len(), channels as i64) {
-        let (emitted, result) = run_session_with_chunks(&le_bytes, &cuts);
+        let (emitted, result) = run_session_with_chunks(le_bytes, &cuts);
         assert_eq!(
             result.data,
             reference.data,
@@ -442,7 +443,7 @@ fn stream_tail_matches_batch_when_final_center_crosses_source_end() {
         state ^= state << 5;
         pcm_bytes.extend_from_slice(&(state as i16).to_le_bytes());
     }
-    let pcm = Pcm16::from_interleaved_le(SAMPLE_RATE, CHANNELS, &pcm_bytes)
+    let pcm = Pcm16::from_interleaved_le(SAMPLE_RATE, CHANNELS, pcm_bytes.as_slice())
         .expect("synthetic PCM parses");
     let expected = Encoder::new(fixture_selection())
         .expect("encoder builds")

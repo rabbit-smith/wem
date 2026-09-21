@@ -245,6 +245,9 @@ fn encode_with(
         .checked_mul(channels * 2)
         .ok_or(WemError::StateError)?;
     let bytes = unsafe { std::slice::from_raw_parts(pcm, byte_len) };
+    // The client's buffer is borrowed for this call only and the kernel owns
+    // its input, so this is the ownership boundary where the samples are
+    // copied in — a reviewed design decision, not an oversight.
     let pcm16 = Pcm16::from_interleaved_le(encoder.profile().sample_rate(), channels, bytes)
         .map_err(|error| WemError::from_kernel(&error))?;
     // CPU-bound kernel work behind the FFI boundary: catch any panic.
