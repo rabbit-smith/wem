@@ -6,6 +6,9 @@
 //! * streaming with seven uneven chunks == the same bytes, seq-ordered
 //!   packets, correct terminal meta;
 //! * encoder-handle path matches the one-shot convenience entry;
+//! * one handle shared by several threads encodes concurrently and every
+//!   thread reproduces the golden bytes (the include/wem.h shareability
+//!   promise);
 //! * NULL arguments, unsatisfiable selections, and lifecycle violations
 //!   return the expected stable codes;
 //! * an out-of-table `WemVersion` code is a revision mismatch
@@ -15,9 +18,11 @@
 
 use std::ffi::c_void;
 use std::path::PathBuf;
+use std::sync::Barrier;
+use std::thread;
 
 use sha2::{Digest, Sha256};
-use wem_capi::{WemError, WemMeta, WemProfile, WemVersion};
+use wem_capi::{WemEncoder, WemError, WemMeta, WemProfile, WemVersion};
 use wem_core::usecases::wav::read_pcm16;
 
 const GOLDEN_SHA256: &str = "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247";
@@ -65,6 +70,42 @@ impl Sinks {
         std::ptr::from_mut(self) as *mut c_void
     }
 }
+
+/// One `WemEncoder *` that may cross a thread boundary.
+///
+/// include/wem.h states normatively: *"WemEncoder is shareable: concurrent
+/// encodes may use one handle on different threads"*, and declares the handle
+/// as `/* Profile-resolved shareable encoder (concurrent encodes OK). */`.
+/// This test drives the raw symbol exactly as a C client would, so the only
+/// value that reaches the threads is the raw pointer and there is no Rust type
+/// that could carry the promise — the wrapper carries it instead.
+///
+/// `unsafe` is the point of this file: an FFI test must exercise the C contract
+/// on C terms (raw pointers, `unsafe extern "C"` callbacks), and the Rust type
+/// system cannot express a claim the C header makes about a pointer it hands
+/// out. `wem-capi` backs the same promise at compile time with the
+/// `Send + Sync` assertion next to `WemEncoder`.
+#[derive(Clone, Copy)]
+struct SharedHandle(*const WemEncoder);
+
+impl SharedHandle {
+    /// The raw handle one `wem_encoder_encode` call needs. Taking `self` by
+    /// value keeps the whole wrapper — and with it the `Send`/`Sync` claim
+    /// below — in the closure capture, instead of the bare `!Send` raw pointer
+    /// the field holds.
+    fn raw(self) -> *const WemEncoder {
+        self.0
+    }
+}
+
+// SAFETY: the header promise quoted above — the handle is shareable across
+// threads. The pointer is only ever borrowed by `wem_encoder_encode`
+// (`*const WemEncoder` -> `&WemEncoder`) and is freed after every thread has
+// joined, so no thread can observe a dropped encoder.
+unsafe impl Send for SharedHandle {}
+// SAFETY: `&SharedHandle` only ever yields the raw pointer, and concurrent
+// encodes through it are exactly what the header documents as safe.
+unsafe impl Sync for SharedHandle {}
 
 unsafe extern "C" fn sink_write(data: *const u8, len: usize, user_data: *mut c_void) -> WemError {
     if user_data.is_null() {
@@ -190,7 +231,82 @@ fn encoder_handle_matches_one_shot_and_reuses() {
 }
 
 // ---------------------------------------------------------------------------
-// 2. Streaming path
+// 2. One handle, several threads (the header's shareability promise)
+// ---------------------------------------------------------------------------
+
+/// include/wem.h: *"WemEncoder is shareable: concurrent encodes may use one
+/// handle on different threads."* This is that sentence executed: one handle,
+/// four threads, each encoding the fixture PCM into its own sink, and each
+/// reproducing the golden container byte for byte.
+#[test]
+fn concurrent_encodes_share_one_handle() {
+    const THREADS: usize = 4;
+
+    let (pcm, frames, _channels) = read_fixture_pcm();
+    let reference = reference_wem();
+
+    let mut handle = std::ptr::null_mut();
+    let code = unsafe { wem_capi::wem_encoder_new(&fixture_profile(), &mut handle) };
+    assert_eq!(code, WemError::Ok, "encoder_new rejected");
+    assert!(!handle.is_null());
+    let shared = SharedHandle(handle.cast_const());
+    // Every thread waits here before calling in, so the encodes genuinely
+    // overlap instead of merely being permitted to.
+    let barrier = Barrier::new(THREADS);
+
+    let outputs: Vec<Vec<u8>> = thread::scope(|scope| {
+        let mut joins = Vec::with_capacity(THREADS);
+        for index in 0..THREADS {
+            let barrier = &barrier;
+            let pcm = pcm.as_slice();
+            joins.push(scope.spawn(move || {
+                // Each thread passes its own sink: a callback that received a
+                // NULL `user_data` (the bug this guards against) makes
+                // `sink_write` return WEM_ERR_INTERNAL, so the encode returns
+                // that code and the assertion below fails loudly — no thread
+                // can quietly write into another thread's buffer.
+                let mut sinks = Sinks::new();
+                let ud = sinks.user_data();
+                barrier.wait();
+                let code = unsafe {
+                    wem_capi::wem_encoder_encode(
+                        shared.raw(),
+                        pcm.as_ptr(),
+                        frames,
+                        Some(sink_write),
+                        ud,
+                    )
+                };
+                assert_eq!(code, WemError::Ok, "thread {index} encode rejected");
+                (index, sinks.out)
+            }));
+        }
+        joins
+            .into_iter()
+            .map(|join| {
+                let (index, out) = join.join().expect("an encode thread panicked");
+                assert_eq!(
+                    sha256_hex(&out),
+                    GOLDEN_SHA256,
+                    "thread {index} sha256 differs from the golden"
+                );
+                assert_eq!(
+                    out, reference,
+                    "thread {index} bytes differ from reference.wem"
+                );
+                out
+            })
+            .collect()
+    });
+    assert_eq!(outputs.len(), THREADS);
+
+    unsafe {
+        wem_capi::wem_encoder_free(handle);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 3. Streaming path
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -291,7 +407,7 @@ fn streaming_null_packet_cb_still_streams_bytes() {
 }
 
 // ---------------------------------------------------------------------------
-// 3. Argument validation (NULL / malformed calls)
+// 4. Argument validation (NULL / malformed calls)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -389,7 +505,7 @@ fn null_arguments_reject_with_state_error() {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Profile selection semantics
+// 5. Profile selection semantics
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -527,7 +643,7 @@ fn out_of_table_version_code_rejects_with_format_unsupported() {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Lifecycle violations
+// 6. Lifecycle violations
 // ---------------------------------------------------------------------------
 
 #[test]

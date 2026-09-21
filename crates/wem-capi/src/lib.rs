@@ -158,6 +158,28 @@ pub struct WemEncoder {
     encoder: Encoder,
 }
 
+/// The header's shareability promise, machine-checked.
+///
+/// include/wem.h states normatively: *"WemEncoder is shareable: concurrent
+/// encodes may use one handle on different threads"*, and declares the handle
+/// as `/* Profile-resolved shareable encoder (concurrent encodes OK). */`.
+/// `wem_encoder_encode` takes `*const WemEncoder` and encodes through a
+/// `&WemEncoder`, so sharing one handle across threads is sound only while the
+/// inner kernel type stays `Sync` — and a handle created on one thread and used
+/// on another also needs `Send` (a handle is not `!Send` merely because the
+/// header hands it out as a raw pointer).
+///
+/// A future `Rc`, `RefCell`, or raw-pointer field anywhere under
+/// [`Encoder`] would turn that documented FFI contract into UB with nothing
+/// failing. This `const` item is evaluated in every build (not only under
+/// `cfg(test)`); the closure body is never called — the bound is checked when
+/// the generic function is instantiated.
+const _: fn() = || {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<WemEncoder>();
+    assert_send_sync::<Encoder>();
+};
+
 /// Streaming encode session (include/wem.h `WemSession`):
 /// single-threaded ownership; `failed` marks the terminal error state.
 pub struct WemSession {
