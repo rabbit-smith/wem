@@ -14,6 +14,22 @@ converted into the signed-16 domain at the adapter boundary; from that point
 on the pipeline (and the native kernel) sees only the signed-16 domain. Converted
 inputs are deterministic but outside the signed-16 bit-exact guarantee.
 
+## Wwise version
+
+The Wwise generation an encoder configuration belongs to (`WwiseVersion`; the
+one installed generation is Wwise 2013.2). It is part of a profile selection, so
+two generations that share a geometry stay distinguishable. Version codes are
+stable and append-only across every language binding, exactly like the C ABI
+error values.
+
+## Profile selection
+
+The caller-facing way to name an encoder configuration: a Wwise version plus the
+PCM channel count and sample rate (`WwiseProfile`). It resolves to exactly one
+installed encoder profile, or is rejected — never substituted by a default and
+never resolved by geometry alone. It is the only profile selector any binding
+exposes.
+
 ## Encoder profile
 
 The complete immutable configuration required to reproduce one Wwise 2013.2

@@ -77,7 +77,7 @@ Each of these produced a wrong conclusion at least once.
 | --- | --- | --- |
 | Probe does float math in the host runtime | The target's own numerics change when the probe is attached | Copy raw bytes; interpret them offline |
 | Attach after the target starts work | Your "first frame" is not the first frame; nothing pairs | Suspend at process creation, attach, then resume |
-| Hook site shorter than the patch | The script loads and silently never fires | Verify the hook fires before trusting an empty result |
+| Interception site shorter than the patch | The script loads and silently never fires | Verify the interception fires before trusting an empty result |
 | Hand-rolled bitstream reader | Impossible ratios, unstable counts | Use the project decoder, or validate against it |
 | Derived files from an older tree | A phantom "only N values differ" that re-measurement contradicts | Re-derive from the current working tree before prioritising |
 | Probe slows the target down | Timeouts, truncated output, half-written records | Shrink the observation window; treat truncated records as absent |

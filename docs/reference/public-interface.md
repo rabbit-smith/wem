@@ -1,9 +1,17 @@
 # Public interface contract
 
-The Python package has one encoding function and four public value types:
+The Python package has one encoding function and six public value types:
 
 ```python
-from wwise_wem import EncodeResult, EncodeStats, PcmBuffer, RawPcm, encode
+from wwise_wem import (
+    EncodeResult,
+    EncodeStats,
+    PcmBuffer,
+    RawPcm,
+    WwiseProfile,
+    WwiseVersion,
+    encode,
+)
 ```
 
 Internal module paths, profile loaders, registry objects, adapters, and the
@@ -12,7 +20,7 @@ native binding are implementation details.
 ## `encode`
 
 ```python
-result = encode(source, profile=None, quality=None)
+result = encode(source, *, profile=None, quality=None)
 ```
 
 `source` accepts exactly three forms:
@@ -27,13 +35,39 @@ result = encode(source, profile=None, quality=None)
 Plain `bytes` are rejected because raw PCM geometry cannot be inferred safely.
 With no `profile`, the encoder selects the installed profile matching the input
 channel count and sample rate. `profile="wwise2013-6ch-44100"` or
-`profile="wwise2013-2ch-48000"` selects one explicitly. `quality` is an optional
-finite profile interpolation value.
+`profile="wwise2013-2ch-48000"` selects one explicitly, and a `WwiseProfile`
+selects one structurally (see [Profile selection](#profile-selection)).
+`quality` is an optional finite profile interpolation value.
 
 All inputs require at least 4096 frames. Unsupported source or field types raise
 `TypeError`; invalid values, unsupported geometry, profile mismatches, and kernel
 configuration errors raise `ValueError`. File access errors retain their standard
 `OSError` subclasses, such as `FileNotFoundError`.
+
+## Profile selection
+
+`profile` also accepts a `WwiseProfile(version, channels, sample_rate)`
+selection: one Wwise generation plus the PCM geometry to encode. The kernel
+resolves it against the configurations compiled into the extension, so an
+unsatisfiable selection is an error, never a substituted default.
+
+```python
+from wwise_wem import WwiseProfile, WwiseVersion, encode
+
+selection = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
+result = encode("input.wav", profile=selection)
+```
+
+`WwiseVersion.WWISE2013` is the only registered generation. `code` is its
+stable cross-language code, `label` the short spelling (`"2013"`) and
+`generation` the full one (`"2013.2"`); `WwiseVersion.ALL` lists every
+registered generation. `WwiseVersion.parse("2013")` accepts the short label or
+the full generation, while `from_code` and `from_generation` decode the other
+two spellings. `WwiseProfile` is immutable, hashable, and compares by value;
+`.version`, `.channels` and `.sample_rate` are read-only.
+
+A selection no installed profile satisfies raises `ValueError`, as do a
+non-positive channel count or sample rate and an unrecognized version spelling.
 
 ## Input types
 
@@ -106,10 +140,15 @@ wwise-wem INPUT.wav --output OUTPUT.wem [OPTIONS]
 python -m wwise_wem INPUT.wav --output OUTPUT.wem [OPTIONS]
 ```
 
-Supported options are `--profile`, `--quality`, `--wwise-version 2013`,
+Supported options are `--profile`, `--quality`, `--wwise-version`,
 `--channels`, `--sample-rate`, `--expect-sha256`, and required `--output`.
-The CLI parses the WAV once, applies optional geometry assertions to that
-`PcmBuffer`, and passes the same buffer to `encode`.
+`--wwise-version` takes the short label `2013` or the full generation `2013.2`
+and participates in the selection: with `--profile` it must agree with the
+generation that profile is installed under, and without one it forms the
+selection together with the WAV geometry. An unrecognized value is rejected as
+an argument error, without reading the WAV. The CLI parses the WAV once,
+applies optional geometry assertions to that `PcmBuffer`, and passes the same
+buffer to `encode`.
 
 ## Execution path
 

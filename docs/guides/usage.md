@@ -77,10 +77,27 @@ Both registered profiles are byte-exact against their paired builds; see
 [`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md) and
 [`../roadmap.md`](../roadmap.md) for the evidence and its limits.
 
-Pass `profile=` (Python) or `--profile` (CLI) to select one explicitly instead
-of by geometry. `quality` / `--quality` applies an optional finite interpolation
-over the profile's quality curves. A channel/rate key that matches no installed
-profile is an error, never an approximation.
+Select explicitly instead of by geometry, either with a structured selection
+(the spelling the kernel itself takes) or by profile name:
+
+```python
+from wwise_wem import WwiseProfile, WwiseVersion, encode
+
+result = encode(
+    "input.wav",
+    profile=WwiseProfile(WwiseVersion.WWISE2013, 6, 44100),
+)
+```
+
+```bash
+wwise-wem input.wav --output output.wem --wwise-version 2013.2
+```
+
+`profile="wwise2013-6ch-44100"` and `--profile wwise2013-6ch-44100` remain
+supported and name an installed profile directly. `quality` / `--quality`
+applies an optional finite interpolation over the profile's quality curves. A
+selection or channel/rate key that matches no installed profile is a
+`ValueError`, never an approximation.
 
 ## CLI reference
 
@@ -93,7 +110,7 @@ python -m wwise_wem INPUT.wav --output OUTPUT.wem [OPTIONS]
 | --- | --- |
 | `--profile NAME` | Select a profile explicitly |
 | `--quality FLOAT` | Profile quality interpolation |
-| `--wwise-version 2013` | Codec generation (only `2013` is registered) |
+| `--wwise-version GENERATION` | Wwise generation (`2013` or `2013.2`); selects or validates it |
 | `--channels N` | Assert the WAV channel count |
 | `--sample-rate HZ` | Assert the WAV sample rate |
 | `--expect-sha256 HEX` | Fail unless the encoded WEM matches this digest |
@@ -125,8 +142,9 @@ binding is a thin parallel shell over it that owns no numerics.
 | Node / browser | wasm-bindgen shell | [`../../js/README.md`](../../js/README.md), [`../../examples/wasm-demo/`](../../examples/wasm-demo/) |
 
 Profiles are compiled into every native library, so no binding needs a profile
-directory or an environment variable. The lower-level bindings take a profile
-name plus signed-16 PCM because their inputs carry no self-describing header.
+directory or an environment variable. The lower-level bindings take one
+structured selection (Wwise generation plus PCM channel count and sample rate)
+alongside signed-16 PCM, because their inputs carry no self-describing header.
 See [`../../examples/README.md`](../../examples/README.md) for the runnable set.
 
 ## Check an install
@@ -135,7 +153,7 @@ The bundled sample is a complete acceptance case: 205 audio packets (77 short,
 128 long) and 108,771 bytes.
 
 ```bash
-wwise-wem tests/fixtures/input.wav --output /tmp/out.wem \
+wwise-wem tests/fixtures/input.wav --output out.wem \
   --expect-sha256 17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247
 ```
 

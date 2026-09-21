@@ -1,8 +1,30 @@
 # Profile model
 
-The codec generation is fixed to Wwise 2013.2. `ProfileKey` selects immutable
-encoder configuration by channel count and sample rate. It is an exact lookup,
+A caller selects a configuration with one structured value — `WwiseProfile`: a
+`WwiseVersion`, a channel count and a sample rate. Never with a profile name, a
+profile directory, profile index/manifest bytes, or an environment variable.
+Inside the kernel, `ProfileKey` carries the full immutable identity
+(generation, geometry, channel layout, setup identity) and is an exact lookup,
 never a request to synthesize or approximate a configuration.
+
+The two types have one spelling per language and are the same contract
+everywhere: Rust `WwiseVersion` / `WwiseProfile`, C `WemVersion` / `WemProfile`
+(see [`include/wem.h`](../../include/wem.h), ABI revision 2), Python
+`WwiseVersion` / `WwiseProfile`. Version codes are stable and append-only, like
+the C ABI error values.
+
+## Selection rules
+
+- The generation participates in resolution. Geometry alone is not an identity:
+  once two generations are installed with the same geometry, a geometry-only
+  lookup could not tell them apart.
+- A selection no installed profile satisfies is an error that names the
+  installed configurations. It is never replaced by a default or by a
+  neighbouring geometry.
+- A selection more than one installed profile satisfies is an error, not a
+  first-match pick.
+- An unrecognized version code is a contract violation against the current
+  revision, not a fallback to the newest known generation.
 
 An installed profile owns its complete calibration set:
 
@@ -18,10 +40,10 @@ pass packet-level and whole-file regression.
 
 ## Installed profiles
 
-| Key | Name | Status |
+| Selection | Name | Status |
 | --- | --- | --- |
-| `(6, 44100)` | `wwise2013-6ch-44100` | Byte-exact for the paired build; whole-file golden, per-frame and per-stage contracts |
-| `(2, 48000)` | `wwise2013-2ch-48000` | Byte-exact for the paired input and both real-build corpora; evidence and limits in [`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md) |
+| `Wwise2013, 6, 44100` | `wwise2013-6ch-44100` | Byte-exact for the paired build; whole-file golden, per-frame and per-stage contracts |
+| `Wwise2013, 2, 48000` | `wwise2013-2ch-48000` | Byte-exact for the paired input and both real-build corpora; evidence and limits in [`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md) |
 
 ### 2ch/48 kHz provenance
 
@@ -47,12 +69,12 @@ No profile value is fitted to an output; the provenance rule is in
 
 ## Exact setup identity
 
-A channel-count/sample-rate key selects one installed `EncoderProfile`. The
+A profile selection resolves to exactly one installed `EncoderProfile`. The
 packaged setup packet is checked against its declared SHA-256 whenever it is
-loaded; missing geometry, an unknown profile name, or a checksum mismatch is an
-error. The built-in path is self-contained: it reads packaged profile resources
-and never reads a reference WEM. Golden expected outputs are test assets, not
-runtime inputs.
+loaded; missing geometry, an unsatisfiable or ambiguous selection, or a
+checksum mismatch is an error. The built-in path is self-contained: it reads
+packaged profile resources and never reads a reference WEM. Golden expected
+outputs are test assets, not runtime inputs.
 
 ## Frozen transcendental tables
 
