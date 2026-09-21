@@ -41,17 +41,69 @@ pub const MIN_PCM_FRAMES: u32 = 4096;
 // PCM input
 // ---------------------------------------------------------------------------
 
+/// The storage shape one [`Pcm16`] was handed its samples in.
+///
+/// The two byte-backed shapes keep the caller's little-endian wire bytes
+/// exactly as received and decode one sample at a time inside
+/// [`Pcm16::to_float_rows`]. Every shell receives bytes (the C ABI and wasm
+/// entries interleaved, the PyO3 memoryview channel-major), so de-interleaving
+/// them into an `i16` row structure that is immediately discarded — only to be
+/// read back as floats — was pure overhead.
+///
+/// The decode is statement-identical in every shape:
+/// `i16::from_le_bytes([lo, hi])` followed by `value as f64 / 32768.0`
+/// (or `*value as f64 / 32768.0` for the row shape, which already holds the
+/// decoded sample). The shape a buffer arrived in can therefore never change
+/// a single output bit.
+#[derive(Debug, Clone)]
+enum PcmStorage {
+    /// Channel-major `i16` rows with equal frame counts
+    /// (Python `PcmBuffer` rows).
+    Rows(Vec<Vec<i16>>),
+    /// Channel-major little-endian signed-16 bytes: channel `c` occupies
+    /// `[c * frames * 2, (c + 1) * frames * 2)` — the layout of a
+    /// C-contiguous `(channels, frames)` signed-16 memoryview.
+    ChannelMajorLe { bytes: Vec<u8> },
+    /// Interleaved little-endian signed-16 bytes (frame-major,
+    /// channel-minor: the interleaved wire form of the streaming API).
+    InterleavedLe { bytes: Vec<u8> },
+}
+
 /// Typed PCM input in the signed-16 wire representation
 /// (Python `PcmBuffer`, i16 flavor).
 ///
-/// Rows are channel-major with equal frame counts; the legacy float
+/// Samples are channel-major in every storage shape; the shape is whichever
+/// form the caller already had (rows of `i16`, channel-major LE bytes, or
+/// interleaved LE bytes) and is private to this type. The legacy float
 /// normalization (`value / 32768.0`) is applied only at the analysis
 /// boundary via [`Pcm16::to_float_rows`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Pcm16 {
     sample_rate: i64,
-    channels: Vec<Vec<i16>>,
+    channel_count: usize,
+    frame_count: i64,
+    storage: PcmStorage,
 }
+
+/// Two buffers are equal when they describe the same PCM — same rate, same
+/// geometry, same sample values — whichever storage shape each one holds.
+/// Before the byte-backed shapes existed every constructor produced the same
+/// rows, so this is exactly the comparison the derive performed, only made
+/// independent of how the buffer was handed in.
+impl PartialEq for Pcm16 {
+    fn eq(&self, other: &Self) -> bool {
+        self.sample_rate == other.sample_rate
+            && self.channel_count == other.channel_count
+            && self.frame_count == other.frame_count
+            && (0..self.frame_count as usize).all(|frame| {
+                (0..self.channel_count).all(|channel| {
+                    self.sample_at(channel, frame) == other.sample_at(channel, frame)
+                })
+            })
+    }
+}
+
+impl Eq for Pcm16 {}
 
 impl Pcm16 {
     /// Construct from channel-major i16 rows
@@ -80,7 +132,37 @@ impl Pcm16 {
         }
         Ok(Self {
             sample_rate,
-            channels,
+            channel_count: channels.len(),
+            frame_count,
+            storage: PcmStorage::Rows(channels),
+        })
+    }
+
+    /// Construct from channel-major little-endian signed-16 PCM bytes:
+    /// channel `c` occupies `[c * frames * 2, (c + 1) * frames * 2)`, with the
+    /// frame count taken from the buffer length. This is the shape of a
+    /// C-contiguous `(channels, frames)` signed-16 memoryview — the PyO3
+    /// intake hands its `tobytes()` result straight here, so no `i16` row
+    /// structure is ever built on that path.
+    ///
+    /// Validation matches `new`/`from_interleaved_le`: positive sample rate,
+    /// at least one channel, at least one frame, and a byte length that is an
+    /// exact multiple of the frame width. A trailing partial frame is a
+    /// geometry violation (GEOMETRY_MISMATCH).
+    pub fn from_channel_major_le(
+        sample_rate: i64,
+        channel_count: usize,
+        bytes: &[u8],
+    ) -> Result<Self, EncoderError> {
+        let frame_count = byte_geometry(channel_count, bytes)?;
+        validate_sample_rate(sample_rate)?;
+        Ok(Self {
+            sample_rate,
+            channel_count,
+            frame_count: frame_count as i64,
+            storage: PcmStorage::ChannelMajorLe {
+                bytes: bytes.to_vec(),
+            },
         })
     }
 
@@ -94,36 +176,16 @@ impl Pcm16 {
         channel_count: usize,
         bytes: &[u8],
     ) -> Result<Self, EncoderError> {
-        if channel_count == 0 {
-            return Err(EncoderError::StateError {
-                message: "PCM buffer needs at least one channel".into(),
-            });
-        }
-        if bytes.is_empty() {
-            return Err(EncoderError::StateError {
-                message: "PCM buffer needs at least one frame".into(),
-            });
-        }
-        let bytes_per_frame =
-            channel_count
-                .checked_mul(2)
-                .ok_or_else(|| EncoderError::StateError {
-                    message: "PCM channel count is too large".into(),
-                })?;
-        if !bytes.len().is_multiple_of(bytes_per_frame) {
-            return Err(EncoderError::GeometryMismatch {
-                message: "chunk carries a trailing partial PCM frame".into(),
-            });
-        }
-        let frames = bytes.len() / bytes_per_frame;
-        let mut channels = vec![Vec::with_capacity(frames); channel_count];
-        for frame in 0..frames {
-            for (slot, row) in channels.iter_mut().enumerate() {
-                let offset = (frame * channel_count + slot) * 2;
-                row.push(i16::from_le_bytes([bytes[offset], bytes[offset + 1]]));
-            }
-        }
-        Self::new(sample_rate, channels)
+        let frame_count = byte_geometry(channel_count, bytes)?;
+        validate_sample_rate(sample_rate)?;
+        Ok(Self {
+            sample_rate,
+            channel_count,
+            frame_count: frame_count as i64,
+            storage: PcmStorage::InterleavedLe {
+                bytes: bytes.to_vec(),
+            },
+        })
     }
 
     pub fn sample_rate(&self) -> i64 {
@@ -132,23 +194,107 @@ impl Pcm16 {
 
     /// Number of channels (Python `channel_count`).
     pub fn channel_count(&self) -> usize {
-        self.channels.len()
+        self.channel_count
     }
 
     /// Frame count (Python `frame_count`).
     pub fn frame_count(&self) -> i64 {
-        self.channels[0].len() as i64
+        self.frame_count
     }
 
     /// Channel-major float rows at the legacy normalization
     /// (`value / 32768.0`), exactly as Python `read_pcm_wav` feeds
     /// `PcmBuffer`.
+    ///
+    /// One arm per storage shape; the decode statement is the same in all of
+    /// them, and only the offset arithmetic differs (which sample lands at
+    /// which `(channel, frame)`). This is the whole bit-exactness argument of
+    /// the shape split, so the three arms must stay statement-identical.
     pub fn to_float_rows(&self) -> Vec<Vec<f64>> {
-        self.channels
-            .iter()
-            .map(|row| row.iter().map(|value| *value as f64 / 32768.0).collect())
-            .collect()
+        match &self.storage {
+            PcmStorage::Rows(rows) => rows
+                .iter()
+                .map(|row| row.iter().map(|value| *value as f64 / 32768.0).collect())
+                .collect(),
+            PcmStorage::ChannelMajorLe { bytes } => {
+                let channel_bytes = self.frame_count as usize * 2;
+                bytes
+                    .chunks_exact(channel_bytes)
+                    .map(|row| {
+                        row.chunks_exact(2)
+                            .map(|pair| i16::from_le_bytes([pair[0], pair[1]]) as f64 / 32768.0)
+                            .collect()
+                    })
+                    .collect()
+            }
+            PcmStorage::InterleavedLe { bytes } => (0..self.channel_count)
+                .map(|channel| {
+                    (0..self.frame_count as usize)
+                        .map(|frame| {
+                            let offset = (frame * self.channel_count + channel) * 2;
+                            i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as f64 / 32768.0
+                        })
+                        .collect()
+                })
+                .collect(),
+        }
     }
+
+    /// One sample in channel-major logical order, decoded exactly as
+    /// [`Pcm16::to_float_rows`] decodes it. Used by the shape-independent
+    /// `PartialEq`; the geometry is checked at construction, so the indexing
+    /// stays in bounds for every shape.
+    fn sample_at(&self, channel: usize, frame: usize) -> i16 {
+        match &self.storage {
+            PcmStorage::Rows(rows) => rows[channel][frame],
+            PcmStorage::ChannelMajorLe { bytes } => {
+                let offset = (channel * self.frame_count as usize + frame) * 2;
+                i16::from_le_bytes([bytes[offset], bytes[offset + 1]])
+            }
+            PcmStorage::InterleavedLe { bytes } => {
+                let offset = (frame * self.channel_count + channel) * 2;
+                i16::from_le_bytes([bytes[offset], bytes[offset + 1]])
+            }
+        }
+    }
+}
+
+/// Shared geometry validation for the byte-backed shapes: at least one
+/// channel, at least one frame, and a byte length that is an exact multiple of
+/// the frame width. Returns the frame count.
+fn byte_geometry(channel_count: usize, bytes: &[u8]) -> Result<usize, EncoderError> {
+    if channel_count == 0 {
+        return Err(EncoderError::StateError {
+            message: "PCM buffer needs at least one channel".into(),
+        });
+    }
+    if bytes.is_empty() {
+        return Err(EncoderError::StateError {
+            message: "PCM buffer needs at least one frame".into(),
+        });
+    }
+    let bytes_per_frame = channel_count
+        .checked_mul(2)
+        .ok_or_else(|| EncoderError::StateError {
+            message: "PCM channel count is too large".into(),
+        })?;
+    if !bytes.len().is_multiple_of(bytes_per_frame) {
+        return Err(EncoderError::GeometryMismatch {
+            message: "chunk carries a trailing partial PCM frame".into(),
+        });
+    }
+    Ok(bytes.len() / bytes_per_frame)
+}
+
+/// Positive sample rate, the last check the byte-backed constructors apply
+/// (the order `new` was called in before the storage split).
+fn validate_sample_rate(sample_rate: i64) -> Result<(), EncoderError> {
+    if sample_rate <= 0 {
+        return Err(EncoderError::StateError {
+            message: "sample rate must be positive".into(),
+        });
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

@@ -160,28 +160,20 @@ fn pcm_from_memoryview(sample_rate: i64, arg: &Bound<'_, PyAny>) -> PyResult<Pcm
             "PCM memoryview byte length disagrees with its shape".to_string(),
         ));
     }
-    // The view is C-contiguous, so each channel is already one contiguous
-    // run of the raw bytes and can be decoded straight into the row the
-    // kernel takes ownership of. That is one pass and one allocation per
-    // channel; decoding to a flat `Vec<i16>` first and slicing it afterwards
-    // would copy the whole stream twice more.
+    // The view is C-contiguous, so each channel is one contiguous run of the
+    // raw bytes — literally the channel-major layout the kernel accepts
+    // directly (`Pcm16::from_channel_major_le`). The bytes go in as they
+    // arrived: no i16 row structure is built here, and the single decode
+    // happens inside `Pcm16::to_float_rows` on the way to the analysis
+    // boundary.
     //
     // The remaining `tobytes()` copy is the floor here: `pyo3::buffer`
     // (and with it a borrowed, zero-copy view) is compiled out under the
     // `abi3-py310` limited API, where the buffer protocol only becomes
     // available at 3.11. Reading the buffer without a copy therefore needs
     // either an abi3 floor of 3.11 or a kernel input type that borrows
-    // bytes instead of owning channel rows.
-    let channel_bytes = frames * 2;
-    let rows: Vec<Vec<i16>> = (0..channels)
-        .map(|channel| {
-            raw[channel * channel_bytes..(channel + 1) * channel_bytes]
-                .chunks_exact(2)
-                .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
-                .collect()
-        })
-        .collect();
-    Pcm16::new(sample_rate, rows).map_err(error_to_pyerr)
+    // bytes instead of owning them.
+    Pcm16::from_channel_major_le(sample_rate, channels, &raw).map_err(error_to_pyerr)
 }
 
 // ---------------------------------------------------------------------------
