@@ -124,6 +124,34 @@ Write a result into `findings/` only with reproducible evidence attached; write
 a method into `methodology/` only after it has actually decided a case. Do not
 restate reference material in a finding — link to it.
 
+## Shared checkout and concurrent lanes
+
+Work happens in several lanes at once — a worktree per task, and often more than
+one agent inside the same repository. A checkout is not private, and these are
+the rules the failure mode taught us.
+
+- **A branch can change under you.** Between two of your commands another lane
+  can create or switch the branch of the worktree you are standing in. Every
+  state-changing git command (`merge`, `commit`, `reset`, `checkout`,
+  `branch -f`) acts on whatever `HEAD` points at *at that moment*.
+- **Read the branch in the same command that writes it.** Chain the check and
+  the write (`git status -sb && git merge --ff-only <branch>`); the branch you
+  saw in an earlier turn is not evidence. Then verify the result
+  (`git log --oneline -1 <branch>`), because a fast-forward that lands on the
+  wrong branch still exits 0.
+- **Land on `main` as an explicit, verified step.** When `main` is not checked
+  out in any worktree, `git branch -f main <sha>` fast-forwards it atomically
+  from your own worktree; git refuses when `main` *is* checked out somewhere,
+  which is the safety net you want. Confirm with `git log --oneline -1 main`
+  before removing the worktree you landed from.
+- **Leave other lanes' state alone.** Do not clean, stash, reset or revert files
+  you did not create, and do not move a branch that another worktree has checked
+  out. Untracked scratch files in a shared tree belong to whoever made them.
+- **Finish the loop.** Once the commit is on `main`, remove your worktree and its
+  branch (`git worktree remove <path>`, `git branch -d <branch>`). `git branch -d`
+  refuses an unmerged branch — that refusal means the commit never reached
+  `main`; fix that instead of forcing `-D`.
+
 ## Conventions
 
 The binding rules are the Git discipline and provenance-hygiene sections of

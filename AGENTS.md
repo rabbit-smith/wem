@@ -65,6 +65,14 @@ This applies identically to Python (oracle) and Rust (kernel) crates.
 - Push only when the human asks. History is never rewritten retroactively.
 - Background work lanes do not commit; the orchestrator commits after
   independent verification.
+- A checkout is shared. Another lane can create or switch the branch of the
+  worktree you are standing in between two of your commands, and `merge`,
+  `commit`, `reset` and `branch -f` act on whatever `HEAD` points at right then.
+  Read the branch in the same command that writes (`git status -sb && git merge …`),
+  confirm afterwards that the ref you meant to move actually moved — a
+  fast-forward of the wrong branch still exits 0 — and never clean, stash, reset
+  or revert files another lane left in the tree. Procedure:
+  [`docs/guides/development.md`](docs/guides/development.md#shared-checkout-and-concurrent-lanes).
 
 ## Provenance hygiene
 
