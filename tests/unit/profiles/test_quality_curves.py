@@ -1,6 +1,6 @@
 """Synthetic-control-point tests for the quality-interpolation mechanism.
 
-These tests pin the interpolation kernel, the schema/validation contract, and
+These tests pin the interpolation kernel, the schema/validation rules, and
 the immutable value object using synthetic data only. They do not touch any
 installed profile resource, so they are independent of the 6ch calibration and
 exercise exactly the code the parallel quality-formula calibration will later

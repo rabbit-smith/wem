@@ -16,7 +16,7 @@ selection — a Wwise generation plus the PCM geometry (`WemProfile` in the C AB
 `WwiseProfile` in Rust and Python). Examples whose input is a WAV read the
 geometry out of its header; examples fed header-less PCM state it on the command
 line. No profile name, profile directory, profile index/manifest bytes, or
-environment variable appears anywhere in that contract.
+environment variable appears anywhere in that scheme.
 
 The configurations compiled into every native library are Wwise 2013 at
 6 channels/44.1kHz (the repository fixture's geometry) and Wwise 2013 at

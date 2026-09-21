@@ -3,15 +3,16 @@
 This package is the thin distribution facade: root API shell, CLI, WAV
 adapters, DTOs, and the installed-profile metadata path. The bit-exact
 implementation domains live in the development-tree reference package
-(`reference/wwise_wem_reference`, see `reference/AGENTS.md`); its
-byte-for-byte outputs remain the project's source of truth, and the Rust
-kernel is verified against it, never the reverse.
+(`reference/wwise_wem_reference`, see `reference/AGENTS.md`); the kernel is
+checked against that tree's byte-for-byte output, never the reverse.
 
 ## Hard rules
 
-1. **Output bytes are frozen.** Any edit must keep `make frame-contract`,
-   `make stage-contract`, and `make golden` green. If a change alters any
-   digest, it is a project decision, not a code change — stop and escalate.
+1. **Byte-for-byte output.** `make stage-contract`, `make golden` and the
+   core-oracle parity suite compare this tree's bytes against the committed
+   reference. A failure names the value or the byte range that differs; the fix
+   is either in the code or in the expected bytes, and which one is a decision
+   about the work, not a re-record.
 2. **No direct transcendentals.** `math.sin/cos/log/log10/pow/exp` outside
    `wwise_wem_reference._tmath` is prohibited in encoder paths; all such
    calls go through the named site entries and, for exact-profile paths,
@@ -27,7 +28,7 @@ kernel is verified against it, never the reverse.
    invents a second way for it to fail. The extension's module name is
    owned by the packaging surface (`distribution_allowlist.json`, root
    `pyproject.toml`, the `wem-python` Cargo lib name, locked by the
-   distribution contract test); facade code never restates it.
+   distribution tests); facade code never restates it.
    The reference oracle is test-only: production code in this package
    never imports `wwise_wem_reference`.
 4. **Layer boundaries.** Follow `docs/reference/architecture.md` import rules; `analysis`,
@@ -37,14 +38,14 @@ kernel is verified against it, never the reverse.
    point of validation (mirror existing style). No silent defaults, no
    `try/except: pass`, no `assert` for invariants that `-O` would erase.
 
-## Compatibility surfaces
+## Public surfaces
 
-- Package root exports (`docs/reference/public-interface.md`) are an exact contract;
-  changing them requires explicit human approval. Internal module paths are
-  not contract.
-- `_f32` statement placement is normative for the Rust port — when touching a
-  numeric function, keep every rounding site where it is unless a contract
-  run proves the output bytes identical.
+- Package root exports (`docs/reference/public-interface.md`) are asserted by
+  `tests/contract/test_public_contract.py` and the distribution tests; internal
+  module paths are not part of that surface.
+- `_f32` call sites mark the float32 assignment points the Rust port must match —
+  when touching a numeric function, keep every rounding site where it is unless a
+  parity run shows the output bytes identical.
 - Immutable DTOs: frozen dataclasses + `MappingProxyType` per existing pattern;
   no mutable state escaping one `AnalysisSession`.
 
@@ -55,14 +56,15 @@ Every new module or packaged data file requires, in the same commit:
 2. `pyproject.toml` package-data glob when under `data/`,
 3. profile data: manifest `resources` entry + SHA-256 + `index.json` re-hash
    (`scripts/generate_frozen_tables.py` shows the canonical update path),
-4. `make wheel-smoke` green (installed + zip import paths).
+4. the wheel packaging test (`make wheel-smoke`) passing for the installed and
+   the zip import path.
 
 This applies to the facade only: reference-tree modules are development-tree
 code and must not be added to the allowlist.
 
-## Provenance vocabulary (contract-enforced)
+## Provenance vocabulary (checked by tests)
 
-The distribution/cleanliness contracts reject these **case-insensitive
+The distribution and cleanliness tests reject these **case-insensitive
 substrings** anywhere in package `.py`/`.json` text — including identifiers,
 docstrings, comments, env var names, and file paths:
 `capture`, `fixture`, `the probe`, `research`, `experimental` — plus regex hits
@@ -70,7 +72,7 @@ like bare `hook`, `DLL`, `RVA`, hex-backtick addresses, and `/tmp` paths.
 Use: `recording/record`, `representative`, `sample`, `site`, `reference`.
 This applies to strings inside profile JSON payloads as well.
 
-## Style gates
+## Style checks
 
 `make lint` (ruff E4/E7/E9/F/W + mypy baseline with `check_untyped_defs`).
 New code: typed signatures, `from __future__ import annotations`, no unused

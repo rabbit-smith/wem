@@ -1,4 +1,4 @@
-//! Container contract: rebuild the Wwise WEM from the real captured packet
+//! Container bytes: rebuild the Wwise WEM from the real captured packet
 //! stream and verify the fmt/setup/data segment hashes and the full-file
 //! SHA-256 against `tests/data/stage-golden/stages/index.json`.
 //!

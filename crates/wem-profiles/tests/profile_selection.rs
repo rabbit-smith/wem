@@ -1,4 +1,4 @@
-//! Structured profile selection contract (`WwiseVersion` / `WwiseProfile`).
+//! Structured profile selection (`WwiseVersion` / `WwiseProfile`).
 //!
 //! The selector is the only profile identity a caller-facing surface exposes,
 //! so its behaviour is pinned here: the version code table, the spelling

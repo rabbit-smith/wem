@@ -1,4 +1,4 @@
-"""Byte-exact contracts for the 2ch/48 kHz stress inputs."""
+"""Byte-exact expectations for the 2ch/48 kHz stress inputs."""
 
 from __future__ import annotations
 

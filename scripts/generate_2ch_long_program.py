@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate a deterministic 20-second stereo PCM16 music-like program.
 
-The long-run contract imports :func:`render_pcm16le` directly, so the test does
+The long-run check imports :func:`render_pcm16le` directly, so the test does
 not need a committed multi-megabyte WAV.  Oscillators use unsigned fixed-point
 phase and triangle waves; the percussion noise uses a fixed xorshift seed.
 There are no platform math-library calls in the signal definition.

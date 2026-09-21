@@ -1,11 +1,11 @@
 name: nightly
 
-# Heavy oracle-vs-kernel parity gates that do not belong in the PR path:
+# Heavy oracle-vs-kernel parity checks that do not belong in the PR path:
 #   * random-PCM differential fuzz (oracle vs native, byte-exact) on a
 #     fixed seed set sized for a < 30 minute budget;
-#   * the deterministic 20-second 2ch music contract across the native,
+#   * the deterministic 20-second 2ch music case across the native,
 #     reference, and streaming paths;
-#   * the release-build performance gate (150ms median cap; 25% regression
+#   * the release-build performance check (150ms median cap; 25% regression
 #     against the recorded baseline is red).
 on:
   schedule:
@@ -29,11 +29,11 @@ jobs:
         run: python scripts/fuzz_diff_parity.py --full
         env:
           PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/reference
-      - name: long-form 2ch music contract
+      - name: long-form 2ch music case
         run: python -m unittest tests.contract.two_channel_long_run_contract -v
         env:
           PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/reference
-      - name: release build for the performance gate
+      - name: release build for the performance check
         run: cd crates && cargo build --release -p wem-core
-      - name: performance gate (150ms median; > 25% vs baseline is red)
+      - name: performance check (150ms median; > 25% vs baseline is red)
         run: python scripts/perf_gate.py

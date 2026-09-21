@@ -9,7 +9,7 @@ behavioural similarity.
 
 | Wwise | PCM | Channels | Rate | Blocks | Status |
 | --- | --- | ---: | ---: | ---: | --- |
-| 2013.2 | signed 16-bit | 6 (5.1) | 44100 Hz | 256/2048 | bit-exact: whole-file golden, per-frame and per-stage contracts |
+| 2013.2 | signed 16-bit | 6 (5.1) | 44100 Hz | 256/2048 | bit-exact: whole-file golden, per-frame and per-stage comparisons |
 | 2013.2 | signed 16-bit | 2 | 48000 Hz | 256/2048 | bit-exact: paired input plus eight real-build corpus cases |
 
 The registry is keyed by `(channels, sample_rate)`; further layouts and rates are
@@ -47,7 +47,7 @@ print(result.stats.audio_packets, result.stats.bytes, result.sha256)
 ```
 
 The profile is chosen from the input geometry and can be asserted explicitly;
-auto-selection, the CLI flags, the accepted input forms and the error contract
+auto-selection, the CLI flags, the accepted input forms and the error behaviour
 are in [`docs/guides/usage.md`](docs/guides/usage.md).
 
 ## Integration surface
@@ -71,7 +71,7 @@ SHA-256 17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247
 
 It is byte-identical to the Wwise reference, as are the paired 2ch/48 kHz input
 (37,658 B, 142/142 packets, SHA-256 `41fe43e2…ef629`) and its representative and
-stress corpora. The full gate list is in
+stress corpora. The full list of test targets is in
 [`docs/guides/development.md`](docs/guides/development.md#verification-ladder).
 
 ## Documentation
@@ -80,11 +80,11 @@ stress corpora. The full gate list is in
 | --- | --- |
 | [`docs/README.md`](docs/README.md) | Index of the whole doc set |
 | [`docs/guides/usage.md`](docs/guides/usage.md) | Install, CLI, Python API, every language binding |
-| [`docs/guides/development.md`](docs/guides/development.md) | Layout, build, verification ladder, red lines, conventions |
+| [`docs/guides/development.md`](docs/guides/development.md) | Layout, build, verification ladder, determinism, conventions |
 | [`docs/reference/architecture.md`](docs/reference/architecture.md) | Layers, dependency direction, encoding flow |
-| [`docs/reference/domain-model.md`](docs/reference/domain-model.md) | Normative vocabulary |
+| [`docs/reference/domain-model.md`](docs/reference/domain-model.md) | The vocabulary to use in code and messages |
 | [`docs/reference/profiles.md`](docs/reference/profiles.md) | Profile ownership, provenance, frozen tables |
-| [`docs/reference/public-interface.md`](docs/reference/public-interface.md) | Compatibility surface |
+| [`docs/reference/public-interface.md`](docs/reference/public-interface.md) | Package exports, the `encode` API and the CLI |
 | [`docs/findings/`](docs/findings/) | Evidence records for completed results |
 | [`docs/methodology/`](docs/methodology/) | How a byte-exactness diagnosis is run |
 | [`AGENTS.md`](AGENTS.md) | Binding agent-conduct rules (root plus per-subtree guides) |
@@ -101,5 +101,5 @@ stress corpora. The full gate list is in
   tree only, imported by the test suites to check the kernel byte for byte.
 - `src/wwise_wem/data/`: immutable profile bundles — setup, codebooks and
   calibration tables.
-- `tests/`: unit, integration, contract and golden suites plus their data
-  assets.
+- `tests/`: unit, integration, cross-implementation and golden suites plus their
+  data assets.

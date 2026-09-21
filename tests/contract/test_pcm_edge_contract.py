@@ -1,4 +1,4 @@
-"""Deterministic PCM boundary contracts for the encoder input adapter."""
+"""Deterministic PCM boundary cases for the encoder input adapter."""
 
 from __future__ import annotations
 

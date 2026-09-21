@@ -1,6 +1,6 @@
-//! StreamSession contract tests (the core streaming lifecycle).
+//! StreamSession tests (the core streaming lifecycle).
 //!
-//! Three gates live here:
+//! Three checks live here:
 //!
 //! 1. **Chunking invariance** — `StreamSession` output bytes equal
 //!    `Encoder::encode_pcm` for any chunk splitting (six+ strategies),
@@ -16,7 +16,7 @@
 //!    structural invariant (ring keep == `STREAM_RING_KEEP`), in
 //!    `wem-analysis`.
 //! 3. **Performance regression** — `encode_pcm`'s release-mode median
-//!    stays within the 150 ms gate documented for the fixture encode.
+//!    stays within the 150 ms budget documented for the fixture encode.
 
 use std::time::Instant;
 
@@ -267,30 +267,30 @@ fn drive_giant_chunk() {
 
 // --- Child-process worker tests ---
 //
-// These do the real streaming work, but only when the parent memory gate
+// These do the real streaming work, but only when the parent memory check
 // spawns them with libtest's own `--ignored --exact <name>` arguments. They
 // are `#[ignore]`d so a normal `#[test]` run reports them without executing
 // them, and parallel threads never contaminate each other's RSS. The parent
 // reads each child's peak via wait4().ru_maxrss.
 #[test]
-#[ignore = "child worker: the memory gate runs it with --ignored --exact"]
+#[ignore = "child worker: the memory check runs it with --ignored --exact"]
 fn stream_memory_rss_worker_duration_300() {
     drive_duration_stream(300);
 }
 
 #[test]
-#[ignore = "child worker: the memory gate runs it with --ignored --exact"]
+#[ignore = "child worker: the memory check runs it with --ignored --exact"]
 fn stream_memory_rss_worker_duration_600() {
     drive_duration_stream(600);
 }
 
 #[test]
-#[ignore = "child worker: the memory gate runs it with --ignored --exact"]
+#[ignore = "child worker: the memory check runs it with --ignored --exact"]
 fn stream_memory_rss_worker_giant_chunk() {
     drive_giant_chunk();
 }
 
-// --- Parent memory gate (forks workers, reads their peak RSS) ---
+// --- Parent memory check (forks workers, reads their peak RSS) ---
 
 #[test]
 fn stream_memory_stays_bounded_across_duration() {
@@ -310,7 +310,7 @@ fn stream_memory_stays_bounded_across_duration() {
         match child_peak_rss(&exe, worker) {
             Some(Ok(peak)) => {
                 eprintln!(
-                    "[memory gate] {label}: child peak RSS {peak} bytes ({:.1} MB)",
+                    "[memory check] {label}: child peak RSS {peak} bytes ({:.1} MB)",
                     peak as f64 / 1e6
                 );
                 assert!(
@@ -324,7 +324,7 @@ fn stream_memory_stays_bounded_across_duration() {
             }
             None => {
                 eprintln!(
-                    "[memory gate] {label}: ru_maxrss unavailable on this platform; skipping"
+                    "[memory check] {label}: ru_maxrss unavailable on this platform; skipping"
                 );
             }
         }
@@ -333,7 +333,7 @@ fn stream_memory_stays_bounded_across_duration() {
 
 /// Run the named worker as a child process and return its peak RSS
 /// (bytes). `None` when the platform has no ru_maxrss measurement
-/// (then the gate skips rather than guess).
+/// (then the check skips rather than guess).
 fn child_peak_rss(exe: &std::path::Path, worker: &str) -> Option<Result<usize, String>> {
     #[cfg(target_os = "macos")]
     {
@@ -456,7 +456,7 @@ fn stream_tail_matches_batch_when_final_center_crosses_source_end() {
 }
 
 // ---------------------------------------------------------------------------
-// 3. Performance regression gate (encode_pcm median, release only)
+// 3. Performance regression check (encode_pcm median, release only)
 // ---------------------------------------------------------------------------
 
 const ENCODE_MEDIAN_GATE_MS: f64 = 150.0;
@@ -465,7 +465,7 @@ const ENCODE_RUNS: usize = 5;
 #[test]
 fn encode_pcm_release_median_within_gate() {
     if cfg!(debug_assertions) {
-        eprintln!("skipping performance gate in debug build");
+        eprintln!("skipping performance check in debug build");
         return;
     }
 
@@ -493,7 +493,7 @@ fn encode_pcm_release_median_within_gate() {
     let median_ms = durations_ms[durations_ms.len() / 2];
     assert!(
         median_ms <= ENCODE_MEDIAN_GATE_MS,
-        "encode_pcm median {median_ms:.1} ms exceeds the {ENCODE_MEDIAN_GATE_MS:.0} ms gate \
+        "encode_pcm median {median_ms:.1} ms exceeds the {ENCODE_MEDIAN_GATE_MS:.0} ms budget \
          (runs: {:?} ms)",
         durations_ms
             .iter()

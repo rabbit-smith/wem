@@ -33,7 +33,7 @@ No build step is needed: the wasm artifacts are committed under `js/`.
    read back with `session.selection()`.
 2. **Stream**: `WemSession` (Init → push* → Finish) fed in frame-aligned
    512 KB chunks; progress from `pcm_frames()`. Chunk boundaries never
-   change the output bytes (include/wem.h contract).
+   change the output bytes (include/wem.h).
 3. **Output**: `finish()` returns container bytes + SHA-256; served as a
    download link.
 

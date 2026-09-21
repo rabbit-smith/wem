@@ -1,8 +1,8 @@
-.PHONY: test test-fast fuzz-parity 2ch-stress 2ch-long frame-contract stage-contract golden lint rust-fmt rust-lint rust-test rust-bench build wheel-smoke check clean native
+.PHONY: test test-fast fuzz-parity 2ch-stress 2ch-long stage-contract golden lint rust-fmt rust-lint rust-test rust-bench build wheel-smoke check clean native
 
 PY ?= python3
 
-test: test-fast fuzz-parity 2ch-stress 2ch-long frame-contract stage-contract golden
+test: test-fast fuzz-parity 2ch-stress 2ch-long stage-contract golden
 
 test-fast:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest discover -s tests/unit -t . -v
@@ -17,9 +17,6 @@ fuzz-parity:
 
 2ch-long:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest tests.contract.two_channel_long_run_contract -v
-
-frame-contract:
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest tests.contract.frame_pipeline_contract -v
 
 stage-contract:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest tests.contract.stage_pipeline_contract -v

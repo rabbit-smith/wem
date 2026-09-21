@@ -1,4 +1,3 @@
-import hashlib
 import math
 import struct
 import unittest
@@ -27,14 +26,9 @@ class TransformRuntimeTests(unittest.TestCase):
             for index in range(64)
         ]
         actual = transform.mdct_forward(transform.make_mdct_look(64), samples)
-        packed = b"".join(struct.pack("<f", value) for value in actual)
-        # Kept deliberately: the float32 spill of this synthetic vector has no
-        # committed artifact, so the digest is its only record -- the direct-DCT
-        # comparison below is a tolerance check, not a byte comparison.
-        self.assertEqual(
-            hashlib.sha256(packed).hexdigest(),
-            "400d55c7245bbe96714f629438d7b66f938dfde6cd59f3dac3cb81418aab5115",
-        )
+        # The float32 spill of this synthetic vector is recorded word for word
+        # on the kernel side (crates/wem-analysis/tests/transform_parity.rs,
+        # recorded from this oracle stage by scripts/record_transform_parity.py).
         direct = [
             (4.0 / 64)
             * sum(

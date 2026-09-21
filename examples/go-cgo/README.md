@@ -46,7 +46,7 @@ name, no profile directory, and no environment variable.
    go run . -wav ../../tests/fixtures/input.wav -out out.wem
    ```
 
-   Byte-exactness check (the golden contract):
+   Byte-exactness check (against the golden digest):
 
    ```bash
    shasum -a 256 out.wem

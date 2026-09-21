@@ -1,4 +1,4 @@
-"""Bounds contract for the seed floor walk.
+"""Bounds for the seed floor walk.
 
 The floor walk advances a cursor through a ``total_octave_lines``-sized seed
 surface. The paired build only stays inside that grid because its geometry

@@ -1,4 +1,4 @@
-"""Contract: registered 2ch/48k container and seed scalars equal the paired build.
+"""Registered 2ch/48k container and seed scalars equal the paired build.
 
 Both groups below were read from the paired build rather than derived, and both
 were previously wrong because the 2ch registration carried the 6ch values:

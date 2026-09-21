@@ -60,10 +60,10 @@ independent observable.**
   from a bitstream must come from one reader used on both sides. Hand-written
   readers desynchronise on variable-length codes and produce spectacular,
   meaningless ratios.
-- **Stage dumps from the current tree.** Per-frame and per-stage seams
-  ([`tests/data/stage-golden/`](../../tests/data/stage-golden/), `make
-  frame-contract`, `make stage-contract`) exist to tell you *where* the first
-  difference is instead of *that* there is one.
+- **Per-frame comparisons from the current tree.** The live per-frame and
+  per-stage suites (`cargo test -p wem-core --test frame_pipeline_parity`,
+  `tests/contract/test_frame_pipeline_parity.py`, `make stage-contract`) exist
+  to tell you *where* the first difference is instead of *that* there is one.
 - **Boundary inputs.** Deliberate samples — silence, opposed DC, low and high
   tones, isolated impulses, independent-channel noise, alternating-channel
   bursts, a tail change — reach branches a single music sample never touches. One
@@ -146,7 +146,7 @@ A finding document is the durable artefact, and it has a fixed shape:
       oracle) and under randomized chunking.
 - [ ] A boundary corpus covering the branches the fix touches, not just the
       original sample.
-- [ ] Every red-line gate unchanged.
+- [ ] Every parity and golden suite still passes.
 - [ ] Every value introduced by the fix traceable to a runtime read or a
       published reference — no fitted constants.
 - [ ] Retractions and the trust boundary written down in the finding.

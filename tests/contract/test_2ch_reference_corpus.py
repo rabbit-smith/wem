@@ -1,4 +1,4 @@
-"""Byte contracts for representative 2ch/48 kHz Wwise outputs."""
+"""Byte expectations for representative 2ch/48 kHz Wwise outputs."""
 
 from __future__ import annotations
 

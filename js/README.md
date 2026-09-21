@@ -4,7 +4,7 @@ Browser encoding for the WEM encoder kernel — the wasm-bindgen shell
 (`crates/wem-wasm`) plus a typed JS wrapper. WAV/PCM in, WEM bytes out. The
 profile bundle is **compiled into the wasm module**: nothing is fetched,
 indexed, or passed in, and no entry touches the filesystem. One-shot and
-streaming APIs mirror the C ABI contract (`include/wem.h`, ABI revision 2):
+streaming APIs mirror the C ABI (`include/wem.h`, ABI revision 2):
 same lifecycle, same error codes, same bytes, selected by the structured
 profile selection (one Wwise generation plus the PCM geometry).
 
@@ -16,7 +16,7 @@ js/
   src/index.ts     the wrapper (typed entry; erasable-TS only, no build step)
   pkg/             wasm-pack --target web      (browser/worker; .wasm fetched by URL)
   pkg-node/        wasm-pack --target nodejs   (Node; .wasm read from disk on import)
-  test-node.mjs    Node parity gate (golden sha256 + chunking consistency + selection/error codes)
+  test-node.mjs    Node parity test (golden sha256 + chunking consistency + selection/error codes)
 ```
 
 Rebuilds (need wasm-pack + a wasm32 toolchain):
@@ -39,8 +39,8 @@ npm test             # → node test-node.mjs (requires pkg-node)
 > ```
 >
 > The committed `pkg/` and `pkg-node/` artifacts are refreshed that way and
-> must track the kernel source: the golden-sha gate in `test-node.mjs` fails
-> against stale kernel bytes, and its 2ch/48k positive gate fails against a
+> must track the kernel source: the golden-sha check in `test-node.mjs` fails
+> against stale kernel bytes, and its 2ch/48k positive check fails against a
 > kernel that still refuses the 2ch configuration.
 
 ## API (sketch)
@@ -102,8 +102,8 @@ argument), `WEM_ERR_GEOMETRY_MISMATCH`, `WEM_ERR_INPUT_TOO_SHORT`,
 encoded through the wasm package must be byte-identical to the committed
 kernel golden `tests/fixtures/reference.wem` (SHA-256
 `17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247` — the
-gate compares that file's bytes, so this digest documents the contract rather
-than being restated by the test),
+test compares that file's bytes, so this digest documents the expected value
+rather than being restated by the test),
 across one-shot (auto-selected, explicit, and raw-PCM paths) and three
 chunking schemes; the compiled-in version table, the resolved selection of
 every constructor, and the selection/error code mapping must hold. Wired into

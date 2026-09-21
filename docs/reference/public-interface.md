@@ -1,4 +1,4 @@
-# Public interface contract
+# Public interface
 
 The Python package has one encoding function and six public value types:
 
@@ -102,12 +102,12 @@ lowercase SHA-256 digest. `len(result)` is the container's byte length and
 save a result. `EncodeStats.to_dict()` returns the stable JSON-ready
 statistics fields.
 
-For `tests/fixtures/input.wav`, the contract is 205 audio packets (77 short and
+For `tests/fixtures/input.wav`, the output is 205 audio packets (77 short and
 128 long), 108,771 output bytes, and SHA-256
 `17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247`.
 
 Both installed profiles are byte-exact against their paired builds. The 2ch
-contract, its corpora, and the limits of that evidence are recorded in
+result, its corpora, and the limits of that evidence are recorded in
 [`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md).
 
 ## Examples

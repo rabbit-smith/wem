@@ -13,7 +13,7 @@ state; a re-run reproduces the same stream set byte-for-byte.
 
 Usage:
   PYTHONPATH=src:reference python3 scripts/fuzz_diff_parity.py --pr
-      PR gate: golden case + a small deterministic differential set
+      PR tier: golden case + a small deterministic differential set
       (budget < 1 minute).
   PYTHONPATH=src:reference python3 scripts/fuzz_diff_parity.py --full
       Nightly: golden case + the full deterministic differential set
@@ -49,8 +49,8 @@ FULL_CASES = 200
 FULL_MAX_FRAMES = 8192
 FULL_SEED_BASE = 20130712
 
-# 2ch/48000 parity contract: a fixed, named geometry item set pinned into
-# the contract (never randomized at run time).  The canonical seed list is
+# 2ch/48000 parity: a fixed, named geometry item set pinned into the seed
+# list (never randomized at run time).  The canonical seed list is
 # deterministic; the PR tier runs the leading slice and the full tier runs
 # the complete set, so the PR set is a strict subset of the full set.  A
 # separate seed family (302407xx) keeps the 2ch items disjoint from the
@@ -268,7 +268,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     mode.add_argument(
         "--pr",
         action="store_true",
-        help="PR gate: golden + small deterministic set (< 1 minute)",
+        help="PR tier: golden + small deterministic set (< 1 minute)",
     )
     mode.add_argument(
         "--full",
@@ -358,7 +358,7 @@ def main() -> int:
             f"case {case_id:03d}: seed={seed} ok ({elapsed:.1f}s)"
         )
 
-    # Fixed 2ch/48k parity items: the seeds are pinned into the contract and
+    # Fixed 2ch/48k parity items: the seeds are pinned in the seed list and
     # both tiers run their (nested) sets.
     for seed in two_ch_seeds:
         started = time.monotonic()

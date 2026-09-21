@@ -20,7 +20,7 @@ The fixed paired input is 96,000-frame, 2ch/48 kHz PCM with input SHA-256
 All three complete WEMs are byte-for-byte identical and all 142 audio packets are
 exact, with a mode sequence of 55 short + 87 long.
 `tests/integration/test_core_oracle_golden.py` also holds an asset-free
-deterministic 2ch contract pinning the output SHA, packet count and short/long
+deterministic 2ch check pinning the output SHA, packet count and short/long
 counts for the native core, the direct core and the oracle; those layers are
 described in [`../reference/architecture.md`](../reference/architecture.md).
 
@@ -151,7 +151,7 @@ input/output SHA-256, the packet count and the short/long counts.
 `tests/data/2ch-reference/manifest.json` records each case's digests and counts.
 
 The two stress cases live in `tests/data/2ch-stress/` and are part of the default
-green contract:
+green suite:
 
 - A square-wave burst alternating between left and right every 2,048 samples: all
   369 audio packets are exact and the complete WEM is 35,172 B. It covers
@@ -291,12 +291,12 @@ What is not proven:
   paths.
 - Independent real-build evidence covers one 96,000-frame paired input and eight
   48,000-frame representative and stress inputs. Boundary lengths such as 4,096,
-  4,097 and 8,192 frames are covered by native/oracle agreement and fuzz
-  contracts, but have no independent real-build output, so the finite-corpus
+  4,097 and 8,192 frames are covered by native/oracle agreement and the fuzz
+  comparison, but have no independent real-build output, so the finite-corpus
   conclusions are not an exhaustive proof for arbitrary PCM.
 
 The no-fitting rule: profile data comes from direct reads or published reference
 algorithms, never output fitting, and local rules must stay anchored to
 independent observables rather than being back-derived from the total byte count.
-The maintenance rules that keep both paired contracts and the corpora unchanged
+The maintenance rules that keep both paired results and the corpora unchanged
 are in [`../roadmap.md`](../roadmap.md).

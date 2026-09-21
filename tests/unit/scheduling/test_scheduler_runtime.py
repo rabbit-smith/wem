@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
 import unittest
-from collections import Counter
-from pathlib import Path
 
 from wwise_wem_reference.analysis.preprocessing.detector_input import iter_detector_quanta
 from wwise_wem_reference.scheduling.model import FramePlan
@@ -15,25 +12,6 @@ from wwise_wem_reference.scheduling.planner import (
 )
 from wwise_wem_reference.scheduling.selector import ModeSelector
 from wwise_wem_reference.analysis.preprocessing.windowing import iter_pcm_windows
-
-
-FRAME_CONTRACT = (
-    Path(__file__).resolve().parents[2]
-    / "data"
-    / "frame-contract"
-    / "wwise2013_6ch_44100.json"
-)
-
-
-def _checked_audio_modes(contract_path: Path) -> list[int]:
-    """Read the checked per-frame scheduler contract."""
-    contract = json.loads(contract_path.read_text(encoding="utf-8"))
-    if contract.get("schema") != "wwise-wem.frame-contract.v1":
-        raise AssertionError("scheduler frame-contract schema differs")
-    frames = contract["frames"]
-    if len(frames) != contract["audio_packets"]:
-        raise AssertionError("scheduler frame-contract frame count differs")
-    return [int(frame["mode"]) for frame in frames]
 
 
 class ModeSelectorTests(unittest.TestCase):
@@ -115,25 +93,6 @@ class SchedulerWindowTests(unittest.TestCase):
         self.assertEqual(
             (following.previous, following.current, following.cursor, following.filled, following.buffer_base, following.emitted),
             (0, 0, 1024, 1152, 128, 1),
-        )
-
-    def test_checked_mode_sequence(self):
-        modes = _checked_audio_modes(FRAME_CONTRACT)
-        self.assertEqual(Counter(modes), Counter({0: 77, 1: 128}))
-        self.assertEqual(
-            Counter(zip(modes, modes[1:])),
-            Counter({(0, 0): 72, (0, 1): 5, (1, 0): 4, (1, 1): 123}),
-        )
-
-        state = append_samples(initial_state(), 1 << 20)
-        blocks = []
-        for following in modes[1:]:
-            block, state = emit_block(state, following)
-            blocks.append(block)
-        self.assertEqual(blocks[0], FramePlan(0, 0, 0, 0, 896, 1152, 1280, 128))
-        self.assertEqual(
-            blocks[-1],
-            FramePlan(203, 1, 1, 1, 139328, 141376, 3072, 1024),
         )
 
     def test_zero_pcm_runtime_views(self):

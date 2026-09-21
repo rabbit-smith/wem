@@ -10,8 +10,8 @@ FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 class GoldenEncoderTests(unittest.TestCase):
     def test_complete_wem_is_bit_exact(self):
         # The whole-file claim is the byte comparison against the committed
-        # reference WEM; that file is itself pinned to the red-line SHA-256
-        # through tests/data/stage-golden/stages/index.json.
+        # reference WEM; that file's SHA-256 is also recorded in
+        # tests/data/stage-golden/stages/index.json.
         result = encode(FIXTURES / "input.wav")
         reference = (FIXTURES / "reference.wem").read_bytes()
         self.assertEqual(result.data, reference)

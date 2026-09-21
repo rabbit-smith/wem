@@ -80,7 +80,7 @@ It has no RIFF framing.
 The RIFF/WAVE envelope containing Wwise fmt metadata, one setup packet and the
 framed audio packets.
 
-## Frame regression contract
+## Frame regression record
 
 A checked record for one encoding. It stores stable hashes at stage seams so a
 change can identify the first differing frame, channel and stage before the

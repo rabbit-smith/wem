@@ -1,11 +1,11 @@
 # wem-capi — the C ABI core surface: the single cross-language integration
 # point of the WEM encoder kernel.
 #
-# The normative contract is include/wem.h (repo root): lifecycle, reply
-# framing, error codes, memory ownership, integration rules. This crate
-# mirrors that header 1:1 and funnels every call into wem-core; it owns
+# include/wem.h (repo root) is the interface this crate mirrors: lifecycle,
+# reply framing, error codes, memory ownership, integration rules. This crate
+# implements that header 1:1 and funnels every call into wem-core; it owns
 # no numerics, no profile logic, no second behavior. See crates/AGENTS.md,
-# "C ABI contract".
+# "C ABI surface".
 
 [package]
 name = "wem-capi"

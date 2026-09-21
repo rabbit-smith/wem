@@ -5,7 +5,7 @@ signed-16 PCM WAV. ABI revision 2 selects the encoder configuration with one
 structured `WemProfile` value — a Wwise generation plus the PCM geometry — so
 the example reads `channels` and `sample_rate` out of the WAV header and passes
 that selection by pointer. There is no profile name, no profile directory, and
-no environment variable anywhere in the profile contract.
+no environment variable anywhere in the profile selection.
 
 ```sh
 cd crates && cargo build -p wem-capi --release && cd ..

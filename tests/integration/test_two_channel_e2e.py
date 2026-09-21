@@ -1,4 +1,4 @@
-"""Formal 2ch/48000 end-to-end contract: facade encode, header geometry, decode.
+"""Formal 2ch/48000 end-to-end check: facade encode, header geometry, decode.
 
 Closes the last 2ch/48k lane end to end against the repository's own
 reference ground-truth decoder (``scripts/decode_wem.py``): the facade

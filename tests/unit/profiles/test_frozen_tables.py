@@ -91,7 +91,7 @@ class FrozenTableEqualityTests(unittest.TestCase):
             self.assertEqual(list(frozen) + list(frozen)[::-1], reference)
 
     def test_twiddles_stay_within_libm_ulp_envelope(self) -> None:
-        # The frozen table is the contract, not the host libm: the whole
+        # Values come from the frozen table, not the host libm: the whole
         # point of freezing was to stop trusting per-platform transcendentals.
         # Windows msvcrt differs from the macOS-generated table by 1 ULP on
         # sin (observed in CI), so only a tight ULP envelope is asserted;

@@ -1,6 +1,6 @@
-"""Contract tests for the intentionally supported public surface.
+"""Tests for the intentionally supported public surface.
 
-These tests freeze user-visible behavior, not the current internal module
+These cover user-visible behavior, not the current internal module
 layout.  Refactors may freely replace the implementation behind this API.
 """
 from __future__ import annotations

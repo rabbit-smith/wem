@@ -14,8 +14,8 @@ twiddle and window constants byte-identical to the 6ch payload. Its
 cross-check runs only once a 2ch-domain recording exists; it is skipped
 until then.
 
-Run the golden and frame-contract suites afterwards; the golden encode must
-stay byte-identical.
+Run `make golden` and the per-frame parity suites afterwards; the golden
+encode and every per-frame value must stay identical.
 
 Usage: python3 scripts/generate_frozen_tables.py [--profile NAME] [--record-dir DIR]
 """
@@ -53,7 +53,7 @@ def installed_profile_name(generation: str, channels: int, sample_rate: int) -> 
     A directory name is a property of the packaged tree, so read it from there
     instead of re-typing it. Read through the index and manifests only: this is
     a generation script, and it must run before — and without — the native
-    extension, exactly as the wheel's zip-import gate does.
+    extension, exactly as the wheel's zip-import check does.
     """
     matches = [
         bundle.name

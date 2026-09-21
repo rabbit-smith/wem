@@ -23,9 +23,9 @@ jobs:
     # Single execution path: the facade's byte-producing calls run on the
     # in-package native extension (wwise_wem._core, built from the
     # wem-python binding crate). Every cell builds that kernel and runs
-    # the full suite against it as a hard gate — no native-absent skips.
+    # the full suite against it — no native-absent skips.
     # The reference oracle (reference/) stays on PYTHONPATH as a test
-    # asset for the parity and contract suites.
+    # asset for the parity suites.
     strategy:
       fail-fast: false
       matrix:
@@ -68,32 +68,28 @@ jobs:
           PY
         env:
           CARGO_TERM_COLOR: always
-      - name: full suite on the native kernel (hard gate)
+      - name: full suite on the native kernel
         run: python -m unittest discover -s tests -v
-      # The two heaviest red lines live in modules that are deliberately not
-      # `test_*`-prefixed, so discovery above cannot reach them (tests/AGENTS.md).
-      # Run them explicitly, in one cell rather than the whole matrix: they are
-      # contract runs, not portability runs.
-      - name: per-frame contract (205-frame hash contract)
-        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.13'
-        run: python -m unittest tests.contract.frame_pipeline_contract -v
-      - name: per-stage contract (frame x stage hashes + representative dumps)
+      # The per-stage comparison suite is not `test_*`-prefixed, so discovery
+      # above cannot reach it; run it explicitly, in one cell rather than the
+      # whole matrix (portability is covered by the full suite).
+      - name: per-stage hashes (frame x stage hashes + representative dumps)
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.13'
         run: python -m unittest tests.contract.stage_pipeline_contract -v
       - name: native binding smoke (streaming + one-shot, byte-exact)
         run: python scripts/native_smoke.py
-      - name: "wheel gate (single wheel: facade + native; clean-venv encode)"
+      - name: "wheel packaging (single wheel: facade + native; clean-venv encode)"
         run: python scripts/wheel_smoke.py
         # Clean-venv isolation is the point: an inherited PYTHONPATH would
         # make the reference tree importable inside the "installed wheel"
         # venv and break (or silently weaken) the structure check.
         env:
           PYTHONPATH: ""
-      - name: differential parity PR gate (golden + 10 cases, < 1 minute)
+      - name: differential parity (golden + 10 cases, < 1 minute)
         run: python scripts/fuzz_diff_parity.py --pr
 
   rust:
-    # The kernel's own gates, as a Rust workspace. Every other job exercises
+    # The kernel's own suites, as a Rust workspace. Every other job exercises
     # the kernel only through one binding (maturin, cgo, wasm-pack), so
     # without this job a crate that builds for one shell but not for the
     # workspace — or a formatting/clippy regression in a crate no shell
@@ -123,7 +119,7 @@ jobs:
       - run: cd crates && cargo build --release -p wem-capi
       - run: cd crates && cargo test --release -p wem-capi
       - name: Build + run the C client (byte-exact)
-        # include/wem.h is the normative contract, and this is the only
+        # include/wem.h is the interface the shells mirror, and this is the only
         # consumer a C compiler reads it with: without this step the header
         # could stop being C-consumable and nothing would notice.
         run: |

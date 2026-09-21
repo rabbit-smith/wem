@@ -1,4 +1,4 @@
-//! C ABI end-to-end contract tests (wem-capi).
+//! C ABI end-to-end tests (wem-capi).
 //!
 //! Drive the FFI surface exactly the way an external language would
 //! (through the rlib symbols, `unsafe` and all) and prove:
@@ -62,7 +62,7 @@ impl Sinks {
 /// value that reaches the threads is the raw pointer and there is no Rust type
 /// that could carry the promise — the wrapper carries it instead.
 ///
-/// `unsafe` is the point of this file: an FFI test must exercise the C contract
+/// `unsafe` is the point of this file: an FFI test must exercise the C ABI
 /// on C terms (raw pointers, `unsafe extern "C"` callbacks), and the Rust type
 /// system cannot express a claim the C header makes about a pointer it hands
 /// out. `wem-capi` backs the same promise at compile time with the

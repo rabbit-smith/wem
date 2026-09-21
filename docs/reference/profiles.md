@@ -7,7 +7,7 @@ Inside the kernel, `ProfileKey` carries the full immutable identity
 (generation, geometry, channel layout, setup identity) and is an exact lookup,
 never a request to synthesize or approximate a configuration.
 
-The two types have one spelling per language and are the same contract
+The two types have one spelling per language and the same shape
 everywhere: Rust `WwiseVersion` / `WwiseProfile`, C `WemVersion` / `WemProfile`
 (see [`include/wem.h`](../../include/wem.h), ABI revision 2), Python
 `WwiseVersion` / `WwiseProfile`. Version codes are stable and append-only, like
@@ -23,8 +23,8 @@ the C ABI error values.
   neighbouring geometry.
 - A selection more than one installed profile satisfies is an error, not a
   first-match pick.
-- An unrecognized version code is a contract violation against the current
-  revision, not a fallback to the newest known generation.
+- An unrecognized version code is rejected against the current revision, not
+  treated as a fallback to the newest known generation.
 
 An installed profile owns its complete calibration set:
 
@@ -42,7 +42,7 @@ pass packet-level and whole-file regression.
 
 | Selection | Name | Status |
 | --- | --- | --- |
-| `Wwise2013, 6, 44100` | `wwise2013-6ch-44100` | Byte-exact for the paired build; whole-file golden, per-frame and per-stage contracts |
+| `Wwise2013, 6, 44100` | `wwise2013-6ch-44100` | Byte-exact for the paired build; checked by the whole-file golden, the per-frame and the per-stage suites |
 | `Wwise2013, 2, 48000` | `wwise2013-2ch-48000` | Byte-exact for the paired input and both real-build corpora; evidence and limits in [`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md) |
 
 ### 2ch/48 kHz provenance
@@ -94,7 +94,7 @@ The development-tree loader therefore keeps its coverage through unit tests
 inside the crate, where `pub(crate)` is reachable; the filesystem loader and
 the digest-chain rejection cases are exercised there, not from an external
 integration test. The Python package carries its own loader
-(`wwise_wem.profiles.bundle`), because the wheel's zip-import digest-chain gate
+(`wwise_wem.profiles.bundle`), because the wheel's zip-import digest-chain test
 must run where the native extension is absent.
 
 ## Frozen transcendental tables
@@ -114,5 +114,6 @@ verify bit equality against the per-site records under
 `tests/data/stage-golden/transcendental/`.
 
 Regenerate the payload with `scripts/generate_frozen_tables.py`, which
-cross-checks the live domain recorded by `scripts/record_tmath.py`. The golden
-WEM bytes and frame-contract hashes must not change afterwards.
+cross-checks the live domain recorded by `scripts/record_tmath.py`. Run
+`make golden` and the per-frame parity suites afterwards: the golden WEM bytes
+and every per-frame value must come out unchanged.

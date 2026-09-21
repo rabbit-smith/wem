@@ -4,9 +4,9 @@ The stage golden assets freeze the per-frame values at every pipeline seam as
 a byte-exact reference for the Rust kernel port:
 
 - ``index.json`` records SHA-256 hashes for every stage of every frame,
-  reusing the frame-contract row packing (little-endian f32 words for float
-  surfaces, little-endian i32 words for integer rows), plus the per-segment
-  hashes of the final WEM container (fmt, setup, data).
+  packing rows as little-endian f32 words for float surfaces and
+  little-endian i32 words for integer rows, plus the per-segment hashes of
+  the final WEM container (fmt, setup, data).
 - ``frames/`` holds raw little-endian binary dumps for representative frames
   only: the first 6 frames, the last 4 frames, and both sides of every
   short/long mode transition.  Float stages dump as f32le words, floor posts
@@ -45,8 +45,9 @@ SCHEMA = "wwise-wem.stage-golden.v1"
 FIRST_REPRESENTATIVE_FRAMES = 6
 LAST_REPRESENTATIVE_FRAMES = 4
 
-# Hashed stages per frame, in pipeline order.  The names match the
-# frame-contract field conventions where they already exist.
+# Hashed stages per frame, in pipeline order.  The names match the ones
+# tests/contract/oracle_frame_values.py emits and the per-frame parity
+# suites compare.
 FLOAT_STAGES = (
     "window",
     "coefficients",
@@ -381,7 +382,7 @@ def build_stage_golden(
     ``selection`` is a structured ``WwiseProfile``; with none the installed
     generation is selected for the geometry read from the WAV.  The index
     header still records the resolved profile's bundle identity, which is
-    part of the versioned asset contract.
+    part of the versioned asset identity.
     """
     wav = Path(wav)
     pcm = read_pcm_wav(wav)

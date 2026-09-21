@@ -2,7 +2,7 @@
  * wwise-wem-wasm — typed wrapper over the wem-wasm kernel shell.
  *
  * The Rust side (crates/wem-wasm) is a parallel language shell over the
- * WEM encoder kernel (`include/wem.h` contract, ABI revision 2): one-shot
+ * WEM encoder kernel (`include/wem.h`, ABI revision 2): one-shot
  * and streaming WAV/PCM -> WEM, errors as `WEM_ERR_*` codes. This module
  * adds a small ergonomic, promise-shaped API on top and NOTHING else: no
  * numerics, no profile logic, no WAV parsing of its own — the kernel owns
@@ -221,7 +221,7 @@ export interface Encoder {
   /**
    * Encode one interleaved s16-LE PCM buffer. The buffer carries no
    * geometry of its own: it is read at the selection's rate and channel
-   * count, so it must match the selection (the C ABI contract for raw PCM).
+   * count, so it must match the selection (the C ABI rule for raw PCM).
    */
   encodePcm16Interleaved(pcm: Uint8Array | ArrayBuffer): WemResult;
   /**
@@ -237,7 +237,7 @@ export interface Encoder {
 /**
  * One streaming encode session (Init -> push* -> Finish -> destroy).
  *
- * Single-threaded ownership (the C ABI contract). All methods are
+ * Single-threaded ownership (as the C ABI requires). All methods are
  * synchronous: the encode work itself is synchronous CPU work, so a
  * Promise wrapper would only obscure error handling. Feed chunks with
  * lengths that are multiples of `channels * 2` bytes (one complete
@@ -474,8 +474,8 @@ export async function encodeWav(
  * own geometry).
  *
  * Drives the kernel's `StreamSession::for_selection` (Init); the reply
- * framing (seq 0 = setup packet, then audio packets) and the chunk contract
- * are the kernel's — chunk boundaries never affect the output bytes.
+ * framing (seq 0 = setup packet, then audio packets) and the chunk framing
+ * rules are the kernel's — chunk boundaries never affect the output bytes.
  */
 export async function createStreamSession(source: GeometrySource): Promise<StreamSession> {
   const coreModule = await core();

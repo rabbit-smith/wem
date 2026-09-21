@@ -1,7 +1,7 @@
 # Development
 
 How the repository is laid out, how to build and verify it, and which rules are
-load-bearing. The normative agent-conduct rules live in the layered
+load-bearing. The agent-conduct rules live in the layered
 [`AGENTS.md`](../../AGENTS.md) set; this page is the human-facing summary of the
 same ground.
 
@@ -11,10 +11,10 @@ same ground.
 | --- | --- |
 | `src/wwise_wem/` | Distribution facade: root API, CLI, adapters, profile registry, and the embedded native extension |
 | `crates/` | Rust kernel workspace: `scheduling`, `analysis`, `vorbis`, `container`, `profiles`, `core`, plus the C ABI (`wem-capi`) and the language shells (`wem-python`, `wem-wasm`) |
-| `include/wem.h` | Normative cross-language contract for the C ABI core surface |
+| `include/wem.h` | C ABI interface the shells mirror 1:1, implemented by `crates/wem-capi` |
 | `reference/wwise_wem_reference/` | Bit-exact pure-Python oracle, development tree only, never shipped |
 | `src/wwise_wem/data/profiles/` | Immutable packaged profile bundles (setup, codebooks, transforms, analysis, psychoacoustics) |
-| `tests/` | `unit/`, `integration/`, `contract/`, `golden/`, and the `data/` contract assets |
+| `tests/` | `unit/`, `integration/`, `contract/`, `golden/`, and the `data/` regression assets |
 | `scripts/` | Regeneration, decoding, fuzz, and packaging tools |
 | `examples/`, `js/` | Runnable bindings: Python, Rust, C, Go via cgo, Node and browser via wasm |
 | `docs/` | This guide set; see [Documentation map](#documentation-map) |
@@ -42,31 +42,32 @@ make wheel-smoke     # install the wheel in a clean venv and encode once
 Climb from the cheapest executable target; do not start from the full suite.
 
 1. One `unittest`/`cargo test` case or module.
-2. The affected gate: `make frame-contract`, `make stage-contract`,
-   `make 2ch-stress`, `make 2ch-long`, or one crate's tests.
+2. The affected suite: `make stage-contract`, `make 2ch-stress`,
+   `make 2ch-long`, `tests/contract/test_frame_pipeline_parity.py`, or one
+   crate's tests.
 3. The full ladders (`make test`, `cargo test --workspace`) at phase
    boundaries, or whenever the change touches shared state, configuration,
    lockfiles, or generated assets.
 4. `make check` before handing work back: lint, rust-lint, the full test
    ladder, and the wheel smoke.
 
-A passing gate is reused. Do not re-earn a green gate per task or per agent;
+A passing suite is reused. Do not re-run a green suite per task or per agent;
 rerun it only on a named invalidator — code, test, data, or configuration that
-the gate actually exercises.
+the suite actually exercises.
 
-### Gates and the invariants they protect
+### What each target runs
 
-The right-hand column is the red-line set: nothing there may move without
-explicit human approval, and each is enforced by its gate rather than by review.
-The binding list is the table in [`AGENTS.md`](../../AGENTS.md).
+The table lists the local targets and the quantities they check. Every one of
+them is a test run; when one goes red, it names what changed, and the answer is
+to fix the code or the test rather than to re-record the expectation.
 
-| Gate | Protects |
+| Target | Checks |
 | --- | --- |
 | `make golden` | Whole-file golden WEM identity: `SHA-256 17851d26…d35247`, 205 audio packets |
-| `make frame-contract` | Per-frame hash contract |
+| `tests/contract/test_frame_pipeline_parity.py`, `cargo test -p wem-core --test frame_pipeline_parity` | Per-frame values (scheduling fields, eight analysis stages, floor posts, residue rows, audio packet) against the pure-Python oracle, all 205 frames |
 | `make stage-contract` | Per-frame × per-stage pipeline hashes and raw dumps |
-| `make 2ch-stress`, `make 2ch-long` | The 2ch stress corpus and the long-run cross-implementation contract |
-| `make fuzz-parity` | Native vs oracle parity under randomized chunking and quality; Python unit, integration and contract suites run in `make test-fast` |
+| `make 2ch-stress`, `make 2ch-long` | The 2ch stress corpus and the long-run cross-implementation comparison |
+| `make fuzz-parity` | Native vs oracle parity under randomized chunking and quality; Python unit, integration and cross-implementation suites run in `make test-fast` |
 | `cargo test --workspace` | Rust kernel, C ABI and shell suites, including the geometry-materializer parity suites |
 | `make wheel-smoke` | Installed-wheel profile digest chain (payload → manifest → index) and one real encode |
 | `make check` | All of the above plus `ruff`, `mypy` and `clippy` |
@@ -79,12 +80,12 @@ most reviews:
 - No runtime transcendental in an encoder path — values come from profile data or
   frozen tables, and a new geometry needs `scripts/record_tmath.py` →
   `scripts/generate_frozen_tables.py` first.
-- Float32 at every assignment point: the Python `_f32` locations are normative,
-  Rust rounds at the same statements, and summation/butterfly order is part of the
-  contract.
+- Float32 at every assignment point: the Python `_f32` locations mark those
+  points, Rust rounds at the same statements, and the parity suites compare the
+  resulting values, so summation and butterfly order may not be rearranged.
 - Bit patterns travel as integers or little-endian bytes, never via decimal
   strings.
-- Generated contract assets must regenerate byte-stably (run twice, diff empty),
+- Generated assets must regenerate byte-stably (run twice, diff empty),
   with `sort_keys` JSON; the kernel stays `wasm32`-scalar-compilable.
 
 ## Profile data
@@ -113,7 +114,7 @@ value needs — are in [`../reference/profiles.md`](../reference/profiles.md).
 | Surface | Holds |
 | --- | --- |
 | [`usage.md`](usage.md) | Install, CLI, per-language entry points |
-| this page | Layout, build, gates, determinism, conventions |
+| this page | Layout, build, test targets, determinism, conventions |
 | [`../reference/`](../reference/) | Normative surfaces: architecture, domain model, profiles, public interface |
 | [`../findings/`](../findings/) | Evidence records for a completed result, with its retractions and trust boundary |
 | [`../methodology/`](../methodology/) | How to run a diagnosis: instruments, oracles, evidence discipline |

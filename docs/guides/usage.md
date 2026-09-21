@@ -1,7 +1,7 @@
 # Usage
 
 How to install the encoder, encode a file, and call it from each supported
-language. For the exact API contract see
+language. For the exact API see
 [`../reference/public-interface.md`](../reference/public-interface.md).
 
 ## Install
@@ -131,9 +131,9 @@ standard `OSError` subclasses such as `FileNotFoundError` for file access.
 ## Other languages
 
 The Rust kernel is the single integration point. Its C ABI core surface
-(`include/wem.h`) is the canonical contract — `Init` → `chunk*` → `Finish`,
-reply frame `seq 0` carrying the setup packet, then audio packets — and every
-binding is a thin parallel shell over it that owns no numerics.
+(`include/wem.h`) is the interface every shell mirrors — `Init` → `chunk*` →
+`Finish`, reply frame `seq 0` carrying the setup packet, then audio packets — and
+every binding is a thin parallel shell over it that owns no numerics.
 
 | Language | Entry point | Guide |
 | --- | --- | --- |
@@ -161,6 +161,6 @@ wwise-wem tests/fixtures/input.wav --output out.wem \
 ```
 
 More cases — the six real-build 2ch reference inputs, the two stress inputs, and
-the differential fuzz gate — are described in
+the differential fuzz test — are described in
 [`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md); the
 commands that run them are in [`development.md`](development.md).

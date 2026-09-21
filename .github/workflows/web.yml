@@ -7,7 +7,7 @@ on:
 jobs:
   web:
     # Browser encoding shell: proves the wasm build compiles for
-    # wasm32-unknown-unknown and that the Node-side parity gate passes —
+    # wasm32-unknown-unknown and that the Node-side parity test passes —
     # fixture PCM through the wasm package must reproduce the kernel
     # golden sha256, one-shot and across chunkings.
     runs-on: ubuntu-latest
@@ -23,17 +23,17 @@ jobs:
       - uses: wasm-pack/wasm-pack-action@v0.4.0
       - name: wasm32 check (threadless kernel + wasm shell)
         run: cd crates && cargo check -p wem-wasm --target wasm32-unknown-unknown
-      - name: clippy gate (wasm target)
+      - name: clippy (wasm target)
         run: cd crates && cargo clippy -p wem-wasm --target wasm32-unknown-unknown -- -D warnings
       - name: unit tests (native; error-code table)
         run: cd crates && cargo test -p wem-wasm
-      - name: build nodejs target (for the parity gate)
+      - name: build nodejs target (for the parity test)
         # Absolute out-dir: wasm-pack resolves --out-dir against the CRATE
         # directory, not the current one, so a relative path here lands in
-        # crates/js/ and the parity gate below would then validate the
+        # crates/js/ and the parity test below would then validate the
         # committed artifacts instead of the freshly built kernel.
         run: cd crates && wasm-pack build wem-wasm --target nodejs --release --out-dir "$(pwd)/../js/pkg-node"
       - name: build web target (npm/browser artifact)
         run: cd crates && wasm-pack build wem-wasm --target web --release --out-dir "$(pwd)/../js/pkg"
-      - name: node parity gate (golden sha256 + chunking consistency + error codes)
+      - name: node parity test (golden sha256 + chunking consistency + error codes)
         run: node js/test-node.mjs

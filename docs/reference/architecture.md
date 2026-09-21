@@ -6,9 +6,8 @@ implementation domains live in the development-tree reference package
 (`wwise_wem_reference`, under `reference/`), which the test suites use as the
 reference oracle. The facade has a single execution path — the in-package
 native extension `wwise_wem._core` (built from `crates/wem-python`) — and
-never imports the reference tree at runtime. The reference implementation's
-byte-for-byte outputs are the project's source of truth; the Rust kernel is
-verified against it, never the reverse.
+never imports the reference tree at runtime. The Rust kernel is checked against
+the reference implementation's byte-for-byte output, never the reverse.
 
 ## Package layout
 
@@ -31,7 +30,7 @@ wwise_wem_reference/            # development-tree reference oracle (not in whee
 ```
 
 The package root exports one `encode` function plus its input/result value
-types. Internal module paths are not compatibility surfaces. The reference
+types. Internal module paths are not part of that surface. The reference
 package may import facade DTOs and profile-metadata types; the facade never
 imports the reference tree (oracle parity is test-only, locked by the
 parity suites).
@@ -104,7 +103,7 @@ The manifest's `resources` object maps stable logical names (for example
 
 `EncoderProfile` is the internal identity value (name, key, setup digest,
 container defaults). Runtime tables are loaded only through that profile's installed
-bundle; there is no separate global runtime-manifest gate.
+bundle; there is no separate global runtime-manifest step.
 
 ## Geometry materializer parity
 
@@ -118,13 +117,14 @@ build (2013.2 conversion plug-in, geometry materializer at module offset
   bytes on the manifest/index digest chain);
 - kernel: `wem-analysis::dsp::{x87, crt90, psy_geom, psy_geom_long}`.
 
-Locks: `tests/contract/test_geometry_materializer_contract.py` asserts
-builder == registered bytes on the 6ch authority, and the generated Rust
-suites (`crates/wem-analysis/tests/*_parity.rs`) assert kernel == builder bit
-for bit on both geometries. On 2ch the five short surfaces are registered from
-that mechanism, with the geometry read from the paired build running at
-48000 Hz; the twelve long surfaces are likewise registered from the mechanism
-and read-verified. Any change to either set requires a regenerated contract.
+Checked by `tests/contract/test_geometry_materializer_contract.py`, which
+asserts builder == registered bytes on the 6ch profile, and by the generated
+Rust suites (`crates/wem-analysis/tests/*_parity.rs`), which assert kernel ==
+builder bit for bit on both geometries. On 2ch the five short surfaces are
+registered from that mechanism, with the geometry read from the paired build
+running at 48000 Hz; the twelve long surfaces are likewise registered from the
+mechanism and read-verified. Any change to either set means regenerating the
+registered bytes and re-running both suites.
 Per-field provenance is in [`profiles.md`](profiles.md).
 
 ## Acceptance boundaries
@@ -134,7 +134,7 @@ Structural changes must preserve:
 - the exact package-root public exports;
 - an acyclic layer-compliant import graph;
 - the exact wheel inventory;
-- the 205-frame regression contract;
+- the 205-frame regression values;
 - the golden WEM byte stream and SHA-256;
 - installed-wheel and ZIP-import resource verification.
 

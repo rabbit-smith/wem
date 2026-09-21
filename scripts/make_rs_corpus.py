@@ -7,7 +7,7 @@ reference WEM bytes to cross-check this implementation.
 
 This tool is repo infrastructure. It is offline, deterministic, and writes
 only to destinations it is explicitly given. It does NOT touch trusted
-contract assets; its outputs are scratch/reference material.
+versioned assets; its outputs are scratch/reference material.
 
 Subcommands:
   gen-wavs       Deterministically generate signed-16 PCM test WAVs (2ch/48k).

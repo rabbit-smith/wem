@@ -16,4 +16,4 @@
 *.abi3.so binary
 *.whl binary
 
-# Golden/contract assets are already covered by *.bin/*.wem/*.wav above.
+# Golden assets are already covered by *.bin/*.wem/*.wav above.

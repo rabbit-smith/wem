@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * wwise-wem-wasm — Node parity gate.
+ * wwise-wem-wasm — Node parity test.
  *
  * Proves the wasm shell encodes byte-exactly against the kernel golden
- * contract, through the package's own entry point (src/index.ts, run via
+ * bytes, through the package's own entry point (src/index.ts, run via
  * Node's native type stripping on >= 22.18), and that its profile selection
  * is the structured one of `include/wem.h` (ABI revision 2):
  *
@@ -15,12 +15,12 @@
  *      different chunkings (single chunk, fixed-size chunks, irregular
  *      frame-aligned chunks) must each reproduce the golden — chunk
  *      boundaries never change the output bytes (include/wem.h).
- *   3. SELECTION CONTRACT: the compiled-in generation table, the resolved
+ *   3. SELECTION BEHAVIOUR: the compiled-in generation table, the resolved
  *      selection of every constructor, and the selection error mapping
  *      (unknown version code -> FORMAT_UNSUPPORTED, non-positive geometry ->
  *      STATE_ERROR, unsatisfiable selection -> PROFILE_NOT_FOUND) are
  *      pinned; the profile bundle is compiled in, so nothing is fetched.
- *   4. ERROR CONTRACT: kernel failures surface as JS Errors whose `code` is
+ *   4. ERROR MAPPING: kernel failures surface as JS Errors whose `code` is
  *      the stable WEM_ERR_* string.
  *
  * Run: node js/test-node.mjs   (requires js/pkg-node built: npm run build:node)
@@ -44,8 +44,8 @@ const repoRoot = join(here, "..");
 
 // Pinned kernel golden: tests/fixtures/input.wav (6ch/44.1kHz, 139398 frames)
 // -> tests/fixtures/reference.wem. The profile bundle rides inside the wasm
-// module. The comparison is the committed file's bytes; the red-line SHA-256 of
-// that file is documented in js/README.md and is deliberately not restated here.
+// module. The comparison is the committed file's bytes; the SHA-256 of that
+// file is documented in js/README.md and is deliberately not restated here.
 const RECORDING = join(repoRoot, "tests/fixtures/input.wav");
 const REFERENCE = join(repoRoot, "tests/fixtures/reference.wem");
 const RECORDING_FRAMES = 139398;
@@ -237,7 +237,7 @@ check(
   equal(results[0].data, results[1].data) && equal(results[0].data, results[2].data),
 );
 
-// --- 3) selection contract (directly over the nodejs core) ------------------
+// --- 3) selection behaviour (directly over the nodejs core) -----------------
 const core = await import("./pkg-node/wem_wasm.js");
 
 await expectWemError(
@@ -276,7 +276,7 @@ await expectWemError(
   "WEM_ERR_PROFILE_NOT_FOUND",
 );
 
-// --- 4) error contract ------------------------------------------------------
+// --- 4) error mapping -------------------------------------------------------
 await expectWemError(
   "WAV geometry vs explicit selection -> WEM_ERR_GEOMETRY_MISMATCH",
   () => encodeWav(wavBytes, { version: 0, channels: 2, sampleRate: 48000 }),
@@ -316,7 +316,7 @@ check(
   WEM_ERROR_CODES.join(", "),
 );
 
-// --- 5) 2ch/48000 configuration (fully registered: positive gate) -----------
+// --- 5) 2ch/48000 configuration (fully registered: positive case) -----------
 // The selection must name the 2ch configuration even though the 6ch one is
 // the bundle's default: this catches accidential fallback to a default.
 const TWO_CHANNEL = {
@@ -350,7 +350,7 @@ if (twoChannelEncoder) {
     describe(twoChannelEncoder.selection()),
   );
   // Encode a deterministic 8192-frame 2ch/48k stream, integer arithmetic
-  // only: the positive gate is that encoding succeeds with the right stats,
+  // only: the positive case is that encoding succeeds with the right stats,
   // not the audio quality (that is covered by the Python E2E suite).
   const frames = 8192;
   const twoChannelPcm = new Uint8Array(frames * 2 * 2);
@@ -385,7 +385,7 @@ if (failures > 0) {
   console.error(`\n${failures} check(s) FAILED`);
   process.exit(1);
 }
-console.log("\nALL NODE PARITY GATES PASSED");
+console.log("\nALL NODE PARITY CHECKS PASSED");
 console.log(
   `golden: ${goldenWem.byteLength} bytes identical to tests/fixtures/reference.wem`,
 );

@@ -95,7 +95,7 @@ def verify_or_write_inputs(
         data = render_wav(case)
         entry = entries.get(case)
         if entry is None:
-            raise ValueError(f"manifest has no input contract for {case}")
+            raise ValueError(f"manifest has no input entry for {case}")
         digest = hashlib.sha256(data).hexdigest()
         if digest != entry["input_sha256"]:
             raise ValueError(f"generated input hash differs from manifest for {case}")

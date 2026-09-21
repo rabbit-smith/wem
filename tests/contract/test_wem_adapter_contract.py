@@ -1,4 +1,4 @@
-"""Path-adapter contracts for synthetic WEM containers.
+"""Path-adapter expectations for synthetic WEM containers.
 
 These tests characterize the dictionary schemas and byte preservation
 boundary of the canonical container codecs.

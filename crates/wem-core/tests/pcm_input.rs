@@ -1,4 +1,4 @@
-//! PCM input contract (wem-core).
+//! PCM input handling (wem-core).
 //!
 //! Two things are pinned here:
 //! * the rejection conditions of the byte-backed constructors

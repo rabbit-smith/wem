@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import struct
 import unittest
 
 import wwise_wem_reference.analysis.dsp.transform as transform
@@ -50,41 +48,22 @@ class TransientDetectorTests(unittest.TestCase):
 
     def test_mask_and_history_words_have_stable_state_evolution(self):
         history = WwisePsyHistory()
-        digest = hashlib.sha256()
         flags = []
         for samples, history_window in zip(
             (ZERO, ZERO, ZERO, IMPULSE, ZERO, ZERO, ZERO),
             (1, 2, 3, 4, 0, 0, 1),
         ):
-            mask = wwise_psy_mask(
+            wwise_psy_mask(
                 samples, RESOURCES.transient, RESOURCES.mdct_looks[128], history, history_window=history_window
             )
             flags.append(history.band_flags)
-            float_words = (
-                *mask,
-                *history.energy_ring,
-                history.energy_sum,
-                history.last_energy,
-                *(value for row in history.band_rings for value in row),
-            )
-            int_words = (
-                history.cursor,
-                *history.band_cursors,
-                history.band_flags,
-            )
-            for value in float_words:
-                digest.update(struct.pack("<f", float(value)))
-            for value in int_words:
-                digest.update(struct.pack("<i", int(value)))
 
         self.assertEqual(tuple(flags), (2, 2, 0, 5, 5, 0, 0))
-        # Kept deliberately: the mask/history word sequence has no committed
-        # artifact, so the digest is its only record -- the flag tuple above
-        # pins the decisions, not the evolved state.
-        self.assertEqual(
-            digest.hexdigest(),
-            "2851d13322f1b57d7be0decaf3900bcf6419125767d5b1dcfaa0ca77a99f531f",
-        )
+        # The evolved mask/history words -- mask, energy ring, band rings,
+        # cursors and flags after every quantum -- are asserted
+        # cross-implementation in crates/wem-analysis/tests/transient_parity.rs
+        # (recorded from this oracle sequence by
+        # scripts/record_transient_parity.py).
 
     def test_zero_and_impulse_sequence_snapshot(self):
         detector = _detector(1)

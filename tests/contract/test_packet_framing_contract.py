@@ -1,4 +1,4 @@
-"""Characterization contract for Wwise packet framing helpers."""
+"""Characterization tests for Wwise packet framing helpers."""
 
 from __future__ import annotations
 

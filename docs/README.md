@@ -5,7 +5,7 @@ Start with the [README](../README.md) for what the project is. Then:
 | Document | Read it when |
 | --- | --- |
 | [`guides/usage.md`](guides/usage.md) | Installing the encoder, encoding a file, calling it from each language |
-| [`guides/development.md`](guides/development.md) | Building, running the gates, determinism and repository conventions |
+| [`guides/development.md`](guides/development.md) | Building, running the tests, determinism and repository conventions |
 | [`reference/architecture.md`](reference/architecture.md) | Changing a layer boundary or the encoding flow |
 | [`reference/domain-model.md`](reference/domain-model.md) | Naming anything: the vocabulary is normative |
 | [`reference/profiles.md`](reference/profiles.md) | Touching profile data or its provenance |
@@ -16,8 +16,8 @@ Start with the [README](../README.md) for what the project is. Then:
 
 ## How this tree is organized
 
-- **`reference/`** holds normative surfaces. They describe how the system *is*;
-  a change here is a change to the contract.
+- **`reference/`** describes how the system *is*; a change here is a change to
+  what the code and the tests are expected to do.
 - **`guides/`** holds task instructions. They describe what a person *does*.
 - **`findings/`** holds evidence for a completed result: the observation behind
   each root cause, the accounting that closes, the retractions, and the boundary
@@ -36,5 +36,5 @@ set at the repository root and in each subtree.
 - Relative links only, so the tree works from a checkout, a wheel, and a ZIP
   import alike.
 - Anything a reader could act on goes in `guides/`; anything a reader could
-  verify goes in `findings/`; anything a reader must obey goes in `reference/`
-  or `AGENTS.md`.
+  verify goes in `findings/`; anything a reader is expected to follow goes in
+  `reference/` or `AGENTS.md`.

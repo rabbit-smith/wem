@@ -1,5 +1,5 @@
 //! End-to-end golden parity test: the Rust kernel must reproduce the
-//! reference WEM byte-for-byte (the P2-4 gate).
+//! reference WEM byte-for-byte.
 //!
 //! Oracle: `tests/fixtures/reference.wem`, produced by the Python encoder
 //! from `tests/fixtures/input.wav`.

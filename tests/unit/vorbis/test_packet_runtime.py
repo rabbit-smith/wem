@@ -1,4 +1,3 @@
-import hashlib
 import math
 import unittest
 
@@ -62,25 +61,12 @@ class PacketRuntimeTests(unittest.TestCase):
         )
         packet = result.packet
         self.assertEqual(len(packet), 331)
-        # Kept deliberately: this synthetic state has no committed artifact, so
-        # the digest is the only record of the packed words -- no byte
-        # comparison against a fixture can replace it.
-        self.assertEqual(
-            hashlib.sha256(packet).hexdigest(),
-            "c944326ea93b1004577243073e7cd087a886f3c7dd874662e290abd447e6fab0",
-        )
         q_after = result.quantized_residue
         self.assertEqual((len(q_after), len(q_after[0])), (6, 128))
-        q_bytes = b"".join(
-            int(value).to_bytes(4, "little", signed=True)
-            for row in q_after
-            for value in row
-        )
-        # Same as above: the quantized-residue words exist only in this test.
-        self.assertEqual(
-            hashlib.sha256(q_bytes).hexdigest(),
-            "7af3033268a641f6078352a0a3d25460fd8c50400ed4b852c845044ac19f19bc",
-        )
+        # The packed words and the quantized-residue rows of this synthetic
+        # state are asserted cross-implementation in
+        # crates/wem-core/tests/packet_parity.rs (recorded from this oracle
+        # stage by scripts/record_packet_parity.py).
 
     def test_type2_coupling_propagates_one_sided_floor_use(self):
         n = 128
