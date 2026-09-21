@@ -14,6 +14,7 @@ htmlcov/
 .understand-anything/
 .workflow/
 /crates/target/
+/examples/rust/target/
 js/node_modules/
 *.so
 *.dylib

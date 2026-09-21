@@ -1,0 +1,12 @@
+[package]
+name = "wem-rust-example"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# This manifest is intentionally standalone: it demonstrates consumption from
+# outside the kernel workspace while retaining a local path for this checkout.
+[workspace]
+
+[dependencies]
+wem-core = { path = "../../crates/wem-core" }

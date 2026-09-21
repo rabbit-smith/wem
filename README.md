@@ -132,6 +132,9 @@ codes are pinned there. Every language binding is a thin parallel shell over
 the kernel — PyO3 (`wwise_wem._core`), Node/wasm (`js/`), Go cgo
 (`examples/go-cgo`) — and owns no numerics of its own.
 
+Runnable Python, Rust, C, Go, and browser examples live in
+[`examples/`](examples/README.md).
+
 ## Tests
 
 ```bash
