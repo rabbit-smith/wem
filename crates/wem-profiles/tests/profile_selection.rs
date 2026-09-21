@@ -2,9 +2,9 @@
 //!
 //! The selector is the only profile identity a caller-facing surface exposes,
 //! so its behaviour is pinned here: the version code table, the spelling
-//! round-trip, and the resolution rules — including the two failure modes the
-//! selector exists to make impossible (a geometry-only guess, and a silent
-//! pick when more than one installed profile satisfies the selection).
+//! round-trip, and the resolution rules — including the failure mode the
+//! selector exists to make impossible (a silent pick when more than one
+//! installed profile satisfies the selection).
 
 use wem_profiles::error::ProfileError;
 use wem_profiles::key::ProfileKey;
@@ -195,7 +195,11 @@ fn an_ambiguous_selection_is_rejected_rather_than_picked() {
     // channel layout are two distinct profile keys, so the registry accepts
     // both. A selection cannot tell them apart, and must say so instead of
     // returning whichever came first.
-    let base = wem_profiles::load_wem_profile(SIX_CHANNEL).expect("installed 6ch profile");
+    let base = wem_profiles::embedded_registry()
+        .expect("embedded registry")
+        .resolve_selection(six())
+        .expect("6ch installs")
+        .clone();
     let twin_key = ProfileKey::new(
         base.channels(),
         base.sample_rate(),
@@ -227,10 +231,4 @@ fn an_ambiguous_selection_is_rejected_rather_than_picked() {
         }
         other => panic!("expected AmbiguousProfileSelection, got {other:?}"),
     }
-    // Geometry-only resolution of the same registry is the ambiguous case
-    // the structured selector replaces.
-    assert!(matches!(
-        registry.resolve_geometry(6, 44_100).unwrap_err(),
-        ProfileError::AmbiguousProfileGeometry { .. }
-    ));
 }

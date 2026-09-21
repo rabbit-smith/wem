@@ -15,7 +15,8 @@
 //!   bytes (threadless targets; no filesystem, shared validation)
 //! * [`ResourceRef`] — checksum-addressed resource identity
 //! * [`ResourceBackend`] — filesystem or in-memory byte source
-//! * [`load_wem_profile`] / [`resolve_wem_profile`] — exact identity lookup
+//! * [`resolve_wem_profile_selection`] — exact identity lookup from the
+//!   structured selector
 //! * typed table loaders: [`load_mdct_looks`], [`load_transient_tables`],
 //!   [`load_frozen_tables`], [`load_book_table`], and the
 //!   [`psychoacoustics`] loaders
@@ -59,8 +60,7 @@ pub use quality::{
     QUALITY_CURVES_INTERPOLATION, QUALITY_CURVES_RESOURCE, QUALITY_CURVES_SCHEMA,
 };
 pub use registry::{
-    embedded_registry, installed_registry, load_wem_profile, load_wem_profile_quality,
-    resolve_wem_profile, resolve_wem_profile_quality, resolve_wem_profile_selection,
+    embedded_registry, installed_registry, resolve_wem_profile_selection,
     resolve_wem_profile_selection_quality, ProfileRegistry,
 };
 pub use resources::{normalize_resource_path, ResourceBackend, ResourceRef};

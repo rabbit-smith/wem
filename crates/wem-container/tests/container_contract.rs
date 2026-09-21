@@ -61,10 +61,11 @@ repo = Path(sys.argv[1])
 sys.path.insert(0, str(repo / "src"))
 sys.path.insert(0, str(repo / "reference"))
 
+import wwise_wem
 import wwise_wem_reference.python_engine as python_engine
 from wwise_wem_reference.container.model import ContainerPlan
 from wwise_wem.adapters.wav import read_pcm_wav
-from wwise_wem.profiles.registry import resolve_wem_profile
+from wwise_wem.profiles.registry import resolve_selection
 
 captured = {}
 original_build = python_engine.build_vorbis_wem
@@ -84,7 +85,11 @@ def capture_build(fmt_fields, packets, **kw):
 python_engine.build_vorbis_wem = capture_build
 try:
     pcm = read_pcm_wav(repo / "tests/fixtures/input.wav")
-    profile = resolve_wem_profile(pcm.channel_count, pcm.sample_rate)
+    profile = resolve_selection(
+        wwise_wem.WwiseProfile(
+            wwise_wem.WwiseVersion.WWISE2013, pcm.channel_count, pcm.sample_rate
+        )
+    )
     python_engine.encode_pcm_python(
         profile=profile,
         container=ContainerPlan.from_profile(profile),

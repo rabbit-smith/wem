@@ -19,16 +19,13 @@ use wem_container::riff::Endian;
 use wem_container::wem::build_vorbis_wem;
 use wem_profiles::assembly::assemble_encoder_profile_resources;
 use wem_profiles::assembly::EncoderProfileResources;
-use wem_profiles::bundle::{load_profile_bundle, load_profile_bundle_from_bytes, ProfileBundle};
-pub use wem_profiles::data::DataDir;
+use wem_profiles::bundle::ProfileBundle;
 use wem_profiles::embedded::load_embedded_profile_bundle;
 use wem_profiles::error::ProfileError;
 use wem_profiles::model::ContainerMetadata;
 use wem_profiles::model::EncoderProfile;
-use wem_profiles::registry::{
-    embedded_registry, resolve_wem_profile_selection_quality, ProfileRegistry,
-};
-use wem_profiles::selection::WwiseProfile;
+use wem_profiles::registry::resolve_wem_profile_selection_quality;
+use wem_profiles::selection::{WwiseProfile, WwiseVersion};
 use wem_vorbis::codebook::Codebook;
 use wem_vorbis::setup::SetupInfo;
 
@@ -170,9 +167,16 @@ pub struct ContainerPlan {
 impl ContainerPlan {
     /// Fresh plan from one installed profile
     /// (Python `_ContainerPlan.from_profile`).
+    ///
+    /// The plan carries the profile's own container metadata; the provenance
+    /// label is the name-free selection description (geometry plus Wwise
+    /// generation), never the internal profile name.
     pub fn from_profile(profile: &EncoderProfile) -> Self {
         let meta = profile.container_metadata();
         let fmt = from_container_metadata(meta);
+        let version = WwiseVersion::from_generation(profile.key().generation())
+            .map(|version| version.label().to_string())
+            .unwrap_or_else(|_| profile.key().generation().to_string());
         Self {
             fmt,
             endian: if profile.endian() == "be" {
@@ -193,7 +197,12 @@ impl ContainerPlan {
                     Some((chunk_id, payload.clone()))
                 })
                 .collect(),
-            metadata_source: format!("profile:{}", profile.name()),
+            metadata_source: format!(
+                "profile:{}ch/{}Hz/{}",
+                profile.channels(),
+                profile.sample_rate(),
+                version
+            ),
         }
     }
 
@@ -318,147 +327,26 @@ impl Encoder {
         Self::from_profile_model(&profile, None)
     }
 
-    /// Load one installed profile by name and construct the encoder
-    /// (Python `load_wem_profile` + `Encoder.__init__`).
-    pub fn from_profile(name: &str) -> Result<Self, EncoderError> {
-        Self::from_profile_quality(name, None)
-    }
-
-    /// Load one installed profile from an explicit profile data tree.
-    pub fn from_profile_in(data: &DataDir, name: &str) -> Result<Self, EncoderError> {
-        Self::from_profile_quality_in(data, name, None)
-    }
-
-    /// Load one installed profile bound to an explicit quality factor
-    /// (Python `load_wem_profile(name, quality=...)` + `Encoder.__init__`).
+    /// Construct from an already-resolved encoder profile (Python
+    /// `Encoder.__init__`).
     ///
-    /// `None` reproduces the historical behavior exactly; with a quality
-    /// value the analysis-resource assembly interpolates the profile's
-    /// quality curves (a missing quality-curves resource is a clear
-    /// configuration error, never a silent fallback).
-    pub fn from_profile_quality(name: &str, quality: Option<f64>) -> Result<Self, EncoderError> {
-        let bundle = load_embedded_named_bundle(name)?;
-        let mut profile = bundle.to_encoder_profile()?;
-        if let Some(quality) = quality {
-            profile = profile
-                .with_quality(quality)
-                .map_err(|error| EncoderError::Internal(InternalError::Profile(error)))?;
-        }
-        Self::from_profile_and_bundle(&profile, None, &bundle)
-    }
-
-    /// Load one installed profile from an explicit profile data tree and
-    /// optionally bind a quality factor. The tree is the one passed in: the
-    /// kernel resolves no profile data from the process environment.
-    pub fn from_profile_quality_in(
-        data: &DataDir,
-        name: &str,
-        quality: Option<f64>,
-    ) -> Result<Self, EncoderError> {
-        let bundle = load_named_bundle(data, name)?;
-        let mut profile = bundle.to_encoder_profile()?;
-        if let Some(quality) = quality {
-            profile = profile
-                .with_quality(quality)
-                .map_err(|error| EncoderError::Internal(InternalError::Profile(error)))?;
-        }
-        Self::from_profile_and_bundle(&profile, None, &bundle)
-    }
-
-    /// Construct from an encoder profile (Python `Encoder.__init__`).
+    /// This is the internal bridge used by [`Encoder::new_with_quality`]
+    /// once a [`WwiseProfile`] has been resolved against the installed
+    /// bundle. It is deliberately not part of the caller-facing surface:
+    /// callers select with a [`WwiseProfile`], never with a profile
+    /// identity, name, path or index bytes.
     ///
     /// `container` may override the profile-derived container plan
     /// (Python `_container` parameter); the geometry cross-check still
-    /// applies. A quality factor bound to the profile (see
-    /// [`wem_profiles::load_wem_profile_quality`]) is forwarded to the
-    /// analysis-resource assembly; with no quality the historical bytes
-    /// are reproduced exactly.
-    pub fn from_profile_model(
+    /// applies. A quality factor already bound to the profile is forwarded
+    /// to the analysis-resource assembly; with no quality the historical
+    /// bytes are reproduced exactly.
+    pub(crate) fn from_profile_model(
         profile: &EncoderProfile,
         container: Option<ContainerPlan>,
     ) -> Result<Self, EncoderError> {
         let bundle = load_embedded_named_bundle(profile.name())?;
         Self::from_profile_and_bundle(profile, container, &bundle)
-    }
-
-    /// Construct from an encoder profile using an explicit profile data
-    /// tree. The tree is the one passed in, never an ambient default.
-    pub fn from_profile_model_in(
-        data: &DataDir,
-        profile: &EncoderProfile,
-        container: Option<ContainerPlan>,
-    ) -> Result<Self, EncoderError> {
-        let bundle = load_profile_bundle(data, Some(profile.name()), false)?;
-        Self::from_profile_and_bundle(profile, container, &bundle)
-    }
-
-    /// Construct the encoder from an in-memory profile bundle — no
-    /// filesystem access (the threadless / wasm32-unknown-unknown entry).
-    ///
-    /// `index` and `files` carry the profile bytes exactly as documented on
-    /// [`wem_profiles::load_profile_bundle_from_bytes`]; the index `default`
-    /// profile is selected and every logical resource is SHA-256 verified on
-    /// load. The output bytes are identical to the filesystem path for the
-    /// same profile (see the `bytes_parity` integration test).
-    pub fn from_profile_bytes(
-        index: &[u8],
-        files: impl IntoIterator<Item = (String, Vec<u8>)>,
-    ) -> Result<Self, EncoderError> {
-        Self::from_profile_bytes_with_quality(index, files, None)
-    }
-
-    /// Construct from a named profile in an in-memory bundle.
-    pub fn from_profile_bytes_named(
-        name: &str,
-        index: &[u8],
-        files: impl IntoIterator<Item = (String, Vec<u8>)>,
-    ) -> Result<Self, EncoderError> {
-        Self::from_profile_bytes_named_with_quality(name, index, files, None)
-    }
-
-    /// The bytes entry with an explicit quality factor: the same
-    /// verification as [`from_profile_bytes`](Self::from_profile_bytes),
-    /// with the quality bound to the assembled profile and forwarded to
-    /// the analysis-resource assembly (None keeps the historical bytes).
-    pub fn from_profile_bytes_with_quality(
-        index: &[u8],
-        files: impl IntoIterator<Item = (String, Vec<u8>)>,
-        quality: Option<f64>,
-    ) -> Result<Self, EncoderError> {
-        Self::from_profile_bytes_selected(index, files, None, quality)
-    }
-
-    /// Construct from a named profile in an in-memory bundle and optionally
-    /// bind a quality factor.
-    pub fn from_profile_bytes_named_with_quality(
-        name: &str,
-        index: &[u8],
-        files: impl IntoIterator<Item = (String, Vec<u8>)>,
-        quality: Option<f64>,
-    ) -> Result<Self, EncoderError> {
-        Self::from_profile_bytes_selected(index, files, Some(name), quality)
-    }
-
-    fn from_profile_bytes_selected(
-        index: &[u8],
-        files: impl IntoIterator<Item = (String, Vec<u8>)>,
-        name: Option<&str>,
-        quality: Option<f64>,
-    ) -> Result<Self, EncoderError> {
-        let bundle = match load_profile_bundle_from_bytes(index, files, name, true) {
-            Ok(bundle) => bundle,
-            Err(ProfileError::ProfileNotInIndex { profile }) => {
-                return Err(EncoderError::ProfileNotFound { requested: profile });
-            }
-            Err(error) => return Err(EncoderError::Internal(InternalError::Profile(error))),
-        };
-        let mut profile = bundle.to_encoder_profile()?;
-        if let Some(quality) = quality {
-            profile = profile
-                .with_quality(quality)
-                .map_err(|error| EncoderError::Internal(InternalError::Profile(error)))?;
-        }
-        Self::from_profile_and_bundle(&profile, None, &bundle)
     }
 
     /// Shared construction from one profile identity + one verified bundle;
@@ -676,28 +564,6 @@ fn analysis_resources_pending(bundle: &ProfileBundle) -> bool {
         .any(|key| bundle.runtime_manifest().resource(key).is_err())
 }
 
-/// Resolve an installed profile by PCM geometry
-/// (Python `resolve_wem_profile`; used by the CLI when no profile is named).
-pub fn resolve_profile_by_geometry(
-    channels: i64,
-    sample_rate: i64,
-) -> Result<Encoder, EncoderError> {
-    let registry = embedded_registry()?;
-    let profile = registry.resolve_geometry(channels, sample_rate)?;
-    Encoder::from_profile_model(profile, None)
-}
-
-/// Resolve a profile by PCM geometry from an explicit profile data tree.
-pub fn resolve_profile_by_geometry_in(
-    data: &DataDir,
-    channels: i64,
-    sample_rate: i64,
-) -> Result<Encoder, EncoderError> {
-    let registry: ProfileRegistry = wem_profiles::registry::installed_registry(data)?;
-    let profile = registry.resolve_geometry(channels, sample_rate)?;
-    Encoder::from_profile_model_in(data, profile, None)
-}
-
 /// Map a profile-resolution failure onto the caller-facing error class.
 ///
 /// A selection that names no installed profile, or more than one, is a
@@ -718,18 +584,6 @@ fn selection_error(error: &ProfileError, selection: WwiseProfile) -> EncoderErro
             message: error.to_string(),
         },
         other => EncoderError::Internal(InternalError::Profile(other.clone())),
-    }
-}
-
-fn load_named_bundle(data: &DataDir, name: &str) -> Result<ProfileBundle, EncoderError> {
-    match load_profile_bundle(data, Some(name), false) {
-        Ok(bundle) => Ok(bundle),
-        Err(ProfileError::ProfileNotInIndex { .. }) | Err(ProfileError::UnknownProfile { .. }) => {
-            Err(EncoderError::ProfileNotFound {
-                requested: name.to_string(),
-            })
-        }
-        Err(error) => Err(EncoderError::Internal(InternalError::Profile(error))),
     }
 }
 

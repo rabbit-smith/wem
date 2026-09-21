@@ -52,38 +52,12 @@ use wem_analysis::dsp::transform::apply_vorbis_window;
 use wem_analysis::preprocessing::streaming::StreamingPcmFeeder;
 use wem_analysis::preprocessing::windowing::WindowedFrame;
 use wem_analysis::session::AnalysisSession;
-use wem_profiles::data::DataDir;
-use wem_profiles::registry::{embedded_registry, installed_registry, ProfileRegistry};
 use wem_profiles::selection::WwiseProfile;
 use wem_scheduling::{append_samples, emit_block, required_samples, FramePlan, SchedulerState};
 
 use crate::encoder::{EncodeResult, EncodeStats, Encoder, MIN_PCM_FRAMES};
 use crate::error::{EncoderError, InternalError};
 use crate::pack::pack_analysis_packet;
-
-/// Profile selection reference.
-///
-/// A hard identity assertion (setup SHA-256) plus an optional soft name
-/// cross-check; this type intentionally carries only these two fields.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProfileRef {
-    /// Hard identity assertion: must exactly match an installed profile's
-    /// setup SHA-256 (lowercase hex).
-    pub setup_sha256: String,
-    /// Soft cross-check: compared against the resolved profile name; a
-    /// mismatch is a state error (the reference semantics reject it).
-    pub name: Option<String>,
-}
-
-impl ProfileRef {
-    /// A reference that asserts both the setup digest and the name.
-    pub fn with_name(setup_sha256: impl Into<String>, name: impl Into<String>) -> Self {
-        Self {
-            setup_sha256: setup_sha256.into(),
-            name: Some(name.into()),
-        }
-    }
-}
 
 /// One packet emitted by a streaming encode.
 ///
@@ -111,9 +85,11 @@ const STREAM_LOOKAHEAD: i64 = 2048;
 
 /// One streaming encode session (the core streaming lifecycle).
 ///
-/// Build with [`StreamSession::new`] and drive `init_profile` ->
-/// `push_pcm_chunk`* -> `finish`, or use the convenience constructor
-/// [`StreamSession::for_profile_ref`].
+/// Build with [`StreamSession::for_selection`] (the only caller-facing
+/// opener: it resolves a structured [`WwiseProfile`] against the bundle
+/// compiled into this library) and drive `push_pcm_chunk`* -> `finish`;
+/// [`StreamSession::new`] is the unopened state the shells construct
+/// before a selection is known.
 pub struct StreamSession {
     initialized: bool,
     finished: bool,
@@ -462,156 +438,6 @@ impl StreamSession {
         }
     }
 
-    /// Open the session on one installed profile (`Init`).
-    ///
-    /// - `PROFILE_NOT_FOUND` when no installed profile's setup SHA-256 matches.
-    /// - `STATE_ERROR` on a second Init or a soft `name` cross-check failure.
-    pub fn init_profile(&mut self, ref_: &ProfileRef) -> Result<(), EncoderError> {
-        self.init_profile_quality(ref_, None)
-    }
-
-    /// Open the session on one installed profile from an explicit data tree.
-    pub fn init_profile_in(
-        &mut self,
-        data: &DataDir,
-        ref_: &ProfileRef,
-    ) -> Result<(), EncoderError> {
-        self.init_profile_quality_in(data, ref_, None)
-    }
-
-    /// Open the session on one installed profile with an explicit quality
-    /// factor (`Init` quality variant).
-    ///
-    /// The quality is bound to the resolved profile and forwarded to the
-    /// analysis-resource assembly (the profile-internal quality
-    /// interpolation); `None` reproduces the historical bytes exactly.
-    ///
-    /// - `PROFILE_NOT_FOUND` when no installed profile's setup SHA-256 matches.
-    /// - `STATE_ERROR` on a second Init, a soft `name` cross-check failure,
-    ///   a non-finite quality, or a setup-pending (draft) profile.
-    pub fn init_profile_quality(
-        &mut self,
-        ref_: &ProfileRef,
-        quality: Option<f64>,
-    ) -> Result<(), EncoderError> {
-        let registry = embedded_registry()?;
-        self.init_profile_quality_with_registry(None, registry, ref_, quality)
-    }
-
-    /// Open the session on one installed profile from an explicit data tree
-    /// and optionally bind a quality factor. The tree is the one passed in,
-    /// never an ambient default.
-    pub fn init_profile_quality_in(
-        &mut self,
-        data: &DataDir,
-        ref_: &ProfileRef,
-        quality: Option<f64>,
-    ) -> Result<(), EncoderError> {
-        let registry = installed_registry(data)?;
-        self.init_profile_quality_with_registry(Some(data), registry, ref_, quality)
-    }
-
-    fn init_profile_quality_with_registry(
-        &mut self,
-        data: Option<&DataDir>,
-        registry: ProfileRegistry,
-        ref_: &ProfileRef,
-        quality: Option<f64>,
-    ) -> Result<(), EncoderError> {
-        if self.initialized || self.finished {
-            return Err(EncoderError::StateError {
-                message: "Init must be the first request".into(),
-            });
-        }
-        if let Some(quality) = quality {
-            if !quality.is_finite() {
-                return Err(EncoderError::StateError {
-                    message: "profile quality must be a finite number".into(),
-                });
-            }
-        }
-        let wanted = ref_.setup_sha256.to_lowercase();
-        if wanted.is_empty() {
-            return Err(EncoderError::ProfileNotFound {
-                requested: ref_.setup_sha256.clone(),
-            });
-        }
-        let candidate = registry
-            .list()
-            .into_iter()
-            .find(|profile| profile.setup_sha256() == wanted);
-        let profile = match candidate {
-            Some(profile) => profile,
-            None => {
-                return Err(EncoderError::ProfileNotFound {
-                    requested: ref_.setup_sha256.clone(),
-                })
-            }
-        };
-        if let Some(name) = &ref_.name {
-            if name != profile.name() {
-                return Err(EncoderError::StateError {
-                    message: format!(
-                        "profile name mismatch: setup_sha256 resolves to \
-                         '{}', not '{name}'",
-                        profile.name()
-                    ),
-                });
-            }
-        }
-        let profile = match quality {
-            Some(quality) => profile
-                .with_quality(quality)
-                .map_err(|error| EncoderError::Internal(InternalError::Profile(error)))?,
-            None => profile,
-        };
-        let encoder = match data {
-            Some(data) => Encoder::from_profile_model_in(data, &profile, None)?,
-            None => Encoder::from_profile_model(&profile, None)?,
-        };
-        let pipeline = StreamPipeline::new(&encoder)?;
-        self.encoder = Some(encoder);
-        self.pipeline = Some(pipeline);
-        self.initialized = true;
-        Ok(())
-    }
-
-    /// Convenience constructor: `new()` + `init_profile()`.
-    pub fn for_profile_ref(ref_: &ProfileRef) -> Result<Self, EncoderError> {
-        let mut session = Self::new();
-        session.init_profile(ref_)?;
-        Ok(session)
-    }
-
-    /// Convenience constructor over an explicit profile data tree.
-    pub fn for_profile_ref_in(data: &DataDir, ref_: &ProfileRef) -> Result<Self, EncoderError> {
-        let mut session = Self::new();
-        session.init_profile_in(data, ref_)?;
-        Ok(session)
-    }
-
-    /// Convenience constructor: `new()` + `init_profile_quality()`.
-    pub fn for_profile_ref_quality(
-        ref_: &ProfileRef,
-        quality: Option<f64>,
-    ) -> Result<Self, EncoderError> {
-        let mut session = Self::new();
-        session.init_profile_quality(ref_, quality)?;
-        Ok(session)
-    }
-
-    /// Convenience constructor over an explicit profile data tree with an
-    /// optional quality factor.
-    pub fn for_profile_ref_quality_in(
-        data: &DataDir,
-        ref_: &ProfileRef,
-        quality: Option<f64>,
-    ) -> Result<Self, EncoderError> {
-        let mut session = Self::new();
-        session.init_profile_quality_in(data, ref_, quality)?;
-        Ok(session)
-    }
-
     /// Open a streaming session on a structured profile selection — the
     /// only caller-facing profile selector (generation + geometry).
     ///
@@ -630,94 +456,6 @@ impl StreamSession {
         Self::from_encoder(Encoder::new_with_quality(selection, quality)?)
     }
 
-    /// Open a streaming session by installed profile name from the default
-    /// embedded profile bundle.
-    pub fn for_profile(name: &str) -> Result<Self, EncoderError> {
-        Self::from_encoder(Encoder::from_profile(name)?)
-    }
-
-    /// Open a streaming session by installed profile name from an explicit
-    /// data tree.
-    pub fn for_profile_in(data: &DataDir, name: &str) -> Result<Self, EncoderError> {
-        let encoder = Encoder::from_profile_in(data, name)?;
-        Self::from_encoder(encoder)
-    }
-
-    /// Open the session on one profile carried entirely as bytes (`Init`
-    /// from a bytes bundle; the threadless / wasm32-unknown-unknown entry).
-    ///
-    /// `index` / `files` are the profile bytes as documented on
-    /// [`Encoder::from_profile_bytes`]; every logical resource is SHA-256
-    /// verified on load. The reference is then asserted against the
-    /// selected profile with the same semantics as [`init_profile`](Self::init_profile):
-    ///
-    /// - `PROFILE_NOT_FOUND` when the bundle's setup SHA-256 does not match
-    ///   `ref_.setup_sha256`.
-    /// - `STATE_ERROR` on a soft `name` cross-check failure.
-    pub fn for_profile_ref_bytes(
-        ref_: &ProfileRef,
-        index: &[u8],
-        files: impl IntoIterator<Item = (String, Vec<u8>)>,
-    ) -> Result<Self, EncoderError> {
-        let encoder = match ref_.name.as_deref() {
-            Some(name) => Encoder::from_profile_bytes_named(name, index, files)
-                .map_err(|error| Self::map_named_bytes_error(error, name))?,
-            None => Encoder::from_profile_bytes(index, files)?,
-        };
-        Self::validate_profile_ref(&encoder, ref_)?;
-        Self::from_encoder(encoder)
-    }
-
-    /// The bytes entry with an explicit quality factor: same semantics as
-    /// [`for_profile_ref_bytes`](Self::for_profile_ref_bytes), with the
-    /// quality bound to the assembled profile and forwarded to the
-    /// analysis-resource assembly (`None` keeps the historical bytes).
-    pub fn for_profile_ref_bytes_quality(
-        ref_: &ProfileRef,
-        index: &[u8],
-        files: impl IntoIterator<Item = (String, Vec<u8>)>,
-        quality: Option<f64>,
-    ) -> Result<Self, EncoderError> {
-        let encoder = match ref_.name.as_deref() {
-            Some(name) => {
-                Encoder::from_profile_bytes_named_with_quality(name, index, files, quality)
-                    .map_err(|error| Self::map_named_bytes_error(error, name))?
-            }
-            None => Encoder::from_profile_bytes_with_quality(index, files, quality)?,
-        };
-        Self::validate_profile_ref(&encoder, ref_)?;
-        Self::from_encoder(encoder)
-    }
-
-    fn validate_profile_ref(encoder: &Encoder, ref_: &ProfileRef) -> Result<(), EncoderError> {
-        let profile = encoder.profile();
-        if profile.setup_sha256() != ref_.setup_sha256.to_lowercase() {
-            return Err(EncoderError::ProfileNotFound {
-                requested: ref_.setup_sha256.clone(),
-            });
-        }
-        if let Some(name) = &ref_.name {
-            if name != profile.name() {
-                return Err(EncoderError::StateError {
-                    message: format!(
-                        "profile name mismatch: setup_sha256 resolves to '{}', not '{name}'",
-                        profile.name()
-                    ),
-                });
-            }
-        }
-        Ok(())
-    }
-
-    fn map_named_bytes_error(error: EncoderError, name: &str) -> EncoderError {
-        match error {
-            EncoderError::ProfileNotFound { .. } => EncoderError::StateError {
-                message: format!("profile name mismatch: '{name}' is absent from profile bundle"),
-            },
-            other => other,
-        }
-    }
-
     fn from_encoder(encoder: Encoder) -> Result<Self, EncoderError> {
         let pipeline = StreamPipeline::new(&encoder)?;
         Ok(Self {
@@ -727,6 +465,8 @@ impl StreamSession {
             pipeline: Some(pipeline),
         })
     }
+
+    /// Push one chunk of little-endian signed-16 interleaved PCM bytes
     /// and return the packets that just completed.
     ///
     /// `STATE_ERROR` before Init or after Finish; `GEOMETRY_MISMATCH` when

@@ -23,11 +23,15 @@ use std::time::Instant;
 use sha2::{Digest, Sha256};
 use wem_container::load_wem_parts_bytes;
 use wem_core::encoder::{Encoder, Pcm16};
-use wem_core::stream::{ProfileRef, StreamSession};
+use wem_core::stream::StreamSession;
 use wem_core::usecases::wav::read_pcm16;
+use wem_core::{WwiseProfile, WwiseVersion};
 
-const PROFILE_NAME: &str = "wwise2013-6ch-44100";
-const SETUP_SHA256: &str = "3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3";
+/// The fixture profile selection: the installed Wwise 2013 6ch/44100
+/// configuration.
+fn fixture_selection() -> WwiseProfile {
+    WwiseProfile::new(WwiseVersion::Wwise2013, 6, 44_100).expect("fixture selection")
+}
 
 fn fixtures_dir() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -35,35 +39,6 @@ fn fixtures_dir() -> std::path::PathBuf {
         .join("tests/fixtures")
         .canonicalize()
         .expect("fixtures directory resolves")
-}
-
-fn read_profile_bytes_bundle() -> (Vec<u8>, Vec<(String, Vec<u8>)>) {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join("src/wwise_wem/data/profiles")
-        .canonicalize()
-        .expect("profiles directory resolves");
-    let index = std::fs::read(dir.join("index.json")).expect("index.json reads");
-    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
-    fn walk(base: &std::path::Path, cur: &std::path::Path, out: &mut Vec<(String, Vec<u8>)>) {
-        for entry in std::fs::read_dir(cur).expect("directory reads") {
-            let entry = entry.expect("directory entry");
-            let path = entry.path();
-            if path.is_dir() {
-                walk(base, &path, out);
-            } else if path.file_name() != Some("index.json".as_ref()) {
-                let rel = path.strip_prefix(base).expect("path under profiles dir");
-                // Canonical POSIX keys: the bytes contract is platform-
-                // independent (no OS separator may reach the kernel).
-                out.push((
-                    rel.to_string_lossy().replace('\\', "/"),
-                    std::fs::read(&path).expect("resource file reads"),
-                ));
-            }
-        }
-    }
-    walk(&dir, &dir, &mut files);
-    (index, files)
 }
 
 // ---------------------------------------------------------------------------
@@ -76,10 +51,7 @@ fn run_session_with_chunks(
     le_bytes: &[u8],
     cuts: &[usize],
 ) -> (Vec<Vec<u8>>, wem_core::EncodeResult) {
-    let (index, files) = read_profile_bytes_bundle();
-    let ref_ = ProfileRef::with_name(SETUP_SHA256, PROFILE_NAME);
-    let mut session =
-        StreamSession::for_profile_ref_bytes(&ref_, &index, files).expect("bytes init");
+    let mut session = StreamSession::for_selection(fixture_selection()).expect("session opens");
     let mut emitted: Vec<Vec<u8>> = Vec::new();
     let mut offset = 0usize;
     for &cut in cuts {
@@ -161,7 +133,7 @@ fn stream_bytes_match_encode_pcm_across_chunking_strategies() {
     let le_bytes: Vec<u8> = wav.interleaved_le_bytes();
     let channels = wav.channels();
 
-    let encoder = Encoder::from_profile(PROFILE_NAME).expect("fs encoder builds");
+    let encoder = Encoder::new(fixture_selection()).expect("fs encoder builds");
     let pcm = wav.to_pcm16().expect("wav converts to Pcm16");
     let reference = encoder.encode_pcm(&pcm).expect("encode runs");
 
@@ -260,11 +232,9 @@ fn tri(i: u64, period: u64, seed: u64) -> f64 {
     }
 }
 
-/// Build a fresh streaming session from the on-disk profile bundle.
+/// Build a fresh streaming session on the fixture selection.
 fn build_session() -> StreamSession {
-    let (index, files) = read_profile_bytes_bundle();
-    let ref_ = ProfileRef::with_name(SETUP_SHA256, PROFILE_NAME);
-    StreamSession::for_profile_ref_bytes(&ref_, &index, files).expect("bytes init")
+    StreamSession::for_selection(fixture_selection()).expect("session opens")
 }
 
 /// Drive `duration` seconds in 10 s chunks and finish (no RSS assertion —
@@ -474,7 +444,7 @@ fn stream_tail_matches_batch_when_final_center_crosses_source_end() {
     }
     let pcm = Pcm16::from_interleaved_le(SAMPLE_RATE, CHANNELS, &pcm_bytes)
         .expect("synthetic PCM parses");
-    let expected = Encoder::from_profile(PROFILE_NAME)
+    let expected = Encoder::new(fixture_selection())
         .expect("encoder builds")
         .encode_pcm(&pcm)
         .expect("batch encode runs");
@@ -510,7 +480,7 @@ fn encode_pcm_release_median_within_gate() {
         return;
     }
 
-    let encoder = Encoder::from_profile(PROFILE_NAME).expect("fs encoder builds");
+    let encoder = Encoder::new(fixture_selection()).expect("fs encoder builds");
     let wav = read_pcm16(&fixtures_dir().join("input.wav")).expect("input.wav reads");
     let pcm = wav.to_pcm16().expect("wav converts to Pcm16");
 

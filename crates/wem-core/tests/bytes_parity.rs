@@ -1,34 +1,35 @@
-//! Bytes-entry parity test (the wasm32-unknown-unknown path).
+//! Profile-bundle bytes assembly: index -> manifest -> verified resources.
 //!
-//! The in-memory entry points (`Encoder::from_profile_bytes`,
-//! `StreamSession::for_profile_ref_bytes`,
-//! `wem_profiles::load_profile_bundle_from_bytes`) must produce
-//! byte-identical output to the filesystem entries for the same profile,
-//! and must reject exactly what the shared validator rejects (zero drift).
+//! The bytes loader (`wem_profiles::load_profile_bundle_from_bytes`) is the
+//! threadless profile-assembly path (wasm32-unknown-unknown): every logical
+//! resource is SHA-256 verified on load, and it must accept and reject
+//! exactly what the filesystem loader does (shared validator, zero drift).
 //!
 //! These tests run natively: they read the fixture profile tree from disk
-//! only to build the bytes input — the bytes entry itself never touches
+//! only to build the bytes input — the bytes loader itself never touches
 //! the filesystem.
 
 use sha2::{Digest, Sha256};
-use wem_core::encoder::{Encoder, Pcm16};
-use wem_core::stream::{ProfileRef, StreamSession};
+use wem_core::encoder::Encoder;
+use wem_core::stream::StreamSession;
 use wem_core::usecases::wav::read_pcm16;
+use wem_core::{WwiseProfile, WwiseVersion};
 
 const PROFILE_NAME: &str = "wwise2013-6ch-44100";
-const GOLDEN_WEM_SHA256: &str = "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247";
 const SETUP_SHA256: &str = "3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3";
 const TWO_CHANNEL_PROFILE_NAME: &str = "wwise2013-2ch-48000";
 const TWO_CHANNEL_SETUP_SHA256: &str =
     "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc";
 
-fn fixtures_dir() -> std::path::PathBuf {
-    // CARGO_MANIFEST_DIR = <root>/crates/wem-core
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join("tests/fixtures")
-        .canonicalize()
-        .expect("fixtures directory resolves")
+/// The fixture profile selection: the installed Wwise 2013 6ch/44100
+/// configuration.
+fn fixture_selection() -> WwiseProfile {
+    WwiseProfile::new(WwiseVersion::Wwise2013, 6, 44_100).expect("6ch/44100 selection")
+}
+
+/// The installed Wwise 2013 2ch/48000 configuration.
+fn two_channel_selection() -> WwiseProfile {
+    WwiseProfile::new(WwiseVersion::Wwise2013, 2, 48_000).expect("2ch/48000 selection")
 }
 
 /// The profiles tree the Rust kernel resolves from the repo layout.
@@ -42,7 +43,7 @@ fn profiles_dir() -> std::path::PathBuf {
 
 /// Read every file of the profile tree as (profiles-dir-relative POSIX
 /// path, bytes) pairs plus the raw index document — the exact input the
-/// bytes entry expects (native fs read, bytes entry only).
+/// bytes loader expects (native fs read, bytes loader only).
 fn read_profile_bytes_bundle() -> (Vec<u8>, Vec<(String, Vec<u8>)>) {
     let dir = profiles_dir();
     let index = std::fs::read(dir.join("index.json")).expect("index.json reads");
@@ -70,106 +71,76 @@ fn read_profile_bytes_bundle() -> (Vec<u8>, Vec<(String, Vec<u8>)>) {
     (index, files)
 }
 
-fn read_fixture(name: &str) -> Vec<u8> {
-    std::fs::read(fixtures_dir().join(name)).expect("fixture file reads")
-}
-
 fn two_channel_dir() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join("tests/data/2ch-reference")
 }
 
-fn encode_once(encoder: &Encoder) -> wem_core::EncodeResult {
-    let wav = read_pcm16(&fixtures_dir().join("input.wav")).expect("input.wav reads");
-    let pcm = wav.to_pcm16().expect("wav converts to Pcm16");
-    encoder.encode_pcm(&pcm).expect("encode runs")
-}
-
 // ---------------------------------------------------------------------------
-// 1. One-shot encode: bytes entry == filesystem entry (Vec<u8> equality)
+// 1. The bytes bundle resolves the same identity as the installed selection
 // ---------------------------------------------------------------------------
 
 #[test]
-fn bytes_encoder_matches_fs_encoder_byte_for_byte() {
+fn bytes_bundle_matches_the_installed_selection() {
     let (index, files) = read_profile_bytes_bundle();
-    let encoder_bytes =
-        Encoder::from_profile_bytes(&index, files.clone()).expect("bytes encoder builds");
-    let encoder_fs = Encoder::from_profile(PROFILE_NAME).expect("fs encoder builds");
+    let from_bytes = wem_profiles::load_profile_bundle_from_bytes(&index, files, None, true)
+        .expect("bytes bundle verifies")
+        .to_encoder_profile()
+        .expect("bytes bundle profile");
+    let installed =
+        wem_profiles::resolve_wem_profile_selection(fixture_selection()).expect("6ch resolves");
 
-    let result_bytes = encode_once(&encoder_bytes);
-    let result_fs = encode_once(&encoder_fs);
+    // One identity, one setup digest: the bytes assembly and the installed
+    // selection agree on what the 6ch/44100 configuration is.
+    assert_eq!(from_bytes.name(), PROFILE_NAME);
+    assert_eq!(from_bytes.setup_sha256(), SETUP_SHA256);
+    assert_eq!(from_bytes.key(), installed.key());
+    assert_eq!(from_bytes.setup_sha256(), installed.setup_sha256());
 
-    // The two construction paths must produce identical WEM bytes.
-    assert_eq!(
-        result_bytes.data, result_fs.data,
-        "bytes entry WEM differs from encode_pcm WEM"
-    );
-    // ...and that is the reference golden.
-    let sha = wem_profiles::resources::hex(Sha256::digest(&result_bytes.data));
-    println!(
-        "bytes-entry WEM sha256: {} (len {})",
-        sha,
-        result_bytes.data.len()
-    );
-    assert_eq!(
-        sha, GOLDEN_WEM_SHA256,
-        "bytes entry WEM differs from golden"
-    );
-    assert_eq!(result_bytes.data, read_fixture("reference.wem"));
-    assert_eq!(result_bytes.stats, result_fs.stats);
-}
-
-// ---------------------------------------------------------------------------
-// 2. StreamSession: bytes init == encode_pcm (chunked pushes)
-// ---------------------------------------------------------------------------
-
-#[test]
-fn bytes_stream_session_matches_encode_pcm() {
-    let (index, files) = read_profile_bytes_bundle();
-    let wav = read_pcm16(&fixtures_dir().join("input.wav")).expect("input.wav reads");
-    let le_bytes: Vec<u8> = wav.interleaved_le_bytes();
-    let bytes_per_frame = wav.channels() * 2usize;
-
-    let ref_ = ProfileRef::with_name(SETUP_SHA256, PROFILE_NAME);
-    let mut session =
-        StreamSession::for_profile_ref_bytes(&ref_, &index, files).expect("bytes init");
-    // Two uneven chunks.
-    let cut = (le_bytes.len() / bytes_per_frame / 2) * bytes_per_frame;
-    assert_eq!(cut % bytes_per_frame, 0);
-    session.push_pcm_chunk(&le_bytes[..cut]).expect("chunk one");
-    session.push_pcm_chunk(&le_bytes[cut..]).expect("chunk two");
-    let streamed = session.finish().expect("finish");
-
-    let encoder_fs = Encoder::from_profile(PROFILE_NAME).expect("fs encoder builds");
-    let oneshot = encode_once(&encoder_fs);
-
-    assert_eq!(
-        streamed.data, oneshot.data,
-        "bytes StreamSession WEM differs from encode_pcm WEM"
-    );
-    let sha = wem_profiles::resources::hex(Sha256::digest(&streamed.data));
-    println!(
-        "bytes stream-session WEM sha256: {} (len {})",
-        sha,
-        streamed.data.len()
-    );
-    assert_eq!(
-        sha, GOLDEN_WEM_SHA256,
-        "bytes stream WEM differs from golden"
-    );
+    // The filesystem loader resolves the same identity from the same tree.
+    let data = wem_profiles::DataDir::from_profiles_dir(profiles_dir());
+    let from_fs = wem_profiles::load_profile_bundle(&data, Some(PROFILE_NAME), true)
+        .expect("fs bundle verifies")
+        .to_encoder_profile()
+        .expect("fs bundle profile");
+    assert_eq!(from_fs.key(), from_bytes.key());
+    assert_eq!(from_fs.setup_sha256(), from_bytes.setup_sha256());
 }
 
 #[test]
-fn named_bytes_encoder_selects_two_channel_profile() {
+fn bytes_bundle_carries_the_two_channel_profile_identity() {
     let (index, files) = read_profile_bytes_bundle();
-    let encoder = Encoder::from_profile_bytes_named(TWO_CHANNEL_PROFILE_NAME, &index, files)
-        .expect("named 2ch bytes encoder builds");
+    let from_bytes = wem_profiles::load_profile_bundle_from_bytes(
+        &index,
+        files,
+        Some(TWO_CHANNEL_PROFILE_NAME),
+        true,
+    )
+    .expect("named 2ch bytes bundle verifies")
+    .to_encoder_profile()
+    .expect("2ch bytes bundle profile");
+    let installed = wem_profiles::resolve_wem_profile_selection(two_channel_selection())
+        .expect("2ch selection resolves");
+
+    assert_eq!(from_bytes.name(), TWO_CHANNEL_PROFILE_NAME);
+    assert_eq!(from_bytes.setup_sha256(), TWO_CHANNEL_SETUP_SHA256);
+    assert_eq!(from_bytes.key(), installed.key());
+}
+
+// ---------------------------------------------------------------------------
+// 2. The installed selections encode the committed reference material
+// ---------------------------------------------------------------------------
+
+#[test]
+fn two_channel_selection_encodes_the_committed_two_channel_wem() {
+    let encoder = Encoder::new(two_channel_selection()).expect("2ch selection resolves");
+    assert_eq!(encoder.profile().name(), TWO_CHANNEL_PROFILE_NAME);
+    assert_eq!(encoder.profile().setup_sha256(), TWO_CHANNEL_SETUP_SHA256);
+
     let wav = read_pcm16(&two_channel_dir().join("tone_high.wav")).expect("2ch WAV reads");
     let pcm = wav.to_pcm16().expect("2ch WAV converts to Pcm16");
-    let result = encoder.encode_pcm(&pcm).expect("2ch bytes encode runs");
-
-    assert_eq!(encoder.profile().name(), TWO_CHANNEL_PROFILE_NAME);
+    let result = encoder.encode_pcm(&pcm).expect("2ch encode runs");
     assert_eq!(
         result.data,
         std::fs::read(two_channel_dir().join("tone_high.wem")).unwrap()
@@ -177,19 +148,18 @@ fn named_bytes_encoder_selects_two_channel_profile() {
 }
 
 #[test]
-fn named_bytes_stream_selects_two_channel_profile() {
-    let (index, files) = read_profile_bytes_bundle();
+fn two_channel_selection_streams_the_committed_two_channel_wem() {
     let wav = read_pcm16(&two_channel_dir().join("tone_high.wav")).expect("2ch WAV reads");
     let le_bytes = wav.interleaved_le_bytes();
     let bytes_per_frame = wav.channels() * 2;
-    let ref_ = ProfileRef::with_name(TWO_CHANNEL_SETUP_SHA256, TWO_CHANNEL_PROFILE_NAME);
-    let mut session = StreamSession::for_profile_ref_bytes(&ref_, &index, files)
-        .expect("named 2ch bytes stream builds");
+    let mut session =
+        StreamSession::for_selection(two_channel_selection()).expect("2ch session opens");
 
+    // Two uneven chunks: chunk boundaries must not affect the bytes.
     let cut = 12_345 * bytes_per_frame;
     session.push_pcm_chunk(&le_bytes[..cut]).expect("chunk one");
     session.push_pcm_chunk(&le_bytes[cut..]).expect("chunk two");
-    let result = session.finish().expect("2ch bytes stream finishes");
+    let result = session.finish().expect("2ch stream finishes");
 
     assert_eq!(
         result.data,
@@ -198,8 +168,8 @@ fn named_bytes_stream_selects_two_channel_profile() {
 }
 
 // ---------------------------------------------------------------------------
-// 3. Rejection parity: the bytes entry rejects exactly what the fs entry
-//    rejects (same validator; zero drift).
+// 3. Rejection parity: the bytes loader rejects what the fs loader rejects
+//    (same validator; zero drift).
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -210,30 +180,19 @@ fn tampered_resource_bytes_are_rejected_with_sha_mismatch() {
         .expect("untouched bytes bundle verifies");
 
     // Flip one byte of the vorbis.setup payload: the shared validator must
-    // reject it exactly like the filesystem entry would.
+    // reject it exactly like the filesystem loader would.
     let mut tampered = files.clone();
     for (path, bytes) in &mut tampered {
         if path.ends_with("vorbis/setup.bin") {
             bytes[10] ^= 0x01;
         }
     }
-    let err = Encoder::from_profile_bytes(&index, tampered)
-        .err()
-        .expect("tampered bytes must fail");
-    match err {
-        wem_core::error::EncoderError::Internal(inner) => {
-            assert!(
-                matches!(
-                    inner,
-                    wem_core::error::InternalError::Profile(
-                        wem_profiles::ProfileError::ShaMismatch { .. }
-                    )
-                ),
-                "expected ShaMismatch, got {inner:?}"
-            );
-        }
-        other => panic!("expected Profile(ShaMismatch), got {other:?}"),
-    }
+    let err = wem_profiles::load_profile_bundle_from_bytes(&index, tampered, None, true)
+        .expect_err("tampered bytes must fail");
+    assert!(
+        matches!(err, wem_profiles::ProfileError::ShaMismatch { .. }),
+        "expected ShaMismatch, got {err:?}"
+    );
 }
 
 #[test]
@@ -313,79 +272,16 @@ fn unsafe_resource_paths_are_rejected_from_bytes() {
 }
 
 #[test]
-fn bytes_entry_refuses_unknown_profiles_and_bogus_digests() {
+fn bytes_loader_refuses_unknown_profiles() {
     let (index, files) = read_profile_bytes_bundle();
     // Unknown profile name in the index selection.
-    let err =
-        wem_profiles::load_profile_bundle_from_bytes(&index, files.clone(), Some("nope"), false)
-            .unwrap_err();
+    let err = wem_profiles::load_profile_bundle_from_bytes(&index, files, Some("nope"), false)
+        .unwrap_err();
     assert!(
         matches!(
             err,
             wem_profiles::ProfileError::ProfileNotInIndex { ref profile } if profile == "nope"
         ),
         "expected ProfileNotInIndex, got {err:?}"
-    );
-
-    let err = Encoder::from_profile_bytes_named("nope", &index, files.clone())
-        .err()
-        .expect("named bytes encoder must reject an unknown profile");
-    assert!(
-        matches!(err, wem_core::error::EncoderError::ProfileNotFound { .. }),
-        "expected ProfileNotFound, got {err:?}"
-    );
-
-    // StreamSession: setup sha that matches no bytes-bundle profile.
-    let bogus = ProfileRef {
-        setup_sha256: "0".repeat(64),
-        name: None,
-    };
-    let err = StreamSession::for_profile_ref_bytes(&bogus, &index, files.clone())
-        .err()
-        .expect("bogus digest must fail");
-    assert!(
-        matches!(err, wem_core::error::EncoderError::ProfileNotFound { .. }),
-        "expected ProfileNotFound, got {err:?}"
-    );
-
-    // StreamSession: right sha, wrong soft name.
-    let wrong_name = ProfileRef::with_name(SETUP_SHA256, "another-profile");
-    let err = StreamSession::for_profile_ref_bytes(&wrong_name, &index, files)
-        .err()
-        .expect("name mismatch must fail");
-    assert!(
-        matches!(err, wem_core::error::EncoderError::StateError { .. }),
-        "expected StateError, got {err:?}"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// 4. Input geometry guards still apply on the bytes entry.
-// ---------------------------------------------------------------------------
-
-#[test]
-fn bytes_encoder_geometry_and_minimum_frame_guards_apply() {
-    let (index, files) = read_profile_bytes_bundle();
-    let encoder = Encoder::from_profile_bytes(&index, files).expect("bytes encoder builds");
-    let bad_geometry =
-        Pcm16::new(48000, vec![vec![0i16; 5000], vec![0i16; 5000]]).expect("pcm builds");
-    assert!(
-        matches!(
-            encoder.encode_pcm(&bad_geometry),
-            Err(wem_core::error::EncoderError::GeometryMismatch { .. })
-        ),
-        "wrong geometry must be rejected"
-    );
-
-    let short = Pcm16::new(44100, vec![vec![0i16; 4095]; 6]).expect("pcm builds");
-    assert!(
-        matches!(
-            encoder.encode_pcm(&short),
-            Err(wem_core::error::EncoderError::InputTooShort {
-                want: 4096,
-                got: 4095
-            })
-        ),
-        "4095 frames must be rejected"
     );
 }

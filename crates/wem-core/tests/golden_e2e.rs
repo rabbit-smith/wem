@@ -12,11 +12,17 @@ use std::path::{Path, PathBuf};
 
 use wem_core::encoder::{Encoder, Pcm16};
 use wem_core::error::EncoderError;
-use wem_core::stream::{ProfileRef, StreamSession};
+use wem_core::stream::StreamSession;
 use wem_core::usecases::wav::read_pcm16;
+use wem_core::{WwiseProfile, WwiseVersion};
 
-const PROFILE_NAME: &str = "wwise2013-6ch-44100";
 const REFERENCE_SHA256: &str = "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247";
+
+/// The fixture profile selection: the installed Wwise 2013 6ch/44100
+/// configuration.
+fn fixture_selection() -> WwiseProfile {
+    WwiseProfile::new(WwiseVersion::Wwise2013, 6, 44_100).expect("fixture selection")
+}
 
 /// The repository fixtures directory (repo_root/tests/fixtures).
 fn fixtures_dir() -> PathBuf {
@@ -38,7 +44,7 @@ fn encode_fixture() -> (wem_core::EncodeResult, Encoder) {
     assert_eq!(wav.channels(), 6);
     assert_eq!(wav.sample_rate(), 44100);
     assert_eq!(wav.frames(), 139398);
-    let encoder = Encoder::from_profile(PROFILE_NAME).expect("profile loads");
+    let encoder = Encoder::new(fixture_selection()).expect("selection resolves");
     let pcm = wav.to_pcm16().expect("wav converts to Pcm16");
     let result = encoder.encode_pcm(&pcm).expect("encode runs");
     (result, encoder)
@@ -70,7 +76,8 @@ fn golden_encode_is_byte_identical_to_reference_wem() {
     assert_eq!(stats.short_packets, 77);
     assert_eq!(stats.long_packets, 128);
     assert_eq!(stats.bytes, 108771);
-    assert_eq!(stats.metadata_source, "profile:wwise2013-6ch-44100");
+    // The provenance label is the name-free selection description.
+    assert_eq!(stats.metadata_source, "profile:6ch/44100Hz/2013");
     assert_eq!(result.sha256(), REFERENCE_SHA256);
 }
 
@@ -109,9 +116,7 @@ fn stream_session_with_seven_uneven_chunks_matches_encode_pcm() {
         "all chunk sizes differ"
     );
 
-    let reference_sha = "3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3";
-    let ref_ = ProfileRef::with_name(reference_sha, PROFILE_NAME);
-    let mut session = StreamSession::for_profile_ref(&ref_).expect("init");
+    let mut session = StreamSession::for_selection(fixture_selection()).expect("session opens");
     for window in frame_boundaries.windows(2) {
         let start = window[0] * bytes_per_frame;
         let end = window[1] * bytes_per_frame;
@@ -158,7 +163,7 @@ fn input_too_short_rejects_4095_frames() {
     let samples_per_frame = wav.channels() * 2;
     let bytes: Vec<u8> = wav.interleaved_le_bytes()[0..frames * samples_per_frame].to_vec();
     let pcm = Pcm16::from_interleaved_le(44100, 6, &bytes).expect("pcm parses");
-    let encoder = Encoder::from_profile(PROFILE_NAME).expect("profile loads");
+    let encoder = Encoder::new(fixture_selection()).expect("selection resolves");
     match encoder.encode_pcm(&pcm) {
         Err(EncoderError::InputTooShort { want, got }) => {
             assert_eq!(want, 4096);
@@ -173,12 +178,7 @@ fn input_too_short_rejects_4095_frames() {
 fn stream_session_input_too_short_rejects_4095_frames() {
     let wav = read_pcm16(&fixtures_dir().join("input.wav")).expect("input.wav reads");
     let bytes: Vec<u8> = wav.interleaved_le_bytes()[0..4095 * wav.channels() * 2].to_vec();
-    let ref_ = ProfileRef {
-        setup_sha256: "3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3"
-            .to_string(),
-        name: None,
-    };
-    let mut session = StreamSession::for_profile_ref(&ref_).expect("init");
+    let mut session = StreamSession::for_selection(fixture_selection()).expect("session opens");
     session.push_pcm_chunk(&bytes).expect("chunk pushes");
     match session.finish() {
         Err(EncoderError::InputTooShort { want, got }) => {
@@ -192,7 +192,7 @@ fn stream_session_input_too_short_rejects_4095_frames() {
 
 #[test]
 fn wrong_profile_geometry_is_rejected() {
-    let encoder = Encoder::from_profile(PROFILE_NAME).expect("profile loads");
+    let encoder = Encoder::new(fixture_selection()).expect("selection resolves");
     // 2 channels / 48 kHz: geometry differs from the 6ch/44100 profile.
     let pcm = Pcm16::new(48000, vec![vec![0i16; 5000], vec![0i16; 5000]]).expect("pcm builds");
     match encoder.encode_pcm(&pcm) {
@@ -203,13 +203,24 @@ fn wrong_profile_geometry_is_rejected() {
 }
 
 #[test]
-fn unknown_profile_names_are_rejected() {
-    match Encoder::from_profile("does-not-exist") {
+fn unresolvable_selections_are_rejected() {
+    // 2ch/44100 is not an installed configuration (the installed 2ch
+    // profile is 48000 Hz): the selection must be rejected, never
+    // satisfied by a neighbouring geometry.
+    let selection = WwiseProfile::new(WwiseVersion::Wwise2013, 2, 44_100).expect("selection");
+    match Encoder::new(selection) {
         Err(EncoderError::ProfileNotFound { requested }) => {
-            assert_eq!(requested, "does-not-exist");
+            assert_eq!(requested, "2ch/44100Hz/2013");
         }
         Err(other) => panic!("expected ProfileNotFound, got {other:?}"),
-        Ok(_) => panic!("unknown profile must be rejected"),
+        Ok(_) => panic!("unresolvable selection must be rejected"),
+    }
+    match StreamSession::for_selection(selection) {
+        Err(EncoderError::ProfileNotFound { requested }) => {
+            assert_eq!(requested, "2ch/44100Hz/2013");
+        }
+        Err(other) => panic!("expected ProfileNotFound, got {other:?}"),
+        Ok(_) => panic!("unresolvable selection must not open a session"),
     }
 }
 
@@ -230,49 +241,8 @@ fn stream_lifecycle_violations_are_state_errors() {
         Ok(_) => panic!("finish before Init must fail"),
     }
 
-    // Second Init is a state error.
-    let ref_ = ProfileRef {
-        setup_sha256: "3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3"
-            .to_string(),
-        name: None,
-    };
-    let mut session = StreamSession::for_profile_ref(&ref_).expect("init");
-    match session.init_profile(&ref_) {
-        Err(EncoderError::StateError { .. }) => {}
-        Err(other) => panic!("second Init: expected StateError, got {other:?}"),
-        Ok(_) => panic!("second Init must fail"),
-    }
-
-    // Soft name cross-check failure.
-    let wrong_name = ProfileRef::with_name(
-        "3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3",
-        "another-profile",
-    );
-    match StreamSession::for_profile_ref(&wrong_name) {
-        Err(EncoderError::StateError { .. }) => {}
-        Err(other) => panic!("name mismatch: expected StateError, got {other:?}"),
-        Ok(_) => panic!("name mismatch must fail"),
-    }
-
-    // No profile matches a bogus digest.
-    let bogus = ProfileRef {
-        setup_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
-            .to_string(),
-        name: None,
-    };
-    match StreamSession::for_profile_ref(&bogus) {
-        Err(EncoderError::ProfileNotFound { .. }) => {}
-        Err(other) => panic!("bogus digest: expected ProfileNotFound, got {other:?}"),
-        Ok(_) => panic!("bogus digest must fail"),
-    }
-
     // Chunk after Finish.
-    let ref_ = ProfileRef {
-        setup_sha256: "3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3"
-            .to_string(),
-        name: None,
-    };
-    let mut session = StreamSession::for_profile_ref(&ref_).expect("init");
+    let mut session = StreamSession::for_selection(fixture_selection()).expect("session opens");
     session
         .push_pcm_chunk(&[0u8; 12 * 1000])
         .expect("chunk pushes");
@@ -296,12 +266,7 @@ fn stream_lifecycle_violations_are_state_errors() {
 
 #[test]
 fn chunk_partial_frame_is_a_geometry_mismatch() {
-    let ref_ = ProfileRef {
-        setup_sha256: "3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3"
-            .to_string(),
-        name: None,
-    };
-    let mut session = StreamSession::for_profile_ref(&ref_).expect("init");
+    let mut session = StreamSession::for_selection(fixture_selection()).expect("session opens");
     // 6 channels -> 12 bytes per frame; 13 leaves a trailing partial frame.
     match session.push_pcm_chunk(&[0u8; 13]) {
         Err(EncoderError::GeometryMismatch { .. }) => {}

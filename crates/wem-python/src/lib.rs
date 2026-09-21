@@ -23,7 +23,7 @@
 //! * Blocking/CPU-heavy kernel calls run under `Python::allow_threads` so
 //!   the GIL is not held while the kernel works.
 
-use pyo3::exceptions::{PyException, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyException, PyValueError};
 use pyo3::ffi::c_str;
 use pyo3::prelude::*;
 use pyo3::type_object::PyTypeInfo;
@@ -31,7 +31,7 @@ use pyo3::types::{PyBytes, PyDict, PyType};
 
 use wem_core::encoder::{EncodeResult as WemEncodeResult, Encoder as WemEncoder, Pcm16};
 use wem_core::error::EncoderError;
-use wem_core::stream::{ProfileRef, StreamPacket, StreamSession as WemStreamSession};
+use wem_core::stream::{StreamPacket, StreamSession as WemStreamSession};
 use wem_core::{WwiseProfile, WwiseVersion};
 
 // ---------------------------------------------------------------------------
@@ -228,6 +228,12 @@ impl PyWwiseVersion {
     #[classattr]
     const ALL: [PyWwiseVersion; 1] = [PyWwiseVersion::Wwise2013];
 
+    /// The generation the auto-selection path uses when the caller names
+    /// none (kernel `WwiseVersion::DEFAULT`): the generation this revision
+    /// installs.
+    #[classattr]
+    const DEFAULT: PyWwiseVersion = PyWwiseVersion::Wwise2013;
+
     /// Stable cross-language code (`include/wem.h` `WemVersion`).
     #[getter]
     fn code(&self) -> u32 {
@@ -275,9 +281,10 @@ impl PyWwiseVersion {
 /// Structured profile selection (kernel `WwiseProfile`; C ABI `WemProfile`):
 /// one Wwise generation plus the PCM geometry to encode.
 ///
-/// This is the only caller-facing profile selector next to the installed
-/// profile name. A selection that no installed profile satisfies is rejected
-/// when it reaches the kernel, never substituted by a default.
+/// This is the only caller-facing profile selector: profile names, profile
+/// paths and profile index bytes are kernel-internal addressing. A selection
+/// that no installed profile satisfies is rejected when it reaches the
+/// kernel, never substituted by a default.
 #[pyclass(name = "WwiseProfile", module = "wwise_wem._core", eq, hash, frozen)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct PyWwiseProfile {
@@ -335,25 +342,18 @@ struct PyEncoder {
 
 #[pymethods]
 impl PyEncoder {
-    /// Construct the encoder from an installed profile name, or from a
-    /// structured [`PyWwiseProfile`] selection (`wem_core::encoder::Encoder::new_with_quality`).
+    /// Construct the encoder from a structured [`PyWwiseProfile`] selection
+    /// (`wem_core::encoder::Encoder::new_with_quality`).
     ///
     /// Profiles are compiled into the kernel. `quality`, when given,
     /// binds the quality factor before assembly; omitted quality keeps the
     /// historical bytes exactly. A selection no installed profile satisfies
-    /// leaves [`WemEncoderError`] with code `PROFILE_NOT_FOUND`.
+    /// leaves [`WemEncoderError`] with code `PROFILE_NOT_FOUND`; any other
+    /// `profile` argument is a Python `TypeError`.
     #[new]
     #[pyo3(signature = (profile, quality=None))]
-    fn new(profile: &Bound<'_, PyAny>, quality: Option<f64>) -> PyResult<Self> {
-        let inner = if let Ok(selection) = profile.downcast::<PyWwiseProfile>() {
-            WemEncoder::new_with_quality(selection.get().inner, quality).map_err(error_to_pyerr)?
-        } else if let Ok(name) = profile.extract::<String>() {
-            WemEncoder::from_profile_quality(&name, quality).map_err(error_to_pyerr)?
-        } else {
-            return Err(PyTypeError::new_err(
-                "profile must be a str profile name or a WwiseProfile selection",
-            ));
-        };
+    fn new(profile: PyRef<'_, PyWwiseProfile>, quality: Option<f64>) -> PyResult<Self> {
+        let inner = WemEncoder::new_with_quality(profile.inner, quality).map_err(error_to_pyerr)?;
         Ok(Self { inner })
     }
 
@@ -457,8 +457,8 @@ impl PyEncodeResult {
 // StreamSession (streaming encode lifecycle)
 // ---------------------------------------------------------------------------
 
-/// One streaming encode session: `start` (Init) -> `push`* (chunks) ->
-/// `finish` (Finish), straight over the kernel's streaming session.
+/// One streaming encode session: `for_selection` (Init) -> `push`* (chunks)
+/// -> `finish` (Finish), straight over the kernel's streaming session.
 ///
 /// `push` returns the packets that just completed, in reply-stream order:
 /// the first packet ever emitted is the setup packet (seq 0), then audio
@@ -498,30 +498,6 @@ impl PyStreamSession {
         let inner = WemStreamSession::for_selection_quality(selection.inner, quality)
             .map_err(error_to_pyerr)?;
         Ok(Self { inner, next_seq: 0 })
-    }
-
-    /// Open the session on one installed profile (`Init`).
-    ///
-    /// `setup_sha256` is a hard identity assertion (lowercase hex);
-    /// `name`, when given, is a soft cross-check that must match the
-    /// resolved profile name. `quality`, when given, binds the quality
-    /// factor to the resolved profile before assembly (the profile
-    /// quality-curves are then interpolated); omitted keeps the
-    /// historical bytes exactly.
-    #[pyo3(signature = (setup_sha256, name=None, quality=None))]
-    fn start(
-        &mut self,
-        setup_sha256: &str,
-        name: Option<&str>,
-        quality: Option<f64>,
-    ) -> PyResult<()> {
-        let profile_ref = ProfileRef {
-            setup_sha256: setup_sha256.to_string(),
-            name: name.map(str::to_string),
-        };
-        self.inner
-            .init_profile_quality(&profile_ref, quality)
-            .map_err(error_to_pyerr)
     }
 
     /// Push one chunk of little-endian signed-16 interleaved PCM bytes
@@ -625,8 +601,6 @@ mod tests {
     use super::*;
     use std::path::Path;
 
-    const PROFILE_NAME: &str = "wwise2013-6ch-44100";
-    const SETUP_SHA256: &str = "3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3";
     const REFERENCE_SHA256: &str =
         "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247";
 
@@ -644,6 +618,20 @@ mod tests {
     /// Import the module under test (0.25 test pattern: wrap_pymodule).
     fn import_module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
         Ok(pyo3::wrap_pymodule!(_core)(py).into_bound(py))
+    }
+
+    /// The fixture profile selection (6 channels / 44100 Hz / Wwise 2013)
+    /// as the Python object every entry point now takes.
+    fn selection_object<'py>(m: &Bound<'py, PyModule>) -> Bound<'py, PyAny> {
+        let version = m
+            .getattr("WwiseVersion")
+            .expect("WwiseVersion")
+            .getattr("WWISE2013")
+            .expect("WWISE2013");
+        m.getattr("WwiseProfile")
+            .expect("WwiseProfile")
+            .call1((version, 6i64, 44_100i64))
+            .expect("fixture selection builds")
     }
 
     /// The fixture WAV as interleaved little-endian i16 PCM bytes.
@@ -677,7 +665,7 @@ mod tests {
             }
             // WemEncoderError must derive from Exception and carry .code.
             let globals = PyDict::new(py);
-            globals.set_item("m", m).unwrap();
+            globals.set_item("m", m.clone()).unwrap();
             py.run(
                 c_str!(
                     r#"
@@ -708,7 +696,7 @@ except Exception as caught2:
         Python::with_gil(|py| {
             let m = import_module(py).unwrap();
             let globals = PyDict::new(py);
-            globals.set_item("m", m).unwrap();
+            globals.set_item("m", m.clone()).unwrap();
             py.run(
                 c_str!(
                     r#"
@@ -718,6 +706,7 @@ assert v.code == 0, v.code
 assert v.label == "2013", v.label
 assert v.generation == "2013.2", v.generation
 assert m.WwiseVersion.ALL == [v], m.WwiseVersion.ALL
+assert m.WwiseVersion.DEFAULT == v, m.WwiseVersion.DEFAULT
 assert m.WwiseVersion.from_code(0) == v
 assert m.WwiseVersion.from_generation("2013.2") == v
 assert m.WwiseVersion.parse("2013") == v
@@ -763,7 +752,7 @@ for wrong in (2013, None, 2013.2):
         Python::with_gil(|py| {
             let m = import_module(py).unwrap();
             let globals = PyDict::new(py);
-            globals.set_item("m", m).unwrap();
+            globals.set_item("m", m.clone()).unwrap();
             py.run(
                 c_str!(
                     r#"
@@ -827,7 +816,7 @@ for bad_geometry in ("6", None, 6.5):
         pass
     else:
         raise AssertionError(bad_geometry)
-for bad_profile in (2013, 6.5, None, v):
+for bad_profile in (2013, 6.5, None, v, "wwise2013-6ch-44100"):
     try:
         m.Encoder(bad_profile)
     except TypeError:
@@ -849,11 +838,11 @@ for bad_profile in (2013, 6.5, None, v):
         Python::with_gil(|py| {
             let m = import_module(py).unwrap();
             let globals = PyDict::new(py);
-            globals.set_item("m", m).unwrap();
+            globals.set_item("m", m.clone()).unwrap();
             globals.set_item("raw", raw).unwrap();
             globals.set_item("rate", rate).unwrap();
             globals.set_item("channels", channels as i64).unwrap();
-            globals.set_item("profile", PROFILE_NAME).unwrap();
+            globals.set_item("selection", selection_object(&m)).unwrap();
             globals.set_item("expected_sha", REFERENCE_SHA256).unwrap();
             py.run(
                 c_str!(
@@ -866,20 +855,17 @@ rows = [
     [values[frame * channels + c] for frame in range(frames)]
     for c in range(channels)
 ]
-selection = m.WwiseProfile(
-    m.WwiseVersion.WWISE2013, channels, rate
-)
-by_name = m.Encoder(profile).encode_pcm(rate, rows)
 by_selection = m.Encoder(selection).encode_pcm(rate, rows)
-assert bytes(by_selection.data) == bytes(by_name.data)
 assert by_selection.sha256() == expected_sha, by_selection.sha256()
 assert by_selection.audio_packets == 205, by_selection.audio_packets
 assert by_selection.pcm_frames == frames, by_selection.pcm_frames
 assert by_selection.channels == channels, by_selection.channels
-assert by_selection.metadata_source == "profile:" + profile, by_selection.metadata_source
+assert by_selection.metadata_source == (
+    "profile:" + str(channels) + "ch/" + str(rate) + "Hz/2013"
+), by_selection.metadata_source
 packed = m.Encoder(selection).encode_pcm16_interleaved(rate, channels, raw)
 assert packed.sha256() == expected_sha, packed.sha256()
-assert bytes(packed.data) == bytes(by_name.data)
+assert bytes(packed.data) == bytes(by_selection.data)
 "#
                 ),
                 Some(&globals),
@@ -895,7 +881,7 @@ assert bytes(packed.data) == bytes(by_name.data)
         Python::with_gil(|py| {
             let m = import_module(py).unwrap();
             let globals = PyDict::new(py);
-            globals.set_item("m", m).unwrap();
+            globals.set_item("m", m.clone()).unwrap();
             globals.set_item("raw", raw).unwrap();
             globals.set_item("rate", rate).unwrap();
             globals.set_item("channels", channels as i64).unwrap();
@@ -927,19 +913,19 @@ assert session.pcm_frames == frames, session.pcm_frames
     }
 
     #[test]
-    fn encoder_unknown_profile_maps_to_profile_not_found() {
+    fn encoder_unresolvable_selection_maps_to_profile_not_found() {
         Python::with_gil(|py| {
             let m = import_module(py).unwrap();
             let globals = PyDict::new(py);
-            globals.set_item("m", m).unwrap();
+            globals.set_item("m", m.clone()).unwrap();
             py.run(
                 c_str!(
                     r#"
 try:
-    m.Encoder("definitely-not-installed")
+    m.Encoder(m.WwiseProfile(m.WwiseVersion.WWISE2013, 2, 44100))
 except m.WemEncoderError as e:
     assert e.code == "PROFILE_NOT_FOUND", e.code
-    assert "definitely-not-installed" in str(e), str(e)
+    assert "2ch/44100Hz/2013" in str(e), str(e)
 else:
     raise AssertionError("expected WemEncoderError")
 "#
@@ -947,27 +933,28 @@ else:
                 Some(&globals),
                 None,
             )
-            .expect("unknown profile maps to PROFILE_NOT_FOUND");
+            .expect("unresolvable selection maps to PROFILE_NOT_FOUND");
         });
     }
 
     #[test]
-    fn encoder_loads_embedded_profile() {
+    fn encoder_builds_from_both_installed_selections() {
         Python::with_gil(|py| {
             let m = import_module(py).unwrap();
             let globals = PyDict::new(py);
-            globals.set_item("m", m).unwrap();
-            globals.set_item("profile", PROFILE_NAME).unwrap();
+            globals.set_item("m", m.clone()).unwrap();
             py.run(
                 c_str!(
                     r#"
-enc = m.Encoder(profile)
+v = m.WwiseVersion.WWISE2013
+m.Encoder(m.WwiseProfile(v, 6, 44100))
+m.Encoder(m.WwiseProfile(v, 2, 48000))
 "#
                 ),
                 Some(&globals),
                 None,
             )
-            .expect("embedded profile selection");
+            .expect("both installed selections build an encoder");
         });
     }
 
@@ -977,11 +964,11 @@ enc = m.Encoder(profile)
         Python::with_gil(|py| {
             let m = import_module(py).unwrap();
             let globals = PyDict::new(py);
-            globals.set_item("m", m).unwrap();
+            globals.set_item("m", m.clone()).unwrap();
             globals.set_item("raw", raw).unwrap();
             globals.set_item("rate", rate).unwrap();
             globals.set_item("channels", channels as i64).unwrap();
-            globals.set_item("profile", PROFILE_NAME).unwrap();
+            globals.set_item("selection", selection_object(&m)).unwrap();
             globals.set_item("expected_sha", REFERENCE_SHA256).unwrap();
             py.run(
                 c_str!(
@@ -994,7 +981,7 @@ rows = [
     [per_channel[frame * channels + c] for frame in range(n // channels)]
     for c in range(channels)
 ]
-res = m.Encoder(profile).encode_pcm(rate, rows)
+res = m.Encoder(selection).encode_pcm(rate, rows)
 assert res.sha256() == expected_sha, res.sha256()
 assert len(bytes(res.data)) == res.bytes_out
 assert res.audio_packets == 205, res.audio_packets
@@ -1002,7 +989,9 @@ assert res.short_packets == 77, res.short_packets
 assert res.long_packets == 128, res.long_packets
 assert res.pcm_frames == n // channels, res.pcm_frames
 assert res.channels == channels, res.channels
-assert res.metadata_source == "profile:" + profile, res.metadata_source
+assert res.metadata_source == (
+    "profile:" + str(channels) + "ch/" + str(rate) + "Hz/2013"
+), res.metadata_source
 "#
                 ),
                 Some(&globals),
@@ -1018,11 +1007,11 @@ assert res.metadata_source == "profile:" + profile, res.metadata_source
         Python::with_gil(|py| {
             let m = import_module(py).unwrap();
             let globals = PyDict::new(py);
-            globals.set_item("m", m).unwrap();
+            globals.set_item("m", m.clone()).unwrap();
             globals.set_item("raw", raw).unwrap();
             globals.set_item("rate", rate).unwrap();
             globals.set_item("channels", channels as i64).unwrap();
-            globals.set_item("profile", PROFILE_NAME).unwrap();
+            globals.set_item("selection", selection_object(&m)).unwrap();
             globals.set_item("expected_sha", REFERENCE_SHA256).unwrap();
             py.run(
                 c_str!(
@@ -1035,7 +1024,7 @@ rows_flat = [vals[f * channels + c]
              for c in range(channels) for f in range(frames)]
 cm_bytes = b''.join(struct.pack('<h', v) for v in rows_flat)
 mv = memoryview(cm_bytes).cast('h', [channels, frames])
-res = m.Encoder(profile).encode_pcm(rate, mv)
+res = m.Encoder(selection).encode_pcm(rate, mv)
 assert res.sha256() == expected_sha, res.sha256()
 assert res.bytes_out == len(bytes(res.data))
 "#
@@ -1055,7 +1044,7 @@ assert res.bytes_out == len(bytes(res.data))
             let encoder = m
                 .getattr("Encoder")
                 .unwrap()
-                .call1((PROFILE_NAME,))
+                .call1((selection_object(&m),))
                 .unwrap();
             let result = encoder
                 .call_method1(
@@ -1075,13 +1064,13 @@ assert res.bytes_out == len(bytes(res.data))
         Python::with_gil(|py| {
             let m = import_module(py).unwrap();
             let globals = PyDict::new(py);
-            globals.set_item("m", m).unwrap();
-            globals.set_item("profile", PROFILE_NAME).unwrap();
+            globals.set_item("m", m.clone()).unwrap();
+            globals.set_item("selection", selection_object(&m)).unwrap();
             globals.set_item("max_channels", usize::MAX).unwrap();
             py.run(
                 c_str!(
                     r#"
-enc = m.Encoder(profile)
+enc = m.Encoder(selection)
 for channels, data, code in (
     (0, b"", "STATE_ERROR"),
     (max_channels, b"\0\0", "STATE_ERROR"),
@@ -1108,14 +1097,14 @@ for channels, data, code in (
         Python::with_gil(|py| {
             let m = import_module(py).unwrap();
             let globals = PyDict::new(py);
-            globals.set_item("m", m).unwrap();
-            globals.set_item("profile", PROFILE_NAME).unwrap();
+            globals.set_item("m", m.clone()).unwrap();
+            globals.set_item("selection", selection_object(&m)).unwrap();
             py.run(
                 c_str!(
                     r#"
 # 44100 Hz is the installed rate but 2 channels is not the installed
 # geometry (the profile is 6 channels).
-enc = m.Encoder(profile)
+enc = m.Encoder(selection)
 try:
     enc.encode_pcm(44100, [[0] * 32 for _ in range(2)])
 except m.WemEncoderError as e:
@@ -1136,12 +1125,12 @@ else:
         Python::with_gil(|py| {
             let m = import_module(py).unwrap();
             let globals = PyDict::new(py);
-            globals.set_item("m", m).unwrap();
-            globals.set_item("profile", PROFILE_NAME).unwrap();
+            globals.set_item("m", m.clone()).unwrap();
+            globals.set_item("selection", selection_object(&m)).unwrap();
             py.run(
                 c_str!(
                     r#"
-enc = m.Encoder(profile)
+enc = m.Encoder(selection)
 try:
     # 6 channels at the installed rate, but below the 4096-frame minimum.
     enc.encode_pcm(44100, [[0] * 100 for _ in range(6)])
@@ -1164,12 +1153,12 @@ else:
         Python::with_gil(|py| {
             let m = import_module(py).unwrap();
             let globals = PyDict::new(py);
-            globals.set_item("m", m).unwrap();
-            globals.set_item("profile", PROFILE_NAME).unwrap();
+            globals.set_item("m", m.clone()).unwrap();
+            globals.set_item("selection", selection_object(&m)).unwrap();
             py.run(
                 c_str!(
                     r#"
-enc = m.Encoder(profile)
+enc = m.Encoder(selection)
 try:
     enc.encode_pcm(44100, [[70000] * 10 for _ in range(6)])
 except m.WemEncoderError as e:
@@ -1201,10 +1190,9 @@ else:
         Python::with_gil(|py| {
             let m = import_module(py).unwrap();
             let globals = PyDict::new(py);
-            globals.set_item("m", m).unwrap();
+            globals.set_item("m", m.clone()).unwrap();
             globals.set_item("raw", raw).unwrap();
-            globals.set_item("profile", PROFILE_NAME).unwrap();
-            globals.set_item("setup_sha", SETUP_SHA256).unwrap();
+            globals.set_item("selection", selection_object(&m)).unwrap();
             globals.set_item("expected_sha", REFERENCE_SHA256).unwrap();
             globals.set_item("setup_packet", setup_packet).unwrap();
             globals.set_item("channels", channels as i64).unwrap();
@@ -1214,8 +1202,7 @@ else:
                     r#"
 # Five unequal frame-count chunks (same spirit as the kernel test).
 cuts = [0, 17000, 40500, 70600, 85600, frames]
-session = m.StreamSession()
-session.start(setup_sha, name=profile)
+session = m.StreamSession.for_selection(selection)
 step = 2 * channels
 packets = []
 for i in range(len(cuts) - 1):
@@ -1242,9 +1229,8 @@ assert bytes(packets[0].data) == bytes(setup_packet), "seq 0 must be the setup p
         Python::with_gil(|py| {
             let m = import_module(py).unwrap();
             let globals = PyDict::new(py);
-            globals.set_item("m", m).unwrap();
-            globals.set_item("setup_sha", SETUP_SHA256).unwrap();
-            globals.set_item("profile", PROFILE_NAME).unwrap();
+            globals.set_item("m", m.clone()).unwrap();
+            globals.set_item("selection", selection_object(&m)).unwrap();
             py.run(
                 c_str!(
                     r#"
@@ -1256,32 +1242,22 @@ def expect_state_error(label, fn):
     else:
         raise AssertionError(label + " did not raise STATE_ERROR")
 
-# 1) push before start
+# 1) push before the session is opened
 s1 = m.StreamSession()
-expect_state_error("push before start", lambda: s1.push(b"\x00" * 12))
+expect_state_error("push before open", lambda: s1.push(b"\x00" * 12))
 
-# 2) double start
+# 2) finish before the session is opened
 s2 = m.StreamSession()
-s2.start(setup_sha)
-expect_state_error("second start", lambda: s2.start(setup_sha))
+expect_state_error("finish before open", lambda: s2.finish())
 
-# 3) finish without start
-s3 = m.StreamSession()
-expect_state_error("finish without start", lambda: s3.finish())
-
-# 4) name soft-check mismatch
-s4 = m.StreamSession()
-expect_state_error("name mismatch", lambda: s4.start(setup_sha, name="wrong-name"))
-
-# 5) push after finish
-s5 = m.StreamSession()
-s5.start(setup_sha)
+# 3) push after finish
+s3 = m.StreamSession.for_selection(selection)
 try:
-    s5.finish()  # zero frames -> terminal INPUT_TOO_SHORT, session ends
-except m.WemEncoderError as e5:
-    assert e5.code == "INPUT_TOO_SHORT", e5.code
-expect_state_error("push after finish", lambda: s5.push(b"\x00" * 12))
-expect_state_error("second finish", lambda: s5.finish())
+    s3.finish()  # zero frames -> terminal INPUT_TOO_SHORT, session ends
+except m.WemEncoderError as e3:
+    assert e3.code == "INPUT_TOO_SHORT", e3.code
+expect_state_error("push after finish", lambda: s3.push(b"\x00" * 12))
+expect_state_error("second finish", lambda: s3.finish())
 "#
                 ),
                 Some(&globals),
@@ -1292,19 +1268,21 @@ expect_state_error("second finish", lambda: s5.finish())
     }
 
     #[test]
-    fn stream_session_unknown_setup_sha_is_profile_not_found() {
+    fn stream_session_unresolvable_selection_is_profile_not_found() {
         Python::with_gil(|py| {
             let m = import_module(py).unwrap();
             let globals = PyDict::new(py);
-            globals.set_item("m", m).unwrap();
+            globals.set_item("m", m.clone()).unwrap();
             py.run(
                 c_str!(
                     r#"
-s = m.StreamSession()
 try:
-    s.start("0" * 64)
+    m.StreamSession.for_selection(
+        m.WwiseProfile(m.WwiseVersion.WWISE2013, 2, 44100)
+    )
 except m.WemEncoderError as e:
     assert e.code == "PROFILE_NOT_FOUND", e.code
+    assert "2ch/44100Hz/2013" in str(e), str(e)
 else:
     raise AssertionError("expected WemEncoderError")
 "#
@@ -1312,7 +1290,7 @@ else:
                 Some(&globals),
                 None,
             )
-            .expect("unknown setup sha maps to PROFILE_NOT_FOUND");
+            .expect("unresolvable selection maps to PROFILE_NOT_FOUND");
         });
     }
 
@@ -1321,13 +1299,12 @@ else:
         Python::with_gil(|py| {
             let m = import_module(py).unwrap();
             let globals = PyDict::new(py);
-            globals.set_item("m", m).unwrap();
-            globals.set_item("setup_sha", SETUP_SHA256).unwrap();
+            globals.set_item("m", m.clone()).unwrap();
+            globals.set_item("selection", selection_object(&m)).unwrap();
             py.run(
                 c_str!(
                     r#"
-s = m.StreamSession()
-s.start(setup_sha)
+s = m.StreamSession.for_selection(selection)
 try:
     # 6 channels * 2 bytes = 12 bytes/frame; 13 bytes leaves a partial frame.
     s.push(b"\x00" * 13)

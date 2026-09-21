@@ -2,12 +2,21 @@
 //! registered from the paired build together with its psychoacoustic
 //! calibration. The setup and encoder resources are complete.
 
+use wem_core::{WwiseProfile, WwiseVersion};
 use wem_profiles::{load_profile_bundle, load_quality_curves, normalize_quality_factor, DataDir};
 
 const TWO_CHANNEL_NAME: &str = "wwise2013-2ch-48000";
 /// Setup packet SHA-256 (215-byte paired 2ch/48k setup).
 const TWO_CHANNEL_SETUP_SHA: &str =
     "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc";
+
+fn fixture_selection() -> WwiseProfile {
+    WwiseProfile::new(WwiseVersion::Wwise2013, 6, 44_100).expect("6ch/44100 selection")
+}
+
+fn two_channel_selection() -> WwiseProfile {
+    WwiseProfile::new(WwiseVersion::Wwise2013, 2, 48_000).expect("2ch/48000 selection")
+}
 
 fn data_dir() -> DataDir {
     DataDir::from_profiles_dir(
@@ -59,20 +68,17 @@ fn two_channel_profile_lists_in_the_registry_as_setup_available() {
     let registry = wem_profiles::installed_registry(&data_dir()).expect("registry loads");
     assert_eq!(registry.len(), 2);
     let profile = registry
-        .resolve_geometry(2, 48000)
-        .expect("2ch geometry resolves");
+        .resolve_selection(two_channel_selection())
+        .expect("2ch selection resolves");
     assert_eq!(profile.name(), TWO_CHANNEL_NAME);
     assert!(profile.setup_available());
     assert_eq!(profile.setup_sha256(), TWO_CHANNEL_SETUP_SHA);
     assert!(profile.pending_reason().is_none());
-    // The setup digest is a stable resolution key.
-    assert_eq!(
-        registry
-            .resolve_setup(2, 48000, TWO_CHANNEL_SETUP_SHA)
-            .expect("2ch resolves by setup digest")
-            .name(),
-        TWO_CHANNEL_NAME
-    );
-    // An empty digest does not match a registered profile.
-    assert!(registry.resolve_setup(2, 48000, "").is_err());
+
+    // The two installed selections resolve to distinct setup digests, so a
+    // setup identity is a consequence of the selection, never a selector.
+    let six_channel = registry
+        .resolve_selection(fixture_selection())
+        .expect("6ch selection resolves");
+    assert_ne!(six_channel.setup_sha256(), profile.setup_sha256());
 }

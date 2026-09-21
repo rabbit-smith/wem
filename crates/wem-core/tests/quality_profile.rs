@@ -5,9 +5,16 @@
 use sha2::{Digest, Sha256};
 use wem_core::encoder::Encoder;
 use wem_core::usecases::wav::read_pcm16;
-use wem_profiles::{resolve_wem_profile, resolve_wem_profile_quality};
+use wem_core::{WwiseProfile, WwiseVersion};
+use wem_profiles::{resolve_wem_profile_selection, resolve_wem_profile_selection_quality};
 
 const GOLDEN_WEM_SHA256: &str = "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247";
+
+/// The fixture profile selection: the installed Wwise 2013 6ch/44100
+/// configuration.
+fn fixture_selection() -> WwiseProfile {
+    WwiseProfile::new(WwiseVersion::Wwise2013, 6, 44_100).expect("fixture selection")
+}
 
 fn fixtures_dir() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -18,23 +25,30 @@ fn fixtures_dir() -> std::path::PathBuf {
 }
 
 #[test]
-fn resolve_wem_profile_quality_returns_additive_copies() {
-    let base = resolve_wem_profile(6, 44100).expect("6ch profile resolves");
+fn selection_resolution_returns_additive_quality_copies() {
+    let base = resolve_wem_profile_selection(fixture_selection()).expect("6ch profile resolves");
     assert!(base.setup_available());
     assert_eq!(base.quality(), None);
 
-    let bound = resolve_wem_profile_quality(6, 44100, Some(4.0)).expect("quality-bound copy");
+    let bound = resolve_wem_profile_selection_quality(fixture_selection(), Some(4.0))
+        .expect("quality-bound copy");
     assert_eq!(bound.quality(), Some(4.0));
     assert!(bound.setup_available());
+    // The bound copy is additive: re-resolving the selection is unbound.
+    assert_eq!(
+        resolve_wem_profile_selection(fixture_selection())
+            .expect("re-resolves")
+            .quality(),
+        None
+    );
 
     // Non-finite quality is rejected.
-    assert!(resolve_wem_profile_quality(6, 44100, Some(f64::NAN)).is_err());
+    assert!(resolve_wem_profile_selection_quality(fixture_selection(), Some(f64::NAN)).is_err());
 }
 
 #[test]
 fn quality_none_encode_bytes_match_the_golden_sha() {
-    let profile = resolve_wem_profile_quality(6, 44100, None).expect("6ch profile resolves");
-    let encoder = Encoder::from_profile_model(&profile, None).expect("encoder builds");
+    let encoder = Encoder::new_with_quality(fixture_selection(), None).expect("encoder builds");
     let wav = read_pcm16(&fixtures_dir().join("input.wav")).expect("input.wav reads");
     let pcm = wav.to_pcm16().expect("wav converts to Pcm16");
     let encoded = encoder.encode_pcm(&pcm).expect("encode runs");

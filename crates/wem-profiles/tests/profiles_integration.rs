@@ -7,6 +7,7 @@ use wem_profiles::psychoacoustics::{
     config::load_short_seed_surface, long_tables::load_long_psy_tables,
     long_variants::load_long_variant, short_tables::load_short_psy_profiles,
 };
+use wem_profiles::selection::{WwiseProfile, WwiseVersion};
 use wem_profiles::{
     assemble_encoder_profile_resources, load_book_table, load_frozen_tables, load_mdct_looks,
     load_profile_bundle, load_transient_tables, normalize_resource_path, resolve_book_id, DataDir,
@@ -26,6 +27,16 @@ fn repo_root() -> PathBuf {
 
 fn data_dir() -> DataDir {
     DataDir::from_profiles_dir(repo_root().join("src/wwise_wem/data/profiles"))
+}
+
+/// The installed Wwise 2013 6ch/44100 selection.
+fn six_selection() -> WwiseProfile {
+    WwiseProfile::new(WwiseVersion::Wwise2013, 6, 44_100).expect("6ch/44100 selection")
+}
+
+/// The installed Wwise 2013 2ch/48000 selection.
+fn two_channel_selection() -> WwiseProfile {
+    WwiseProfile::new(WwiseVersion::Wwise2013, 2, 48_000).expect("2ch/48000 selection")
 }
 
 fn bundle() -> wem_profiles::ProfileBundle {
@@ -906,16 +917,18 @@ fn installed_registry_resolutions() {
     // profile (fully registered: setup and psychoacoustics available).
     assert_eq!(registry.len(), 2);
 
-    let by_geometry = registry.resolve_geometry(6, 44100).expect("geometry");
-    assert_eq!(by_geometry.name(), "wwise2013-6ch-44100");
-    assert!(by_geometry.setup_available());
+    let six_channel = registry
+        .resolve_selection(six_selection())
+        .expect("6ch selection resolves");
+    assert_eq!(six_channel.name(), "wwise2013-6ch-44100");
+    assert!(six_channel.setup_available());
 
     // The 2ch/48000 profile resolves by its geometry and carries its setup
     // digest; its psychoacoustics are registered, so the profile is fully
     // ready (no manifest-declared pending reason).
     let stereo = registry
-        .resolve_geometry(2, 48000)
-        .expect("2ch geometry resolves");
+        .resolve_selection(two_channel_selection())
+        .expect("2ch selection resolves");
     assert_eq!(stereo.name(), "wwise2013-2ch-48000");
     assert!(stereo.setup_available());
     assert_eq!(
@@ -923,6 +936,9 @@ fn installed_registry_resolutions() {
         "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc"
     );
     assert!(stereo.pending_reason().is_none());
+    // The two selections resolve to distinct setup digests: a setup digest
+    // is a consequence of a selection, never an alternative selector.
+    assert_ne!(six_channel.setup_sha256(), stereo.setup_sha256());
 
     // Unknown key rejected.
     let unknown = ProfileKey::new(
@@ -934,51 +950,34 @@ fn installed_registry_resolutions() {
     )
     .expect("full identity");
     assert!(registry.resolve_key(&unknown).is_err());
-    // resolve_setup: right sha, wrong geometry -> rejected.
-    let sha = wem_profiles::WWISE2013_6CH_44100_SETUP_IDENTITY
-        .strip_prefix("sha256:")
-        .unwrap();
-    assert!(registry.resolve_setup(2, 44100, sha).is_err());
-    let matched = registry
-        .resolve_setup(6, 44100, sha)
-        .expect("template setup resolves");
-    assert_eq!(matched.name(), "wwise2013-6ch-44100");
-    // The 2ch profile now resolves by its own setup digest.
-    assert_eq!(
-        registry
-            .resolve_setup(
-                2,
-                48000,
-                "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc"
-            )
-            .expect("2ch resolves by setup digest")
-            .name(),
-        "wwise2013-2ch-48000"
-    );
-    assert!(registry.resolve_setup(2, 48000, "").is_err());
 
-    // load_wem_profile / resolve_wem_profile through the environment.
-    let name = "wwise2013-6ch-44100";
-    let loaded = wem_profiles::load_wem_profile(name).expect("named profile loads");
-    assert_eq!(loaded.name(), name);
-    assert!(wem_profiles::load_wem_profile("nope").is_err());
-    let resolved = wem_profiles::resolve_wem_profile(6, 44100).expect("geometry profile");
+    // The free resolvers agree with the registry.
+    let resolved =
+        wem_profiles::resolve_wem_profile_selection(six_selection()).expect("6ch selection");
+    assert_eq!(resolved.name(), "wwise2013-6ch-44100");
     assert_eq!(resolved.block_sizes(), [256, 2048]);
     assert_eq!(resolved.quality(), None);
 
     // Quality-bound lookups are additive copies (the registry instance is
     // never mutated).
-    let bound = wem_profiles::load_wem_profile_quality(name, Some(4.0)).expect("quality copy");
+    let bound = wem_profiles::resolve_wem_profile_selection_quality(six_selection(), Some(4.0))
+        .expect("quality copy");
     assert_eq!(bound.quality(), Some(4.0));
     let registry = wem_profiles::installed_registry(&data_dir()).expect("registry");
     assert_eq!(
-        registry.get_by_name(name).expect("original").quality(),
+        registry
+            .resolve_selection(six_selection())
+            .expect("original")
+            .quality(),
         None
     );
-    assert!(wem_profiles::load_wem_profile_quality(name, Some(f64::NAN)).is_err());
-    let stereo_by_name =
-        wem_profiles::load_wem_profile_quality("wwise2013-2ch-48000", None).expect("2ch profile");
-    assert!(stereo_by_name.setup_available());
+    assert!(
+        wem_profiles::resolve_wem_profile_selection_quality(six_selection(), Some(f64::NAN))
+            .is_err()
+    );
+    let stereo_by_selection = wem_profiles::resolve_wem_profile_selection(two_channel_selection())
+        .expect("2ch selection");
+    assert!(stereo_by_selection.setup_available());
 }
 
 #[test]

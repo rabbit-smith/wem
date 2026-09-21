@@ -31,11 +31,8 @@ pub mod usecases {
     pub mod wav;
 }
 
-pub use encoder::{
-    resolve_profile_by_geometry, ContainerPlan, EncodeResult, EncodeStats, Encoder, Pcm16,
-    MIN_PCM_FRAMES,
-};
+pub use encoder::{ContainerPlan, EncodeResult, EncodeStats, Encoder, Pcm16, MIN_PCM_FRAMES};
 pub use error::{EncoderError, InternalError};
 pub use pack::{pack_analysis_frame, EncodedPacket};
-pub use stream::{ProfileRef, StreamPacket, StreamSession};
+pub use stream::{StreamPacket, StreamSession};
 pub use wem_profiles::selection::{WwiseProfile, WwiseVersion};
