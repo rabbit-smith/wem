@@ -1,4 +1,4 @@
-.PHONY: test test-fast fuzz-parity 2ch-stress 2ch-long frame-contract stage-contract golden lint rust-lint build wheel-smoke check clean native
+.PHONY: test test-fast fuzz-parity 2ch-stress 2ch-long frame-contract stage-contract golden lint rust-lint rust-test rust-bench build wheel-smoke check clean native
 
 PY ?= python3
 

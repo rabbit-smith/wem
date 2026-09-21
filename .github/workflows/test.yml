@@ -70,6 +70,16 @@ jobs:
           CARGO_TERM_COLOR: always
       - name: full suite on the native kernel (hard gate)
         run: python -m unittest discover -s tests -v
+      # The two heaviest red lines live in modules that are deliberately not
+      # `test_*`-prefixed, so discovery above cannot reach them (tests/AGENTS.md).
+      # Run them explicitly, in one cell rather than the whole matrix: they are
+      # contract runs, not portability runs.
+      - name: per-frame contract (205-frame hash contract)
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.13'
+        run: python -m unittest tests.contract.frame_pipeline_contract -v
+      - name: per-stage contract (frame x stage hashes + representative dumps)
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.13'
+        run: python -m unittest tests.contract.stage_pipeline_contract -v
       - name: native binding smoke (streaming + one-shot, byte-exact)
         run: python scripts/native_smoke.py
       - name: "wheel gate (single wheel: facade + native; clean-venv encode)"
@@ -82,17 +92,56 @@ jobs:
       - name: differential parity PR gate (golden + 10 cases, < 1 minute)
         run: python scripts/fuzz_diff_parity.py --pr
 
+  rust:
+    # The kernel's own gates, as a Rust workspace. Every other job exercises
+    # the kernel only through one binding (maturin, cgo, wasm-pack), so
+    # without this job a crate that builds for one shell but not for the
+    # workspace — or a formatting/clippy regression in a crate no shell
+    # happens to build — reaches main unchallenged.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: formatting
+        run: cd crates && cargo fmt --all --check
+      - name: clippy (workspace, all targets, warnings denied)
+        run: cd crates && cargo clippy --workspace --all-targets -- -D warnings
+      - name: workspace tests (unit, integration, doc)
+        run: cd crates && cargo test --workspace
+
   capi:
     # C ABI core surface (the single cross-language integration point):
     # proves byte-exactness end-to-end — the Rust FFI tests (capi_e2e)
-    # plus the Go cgo reference binding streaming the fixture through
-    # the C ABI and rebuilding the golden WEM.
+    # plus the Go cgo binding and the plain C client, each streaming the
+    # fixture through the C ABI and rebuilding the golden WEM.
     runs-on: ubuntu-latest
+    env:
+      # The golden digest, shared by every client in this job so the checks
+      # cannot drift apart.
+      GOLDEN_SHA256: 17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cd crates && cargo build --release -p wem-capi
       - run: cd crates && cargo test --release -p wem-capi
+      - name: Build + run the C client (byte-exact)
+        # include/wem.h is the normative contract, and this is the only
+        # consumer a C compiler reads it with: without this step the header
+        # could stop being C-consumable and nothing would notice.
+        run: |
+          set -euo pipefail
+          cc -std=c11 -Wall -Wextra -Werror -Iinclude \
+            examples/c/encode_pcm16.c \
+            -Lcrates/target/release -lwem_capi -lpthread -ldl -lm \
+            -o "${RUNNER_TEMP}/wem-c-example"
+          "${RUNNER_TEMP}/wem-c-example" tests/fixtures/input.wav "${RUNNER_TEMP}/c-capi-out.wem"
+          GOT=$(sha256sum "${RUNNER_TEMP}/c-capi-out.wem" | awk '{print $1}')
+          if [ "$GOT" != "${GOLDEN_SHA256}" ]; then
+            echo "golden sha256 mismatch: got $GOT"; exit 1
+          fi
+          echo "golden sha256 OK: $GOT"
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
@@ -104,7 +153,7 @@ jobs:
           go build ./...
           go run . -wav ../../tests/fixtures/input.wav -out "${RUNNER_TEMP}/go-capi-out.wem"
           GOT=$(sha256sum "${RUNNER_TEMP}/go-capi-out.wem" | awk '{print $1}')
-          if [ "$GOT" != "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247" ]; then
+          if [ "$GOT" != "${GOLDEN_SHA256}" ]; then
             echo "golden sha256 mismatch: got $GOT"; exit 1
           fi
           echo "golden sha256 OK: $GOT"
