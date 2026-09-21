@@ -1,11 +1,13 @@
 //! wwise-wem: encode a signed-16 PCM WAV into a Wwise Vorbis WEM.
 //!
 //! Usage:
-//!   wwise-wem <input.wav> [--output <path>] [--profile <name>] [--time]
+//!   wwise-wem <input.wav> [--output <path>] [--wwise-version <label>] [--time]
 //!
 //! * `--output` defaults to stdout (use "-" explicitly for stdout).
-//! * `--profile` selects an installed profile by name; without it, the
-//!   profile is resolved from the WAV's channel count and sample rate.
+//! * `--wwise-version` selects the Wwise generation (default: the installed
+//!   one, `2013`). The PCM geometry always comes from the input WAV, so the
+//!   two together are the structured profile selection; there is no profile
+//!   name and no profile directory.
 //! * `--time` prints per-stage timings to stderr (bench/diagnostics).
 //!
 //! A one-line summary (bytes, sha256, stats) is written to stderr so the
@@ -15,7 +17,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use wem_core::usecases::wav::read_pcm16;
-use wem_core::{resolve_profile_by_geometry, Encoder, Pcm16};
+use wem_core::{Encoder, Pcm16, WwiseProfile, WwiseVersion};
 
 fn main() {
     if let Err(message) = run() {
@@ -25,14 +27,14 @@ fn main() {
 }
 
 fn usage() -> &'static str {
-    "usage: wwise-wem <input.wav> [--output <path>] [--profile <name>] [--time]"
+    "usage: wwise-wem <input.wav> [--output <path>] [--wwise-version <label>] [--time]"
 }
 
 fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut input: Option<String> = None;
     let mut output: Option<String> = None;
-    let mut profile: Option<String> = None;
+    let mut version: Option<String> = None;
     let mut time_stages = false;
     let mut i = 0usize;
     while i < args.len() {
@@ -41,9 +43,9 @@ fn run() -> Result<(), String> {
                 i += 1;
                 output = Some(args.get(i).cloned().ok_or_else(|| usage().to_string())?);
             }
-            "--profile" | "-p" => {
+            "--wwise-version" | "-V" => {
                 i += 1;
-                profile = Some(args.get(i).cloned().ok_or_else(|| usage().to_string())?);
+                version = Some(args.get(i).cloned().ok_or_else(|| usage().to_string())?);
             }
             "--time" => time_stages = true,
             "-h" | "--help" => {
@@ -68,11 +70,13 @@ fn run() -> Result<(), String> {
     let wav = read_pcm16(Path::new(&input)).map_err(|error| error.to_string())?;
     let wav_load_ms = stage_start.elapsed().as_secs_f64() * 1e3;
 
-    let encoder = match profile {
-        Some(name) => Encoder::from_profile(&name).map_err(|error| error.to_string())?,
-        None => resolve_profile_by_geometry(wav.channels() as i64, wav.sample_rate())
-            .map_err(|error| error.to_string())?,
+    let generation = match version {
+        Some(label) => WwiseVersion::parse(&label).map_err(|error| error.to_string())?,
+        None => WwiseVersion::DEFAULT,
     };
+    let selection = WwiseProfile::new(generation, wav.channels() as i64, wav.sample_rate() as i64)
+        .map_err(|error| error.to_string())?;
+    let encoder = Encoder::new(selection).map_err(|error| error.to_string())?;
     let profile_assembly_ms = stage_start.elapsed().as_secs_f64() * 1e3 - wav_load_ms;
 
     let stage_start = Instant::now();

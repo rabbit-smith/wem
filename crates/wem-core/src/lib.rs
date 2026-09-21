@@ -7,8 +7,11 @@
 //!
 //! Public surface:
 //! * [`encoder::Encoder`] — one-shot PCM-to-WEM encode
-//!   (Python `application/encoder.py`); the filesystem entry is
-//!   `from_profile`, the threadless (bytes) entry is `from_profile_bytes`
+//!   (Python `application/encoder.py`); the caller-facing entry is
+//!   [`encoder::Encoder::new`] over a structured [`WwiseProfile`]
+//! * [`WwiseProfile`] / [`WwiseVersion`] — the structured profile selector
+//!   (re-exported from `wem-profiles` for the bindings that depend only on
+//!   this crate)
 //! * [`encoder::Pcm16`] / [`encoder::EncodeResult`] — typed I/O models
 //! * [`pack::pack_analysis_frame`] — frame-level floor-fit and packet
 //!   diagnostics
@@ -35,3 +38,4 @@ pub use encoder::{
 pub use error::{EncoderError, InternalError};
 pub use pack::{pack_analysis_frame, EncodedPacket};
 pub use stream::{ProfileRef, StreamPacket, StreamSession};
+pub use wem_profiles::selection::{WwiseProfile, WwiseVersion};

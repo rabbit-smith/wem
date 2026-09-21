@@ -12,7 +12,7 @@ use std::time::Instant;
 use wem_analysis::session::AnalysisSession;
 use wem_container::wem::build_vorbis_wem;
 use wem_core::pack::pack_analysis_packet;
-use wem_core::{Encoder, Pcm16, MIN_PCM_FRAMES};
+use wem_core::{Encoder, Pcm16, WwiseProfile, WwiseVersion, MIN_PCM_FRAMES};
 
 fn main() {
     let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -26,7 +26,15 @@ fn main() {
         "fixture must satisfy the frame minimum"
     );
 
-    let encoder = Encoder::from_profile("wwise2013-6ch-44100").expect("profile loads");
+    // The structured selection: the installed generation plus the geometry
+    // of the WAV being timed.
+    let selection = WwiseProfile::new(
+        WwiseVersion::DEFAULT,
+        wav.channels() as i64,
+        wav.sample_rate() as i64,
+    )
+    .expect("fixture geometry is valid");
+    let encoder = Encoder::new(selection).expect("profile loads");
 
     // Warm-up: page faults, allocator growth, I-cache.
     let warmup = encoder.encode_pcm(&pcm).expect("warm-up encode");

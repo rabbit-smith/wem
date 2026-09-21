@@ -54,6 +54,7 @@ use wem_analysis::preprocessing::windowing::WindowedFrame;
 use wem_analysis::session::AnalysisSession;
 use wem_profiles::data::DataDir;
 use wem_profiles::registry::{embedded_registry, installed_registry, ProfileRegistry};
+use wem_profiles::selection::WwiseProfile;
 use wem_scheduling::{append_samples, emit_block, required_samples, FramePlan, SchedulerState};
 
 use crate::encoder::{EncodeResult, EncodeStats, Encoder, MIN_PCM_FRAMES};
@@ -609,6 +610,24 @@ impl StreamSession {
         let mut session = Self::new();
         session.init_profile_quality_in(data, ref_, quality)?;
         Ok(session)
+    }
+
+    /// Open a streaming session on a structured profile selection — the
+    /// only caller-facing profile selector (generation + geometry).
+    ///
+    /// - `PROFILE_NOT_FOUND` when no installed profile satisfies the selection.
+    /// - `FORMAT_UNSUPPORTED` on an unrecognized generation code.
+    pub fn for_selection(selection: WwiseProfile) -> Result<Self, EncoderError> {
+        Self::for_selection_quality(selection, None)
+    }
+
+    /// Open a streaming session on a structured profile selection with an
+    /// optional quality factor (`None` reproduces the historical bytes).
+    pub fn for_selection_quality(
+        selection: WwiseProfile,
+        quality: Option<f64>,
+    ) -> Result<Self, EncoderError> {
+        Self::from_encoder(Encoder::new_with_quality(selection, quality)?)
     }
 
     /// Open a streaming session by installed profile name from the default

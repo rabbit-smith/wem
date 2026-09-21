@@ -25,7 +25,10 @@ use wem_profiles::embedded::load_embedded_profile_bundle;
 use wem_profiles::error::ProfileError;
 use wem_profiles::model::ContainerMetadata;
 use wem_profiles::model::EncoderProfile;
-use wem_profiles::registry::{embedded_registry, ProfileRegistry};
+use wem_profiles::registry::{
+    embedded_registry, resolve_wem_profile_selection_quality, ProfileRegistry,
+};
+use wem_profiles::selection::WwiseProfile;
 use wem_vorbis::codebook::Codebook;
 use wem_vorbis::setup::SetupInfo;
 
@@ -289,6 +292,32 @@ pub struct Encoder {
 }
 
 impl Encoder {
+    /// Construct the encoder from a structured profile selection — the only
+    /// caller-facing profile selector (Python `Encoder(profile=...)`).
+    ///
+    /// The selection is resolved against the profile bundle compiled into
+    /// this library; a selection no installed profile satisfies fails with
+    /// [`EncoderError::ProfileNotFound`], never with a substituted default.
+    pub fn new(selection: WwiseProfile) -> Result<Self, EncoderError> {
+        Self::new_with_quality(selection, None)
+    }
+
+    /// Construct the encoder from a structured selection, optionally bound to
+    /// a quality factor.
+    ///
+    /// `None` reproduces the historical bytes exactly; with a quality value
+    /// the analysis-resource assembly interpolates the profile's quality
+    /// curves (a missing quality-curves resource is a clear configuration
+    /// error, never a silent fallback).
+    pub fn new_with_quality(
+        selection: WwiseProfile,
+        quality: Option<f64>,
+    ) -> Result<Self, EncoderError> {
+        let profile = resolve_wem_profile_selection_quality(selection, quality)
+            .map_err(|error| selection_error(&error, selection))?;
+        Self::from_profile_model(&profile, None)
+    }
+
     /// Load one installed profile by name and construct the encoder
     /// (Python `load_wem_profile` + `Encoder.__init__`).
     pub fn from_profile(name: &str) -> Result<Self, EncoderError> {
@@ -667,6 +696,29 @@ pub fn resolve_profile_by_geometry_in(
     let registry: ProfileRegistry = wem_profiles::registry::installed_registry(data)?;
     let profile = registry.resolve_geometry(channels, sample_rate)?;
     Encoder::from_profile_model_in(data, profile, None)
+}
+
+/// Map a profile-resolution failure onto the caller-facing error class.
+///
+/// A selection that names no installed profile, or more than one, is a
+/// caller-facing resolution failure (`WEM_ERR_PROFILE_NOT_FOUND`), not an
+/// internal fault; an unrecognized generation code violates this revision's
+/// contract (`WEM_ERR_FORMAT_UNSUPPORTED`); anything else stays internal.
+fn selection_error(error: &ProfileError, selection: WwiseProfile) -> EncoderError {
+    match error {
+        ProfileError::NoProfileForSelection { .. }
+        | ProfileError::AmbiguousProfileSelection { .. } => EncoderError::ProfileNotFound {
+            requested: selection.describe(),
+        },
+        ProfileError::UnknownWwiseVersion { .. }
+        | ProfileError::UnsupportedWwiseGeneration { .. } => EncoderError::FormatUnsupported {
+            message: error.to_string(),
+        },
+        ProfileError::SelectionGeometryNonPositive => EncoderError::StateError {
+            message: error.to_string(),
+        },
+        other => EncoderError::Internal(InternalError::Profile(other.clone())),
+    }
 }
 
 fn load_named_bundle(data: &DataDir, name: &str) -> Result<ProfileBundle, EncoderError> {
