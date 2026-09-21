@@ -451,8 +451,9 @@ pub(crate) fn load_profile_bundle(
 ///
 /// Crate-internal: index/manifest bytes are an intake the caller-facing
 /// surface never accepts. The in-crate loader suite is its only consumer, so
-/// it stays compiled (and validated) in every build.
-#[allow(dead_code)]
+/// a non-test build compiles it unused — known and intended — while a test
+/// build has to keep it live, and says so if the suite ever stops calling it.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn load_profile_bundle_from_bytes(
     index: &[u8],
     files: impl IntoIterator<Item = (String, Vec<u8>)>,

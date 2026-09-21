@@ -131,8 +131,9 @@ impl ResourceRef {
     /// Validate package/identity and normalize; mirrors Python `__post_init__`.
     ///
     /// Crate-internal constructor: it takes a profile tree. The in-crate
-    /// loader suite is its consumer.
-    #[allow(dead_code)]
+    /// loader suite is its consumer, so a non-test build compiles it unused
+    /// (known and intended) and a test build requires it live.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn new(data: DataDir, path: &str, sha256: &str) -> Result<Self, ProfileError> {
         Self::with_backend(ResourceBackend::Fs(data), path, sha256)
     }

@@ -142,8 +142,9 @@ impl ProfileRegistry {
 /// manifest-declared `pending_reason`, and never match a setup digest.
 ///
 /// Crate-internal: it takes a profile tree. The in-crate loader suite is its
-/// consumer; callers resolve against the compiled-in registry.
-#[allow(dead_code)]
+/// consumer; callers resolve against the compiled-in registry. Unused in a
+/// non-test build (known and intended), required live in a test build.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn installed_registry(data: &DataDir) -> Result<ProfileRegistry, ProfileError> {
     let names = index_profile_names(data)?;
     let mut profiles = Vec::with_capacity(names.len());

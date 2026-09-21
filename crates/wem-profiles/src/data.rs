@@ -32,9 +32,10 @@ impl DataDir {
     ///
     /// The crate-internal loader suite is the only caller, so the
     /// development-tree seam stays compiled in every build without being
-    /// reachable from outside this crate; `allow(dead_code)` keeps the
-    /// reachability lint from silencing it instead.
-    #[allow(dead_code)]
+    /// reachable from outside this crate. It is unused outside a test build
+    /// (known and intended, hence the conditional allow) and live inside one,
+    /// where a dropped call is a warning instead of silence.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn from_profiles_dir(profiles_dir: impl Into<PathBuf>) -> Self {
         Self {
             profiles_dir: profiles_dir.into(),
