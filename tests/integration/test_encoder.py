@@ -42,6 +42,8 @@ class EncoderFacadeTests(unittest.TestCase):
         self.assertIs(encoder.selection, SELECTION)
 
     def test_constructor_rejects_a_non_selection(self) -> None:
+        # The literal IS the subject here: a profile *name* is not a selection,
+        # and the facade must refuse it rather than resolve it.
         with self.assertRaisesRegex(TypeError, "selection must be WwiseProfile"):
             Encoder("wwise2013-6ch-44100")  # type: ignore[arg-type]
 

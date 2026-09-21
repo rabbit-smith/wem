@@ -62,6 +62,9 @@ class PacketRuntimeTests(unittest.TestCase):
         )
         packet = result.packet
         self.assertEqual(len(packet), 331)
+        # Kept deliberately: this synthetic state has no committed artifact, so
+        # the digest is the only record of the packed words -- no byte
+        # comparison against a fixture can replace it.
         self.assertEqual(
             hashlib.sha256(packet).hexdigest(),
             "c944326ea93b1004577243073e7cd087a886f3c7dd874662e290abd447e6fab0",
@@ -73,6 +76,7 @@ class PacketRuntimeTests(unittest.TestCase):
             for row in q_after
             for value in row
         )
+        # Same as above: the quantized-residue words exist only in this test.
         self.assertEqual(
             hashlib.sha256(q_bytes).hexdigest(),
             "7af3033268a641f6078352a0a3d25460fd8c50400ed4b852c845044ac19f19bc",

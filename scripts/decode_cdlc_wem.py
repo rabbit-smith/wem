@@ -87,7 +87,6 @@ T97_END = T97_COUNT
 T219_END = T97_END + T219_COUNT
 T282_END = T219_END + T282_COUNT
 
-DEFAULT_PROFILE = "wwise2013-2ch-48000"
 DEFAULT_CORPUS = _REPO_ROOT / "corpus" / "paired-build-probe" / "the long paired input"
 DEFAULT_OUT_DIR = _REPO_ROOT / "corpus" / "paired-build-probe" / "out"
 SAMPLE_RATE = 48000
@@ -96,6 +95,22 @@ SAMPLE_RATE = 48000
 # below need no extra parameter; the decode script reads no environment
 # variable, so which synthesis path ran is always visible in the command line.
 _LIBVORBIS_EXACT = False
+
+
+def profile_name(channels: int, sample_rate: int) -> str:
+    """Directory name of the installed profile one selection denotes.
+
+    The name is a property of the packaged tree, so it is read off the
+    selection instead of being re-typed here. The imports stay local because
+    resolving a selection needs the native kernel, which the decode path
+    itself never uses.
+    """
+    from wwise_wem import WwiseProfile, WwiseVersion
+    from wwise_wem.profiles.registry import resolve_selection
+
+    return resolve_selection(
+        WwiseProfile(WwiseVersion.WWISE2013, channels, sample_rate)
+    ).name
 
 
 class ResidueEOP(Exception):
@@ -1781,7 +1796,7 @@ def main() -> int:
         description="Reference ground-truth WEM decoder (2ch/48k paired-build probe)."
     )
     parser.add_argument("--wem", type=Path, default=DEFAULT_CORPUS)
-    parser.add_argument("--profile", default=DEFAULT_PROFILE)
+    parser.add_argument("--profile", default=profile_name(2, SAMPLE_RATE))
     parser.add_argument("--self-check", action="store_true")
     parser.add_argument("--segments", action="store_true")
     parser.add_argument(
@@ -2060,9 +2075,6 @@ def run_self_check() -> int:
     Uses the 6ch profile (fully registered) and the repo fixture's PCM to
     verify the decode chain (framing, floor, residue, MDCT inverse, OLA).
     """
-    profile_dir = (
-        _REPO_ROOT / "src" / "wwise_wem" / "data" / "profiles" / "wwise2013-6ch-44100"
-    )
     fixture_pcm = _REPO_ROOT / "tests" / "fixtures" / "input.wav"
     if not fixture_pcm.exists():
         print("SELF-CHECK: missing fixture input.wav")
@@ -2077,6 +2089,10 @@ def run_self_check() -> int:
     pcm = read_pcm_wav(fixture_pcm)
     profile = resolve_selection(
         WwiseProfile(WwiseVersion.DEFAULT, pcm.channel_count, pcm.sample_rate)
+    )
+    # The profile directory is the packaged name of that same selection.
+    profile_dir = (
+        _REPO_ROOT / "src" / "wwise_wem" / "data" / "profiles" / profile.name
     )
     result = python_engine.encode_pcm_python(
         profile=profile,

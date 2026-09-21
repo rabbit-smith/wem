@@ -5,6 +5,8 @@ from pathlib import Path
 
 import wwise_wem
 
+from wwise_wem import WwiseProfile, WwiseVersion
+from wwise_wem.profiles.registry import resolve_selection
 from wwise_wem_reference.profiles.transient import load_transient_tables
 from wwise_wem_reference.profiles.psychoacoustics.long_tables import load_long_psy_tables
 from wwise_wem_reference.profiles.psychoacoustics.long_variants import load_long_variant
@@ -13,11 +15,16 @@ from wwise_wem.profiles.bundle import load_profile_bundle
 from wwise_wem_reference.profiles.transform import load_mdct_looks
 
 
+SIX_CHANNEL_SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
+
+
 class PackagedTableTests(unittest.TestCase):
     def test_runtime_manifest_hashes(self):
+        # The 6ch/44100 profile's directory is the packaged name its selection
+        # resolves to, never a literal restated by the test.
         profile = (
             Path(wwise_wem.__file__).parent
-            / "data" / "profiles" / "wwise2013-6ch-44100"
+            / "data" / "profiles" / resolve_selection(SIX_CHANNEL_SELECTION).name
         )
         manifest = json.loads((profile / "manifest.json").read_text())
         for logical_name, resource in manifest["resources"].items():

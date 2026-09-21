@@ -78,6 +78,9 @@ class TransientDetectorTests(unittest.TestCase):
                 digest.update(struct.pack("<i", int(value)))
 
         self.assertEqual(tuple(flags), (2, 2, 0, 5, 5, 0, 0))
+        # Kept deliberately: the mask/history word sequence has no committed
+        # artifact, so the digest is its only record -- the flag tuple above
+        # pins the decisions, not the evolved state.
         self.assertEqual(
             digest.hexdigest(),
             "2851d13322f1b57d7be0decaf3900bcf6419125767d5b1dcfaa0ca77a99f531f",

@@ -7,9 +7,10 @@
  * Node's native type stripping on >= 22.18), and that its profile selection
  * is the structured one of `include/wem.h` (ABI revision 2):
  *
- *   1. ONE-SHOT: the pinned 6ch/44.1kHz recording -> WEM, sha256 must equal
- *      the kernel golden — auto-selected from the WAV geometry, with an
- *      explicit selection, and through the raw-PCM entry.
+ *   1. ONE-SHOT: the pinned 6ch/44.1kHz recording -> WEM, byte-identical to
+ *      the committed kernel golden (tests/fixtures/reference.wem) —
+ *      auto-selected from the WAV geometry, with an explicit selection, and
+ *      through the raw-PCM entry.
  *   2. STREAMING CHUNK CONSISTENCY: the same PCM fed to sessions with three
  *      different chunkings (single chunk, fixed-size chunks, irregular
  *      frame-aligned chunks) must each reproduce the golden — chunk
@@ -42,10 +43,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
 
 // Pinned kernel golden: tests/fixtures/input.wav (6ch/44.1kHz, 139398 frames)
-// -> reference WEM. The profile bundle rides inside the wasm module.
-const GOLDEN_SHA256 =
-  "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247";
+// -> tests/fixtures/reference.wem. The profile bundle rides inside the wasm
+// module. The comparison is the committed file's bytes; the red-line SHA-256 of
+// that file is documented in js/README.md and is deliberately not restated here.
 const RECORDING = join(repoRoot, "tests/fixtures/input.wav");
+const REFERENCE = join(repoRoot, "tests/fixtures/reference.wem");
 const RECORDING_FRAMES = 139398;
 
 let failures = 0;
@@ -55,6 +57,9 @@ function check(label, ok, detail = "") {
   console.log(`[${mark}] ${label}${detail ? ` — ${detail}` : ""}`);
   if (!ok) failures += 1;
 }
+
+const equal = (x, y) =>
+  x.byteLength === y.byteLength && [...x].every((v, i) => v === y[i]);
 
 async function expectWemError(label, fn, expectedCode) {
   try {
@@ -83,6 +88,7 @@ const describe = (s) =>
   `channels=${s.channels}, sampleRate=${s.sampleRate}, description=${s.description}`;
 
 const wavBytes = new Uint8Array(readFileSync(RECORDING));
+const goldenWem = new Uint8Array(readFileSync(REFERENCE));
 
 await initWasm();
 
@@ -111,15 +117,15 @@ const SIX_CHANNEL = {
 const t0 = Date.now();
 const auto = await encodeWav(wavBytes); // no selection: auto-selected from the WAV
 check(
-  "one-shot (auto-selected) sha256 == golden",
-  auto.sha256Hex === GOLDEN_SHA256,
+  "one-shot (auto-selected) bytes == reference.wem",
+  equal(auto.data, goldenWem),
   `sha256=${auto.sha256Hex}, bytes=${auto.totalLen}, ${Date.now() - t0}ms`,
 );
 
 const explicit = await encodeWav(wavBytes, { version: 0, channels: 6, sampleRate: 44100 });
 check(
-  "one-shot (explicit selection 0/6ch/44100) sha256 == golden",
-  explicit.sha256Hex === GOLDEN_SHA256,
+  "one-shot (explicit selection 0/6ch/44100) bytes == reference.wem",
+  equal(explicit.data, goldenWem),
   `sha256=${explicit.sha256Hex}, bytes=${explicit.totalLen}`,
 );
 
@@ -147,8 +153,8 @@ check(
 );
 const pcmOneShot = encoder.encodePcm16Interleaved(parsed.pcm);
 check(
-  "one-shot through the raw-PCM entry sha256 == golden",
-  pcmOneShot.sha256Hex === GOLDEN_SHA256,
+  "one-shot through the raw-PCM entry bytes == reference.wem",
+  equal(pcmOneShot.data, goldenWem),
   `sha256=${pcmOneShot.sha256Hex}, bytes=${pcmOneShot.totalLen}`,
 );
 encoder.destroy();
@@ -215,8 +221,8 @@ for (const [label, chunks] of Object.entries(plans)) {
   const { result, resolved } = await streamEncode(chunks, source);
   results.push(result);
   check(
-    `streaming (${label}) sha256 == golden`,
-    result.sha256Hex === GOLDEN_SHA256,
+    `streaming (${label}) bytes == reference.wem`,
+    equal(result.data, goldenWem),
     `sha256=${result.sha256Hex}, packets=${result.stats.audioPackets}, chunks=${chunks.length}`,
   );
   check(
@@ -226,8 +232,6 @@ for (const [label, chunks] of Object.entries(plans)) {
   );
 }
 
-const equal = (x, y) =>
-  x.byteLength === y.byteLength && [...x].every((v, i) => v === y[i]);
 check(
   "streaming outputs byte-identical across all chunkings",
   equal(results[0].data, results[1].data) && equal(results[0].data, results[2].data),
@@ -382,4 +386,7 @@ if (failures > 0) {
   process.exit(1);
 }
 console.log("\nALL NODE PARITY GATES PASSED");
-console.log(`golden sha256: ${GOLDEN_SHA256}`);
+console.log(
+  `golden: ${goldenWem.byteLength} bytes identical to tests/fixtures/reference.wem`,
+);
+console.log(`golden sha256 (computed, not compared): ${auto.sha256Hex}`);

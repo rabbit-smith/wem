@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import struct
 import tempfile
 import unittest
@@ -10,10 +9,13 @@ import wave
 from pathlib import Path
 from typing import ClassVar, TypedDict
 
-from wwise_wem import EncodeResult, encode
+from wwise_wem import EncodeResult, WwiseProfile, WwiseVersion, encode
 from wwise_wem_reference.container.wem import load_wem_parts_bytes
 from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem.model import PcmBuffer
+from wwise_wem.profiles.registry import resolve_selection
+from wwise_wem_reference.python_engine import ContainerPlan, encode_pcm_python
+from tests.contract.wem_byte_contract import assert_wem_equal
 
 
 CHANNELS = 6
@@ -43,83 +45,87 @@ class _Case(TypedDict):
     short_packets: int
     long_packets: int
     bytes: int
-    sha256: str
 
 
 class PcmLengthEncodeContractTests(unittest.TestCase):
-    # NOTE (the round, 2026): the three ``sha256`` digests below were re-locked when
-    # ``nAvgBytesPerSec`` stopped being carried from the profile and started
-    # being derived as ``floor(data_payload_bytes * nSamplesPerSec /
+    # NOTE (the round, 2026): ``nAvgBytesPerSec`` is derived, not carried from the
+    # profile -- ``floor(data_payload_bytes * nSamplesPerSec /
     # dwTotalPCMFrames)`` (see ``container.packets.recompute_vorbis_fmt_sizes``).
-    # The previously locked digests encoded the profile constant 34381 -- which
-    # is only correct for the 139398-frame golden fixture -- so every other
-    # input length carried a wrong header field. Verified mechanically: writing
-    # 34381 back into the ``avg`` slot of each new file reproduces the old
-    # digest byte-for-byte, i.e. only that 4-byte field moved; ``bytes``,
-    # packet counts and every audio packet are unchanged. The whole-file golden
-    # digest (6ch fixture) is unaffected and still passes untouched.
+    # The profile constant 34381 is only correct for the 139398-frame golden
+    # fixture, whose whole-file byte comparison pins that field; every other
+    # input length must derive its own value.
     #
-    # NOTE (2026): every entry below was re-locked a second time, together with
-    # the packet counts, when the mode-selection tail rule was corrected. The
-    # paired build emits a frame while the *previous* frame's center still lies
-    # inside the PCM, so the plan ends exactly on the source length; the previous
-    # ``center < source_len + prefix`` bound overshot by a fixed amount and
-    # emitted trailing frames the build does not. Verified mechanically on all
-    # three lengths: the new stream's packets are an exact prefix of the old
-    # stream's (2, 1 and 2 trailing packets removed respectively), every other
-    # packet is byte-identical, and the new plan's last frame starts exactly at
-    # the source length (4096 -> 4096, 8192 -> 8192) with its predecessor still
-    # inside the PCM. That end-on-the-source-length signature is what all six
-    # measured reference streams show (both conversion routes), and the 6ch
-    # fixture golden digest is unaffected.
+    # NOTE (2026): the packet counts below were re-locked when the
+    # mode-selection tail rule was corrected. The paired build emits a frame
+    # while the *previous* frame's center still lies inside the PCM, so the plan
+    # ends exactly on the source length; the previous ``center < source_len +
+    # prefix`` bound overshot by a fixed amount and emitted trailing frames the
+    # build does not. Verified mechanically on all three lengths: the new
+    # stream's packets are an exact prefix of the old stream's (2, 1 and 2
+    # trailing packets removed respectively), every other packet is
+    # byte-identical, and the new plan's last frame starts exactly at the source
+    # length (4096 -> 4096, 8192 -> 8192). That end-on-the-source-length
+    # signature is what all six measured reference streams show (both conversion
+    # routes).
     #
-    # The payload hashes were re-locked again when EOS prediction was corrected
-    # to train on the final long block (2048 samples), matching the public
-    # Vorbis analysis algorithm and the paired build's predicted samples.
-    # The current hashes also include the terminal overlap excess derived from
-    # the emitted mode sequence in fmt fields 0x24 and 0x32. Packet bytes and
-    # lengths are unchanged by that header correction.
+    # EOS prediction trains on the final long block (2048 samples), matching the
+    # public Vorbis analysis algorithm and the paired build's predicted samples;
+    # the terminal overlap excess derived from the emitted mode sequence is
+    # carried in fmt fields 0x24 and 0x32 (that header correction leaves packet
+    # bytes and lengths unchanged).
+    #
+    # The payloads at these lengths have no committed counterpart, so the
+    # whole-file claim is the byte comparison against the reference oracle below
+    # (plus the mode sequence and byte length pinned here) rather than a digest
+    # of this implementation's own output.
     EXPECTED: dict[int, _Case] = {
         4096: {
             "audio_packets": 33,
             "short_packets": 33,
             "long_packets": 0,
             "bytes": 10793,
-            "sha256": "f0813e4e6595d9492369635cb87da83811142cda07032acdcb26806a547d2f5e",
         },
         4097: {
             "audio_packets": 34,
             "short_packets": 34,
             "long_packets": 0,
             "bytes": 11148,
-            "sha256": "6e3cc48f03634f065c537f3bdce1009e985f609e61c311fab205338be6120ab6",
         },
         8192: {
             "audio_packets": 65,
             "short_packets": 65,
             "long_packets": 0,
             "bytes": 21144,
-            "sha256": "ee9e06531f101812fd0a69c1eb1c032b9c1cff0d6b168f693bc3c2b60cf91c24",
         },
     }
 
     _directory: ClassVar[tempfile.TemporaryDirectory]
     results: ClassVar[dict[int, EncodeResult]]
+    oracle: ClassVar[dict[int, EncodeResult]]
 
     @classmethod
     def setUpClass(cls) -> None:
         cls._directory = tempfile.TemporaryDirectory()
         cls.results = {}
+        cls.oracle = {}
+        selection = WwiseProfile(WwiseVersion.WWISE2013, CHANNELS, SAMPLE_RATE)
+        profile = resolve_selection(selection)
+        container = ContainerPlan.from_profile(profile)
         for frame_count in cls.EXPECTED:
             path = Path(cls._directory.name) / f"edge-{frame_count}.wav"
             _write_pcm16(path, frame_count)
             cls.results[frame_count] = encode(path)
+            cls.oracle[frame_count] = encode_pcm_python(
+                profile=profile,
+                container=container,
+                pcm=read_pcm_wav(path),
+            )
 
     @classmethod
     def tearDownClass(cls) -> None:
         cls._directory.cleanup()
 
-    def test_frame_boundaries_lock_modes_packet_counts_bytes_and_sha(self) -> None:
+    def test_frame_boundaries_lock_modes_packet_counts_and_oracle_bytes(self) -> None:
         for frame_count, expected in self.EXPECTED.items():
             with self.subTest(frame_count=frame_count):
                 result = self.results[frame_count]
@@ -130,13 +136,19 @@ class PcmLengthEncodeContractTests(unittest.TestCase):
                 for field in ("audio_packets", "short_packets", "long_packets", "bytes"):
                     self.assertEqual(getattr(stats, field), expected[field])
                 self.assertEqual(len(result.data), expected["bytes"])
-                self.assertEqual(hashlib.sha256(result.data).hexdigest(), expected["sha256"])
 
                 audio_packets = load_wem_parts_bytes(result.data)["packets"][1:]
                 modes = tuple(packet[0] & 1 for packet in audio_packets)
                 self.assertEqual(len(modes), expected["audio_packets"])
                 self.assertEqual(
                     modes, (0,) * expected["short_packets"] + (1,) * expected["long_packets"]
+                )
+
+                assert_wem_equal(
+                    self,
+                    bytes(self.oracle[frame_count].data),
+                    bytes(result.data),
+                    f"{frame_count} frames: Python oracle",
                 )
 
 

@@ -29,13 +29,19 @@ import unittest
 from pathlib import Path
 from typing import Any, ClassVar
 
+from wwise_wem import WwiseProfile, WwiseVersion
+from wwise_wem.profiles.registry import resolve_selection
+
+
+#: The packaged 2ch/48000 profile directory: the name its selection resolves
+#: to, read off the registry instead of being re-typed here.
 PROFILE = (
     Path(__file__).resolve().parents[2]
     / "src"
     / "wwise_wem"
     / "data"
     / "profiles"
-    / "wwise2013-2ch-48000"
+    / resolve_selection(WwiseProfile(WwiseVersion.WWISE2013, 2, 48000)).name
 )
 
 AUX_FIELDS = {

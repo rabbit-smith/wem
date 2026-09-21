@@ -117,10 +117,6 @@ jobs:
     # plus the Go cgo binding and the plain C client, each streaming the
     # fixture through the C ABI and rebuilding the golden WEM.
     runs-on: ubuntu-latest
-    env:
-      # The golden digest, shared by every client in this job so the checks
-      # cannot drift apart.
-      GOLDEN_SHA256: 17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -137,11 +133,16 @@ jobs:
             -Lcrates/target/release -lwem_capi -lpthread -ldl -lm \
             -o "${RUNNER_TEMP}/wem-c-example"
           "${RUNNER_TEMP}/wem-c-example" tests/fixtures/input.wav "${RUNNER_TEMP}/c-capi-out.wem"
-          GOT=$(sha256sum "${RUNNER_TEMP}/c-capi-out.wem" | awk '{print $1}')
-          if [ "$GOT" != "${GOLDEN_SHA256}" ]; then
-            echo "golden sha256 mismatch: got $GOT"; exit 1
+          # Byte comparison, not a digest: the committed reference WEM is the
+          # recorded artifact, and `cmp` reports the first differing byte.
+          if ! cmp -s tests/fixtures/reference.wem "${RUNNER_TEMP}/c-capi-out.wem"; then
+            echo "golden byte mismatch: the C client output differs from tests/fixtures/reference.wem"
+            echo "  expected (tests/fixtures/reference.wem): $(wc -c < tests/fixtures/reference.wem) bytes, sha256 $(sha256sum tests/fixtures/reference.wem | awk '{print $1}')"
+            echo "  actual   (C client output)             : $(wc -c < "${RUNNER_TEMP}/c-capi-out.wem") bytes, sha256 $(sha256sum "${RUNNER_TEMP}/c-capi-out.wem" | awk '{print $1}')"
+            cmp tests/fixtures/reference.wem "${RUNNER_TEMP}/c-capi-out.wem" || true
+            exit 1
           fi
-          echo "golden sha256 OK: $GOT"
+          echo "golden bytes OK: C client output == tests/fixtures/reference.wem"
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
@@ -152,9 +153,13 @@ jobs:
           go vet ./...
           go build ./...
           go run . -wav ../../tests/fixtures/input.wav -out "${RUNNER_TEMP}/go-capi-out.wem"
-          GOT=$(sha256sum "${RUNNER_TEMP}/go-capi-out.wem" | awk '{print $1}')
-          if [ "$GOT" != "${GOLDEN_SHA256}" ]; then
-            echo "golden sha256 mismatch: got $GOT"; exit 1
+          # Same byte comparison as the C step, against the same artifact.
+          if ! cmp -s ../../tests/fixtures/reference.wem "${RUNNER_TEMP}/go-capi-out.wem"; then
+            echo "golden byte mismatch: the Go binding output differs from tests/fixtures/reference.wem"
+            echo "  expected (tests/fixtures/reference.wem): $(wc -c < ../../tests/fixtures/reference.wem) bytes, sha256 $(sha256sum ../../tests/fixtures/reference.wem | awk '{print $1}')"
+            echo "  actual   (Go binding output)           : $(wc -c < "${RUNNER_TEMP}/go-capi-out.wem") bytes, sha256 $(sha256sum "${RUNNER_TEMP}/go-capi-out.wem" | awk '{print $1}')"
+            cmp ../../tests/fixtures/reference.wem "${RUNNER_TEMP}/go-capi-out.wem" || true
+            exit 1
           fi
-          echo "golden sha256 OK: $GOT"
+          echo "golden bytes OK: Go binding output == tests/fixtures/reference.wem"
 

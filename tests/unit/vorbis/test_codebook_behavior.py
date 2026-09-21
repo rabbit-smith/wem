@@ -87,7 +87,13 @@ class CodebookBehaviorTests(unittest.TestCase):
 
     def test_published_tables_and_resolver_have_no_pointer_provenance(self) -> None:
         root = Path(__file__).resolve().parents[3]
-        table_dir = root / "src" / "wwise_wem" / "data" / "profiles" / "wwise2013-6ch-44100" / "vorbis" / "codebooks"
+        # The directory is the packaged name of the selection, read off the
+        # resolved profile rather than re-typed here.
+        profile_name = resolve_selection(SIX_CHANNEL_SELECTION).name
+        table_dir = (
+            root / "src" / "wwise_wem" / "data" / "profiles" / profile_name
+            / "vorbis" / "codebooks"
+        )
         forbidden = {"ptr", "lengthlist_ptr", "quantlist_ptr"}
         for path in sorted(table_dir.glob("*_decoded.json")):
             for row in json.loads(path.read_text(encoding="utf-8")):

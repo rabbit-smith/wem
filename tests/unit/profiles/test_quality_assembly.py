@@ -26,7 +26,9 @@ import unittest
 import zipfile
 from pathlib import Path
 
+from wwise_wem import WwiseProfile, WwiseVersion
 from wwise_wem.profiles.bundle import load_profile_bundle
+from wwise_wem.profiles.registry import resolve_selection
 from wwise_wem_reference.profiles.assembly import (
     assemble_analysis_resources,
     assemble_encoder_profile_resources,
@@ -37,7 +39,10 @@ from wwise_wem_reference.profiles.quality import (
 )
 
 
-_PROFILE = "wwise2013-6ch-44100"
+#: The 6ch/44100 profile's packaged directory name, read off its selection.
+_PROFILE = resolve_selection(
+    WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
+).name
 _ROOT = Path(__file__).resolve().parents[3]
 _SRC = _ROOT / "src" / "wwise_wem"
 

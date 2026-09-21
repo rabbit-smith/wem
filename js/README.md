@@ -99,8 +99,11 @@ argument), `WEM_ERR_GEOMETRY_MISMATCH`, `WEM_ERR_INPUT_TOO_SHORT`,
 ## Verification
 
 `test-node.mjs` pins byte-exactness: the representative 6ch/44.1kHz recording
-encoded through the wasm package must match the kernel golden
-(`17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247`),
+encoded through the wasm package must be byte-identical to the committed
+kernel golden `tests/fixtures/reference.wem` (SHA-256
+`17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247` — the
+gate compares that file's bytes, so this digest documents the contract rather
+than being restated by the test),
 across one-shot (auto-selected, explicit, and raw-PCM paths) and three
 chunking schemes; the compiled-in version table, the resolved selection of
 every constructor, and the selection/error code mapping must hold. Wired into

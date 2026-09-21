@@ -18,7 +18,9 @@ import unittest
 from pathlib import Path
 
 from tests.analysis_resource_support import installed_profile_bundle
+from wwise_wem import WwiseProfile, WwiseVersion
 from wwise_wem.profiles.bundle import load_profile_bundle
+from wwise_wem.profiles.registry import resolve_selection
 from wwise_wem_reference.profiles.quality import (
     _linear_frac,
     normalize_quality_factor,
@@ -30,7 +32,10 @@ from wwise_wem_reference.profiles.transient import (
     materialize_transient_tables,
 )
 
-_PROFILE = "wwise2013-2ch-48000"
+#: The 2ch/48000 profile's packaged directory name, read off its selection.
+_PROFILE = resolve_selection(
+    WwiseProfile(WwiseVersion.WWISE2013, 2, 48000)
+).name
 _ROOT = Path(__file__).resolve().parents[3]
 _RESOURCE = (
     _ROOT

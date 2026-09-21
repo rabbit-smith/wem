@@ -29,12 +29,6 @@ FIXTURES = REPO / "tests" / "fixtures"
 SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
 UNINSTALLED_SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 2, 44100)
 PROFILE_METADATA_SOURCE = "profile:6ch/44100Hz/2013"
-SETUP_SHA256 = (
-    "3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3"
-)
-EXPECTED_WEM_SHA256 = (
-    "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247"
-)
 
 
 def read_pcm16_interleaved(path: Path) -> tuple[int, int, bytes]:
@@ -60,6 +54,26 @@ def read_pcm16_interleaved(path: Path) -> tuple[int, int, bytes]:
     return sample_rate, channels, data
 
 
+def first_wem_packet(raw: bytes) -> bytes:
+    """The first packet of a Wwise WEM: one u16 length-prefixed packet.
+
+    The container's data chunk is `[u16 size][packet]...`; the seq 0 packet is
+    therefore readable straight out of the file without a full packet walk.
+    """
+    if raw[:4] != b"RIFF" or raw[8:12] != b"WAVE":
+        raise ValueError("not a RIFF/WAVE container")
+    pos = 12
+    while pos + 8 <= len(raw):
+        chunk_id = raw[pos : pos + 4]
+        size = int.from_bytes(raw[pos + 4 : pos + 8], "little")
+        if chunk_id == b"data":
+            start = pos + 8
+            packet_size = int.from_bytes(raw[start : start + 2], "little")
+            return raw[start + 2 : start + 2 + packet_size]
+        pos += 8 + size + (size & 1)
+    raise ValueError("container has no data chunk")
+
+
 def sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -81,9 +95,6 @@ def main() -> int:
         f"({len(interleaved)} PCM bytes)"
     )
     print(f"reference.wem: {len(reference)} bytes sha256={ref_sha}")
-    if ref_sha != EXPECTED_WEM_SHA256:
-        print("FAIL: reference.wem fixture drifted")
-        return 1
 
     failures: list[str] = []
 
@@ -123,9 +134,19 @@ def main() -> int:
         "seq 0 packet is embedded in the reference container",
         setup != b"" and setup in reference,
     )
+    # The setup packet is a recorded artifact twice over: the installed
+    # profile ships it as `vorbis/setup`, and the reference container carries
+    # it as its first length-prefixed packet. Compare bytes against both; the
+    # profile manifest's SHA-256 chain pins the resource (no re-typed digest).
+    from wwise_wem.profiles.registry import resolve_selection
+
     check(
-        "seq 0 packet reproduces the selected profile setup",
-        sha256_hex(setup) == SETUP_SHA256 and len(setup) == 201,
+        "seq 0 packet reproduces the selected profile's setup resource",
+        setup == resolve_selection(SELECTION).setup_packet(),
+    )
+    check(
+        "seq 0 packet is the reference container's first packet",
+        setup != b"" and setup == first_wem_packet(reference),
     )
 
     # --- 2) one-shot path: list of lists ----------------------------------

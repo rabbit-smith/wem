@@ -1,4 +1,3 @@
-import hashlib
 import unittest
 from pathlib import Path
 
@@ -6,15 +5,16 @@ from wwise_wem import encode
 
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
-EXPECTED_SHA256 = "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247"
 
 
 class GoldenEncoderTests(unittest.TestCase):
     def test_complete_wem_is_bit_exact(self):
+        # The whole-file claim is the byte comparison against the committed
+        # reference WEM; that file is itself pinned to the red-line SHA-256
+        # through tests/data/stage-golden/stages/index.json.
         result = encode(FIXTURES / "input.wav")
         reference = (FIXTURES / "reference.wem").read_bytes()
         self.assertEqual(result.data, reference)
-        self.assertEqual(hashlib.sha256(result.data).hexdigest(), EXPECTED_SHA256)
         stats = result.stats
         self.assertEqual(stats.pcm_frames, 139398)
         self.assertEqual(stats.channels, 6)

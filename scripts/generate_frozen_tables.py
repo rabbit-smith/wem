@@ -30,15 +30,54 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "src"))
+# Both trees are resolved from this file, so the script runs from any cwd and
+# needs no PYTHONPATH: `src` is the distribution facade, `reference` the
+# pure-Python oracle that owns the transcendental recorders.
+for entry in (ROOT / "src", ROOT / "reference"):
+    if str(entry) not in sys.path:
+        sys.path.insert(0, str(entry))
 
 from wwise_wem_reference._tmath import math_bits  # noqa: E402
 from wwise_wem_reference.analysis.dsp.transform import vorbis_window  # noqa: E402
-from wwise_wem.profiles.bundle import load_profile_bundle  # noqa: E402
+from wwise_wem.profiles.bundle import (  # noqa: E402
+    WWISE_GENERATION,
+    installed_profile_names,
+    load_profile_bundle,
+)
 from wwise_wem_reference.profiles.psychoacoustics.config import load_short_seed_surface  # noqa: E402
 
-SIX_CHANNEL_PROFILE = "wwise2013-6ch-44100"
-TWO_CHANNEL_PROFILE = "wwise2013-2ch-48000"
+
+def installed_profile_name(generation: str, channels: int, sample_rate: int) -> str:
+    """The packaged profile directory whose manifest key is this identity.
+
+    A directory name is a property of the packaged tree, so read it from there
+    instead of re-typing it. Read through the index and manifests only: this is
+    a generation script, and it must run before — and without — the native
+    extension, exactly as the wheel's zip-import gate does.
+    """
+    matches = [
+        bundle.name
+        for bundle in (
+            load_profile_bundle(profile=name, verify_all=False)
+            for name in installed_profile_names()
+        )
+        if (
+            bundle.key.generation,
+            bundle.key.channels,
+            bundle.key.sample_rate,
+        )
+        == (generation, channels, sample_rate)
+    ]
+    if len(matches) != 1:
+        raise SystemExit(
+            f"expected exactly one installed profile for "
+            f"{channels}ch/{sample_rate}Hz/{generation}, found {matches}"
+        )
+    return matches[0]
+
+
+SIX_CHANNEL_PROFILE = installed_profile_name(WWISE_GENERATION, 6, 44100)
+TWO_CHANNEL_PROFILE = installed_profile_name(WWISE_GENERATION, 2, 48000)
 PROFILES = (SIX_CHANNEL_PROFILE, TWO_CHANNEL_PROFILE)
 FROZEN_RESOURCE = "analysis.frozen-tables"
 FROZEN_SCHEMA = "wem.frozen-math.v1"

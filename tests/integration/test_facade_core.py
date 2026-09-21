@@ -17,7 +17,6 @@ for native-absent environments.
 
 from __future__ import annotations
 
-import hashlib
 import unittest
 from pathlib import Path
 
@@ -33,9 +32,6 @@ FIXTURES = ROOT / "tests" / "fixtures"
 INPUT = FIXTURES / "input.wav"
 REFERENCE = FIXTURES / "reference.wem"
 SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
-EXPECTED_SHA256 = (
-    "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247"
-)
 EXPECTED_STATS = {
     "pcm_frames": 139398,
     "channels": 6,
@@ -65,13 +61,8 @@ class FacadeIsCoreTests(unittest.TestCase):
         )
 
         self.assertEqual(result.data, reference)
-        self.assertEqual(
-            hashlib.sha256(result.data).hexdigest(), EXPECTED_SHA256
-        )
-        self.assertEqual(result.sha256, EXPECTED_SHA256)
         self.assertEqual(result.stats.to_dict(), EXPECTED_STATS)
         self.assertEqual(bytes(direct.data), reference)
-        self.assertEqual(direct.sha256(), EXPECTED_SHA256)
         # The facade output is what the in-package core binding produces:
         # there is no second path that could diverge.
         self.assertEqual(result.sha256, direct.sha256())

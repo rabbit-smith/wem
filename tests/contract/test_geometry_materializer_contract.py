@@ -31,6 +31,8 @@ import unittest
 from pathlib import Path
 from typing import Any, ClassVar
 
+from wwise_wem import WwiseProfile, WwiseVersion
+from wwise_wem.profiles.registry import resolve_selection
 from wwise_wem_reference.geometry_materializer import (
     inputs,
     long_base,
@@ -38,18 +40,22 @@ from wwise_wem_reference.geometry_materializer import (
     short_seed,
 )
 
-PROFILES = (
-    Path(__file__).resolve().parents[2]
-    / "src"
-    / "wwise_wem"
-    / "data"
-    / "profiles"
-    / "wwise2013-6ch-44100"
-    / "psychoacoustics"
+#: The packaged profile directories are the names their selections resolve to;
+#: the contract reads them off the registry rather than re-typing them.
+PROFILE_ROOT = (
+    Path(__file__).resolve().parents[2] / "src" / "wwise_wem" / "data" / "profiles"
 )
+SIX_CHANNEL_NAME = resolve_selection(
+    WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
+).name
+TWO_CHANNEL_NAME = resolve_selection(
+    WwiseProfile(WwiseVersion.WWISE2013, 2, 48000)
+).name
+
+PROFILES = PROFILE_ROOT / SIX_CHANNEL_NAME / "psychoacoustics"
 KEY = (6, 40000, 70000)  # the 6ch descriptor family (paired build geometry)
 
-PROFILES_2CH = PROFILES.parents[1] / "wwise2013-2ch-48000" / "psychoacoustics"
+PROFILES_2CH = PROFILE_ROOT / TWO_CHANNEL_NAME / "psychoacoustics"
 KEY_2CH = (2, 45000, 50000)  # the 2ch/48k descriptor family
 
 

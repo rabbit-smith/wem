@@ -28,11 +28,16 @@ class DetectorFeederTests(unittest.TestCase):
         quanta = tuple(iter_detector_quanta((signal,)))
 
         self.assertEqual(len(stream), 13312)
+        # Kept deliberately: the padded timeline and the quantum boundaries are
+        # derived words with no committed artifact, so these digests are the
+        # only record of them -- no byte comparison against a fixture exists to
+        # take over.
         self.assertEqual(
             _float_sha256(stream),
             "0e445d751f57d9602c4c33277d097608a366b78e5197fd811614f5576b4d7c11",
         )
         self.assertEqual(len(quanta), 207)
+        # Same as above: per-quantum words that exist only here.
         self.assertEqual(
             {index: _float_sha256(quanta[index][0]) for index in (0, 15, 16, 79, 80, 206)},
             {

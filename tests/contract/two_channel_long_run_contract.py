@@ -1,8 +1,15 @@
 """Cross-implementation stability contract for long 2ch/48 kHz input.
 
 This intentionally lacks a ``test_`` prefix: the pure-Python oracle makes it a
-heavy explicit contract, following ``tests/AGENTS.md``.  The expected WEM is a
-native/oracle agreement and is not represented as a real Wwise build.
+heavy explicit contract, following ``tests/AGENTS.md``.  The contract is the
+*agreement* of the engines on one long program: every check below compares
+produced bytes against another producer (the Python oracle, the public WAV
+path, and the streaming lifecycle), and the 2ch/48 kHz configuration's
+absolute byte pin is the committed real-build corpora (``tests/data/2ch-reference``,
+``tests/data/2ch-stress``).  The program's own identity is pinned once, on the
+generator's PCM, because no committed PCM artifact exists for it (the
+generator deliberately ships no multi-megabyte WAV; see
+:mod:`scripts.generate_2ch_long_program`).
 """
 
 from __future__ import annotations
@@ -30,8 +37,10 @@ from wwise_wem_reference.python_engine import ContainerPlan, encode_pcm_python
 
 
 SELECTION = WwiseProfile(WwiseVersion.WWISE2013, CHANNELS, SAMPLE_RATE)
+# The generated program is this contract's input; the digest is the only record
+# of its identity (a byte comparison against a committed WAV would mean
+# committing the whole 20-second stream), so it stays.
 PCM_SHA256 = "89b916a151ad1d42d313efdc2ae970a2671fee9b5c5b979aeb9982f7b1f85554"
-WEM_SHA256 = "bac1214584a57a1e9ae013cdee2d17671a2a63bda0f78ec8d064e3b41db17290"
 WEM_BYTES = 300_592
 AUDIO_PACKETS = 1_685
 SHORT_PACKETS = 853
@@ -72,7 +81,6 @@ class TwoChannelLongRunContract(unittest.TestCase):
         )
 
         self.assertEqual(len(native), WEM_BYTES)
-        self.assertEqual(hashlib.sha256(native).hexdigest(), WEM_SHA256)
         self.assertEqual(native_result.stats.audio_packets, AUDIO_PACKETS)
         self.assertEqual(native_result.stats.short_packets, SHORT_PACKETS)
         self.assertEqual(native_result.stats.long_packets, LONG_PACKETS)
