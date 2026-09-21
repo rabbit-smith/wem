@@ -12,12 +12,16 @@ use wem_analysis::preprocessing::windowing::iter_planned_pcm_windows;
 use wem_analysis::session::AnalysisSession;
 use wem_scheduling::plan_mode_sequence;
 
-fn repo_root() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("repo root")
-        .to_path_buf()
+/// Analysis resources of the installed Wwise 2013 6ch/44100 configuration,
+/// resolved from a structured selection against the compiled-in profile
+/// bundle (never a profile name or a profile tree).
+fn encoder_analysis_resources() -> wem_analysis::config::AnalysisProfileResources {
+    let selection =
+        wem_profiles::WwiseProfile::new(wem_profiles::WwiseVersion::Wwise2013, 6, 44_100)
+            .expect("6ch/44100 selection");
+    let bundle =
+        wem_profiles::bundle_for_selection(selection).expect("installed 6ch profile resolves");
+    wem_profiles::assemble_analysis_resources(&bundle, None).expect("analysis resources assemble")
 }
 
 fn sine_like(frames: i64) -> Vec<Vec<f64>> {
@@ -38,11 +42,7 @@ fn streaming_frame_rows_match_batch_materialization() {
     let frames = 9000i64;
     let pcm = sine_like(frames);
 
-    let data_dir =
-        wem_profiles::DataDir::from_profiles_dir(repo_root().join("src/wwise_wem/data/profiles"));
-    let bundle = wem_profiles::load_profile_bundle(&data_dir, None, false).expect("profile loads");
-    let resources =
-        wem_profiles::assemble_analysis_resources(&bundle, None).expect("resources assemble");
+    let resources = encoder_analysis_resources();
     let frozen = resources
         .frozen
         .as_ref()

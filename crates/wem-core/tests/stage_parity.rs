@@ -43,6 +43,18 @@ fn read_index() -> Value {
     serde_json::from_str(&text).expect("index.json parses")
 }
 
+/// Analysis resources of the installed Wwise 2013 6ch/44100 configuration,
+/// resolved from a structured selection against the compiled-in profile
+/// bundle (never a profile name or a profile tree).
+fn encoder_analysis_resources() -> wem_analysis::config::AnalysisProfileResources {
+    let selection =
+        wem_profiles::WwiseProfile::new(wem_profiles::WwiseVersion::Wwise2013, 6, 44_100)
+            .expect("6ch/44100 selection");
+    let bundle =
+        wem_profiles::bundle_for_selection(selection).expect("installed 6ch profile resolves");
+    wem_profiles::assemble_analysis_resources(&bundle, None).expect("analysis resources assemble")
+}
+
 fn int_field(v: &Value, field: &str) -> i64 {
     v.get(field)
         .and_then(Value::as_i64)
@@ -144,12 +156,7 @@ fn stage_parity_all_frames() {
     assert_eq!(channels, 6, "6 channels");
     assert_eq!(sample_rate, 44100, "44.1 kHz");
 
-    let data_dir =
-        wem_profiles::DataDir::from_profiles_dir(repo_root().join("src/wwise_wem/data/profiles"));
-    let bundle =
-        wem_profiles::load_profile_bundle(&data_dir, None, false).expect("installed profile loads");
-    let resources = wem_profiles::assemble_analysis_resources(&bundle, None)
-        .expect("analysis resources assemble");
+    let resources = encoder_analysis_resources();
 
     // Create the session and select modes + windows.
     let mut session = AnalysisSession::new(channels, sample_rate, [256, 2048], resources)

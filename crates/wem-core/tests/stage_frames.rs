@@ -18,11 +18,23 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use wem_profiles::{assemble_encoder_profile_resources, load_profile_bundle, DataDir};
+use wem_profiles::{
+    assemble_encoder_profile_resources, bundle_for_selection, WwiseProfile, WwiseVersion,
+};
 use wem_vorbis::floor_fit::floor1_fit_wwise;
 use wem_vorbis::packet_encoder::pack_block_packet_details;
 
 const SCHEMA: &str = "wwise-wem.stage-golden.v1";
+
+/// Encoder resources of the installed Wwise 2013 6ch/44100 configuration,
+/// resolved from a structured selection against the compiled-in profile
+/// bundle (never a profile name or a profile tree).
+fn encoder_resources() -> wem_profiles::EncoderProfileResources {
+    let selection =
+        WwiseProfile::new(WwiseVersion::Wwise2013, 6, 44_100).expect("6ch/44100 selection");
+    let bundle = bundle_for_selection(selection).expect("installed 6ch profile resolves");
+    assemble_encoder_profile_resources(&bundle, None, None).expect("assembly succeeds")
+}
 
 fn repo_root() -> PathBuf {
     // crates/wem-vorbis -> repo root (two levels up from the manifest dir).
@@ -211,15 +223,7 @@ fn stage_frames_packet_parity_all_28_representatives() {
     );
 
     let stages = stages_dir();
-    let res = {
-        let data = DataDir::from_profiles_dir(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../..")
-                .join("src/wwise_wem/data/profiles"),
-        );
-        let bundle = load_profile_bundle(&data, None, false).expect("installed profile loads");
-        assemble_encoder_profile_resources(&bundle, None, None).expect("assembly succeeds")
-    };
+    let res = encoder_resources();
     // The setup packet must match the recorded setup hash.
     assert_eq!(
         sha256_hex(&res.setup_packet),

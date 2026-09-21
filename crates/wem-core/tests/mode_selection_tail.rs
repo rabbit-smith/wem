@@ -10,14 +10,16 @@
 use wem_analysis::config::AnalysisError;
 use wem_analysis::preprocessing::windowing::WindowedFrame;
 use wem_analysis::session::AnalysisSession;
+use wem_profiles::{bundle_for_selection, WwiseProfile, WwiseVersion};
 use wem_scheduling::FramePlan;
 
-fn repo_root() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("repo root")
-        .to_path_buf()
+/// Analysis resources of the installed 2ch/48000 configuration, resolved from
+/// a structured selection against the compiled-in profile bundle.
+fn two_channel_resources() -> wem_analysis::config::AnalysisProfileResources {
+    let selection =
+        WwiseProfile::new(WwiseVersion::Wwise2013, 2, 48_000).expect("2ch/48000 selection");
+    let bundle = bundle_for_selection(selection).expect("installed 2ch profile resolves");
+    wem_profiles::assemble_analysis_resources(&bundle, None).expect("resources assemble")
 }
 
 fn synthetic(frames: usize, channels: usize) -> Vec<Vec<f64>> {
@@ -34,12 +36,7 @@ fn synthetic(frames: usize, channels: usize) -> Vec<Vec<f64>> {
 
 #[test]
 fn tail_stops_one_frame_past_the_source_length() {
-    let data_dir =
-        wem_profiles::DataDir::from_profiles_dir(repo_root().join("src/wwise_wem/data/profiles"));
-    let bundle = wem_profiles::load_profile_bundle(&data_dir, Some("wwise2013-2ch-48000"), false)
-        .expect("profile loads");
-    let resources =
-        wem_profiles::assemble_analysis_resources(&bundle, None).expect("resources assemble");
+    let resources = two_channel_resources();
     let frames = 7425usize;
     let pcm = synthetic(frames, 2);
     let mut session = AnalysisSession::new(2, 48000, [256, 2048], resources).expect("session");
@@ -70,12 +67,7 @@ fn tail_stops_one_frame_past_the_source_length() {
 
 #[test]
 fn captured_transition_codes_never_fall_back_to_advanced_selector_state() {
-    let data_dir =
-        wem_profiles::DataDir::from_profiles_dir(repo_root().join("src/wwise_wem/data/profiles"));
-    let bundle = wem_profiles::load_profile_bundle(&data_dir, Some("wwise2013-2ch-48000"), false)
-        .expect("profile loads");
-    let resources =
-        wem_profiles::assemble_analysis_resources(&bundle, None).expect("resources assemble");
+    let resources = two_channel_resources();
     let mut session = AnalysisSession::new(2, 48000, [256, 2048], resources).expect("session");
 
     assert!(matches!(

@@ -1,9 +1,15 @@
 //! The 2ch/48000 profile: its setup packet, codebooks, and quality curves are
 //! registered from the paired build together with its psychoacoustic
 //! calibration. The setup and encoder resources are complete.
+//!
+//! The bundle comes from `wem_profiles::bundle_for_selection` — a structured
+//! selection resolved against the compiled-in profile bundle, never a profile
+//! name or a profile tree.
 
 use wem_core::{WwiseProfile, WwiseVersion};
-use wem_profiles::{load_profile_bundle, load_quality_curves, normalize_quality_factor, DataDir};
+use wem_profiles::{
+    bundle_for_selection, embedded_registry, load_quality_curves, normalize_quality_factor,
+};
 
 const TWO_CHANNEL_NAME: &str = "wwise2013-2ch-48000";
 /// Setup packet SHA-256 (215-byte paired 2ch/48k setup).
@@ -18,21 +24,10 @@ fn two_channel_selection() -> WwiseProfile {
     WwiseProfile::new(WwiseVersion::Wwise2013, 2, 48_000).expect("2ch/48000 selection")
 }
 
-fn data_dir() -> DataDir {
-    DataDir::from_profiles_dir(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .join("src/wwise_wem/data/profiles")
-            .canonicalize()
-            .expect("profiles directory resolves"),
-    )
-}
-
 #[test]
 fn two_channel_profile_exposes_its_quality_curves() {
     // The 2ch/48000 profile ships its quality curves and setup packet.
-    let bundle =
-        load_profile_bundle(&data_dir(), Some(TWO_CHANNEL_NAME), false).expect("2ch bundle loads");
+    let bundle = bundle_for_selection(two_channel_selection()).expect("2ch bundle resolves");
     assert!(bundle.setup_available());
     assert!(bundle.pending_reason().is_none());
     assert_eq!(
@@ -65,7 +60,7 @@ fn two_channel_profile_exposes_its_quality_curves() {
 
 #[test]
 fn two_channel_profile_lists_in_the_registry_as_setup_available() {
-    let registry = wem_profiles::installed_registry(&data_dir()).expect("registry loads");
+    let registry = embedded_registry().expect("registry loads");
     assert_eq!(registry.len(), 2);
     let profile = registry
         .resolve_selection(two_channel_selection())

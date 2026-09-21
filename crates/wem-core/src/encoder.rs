@@ -23,11 +23,10 @@ use wem_container::wem::build_vorbis_wem;
 use wem_profiles::assembly::assemble_encoder_profile_resources;
 use wem_profiles::assembly::EncoderProfileResources;
 use wem_profiles::bundle::ProfileBundle;
-use wem_profiles::embedded::load_embedded_profile_bundle;
 use wem_profiles::error::ProfileError;
 use wem_profiles::model::ContainerMetadata;
 use wem_profiles::model::EncoderProfile;
-use wem_profiles::registry::resolve_wem_profile_selection_quality;
+use wem_profiles::registry::{bundle_for_selection, resolve_wem_profile_selection_quality};
 use wem_profiles::selection::{WwiseProfile, WwiseVersion};
 use wem_vorbis::codebook::Codebook;
 use wem_vorbis::setup::SetupInfo;
@@ -355,34 +354,17 @@ impl Encoder {
     ) -> Result<Self, EncoderError> {
         let profile = resolve_wem_profile_selection_quality(selection, quality)
             .map_err(|error| selection_error(&error, selection))?;
-        Self::from_profile_model(&profile, None)
-    }
-
-    /// Construct from an already-resolved encoder profile (Python
-    /// `Encoder.__init__`).
-    ///
-    /// This is the internal bridge used by [`Encoder::new_with_quality`]
-    /// once a [`WwiseProfile`] has been resolved against the installed
-    /// bundle. It is deliberately not part of the caller-facing surface:
-    /// callers select with a [`WwiseProfile`], never with a profile
-    /// identity, name, path or index bytes.
-    ///
-    /// `container` may override the profile-derived container plan
-    /// (Python `_container` parameter); the geometry cross-check still
-    /// applies. A quality factor already bound to the profile is forwarded
-    /// to the analysis-resource assembly; with no quality the historical
-    /// bytes are reproduced exactly.
-    pub(crate) fn from_profile_model(
-        profile: &EncoderProfile,
-        container: Option<ContainerPlan>,
-    ) -> Result<Self, EncoderError> {
-        let bundle = load_embedded_named_bundle(profile.name())?;
-        Self::from_profile_and_bundle(profile, container, &bundle)
+        // The verified bundle for the same selection: both halves come from
+        // one resolution against the compiled-in registry, so nothing here
+        // addresses a profile by name, path or index bytes.
+        let bundle =
+            bundle_for_selection(selection).map_err(|error| selection_error(&error, selection))?;
+        Self::from_profile_and_bundle(&profile, None, &bundle)
     }
 
     /// Shared construction from one profile identity + one verified bundle;
-    /// both the filesystem and the in-memory entries funnel through here so
-    /// the cross-checks cannot drift between them.
+    /// every entry funnels through here so the cross-checks cannot drift
+    /// between callers.
     pub(crate) fn from_profile_and_bundle(
         profile: &EncoderProfile,
         container: Option<ContainerPlan>,
@@ -615,17 +597,5 @@ fn selection_error(error: &ProfileError, selection: WwiseProfile) -> EncoderErro
             message: error.to_string(),
         },
         other => EncoderError::Internal(InternalError::Profile(other.clone())),
-    }
-}
-
-fn load_embedded_named_bundle(name: &str) -> Result<ProfileBundle, EncoderError> {
-    match load_embedded_profile_bundle(Some(name)) {
-        Ok(bundle) => Ok(bundle),
-        Err(ProfileError::ProfileNotInIndex { .. }) | Err(ProfileError::UnknownProfile { .. }) => {
-            Err(EncoderError::ProfileNotFound {
-                requested: name.to_string(),
-            })
-        }
-        Err(error) => Err(EncoderError::Internal(InternalError::Profile(error))),
     }
 }
