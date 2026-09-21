@@ -7,6 +7,9 @@
 //! * [`Encoder`] — one-shot PCM-to-WEM encode (`wem_core::encoder::Encoder`)
 //! * [`StreamSession`] — the core streaming lifecycle
 //!   (Init -> chunks* -> Finish; `wem_core::stream::StreamSession`)
+//! * [`WwiseVersion`] / [`WwiseProfile`] — the structured profile selector
+//!   (`wem_core::{WwiseVersion, WwiseProfile}`; C ABI `WemVersion` /
+//!   `WemProfile`): one Wwise generation plus the PCM geometry
 //! * [`WemEncoderError`] — the single terminal exception; its `.code`
 //!   carries the kernel error-code name (stable across the cross-language
 //!   shells) and its message carries the kernel diagnostic
@@ -20,15 +23,16 @@
 //! * Blocking/CPU-heavy kernel calls run under `Python::allow_threads` so
 //!   the GIL is not held while the kernel works.
 
-use pyo3::exceptions::PyException;
+use pyo3::exceptions::{PyException, PyTypeError, PyValueError};
 use pyo3::ffi::c_str;
 use pyo3::prelude::*;
 use pyo3::type_object::PyTypeInfo;
-use pyo3::types::{PyBytes, PyDict};
+use pyo3::types::{PyBytes, PyDict, PyType};
 
 use wem_core::encoder::{EncodeResult as WemEncodeResult, Encoder as WemEncoder, Pcm16};
 use wem_core::error::EncoderError;
 use wem_core::stream::{ProfileRef, StreamPacket, StreamSession as WemStreamSession};
+use wem_core::{WwiseProfile, WwiseVersion};
 
 // ---------------------------------------------------------------------------
 // Error surface (kernel encoder error codes)
@@ -170,6 +174,155 @@ fn pcm_from_memoryview(sample_rate: i64, arg: &Bound<'_, PyAny>) -> PyResult<Pcm
 }
 
 // ---------------------------------------------------------------------------
+// Structured profile selection (Wwise generation + PCM geometry)
+// ---------------------------------------------------------------------------
+
+/// One kernel selection error as a Python `ValueError`: the message is the
+/// kernel diagnostic (`ProfileError` Display, zero drift), exactly as the
+/// encoder path maps it onto `EncoderError` codes.
+fn selection_value_error(error: impl std::fmt::Display) -> PyErr {
+    PyValueError::new_err(error.to_string())
+}
+
+/// Wwise generation selector (kernel `WwiseVersion`; C ABI `WemVersion`).
+///
+/// Codes are stable and append-only: a new Wwise generation appends a
+/// variant and a code, it never renumbers or reuses one.
+#[pyclass(name = "WwiseVersion", module = "wwise_wem._core", eq, hash, frozen)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum PyWwiseVersion {
+    /// Wwise 2013.2 (kernel code 0, the code the C ABI spells
+    /// `WEM_WWISE_2013`).
+    #[pyo3(name = "WWISE2013")]
+    Wwise2013,
+}
+
+impl PyWwiseVersion {
+    /// The kernel selector this variant stands for.
+    const fn to_kernel(self) -> WwiseVersion {
+        match self {
+            PyWwiseVersion::Wwise2013 => WwiseVersion::Wwise2013,
+        }
+    }
+
+    /// The variant standing for one kernel selector.
+    const fn from_kernel(version: WwiseVersion) -> Self {
+        match version {
+            WwiseVersion::Wwise2013 => PyWwiseVersion::Wwise2013,
+        }
+    }
+
+    /// The Python attribute name of one variant (pinned by the surface test
+    /// together with the generated `repr`).
+    const fn python_name(self) -> &'static str {
+        match self {
+            PyWwiseVersion::Wwise2013 => "WWISE2013",
+        }
+    }
+}
+
+#[pymethods]
+impl PyWwiseVersion {
+    /// Every selectable generation, in stable order (kernel
+    /// `WwiseVersion::ALL`).
+    #[classattr]
+    const ALL: [PyWwiseVersion; 1] = [PyWwiseVersion::Wwise2013];
+
+    /// Stable cross-language code (`include/wem.h` `WemVersion`).
+    #[getter]
+    fn code(&self) -> u32 {
+        self.to_kernel().code()
+    }
+
+    /// The short label this generation is spelled with on a command line.
+    #[getter]
+    fn label(&self) -> &'static str {
+        self.to_kernel().label()
+    }
+
+    /// The profile-key `generation` string this generation resolves against.
+    #[getter]
+    fn generation(&self) -> &'static str {
+        self.to_kernel().generation()
+    }
+
+    /// Decode a stable cross-language code (an unrecognized code is a
+    /// `ValueError`, never a silent default).
+    #[staticmethod]
+    fn from_code(code: u32) -> PyResult<Self> {
+        WwiseVersion::from_code(code)
+            .map(Self::from_kernel)
+            .map_err(selection_value_error)
+    }
+
+    /// Decode a profile-key `generation` string.
+    #[staticmethod]
+    fn from_generation(generation: &str) -> PyResult<Self> {
+        WwiseVersion::from_generation(generation)
+            .map(Self::from_kernel)
+            .map_err(selection_value_error)
+    }
+
+    /// Decode a user-facing spelling: the short label or the full generation.
+    #[staticmethod]
+    fn parse(text: &str) -> PyResult<Self> {
+        WwiseVersion::parse(text)
+            .map(Self::from_kernel)
+            .map_err(selection_value_error)
+    }
+}
+
+/// Structured profile selection (kernel `WwiseProfile`; C ABI `WemProfile`):
+/// one Wwise generation plus the PCM geometry to encode.
+///
+/// This is the only caller-facing profile selector next to the installed
+/// profile name. A selection that no installed profile satisfies is rejected
+/// when it reaches the kernel, never substituted by a default.
+#[pyclass(name = "WwiseProfile", module = "wwise_wem._core", eq, hash, frozen)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct PyWwiseProfile {
+    inner: WwiseProfile,
+}
+
+#[pymethods]
+impl PyWwiseProfile {
+    /// Build a selection; channels and sample rate must be positive.
+    #[new]
+    fn new(version: PyWwiseVersion, channels: i64, sample_rate: i64) -> PyResult<Self> {
+        WwiseProfile::new(version.to_kernel(), channels, sample_rate)
+            .map(|inner| Self { inner })
+            .map_err(selection_value_error)
+    }
+
+    /// The selected Wwise generation.
+    #[getter]
+    fn version(&self) -> PyWwiseVersion {
+        PyWwiseVersion::from_kernel(self.inner.version())
+    }
+
+    /// The selected PCM channel count.
+    #[getter]
+    fn channels(&self) -> i64 {
+        self.inner.channels()
+    }
+
+    /// The selected PCM sample rate.
+    #[getter]
+    fn sample_rate(&self) -> i64 {
+        self.inner.sample_rate()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "WwiseProfile(version=WwiseVersion.{}, channels={}, sample_rate={})",
+            PyWwiseVersion::from_kernel(self.inner.version()).python_name(),
+            self.inner.channels(),
+            self.inner.sample_rate(),
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Encoder
 // ---------------------------------------------------------------------------
 
@@ -182,14 +335,25 @@ struct PyEncoder {
 
 #[pymethods]
 impl PyEncoder {
+    /// Construct the encoder from an installed profile name, or from a
+    /// structured [`PyWwiseProfile`] selection (`wem_core::encoder::Encoder::new_with_quality`).
+    ///
+    /// Profiles are compiled into the kernel. `quality`, when given,
+    /// binds the quality factor before assembly; omitted quality keeps the
+    /// historical bytes exactly. A selection no installed profile satisfies
+    /// leaves [`WemEncoderError`] with code `PROFILE_NOT_FOUND`.
     #[new]
-    #[pyo3(signature = (profile_name, quality=None))]
-    fn new(profile_name: &str, quality: Option<f64>) -> PyResult<Self> {
-        // Profiles are compiled into the kernel. `quality`, when given,
-        // binds the quality factor before assembly; omitted quality keeps the
-        // historical bytes exactly.
-        let inner =
-            WemEncoder::from_profile_quality(profile_name, quality).map_err(error_to_pyerr)?;
+    #[pyo3(signature = (profile, quality=None))]
+    fn new(profile: &Bound<'_, PyAny>, quality: Option<f64>) -> PyResult<Self> {
+        let inner = if let Ok(selection) = profile.downcast::<PyWwiseProfile>() {
+            WemEncoder::new_with_quality(selection.get().inner, quality).map_err(error_to_pyerr)?
+        } else if let Ok(name) = profile.extract::<String>() {
+            WemEncoder::from_profile_quality(&name, quality).map_err(error_to_pyerr)?
+        } else {
+            return Err(PyTypeError::new_err(
+                "profile must be a str profile name or a WwiseProfile selection",
+            ));
+        };
         Ok(Self { inner })
     }
 
@@ -316,6 +480,26 @@ impl PyStreamSession {
         }
     }
 
+    /// Open a session on a structured `WwiseProfile` selection
+    /// (`wem_core::stream::StreamSession::for_selection_quality`): the kernel
+    /// resolves the selection, the returned session is already open and the
+    /// next call is `push`.
+    ///
+    /// A selection no installed profile satisfies leaves
+    /// [`WemEncoderError`] with code `PROFILE_NOT_FOUND`; `quality`, when
+    /// given, binds the quality factor before assembly.
+    #[classmethod]
+    #[pyo3(signature = (selection, quality=None))]
+    fn for_selection(
+        _cls: &Bound<'_, PyType>,
+        selection: PyRef<'_, PyWwiseProfile>,
+        quality: Option<f64>,
+    ) -> PyResult<Self> {
+        let inner = WemStreamSession::for_selection_quality(selection.inner, quality)
+            .map_err(error_to_pyerr)?;
+        Ok(Self { inner, next_seq: 0 })
+    }
+
     /// Open the session on one installed profile (`Init`).
     ///
     /// `setup_sha256` is a hard identity assertion (lowercase hex);
@@ -422,6 +606,8 @@ struct PyWemComplete {
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
     m.add("WemEncoderError", WemEncoderError::type_object(py))?;
+    m.add_class::<PyWwiseVersion>()?;
+    m.add_class::<PyWwiseProfile>()?;
     m.add_class::<PyEncoder>()?;
     m.add_class::<PyStreamSession>()?;
     m.add_class::<PyEncodeResult>()?;
@@ -483,6 +669,8 @@ mod tests {
                 "Packet",
                 "WemComplete",
                 "WemEncoderError",
+                "WwiseVersion",
+                "WwiseProfile",
             ] {
                 m.getattr(name)
                     .unwrap_or_else(|err| panic!("{name} missing; err={err}"));
@@ -512,6 +700,229 @@ except Exception as caught2:
                 None,
             )
             .expect("exception semantics");
+        });
+    }
+
+    #[test]
+    fn version_surface_is_stable_and_parses_user_spellings() {
+        Python::with_gil(|py| {
+            let m = import_module(py).unwrap();
+            let globals = PyDict::new(py);
+            globals.set_item("m", m).unwrap();
+            py.run(
+                c_str!(
+                    r#"
+v = m.WwiseVersion.WWISE2013
+assert repr(v) == "WwiseVersion.WWISE2013", repr(v)
+assert v.code == 0, v.code
+assert v.label == "2013", v.label
+assert v.generation == "2013.2", v.generation
+assert m.WwiseVersion.ALL == [v], m.WwiseVersion.ALL
+assert m.WwiseVersion.from_code(0) == v
+assert m.WwiseVersion.from_generation("2013.2") == v
+assert m.WwiseVersion.parse("2013") == v
+assert m.WwiseVersion.parse("2013.2") == v
+assert hash(m.WwiseVersion.parse("2013")) == hash(v)
+for bad in ("2014", "2013.1", "", "wwise2013"):
+    try:
+        m.WwiseVersion.parse(bad)
+    except ValueError as error:
+        assert "unsupported Wwise generation" in str(error), (bad, str(error))
+    else:
+        raise AssertionError(bad)
+try:
+    m.WwiseVersion.from_code(7)
+except ValueError as error:
+    assert "unknown Wwise version code 7" in str(error), str(error)
+else:
+    raise AssertionError("unknown version code accepted")
+try:
+    m.WwiseVersion.from_generation("2012.1")
+except ValueError as error:
+    assert "unsupported Wwise generation" in str(error), str(error)
+else:
+    raise AssertionError("unknown generation accepted")
+for wrong in (2013, None, 2013.2):
+    try:
+        m.WwiseVersion.parse(wrong)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError(wrong)
+"#
+                ),
+                Some(&globals),
+                None,
+            )
+            .expect("version selector surface");
+        });
+    }
+
+    #[test]
+    fn profile_surface_rejects_unresolvable_selections_and_bad_values() {
+        Python::with_gil(|py| {
+            let m = import_module(py).unwrap();
+            let globals = PyDict::new(py);
+            globals.set_item("m", m).unwrap();
+            py.run(
+                c_str!(
+                    r#"
+v = m.WwiseVersion.WWISE2013
+selection = m.WwiseProfile(v, 6, 44100)
+assert repr(selection) == (
+    "WwiseProfile(version=WwiseVersion.WWISE2013, channels=6, sample_rate=44100)"
+), repr(selection)
+assert selection.version == v, selection.version
+assert selection.channels == 6 and selection.sample_rate == 44100
+assert selection == m.WwiseProfile(v, 6, 44100)
+assert hash(selection) == hash(m.WwiseProfile(v, 6, 44100))
+assert selection != m.WwiseProfile(v, 2, 48000)
+assert selection != "WwiseProfile"
+for name in ("version", "channels", "sample_rate"):
+    try:
+        setattr(selection, name, None)
+    except AttributeError:
+        pass
+    else:
+        raise AssertionError(name + " is writable")
+
+# Both installed configurations resolve through the kernel.
+m.Encoder(m.WwiseProfile(v, 6, 44100))
+m.Encoder(m.WwiseProfile(v, 2, 48000))
+
+# A geometry no installed profile satisfies is a structured kernel error.
+for channels, rate in ((2, 44100), (6, 48000), (1, 22050)):
+    try:
+        m.Encoder(m.WwiseProfile(v, channels, rate))
+    except m.WemEncoderError as error:
+        assert error.code == "PROFILE_NOT_FOUND", (channels, rate, error.code)
+    else:
+        raise AssertionError((channels, rate))
+try:
+    m.StreamSession.for_selection(m.WwiseProfile(v, 2, 44100))
+except m.WemEncoderError as error:
+    assert error.code == "PROFILE_NOT_FOUND", error.code
+else:
+    raise AssertionError("unresolvable selection opened a session")
+
+# Non-positive geometry and wrong types are Python-level rejections.
+for channels, rate in ((0, 44100), (-1, 44100), (6, 0), (6, -44100)):
+    try:
+        m.WwiseProfile(v, channels, rate)
+    except ValueError as error:
+        assert "must be positive" in str(error), str(error)
+    else:
+        raise AssertionError((channels, rate))
+for bad_version in ("2013", 0, None):
+    try:
+        m.WwiseProfile(bad_version, 6, 44100)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError(bad_version)
+for bad_geometry in ("6", None, 6.5):
+    try:
+        m.WwiseProfile(v, bad_geometry, 44100)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError(bad_geometry)
+for bad_profile in (2013, 6.5, None, v):
+    try:
+        m.Encoder(bad_profile)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError(bad_profile)
+"#
+                ),
+                Some(&globals),
+                None,
+            )
+            .expect("structured selection surface");
+        });
+    }
+
+    #[test]
+    fn structured_selection_encode_is_bit_exact() {
+        let (raw, rate, channels, _frames) = fixture_pcm_bytes();
+        Python::with_gil(|py| {
+            let m = import_module(py).unwrap();
+            let globals = PyDict::new(py);
+            globals.set_item("m", m).unwrap();
+            globals.set_item("raw", raw).unwrap();
+            globals.set_item("rate", rate).unwrap();
+            globals.set_item("channels", channels as i64).unwrap();
+            globals.set_item("profile", PROFILE_NAME).unwrap();
+            globals.set_item("expected_sha", REFERENCE_SHA256).unwrap();
+            py.run(
+                c_str!(
+                    r#"
+import struct
+n = len(raw) // 2
+values = struct.unpack("<{n}h".format(n=n), raw)
+frames = n // channels
+rows = [
+    [values[frame * channels + c] for frame in range(frames)]
+    for c in range(channels)
+]
+selection = m.WwiseProfile(
+    m.WwiseVersion.WWISE2013, channels, rate
+)
+by_name = m.Encoder(profile).encode_pcm(rate, rows)
+by_selection = m.Encoder(selection).encode_pcm(rate, rows)
+assert bytes(by_selection.data) == bytes(by_name.data)
+assert by_selection.sha256() == expected_sha, by_selection.sha256()
+assert by_selection.audio_packets == 205, by_selection.audio_packets
+assert by_selection.pcm_frames == frames, by_selection.pcm_frames
+assert by_selection.channels == channels, by_selection.channels
+assert by_selection.metadata_source == "profile:" + profile, by_selection.metadata_source
+packed = m.Encoder(selection).encode_pcm16_interleaved(rate, channels, raw)
+assert packed.sha256() == expected_sha, packed.sha256()
+assert bytes(packed.data) == bytes(by_name.data)
+"#
+                ),
+                Some(&globals),
+                None,
+            )
+            .expect("structured selection encode must be bit-exact");
+        });
+    }
+
+    #[test]
+    fn stream_session_for_selection_is_bit_exact() {
+        let (raw, rate, channels, frames) = fixture_pcm_bytes();
+        Python::with_gil(|py| {
+            let m = import_module(py).unwrap();
+            let globals = PyDict::new(py);
+            globals.set_item("m", m).unwrap();
+            globals.set_item("raw", raw).unwrap();
+            globals.set_item("rate", rate).unwrap();
+            globals.set_item("channels", channels as i64).unwrap();
+            globals.set_item("frames", frames as i64).unwrap();
+            globals.set_item("expected_sha", REFERENCE_SHA256).unwrap();
+            py.run(
+                c_str!(
+                    r#"
+cuts = [0, 17000, 40500, 70600, 85600, frames]
+selection = m.WwiseProfile(m.WwiseVersion.WWISE2013, channels, rate)
+session = m.StreamSession.for_selection(selection)
+step = 2 * channels
+packets = []
+for i in range(len(cuts) - 1):
+    lo, hi = cuts[i] * step, cuts[i + 1] * step
+    packets.extend(session.push(raw[lo:hi]))
+complete = session.finish()
+assert complete.sha256 == expected_sha, complete.sha256
+assert complete.total_len == len(bytes(complete.bytes))
+assert [p.seq for p in packets] == list(range(len(packets))), "seq must be 0..n-1"
+assert session.pcm_frames == frames, session.pcm_frames
+"#
+                ),
+                Some(&globals),
+                None,
+            )
+            .expect("selection streaming encode must be bit-exact");
         });
     }
 

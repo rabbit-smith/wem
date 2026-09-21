@@ -5,6 +5,8 @@
     "EncodeStats",
     "PcmBuffer",
     "RawPcm",
+    "WwiseProfile",
+    "WwiseVersion",
     "encode"
   ],
   "modules": [

@@ -94,7 +94,15 @@ class TypedApiTests(unittest.TestCase):
     def test_package_root_has_one_small_public_surface(self) -> None:
         self.assertEqual(
             wwise_wem.__all__,
-            ["EncodeResult", "EncodeStats", "PcmBuffer", "RawPcm", "encode"],
+            [
+                "EncodeResult",
+                "EncodeStats",
+                "PcmBuffer",
+                "RawPcm",
+                "WwiseProfile",
+                "WwiseVersion",
+                "encode",
+            ],
         )
 
     def test_fresh_package_import_keeps_runtime_modules_lazy(self) -> None:
