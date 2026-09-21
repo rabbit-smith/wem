@@ -1,4 +1,4 @@
-.PHONY: test test-fast fuzz-parity 2ch-stress 2ch-long frame-contract stage-contract golden lint rust-lint rust-test rust-bench build wheel-smoke check clean native
+.PHONY: test test-fast fuzz-parity 2ch-stress 2ch-long frame-contract stage-contract golden lint rust-fmt rust-lint rust-test rust-bench build wheel-smoke check clean native
 
 PY ?= python3
 
@@ -27,11 +27,18 @@ stage-contract:
 golden:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest tests.golden.test_golden -v
 
-RUFF ?= ruff
-MYPY ?= mypy
+# Lint tools come from the project venv when it exists. Without this, `make
+# lint` only works for a developer whose shell happens to have ruff/mypy on
+# PATH, which is how "the Python lint could not be run locally" happened.
+VENV_BIN := $(if $(wildcard .venv/bin),.venv/bin/,)
+RUFF ?= $(VENV_BIN)ruff
+MYPY ?= $(VENV_BIN)mypy
 lint:
 	$(RUFF) check src reference tests scripts
 	$(MYPY) --no-site-packages src reference
+
+rust-fmt:
+	cd crates && cargo fmt --all --check
 
 rust-lint:
 	cd crates && cargo clippy --workspace --all-targets -- -D warnings
@@ -54,7 +61,7 @@ rust-test:
 rust-bench:
 	cd crates && cargo build --release -p wem-core && target/release/wwise-wem ../tests/fixtures/input.wav --output /dev/null --time
 
-check: lint rust-lint test wheel-smoke
+check: lint rust-fmt rust-lint test wheel-smoke
 
 clean:
 	$(PY) scripts/clean.py
