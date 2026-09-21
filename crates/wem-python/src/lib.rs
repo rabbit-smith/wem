@@ -160,15 +160,26 @@ fn pcm_from_memoryview(sample_rate: i64, arg: &Bound<'_, PyAny>) -> PyResult<Pcm
             "PCM memoryview byte length disagrees with its shape".to_string(),
         ));
     }
-    // Copy out the channel-major rows (the kernel takes ownership).
-    // Zero-copy PCM intake would need a kernel API that borrows the
-    // Python buffer directly — deferred to P3-2 (the facade cutover).
-    let samples: Vec<i16> = raw
-        .chunks_exact(2)
-        .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
-        .collect();
+    // The view is C-contiguous, so each channel is already one contiguous
+    // run of the raw bytes and can be decoded straight into the row the
+    // kernel takes ownership of. That is one pass and one allocation per
+    // channel; decoding to a flat `Vec<i16>` first and slicing it afterwards
+    // would copy the whole stream twice more.
+    //
+    // The remaining `tobytes()` copy is the floor here: `pyo3::buffer`
+    // (and with it a borrowed, zero-copy view) is compiled out under the
+    // `abi3-py310` limited API, where the buffer protocol only becomes
+    // available at 3.11. Reading the buffer without a copy therefore needs
+    // either an abi3 floor of 3.11 or a kernel input type that borrows
+    // bytes instead of owning channel rows.
+    let channel_bytes = frames * 2;
     let rows: Vec<Vec<i16>> = (0..channels)
-        .map(|c| samples[c * frames..(c + 1) * frames].to_vec())
+        .map(|channel| {
+            raw[channel * channel_bytes..(channel + 1) * channel_bytes]
+                .chunks_exact(2)
+                .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+                .collect()
+        })
         .collect();
     Pcm16::new(sample_rate, rows).map_err(error_to_pyerr)
 }

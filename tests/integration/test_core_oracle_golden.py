@@ -17,6 +17,7 @@ for native-absent environments.
 
 from __future__ import annotations
 
+import array
 import hashlib
 import unittest
 from pathlib import Path
@@ -62,6 +63,23 @@ BOUNDARY_FRAME_COUNTS = (
 def _rows_from_pcm(pcm: PcmBuffer) -> list[list[int]]:
     """Kernel-form rows for in-domain PCM (read_pcm_wav output is in-domain)."""
     return [[int(sample * 32768.0) for sample in row] for row in pcm.channels]
+
+
+def _channel_major_view(pcm: PcmBuffer) -> memoryview:
+    """The same PCM as the 2-D ``(channels, frames)`` signed-16 view.
+
+    ``Encoder.encode_pcm`` accepts either a list of per-channel rows or this
+    buffer form; the buffer form is what a caller holding PCM in an array
+    already has, so it is the one that must be proved identical.
+    """
+    flat = array.array("h")
+    for row in _rows_from_pcm(pcm):
+        flat.extend(row)
+    channels = len(pcm.channels)
+    frames = len(pcm.channels[0])
+    # `memoryview.cast` reshapes only through a byte format, so go via 'B'.
+    raw = memoryview(flat).cast("B")
+    return raw.cast("h", (channels, frames))
 
 
 def _oracle_encode(pcm: PcmBuffer, profile) -> "object":
@@ -129,6 +147,60 @@ class CoreOracleGoldenTests(unittest.TestCase):
             oracle_result.stats.to_dict(),
         )
         self.assertEqual(facade.stats.metadata_source, KERNEL_METADATA_SOURCE)
+
+
+    def test_memoryview_pcm_is_the_same_container_as_the_list_form(self):
+        """Both accepted PCM forms reach the same bytes.
+
+        The buffer form is decoded channel-by-channel from one raw copy; it
+        must agree with the list form and with the golden file exactly.
+        """
+        pcm = read_pcm_wav(INPUT)
+        golden = REFERENCE.read_bytes()
+        encoder = core_module.Encoder(SELECTION)
+
+        from_list = encoder.encode_pcm(pcm.sample_rate, _rows_from_pcm(pcm))
+        from_view = encoder.encode_pcm(pcm.sample_rate, _channel_major_view(pcm))
+
+        self.assertEqual(bytes(from_view.data), golden)
+        self.assertEqual(bytes(from_view.data), bytes(from_list.data))
+        self.assertEqual(from_view.sha256(), EXPECTED_SHA256)
+        # Same accounting as the list form (the binding exposes the
+        # fields individually; the facade is what groups them).
+        for field in (
+            "pcm_frames",
+            "channels",
+            "audio_packets",
+            "short_packets",
+            "long_packets",
+            "bytes_out",
+            "metadata_source",
+        ):
+            self.assertEqual(
+                getattr(from_view, field), getattr(from_list, field), field
+            )
+
+    def test_memoryview_pcm_rejects_what_it_cannot_decode(self):
+        pcm = read_pcm_wav(INPUT)
+        encoder = core_module.Encoder(SELECTION)
+        frames = len(pcm.channels[0])
+        channels = len(pcm.channels)
+
+        # 1-D: not the documented (channels, frames) geometry.
+        with self.assertRaisesRegex(core_module.WemEncoderError, "must be 2-D"):
+            encoder.encode_pcm(pcm.sample_rate, memoryview(b"\x00\x00"))
+
+        # 2-D but unsigned bytes: not the signed-16 domain.
+        wide = memoryview(bytearray(channels * frames * 2)).cast(
+            "B", (channels, frames * 2)
+        )
+        with self.assertRaisesRegex(core_module.WemEncoderError, "must be signed-16"):
+            encoder.encode_pcm(pcm.sample_rate, wide)
+
+        # 2-D and signed-16 but strided: its bytes are not one run per channel.
+        strided = _channel_major_view(pcm)[::2]
+        with self.assertRaisesRegex(core_module.WemEncoderError, "must be C-contiguous"):
+            encoder.encode_pcm(pcm.sample_rate, strided)
 
     def test_boundary_length_inputs_are_byte_identical_between_facade_and_oracle(
         self,
