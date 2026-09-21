@@ -4,39 +4,49 @@
  *
  * Proves the wasm shell encodes byte-exactly against the kernel golden
  * contract, through the package's own entry point (src/index.ts, run via
- * Node's native type stripping on >= 22.18):
+ * Node's native type stripping on >= 22.18), and that its profile selection
+ * is the structured one of `include/wem.h` (ABI revision 2):
  *
- *   1. ONE-SHOT: fixture PCM -> WEM, sha256 must equal the golden.
- *   2. STREAMING CHUNK CONSISTENCY: the same PCM fed to sessions with
- *      three different chunkings (single chunk, fixed-size chunks,
- *      irregular frame-aligned chunks) must each reproduce the golden —
- *      chunk boundaries never change the output bytes (include/wem.h).
- *   3. ERROR CONTRACT: a wrong setup reference must throw a JS Error
- *      whose `code` is the stable WEM_ERR_* string.
+ *   1. ONE-SHOT: the pinned 6ch/44.1kHz recording -> WEM, sha256 must equal
+ *      the kernel golden — auto-selected from the WAV geometry, with an
+ *      explicit selection, and through the raw-PCM entry.
+ *   2. STREAMING CHUNK CONSISTENCY: the same PCM fed to sessions with three
+ *      different chunkings (single chunk, fixed-size chunks, irregular
+ *      frame-aligned chunks) must each reproduce the golden — chunk
+ *      boundaries never change the output bytes (include/wem.h).
+ *   3. SELECTION CONTRACT: the compiled-in generation table, the resolved
+ *      selection of every constructor, and the selection error mapping
+ *      (unknown version code -> FORMAT_UNSUPPORTED, non-positive geometry ->
+ *      STATE_ERROR, unsatisfiable selection -> PROFILE_NOT_FOUND) are
+ *      pinned; the profile bundle is compiled in, so nothing is fetched.
+ *   4. ERROR CONTRACT: kernel failures surface as JS Errors whose `code` is
+ *      the stable WEM_ERR_* string.
  *
  * Run: node js/test-node.mjs   (requires js/pkg-node built: npm run build:node)
  */
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   initWasm,
-  loadProfileBundle,
-  encodeWav,
+  listVersions,
   parseWav,
+  encodeWav,
+  createEncoder,
   createStreamSession,
+  WEM_ERROR_CODES,
 } from "./src/index.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
 
-// Pinned kernel golden (tests/fixtures/input.wav -> reference encode).
+// Pinned kernel golden: tests/fixtures/input.wav (6ch/44.1kHz, 139398 frames)
+// -> reference WEM. The profile bundle rides inside the wasm module.
 const GOLDEN_SHA256 =
   "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247";
-const PROFILE_NAME = "wwise2013-6ch-44100";
-const SETUP_SHA256 =
-  "3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3";
+const RECORDING = join(repoRoot, "tests/fixtures/input.wav");
+const RECORDING_FRAMES = 139398;
 
 let failures = 0;
 
@@ -60,74 +70,123 @@ async function expectWemError(label, fn, expectedCode) {
   }
 }
 
-/** Walk the profiles tree as (profiles-dir-relative path, bytes) pairs. */
-function readProfileBundle() {
-  const profilesDir = join(repoRoot, "src/wwise_wem/data/profiles");
-  const walk = (dir) => {
-    const out = [];
-    for (const entry of readdirSync(dir)) {
-      const p = join(dir, entry);
-      if (statSync(p).isDirectory()) out.push(...walk(p));
-      else out.push(p);
-    }
-    return out;
-  };
-  const indexBytes = new Uint8Array(readFileSync(join(profilesDir, "index.json")));
-  const files = new Map();
-  for (const p of walk(profilesDir)) {
-    if (p.endsWith("index.json")) continue;
-    // POSIX keys regardless of platform (the kernel bytes contract).
-    const rel = relative(profilesDir, p).split(join).join("/");
-    files.set(rel, new Uint8Array(readFileSync(p)));
-  }
-  return { indexBytes, files };
-}
+const sameSelection = (got, want) =>
+  got.versionCode === want.versionCode &&
+  got.version === want.version &&
+  got.generation === want.generation &&
+  got.channels === want.channels &&
+  got.sampleRate === want.sampleRate &&
+  got.description === want.description;
 
-const { indexBytes, files } = readProfileBundle();
-const wavBytes = new Uint8Array(readFileSync(join(repoRoot, "tests/fixtures/input.wav")));
+const describe = (s) =>
+  `versionCode=${s.versionCode}, version=${s.version}, generation=${s.generation}, ` +
+  `channels=${s.channels}, sampleRate=${s.sampleRate}, description=${s.description}`;
+
+const wavBytes = new Uint8Array(readFileSync(RECORDING));
 
 await initWasm();
 
+// --- 0) the compiled-in generation table -----------------------------------
+const versions = await listVersions();
+check(
+  "compiled-in Wwise version table (WemVersion)",
+  Array.isArray(versions) &&
+    versions.length === 1 &&
+    versions[0].code === 0 &&
+    versions[0].label === "2013" &&
+    versions[0].generation === "2013.2",
+  JSON.stringify(versions),
+);
+
+const SIX_CHANNEL = {
+  versionCode: 0,
+  version: "2013",
+  generation: "2013.2",
+  channels: 6,
+  sampleRate: 44100,
+  description: "6ch/44100Hz/2013",
+};
+
 // --- 1) one-shot parity ----------------------------------------------------
-const bundle = await loadProfileBundle(PROFILE_NAME, indexBytes, files);
-check(
-  "profile bundle verified (kernel SHA-256 entries)",
-  bundle.info.name === PROFILE_NAME && bundle.info.setupSha256 === SETUP_SHA256,
-  `name=${bundle.info.name}, setup=${bundle.info.setupSha256}`,
-);
-
 const t0 = Date.now();
-const oneShot = await encodeWav(wavBytes, bundle);
+const auto = await encodeWav(wavBytes); // no selection: auto-selected from the WAV
 check(
-  "one-shot encode sha256 == golden",
-  oneShot.sha256Hex === GOLDEN_SHA256,
-  `sha256=${oneShot.sha256Hex}, bytes=${oneShot.totalLen}, ${Date.now() - t0}ms`,
+  "one-shot (auto-selected) sha256 == golden",
+  auto.sha256Hex === GOLDEN_SHA256,
+  `sha256=${auto.sha256Hex}, bytes=${auto.totalLen}, ${Date.now() - t0}ms`,
 );
 
-// --- 2) streaming chunk consistency ----------------------------------------
-const { pcm } = await parseWav(wavBytes);
-const framesPer = pcm.byteLength / 12; // 6ch x s16 = 12 bytes/frame
-if (framesPer !== 139398) {
-  check("fixture PCM geometry", false, `frames=${framesPer}`);
-  process.exit(1);
+const explicit = await encodeWav(wavBytes, { version: 0, channels: 6, sampleRate: 44100 });
+check(
+  "one-shot (explicit selection 0/6ch/44100) sha256 == golden",
+  explicit.sha256Hex === GOLDEN_SHA256,
+  `sha256=${explicit.sha256Hex}, bytes=${explicit.totalLen}`,
+);
+
+const parsed = await parseWav(wavBytes);
+check(
+  "kernel WAV parse: geometry and frame count",
+  parsed.channels === 6 &&
+    parsed.sampleRate === 44100 &&
+    parsed.frames === RECORDING_FRAMES &&
+    parsed.pcm.byteLength === RECORDING_FRAMES * 12,
+  `channels=${parsed.channels}, sampleRate=${parsed.sampleRate}, frames=${parsed.frames}`,
+);
+
+// spelling variants of the version selector, and the resolved selection each
+// constructor entry reports (no encode: construction + selection only)
+const encoder = await createEncoder({
+  version: "2013",
+  channels: 6,
+  sampleRate: 44100,
+});
+check(
+  "encoder selection (label \"2013\") resolves to 6ch/44100Hz/2013",
+  sameSelection(encoder.selection(), SIX_CHANNEL),
+  describe(encoder.selection()),
+);
+const pcmOneShot = encoder.encodePcm16Interleaved(parsed.pcm);
+check(
+  "one-shot through the raw-PCM entry sha256 == golden",
+  pcmOneShot.sha256Hex === GOLDEN_SHA256,
+  `sha256=${pcmOneShot.sha256Hex}, bytes=${pcmOneShot.totalLen}`,
+);
+encoder.destroy();
+
+for (const [label, source] of [
+  ["generation \"2013.2\"", { version: "2013.2", channels: 6, sampleRate: 44100 }],
+  ["geometry only (auto generation)", { channels: 6, sampleRate: 44100 }],
+  ["auto-selected from the parsed WAV", parsed],
+]) {
+  const handle = await createEncoder(source);
+  check(
+    `encoder selection (${label}) resolves to 6ch/44100Hz/2013`,
+    sameSelection(handle.selection(), SIX_CHANNEL),
+    describe(handle.selection()),
+  );
+  handle.destroy();
 }
 
-async function streamEncode(chunks) {
-  const session = await createStreamSession(bundle);
+// --- 2) streaming chunk consistency ----------------------------------------
+const framesPer = parsed.pcm.byteLength / 12; // 6ch x s16 = 12 bytes/frame
+
+async function streamEncode(chunks, source) {
+  const session = await createStreamSession(source);
   try {
+    const resolved = session.selection();
     for (const chunk of chunks) {
       session.push(chunk);
     }
-    return session.finish();
+    return { result: session.finish(), resolved };
   } finally {
     session.destroy();
   }
 }
 
-const slice = (from, to) => pcm.slice(from * 12, to * 12);
+const slice = (from, to) => parsed.pcm.slice(from * 12, to * 12);
 
 const plans = {
-  "single-chunk": [pcm],
+  "single-chunk": [parsed.pcm],
   "fixed-5462-frames": (() => {
     const out = [];
     for (let off = 0; off < framesPer; off += 5462) {
@@ -150,12 +209,20 @@ const plans = {
 
 const results = [];
 for (const [label, chunks] of Object.entries(plans)) {
-  const r = await streamEncode(chunks);
-  results.push(r);
+  // first plan: explicit geometry, generation auto-selected; the rest: the
+  // parsed WAV as the geometry source
+  const source = label === "single-chunk" ? { channels: 6, sampleRate: 44100 } : parsed;
+  const { result, resolved } = await streamEncode(chunks, source);
+  results.push(result);
   check(
     `streaming (${label}) sha256 == golden`,
-    r.sha256Hex === GOLDEN_SHA256,
-    `sha256=${r.sha256Hex}, packets=${r.stats.audioPackets}, chunks=${chunks.length}`,
+    result.sha256Hex === GOLDEN_SHA256,
+    `sha256=${result.sha256Hex}, packets=${result.stats.audioPackets}, chunks=${chunks.length}`,
+  );
+  check(
+    `streaming (${label}) session selection`,
+    sameSelection(resolved, SIX_CHANNEL),
+    describe(resolved),
   );
 }
 
@@ -166,102 +233,136 @@ check(
   equal(results[0].data, results[1].data) && equal(results[0].data, results[2].data),
 );
 
-// --- 3) error contract (directly over the nodejs core) -----------------------
+// --- 3) selection contract (directly over the nodejs core) ------------------
 const core = await import("./pkg-node/wem_wasm.js");
 
 await expectWemError(
-  "wrong setup sha reference -> WEM_ERR_PROFILE_NOT_FOUND",
-  () => {
-    new core.WemSession(indexBytes, files, "0".repeat(64), PROFILE_NAME);
-  },
+  "unknown version code -> WEM_ERR_FORMAT_UNSUPPORTED",
+  () => new core.WemEncoder(7, 6, 44100),
+  "WEM_ERR_FORMAT_UNSUPPORTED",
+);
+
+await expectWemError(
+  "unknown version label -> WEM_ERR_FORMAT_UNSUPPORTED",
+  () => new core.WemSession("2011", 6, 44100),
+  "WEM_ERR_FORMAT_UNSUPPORTED",
+);
+
+await expectWemError(
+  "malformed version argument -> WEM_ERR_STATE_ERROR",
+  () => new core.WemEncoder(true, 6, 44100),
+  "WEM_ERR_STATE_ERROR",
+);
+
+await expectWemError(
+  "non-positive geometry -> WEM_ERR_STATE_ERROR",
+  () => new core.WemEncoder(0, 0, 44100),
+  "WEM_ERR_STATE_ERROR",
+);
+
+await expectWemError(
+  "unsatisfiable selection (2013, 2ch/44100) -> WEM_ERR_PROFILE_NOT_FOUND",
+  () => new core.WemEncoder(0, 2, 44100),
   "WEM_ERR_PROFILE_NOT_FOUND",
 );
 
 await expectWemError(
-  "name cross-check failure -> WEM_ERR_STATE_ERROR",
-  () => {
-    new core.WemSession(indexBytes, files, SETUP_SHA256, "not-this-profile");
-  },
-  "WEM_ERR_STATE_ERROR",
+  "auto-selection without a compiled geometry -> WEM_ERR_PROFILE_NOT_FOUND",
+  () => new core.WemSession(null, 1, 8000),
+  "WEM_ERR_PROFILE_NOT_FOUND",
+);
+
+// --- 4) error contract ------------------------------------------------------
+await expectWemError(
+  "WAV geometry vs explicit selection -> WEM_ERR_GEOMETRY_MISMATCH",
+  () => encodeWav(wavBytes, { version: 0, channels: 2, sampleRate: 48000 }),
+  "WEM_ERR_GEOMETRY_MISMATCH",
+);
+
+await expectWemError(
+  "not a signed-16 PCM WAV -> WEM_ERR_FORMAT_UNSUPPORTED",
+  () => parseWav(new Uint8Array([1, 2, 3, 4])),
+  "WEM_ERR_FORMAT_UNSUPPORTED",
 );
 
 await expectWemError(
   "unaligned chunk -> WEM_ERR_GEOMETRY_MISMATCH",
   () => {
-    const s = new core.WemSession(indexBytes, files, SETUP_SHA256, PROFILE_NAME);
-    s.push(pcm.slice(0, 13)); // 13 bytes: not a multiple of 12
+    const s = new core.WemSession(0, 6, 44100);
+    s.push(parsed.pcm.slice(0, 13)); // 13 bytes: not a multiple of 12
   },
   "WEM_ERR_GEOMETRY_MISMATCH",
 );
 
-const TWO_CHANNEL_PROFILE = "wwise2013-2ch-48000";
-const TWO_CHANNEL_SETUP_SHA256 =
-  "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc";
-
-// --- 4) 2ch/48000 profile (fully registered: positive gate) -----------------
-// The profile name must select the 2ch bundle even though index.json keeps 6ch
-// as its default. This catches accidental fallback to the default bundle.
+await expectWemError(
+  "below the 4096-frame minimum -> WEM_ERR_INPUT_TOO_SHORT",
+  () => {
+    const s = new core.WemSession(0, 6, 44100);
+    s.push(slice(0, 1024));
+    s.finish();
+  },
+  "WEM_ERR_INPUT_TOO_SHORT",
+);
 
 check(
-  "2ch profile files are present in the profile tree",
-  files.has(`${TWO_CHANNEL_PROFILE}/analysis/quality-curves.json`) &&
-    files.has(`${TWO_CHANNEL_PROFILE}/analysis/frozen-tables.json`) &&
-    files.has(`${TWO_CHANNEL_PROFILE}/pending.json`) &&
-    files.has(`${TWO_CHANNEL_PROFILE}/manifest.json`) &&
-    files.has(`${TWO_CHANNEL_PROFILE}/vorbis/setup.bin`) &&
-    files.has(`${TWO_CHANNEL_PROFILE}/vorbis/codebooks/t97.json`) &&
-    files.has(`${TWO_CHANNEL_PROFILE}/vorbis/codebooks/t282.json`) &&
-    files.has(`${TWO_CHANNEL_PROFILE}/psychoacoustics/short-seed.json`) &&
-    files.has(`${TWO_CHANNEL_PROFILE}/psychoacoustics/short-profiles.json`) &&
-    files.has(`${TWO_CHANNEL_PROFILE}/psychoacoustics/long-base.json`) &&
-    files.has(`${TWO_CHANNEL_PROFILE}/psychoacoustics/long-modes.json`),
+  "WEM_ERROR_CODES mirrors the include/wem.h table",
+  WEM_ERROR_CODES.length === 7 &&
+    WEM_ERROR_CODES[0] === "WEM_OK" &&
+    WEM_ERROR_CODES[6] === "WEM_ERR_INTERNAL",
+  WEM_ERROR_CODES.join(", "),
 );
+
+// --- 5) 2ch/48000 configuration (fully registered: positive gate) -----------
+// The selection must name the 2ch configuration even though the 6ch one is
+// the bundle's default: this catches accidential fallback to a default.
+const TWO_CHANNEL = {
+  versionCode: 0,
+  version: "2013",
+  generation: "2013.2",
+  channels: 2,
+  sampleRate: 48000,
+  description: "2ch/48000Hz/2013",
+};
 
 let twoChannelEncoder = null;
 let twoChannelError = null;
 try {
-  twoChannelEncoder = new core.WemEncoder(TWO_CHANNEL_PROFILE, indexBytes, files);
+  twoChannelEncoder = await createEncoder({ version: 0, channels: 2, sampleRate: 48000 });
 } catch (error) {
   twoChannelError = error;
 }
 check(
-  "2ch profile builds through the wasm kernel",
+  "2ch/48000 selection builds through the wasm kernel",
   twoChannelEncoder !== null && twoChannelError === null,
   twoChannelError
     ? `code=${twoChannelError.code ?? "<no code>"}, message="${twoChannelError.message ?? twoChannelError}"`
     : "built",
 );
+
 if (twoChannelEncoder) {
-  const info = twoChannelEncoder.profile_info();
   check(
-    "2ch encoder reports the registered 2ch/48000 geometry",
-    info.name === TWO_CHANNEL_PROFILE &&
-      info.channels === 2 &&
-      info.sampleRate === 48000 &&
-      info.setupSha256 === TWO_CHANNEL_SETUP_SHA256,
-    `name=${info.name}, ch=${info.channels}, rate=${info.sampleRate}, setup=${info.setupSha256.slice(0, 12)}...`,
+    "2ch encoder reports the resolved 2ch/48000Hz/2013 selection",
+    sameSelection(twoChannelEncoder.selection(), TWO_CHANNEL),
+    describe(twoChannelEncoder.selection()),
   );
-  // Encode a deterministic 8192-frame 2ch/48k stream (sines + LCG noise):
-  // the positive gate is that encoding succeeds with the right stats, not
-  // the audio quality (that is covered by the Python E2E round-trip suite).
+  // Encode a deterministic 8192-frame 2ch/48k stream, integer arithmetic
+  // only: the positive gate is that encoding succeeds with the right stats,
+  // not the audio quality (that is covered by the Python E2E suite).
   const frames = 8192;
   const twoChannelPcm = new Uint8Array(frames * 2 * 2);
   const twoChannelView = new DataView(twoChannelPcm.buffer);
-  let lcg = 0x9e3779b9;
+  let lcg = 0x9e3779b9 | 0;
   const lcgNext = () => {
     lcg = (Math.imul(lcg, 48271) + 11) | 0;
-    return lcg / 2147483648;
+    return lcg >> 20; // [-2048, 2047]
   };
   for (let f = 0; f < frames; f++) {
-    const t = f / 48000;
-    const s0 =
-      0.2 * Math.sin(2 * Math.PI * 440 * t) + 0.02 * (lcgNext() - 0.5);
-    const s1 =
-      0.15 * Math.sin(2 * Math.PI * 660 * t + 1.3) + 0.02 * (lcgNext() - 0.5);
-    twoChannelView.setInt16(f * 4, Math.round(Math.max(-1, Math.min(1, s0)) * 32767), true);
-    twoChannelView.setInt16(f * 4 + 2, Math.round(Math.max(-1, Math.min(1, s1)) * 32767), true);
+    const tone0 = f % 64 < 32 ? 6000 : -6000;
+    const tone1 = f % 96 < 48 ? 5000 : -5000;
+    twoChannelView.setInt16(f * 4, tone0 + lcgNext(), true);
+    twoChannelView.setInt16(f * 4 + 2, tone1 + lcgNext(), true);
   }
-  const twoChannelResult = twoChannelEncoder.encode_pcm16_interleaved(twoChannelPcm);
+  const twoChannelResult = twoChannelEncoder.encodePcm16Interleaved(twoChannelPcm);
   check(
     "2ch encode produces a WEM stream through the wasm kernel",
     twoChannelResult.data.byteLength > 0 &&
@@ -272,7 +373,7 @@ if (twoChannelEncoder) {
         twoChannelResult.stats.audioPackets,
     `bytes=${twoChannelResult.data.byteLength}, packets=${twoChannelResult.stats.audioPackets}, sha=${twoChannelResult.sha256Hex.slice(0, 12)}...`,
   );
-  twoChannelEncoder.free();
+  twoChannelEncoder.destroy();
 }
 
 // --- summary ------------------------------------------------------------------

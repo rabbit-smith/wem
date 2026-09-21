@@ -1,13 +1,17 @@
 /**
  * WEM browser demo — streaming encode in the tab.
  *
- * Loads the wasm-bindgen web build (../../js/pkg, relative .wasm fetch),
- * fetches the profile bundle from relative paths (SHA-256 verification is
- * done by the kernel on load), then streams a dropped .wav through
- * WemSession in frame-aligned chunks and offers the result for download.
+ * Loads the wasm-bindgen web build (../../js/pkg, relative .wasm fetch), then
+ * streams a dropped .wav through WemSession in frame-aligned chunks and offers
+ * the result for download.
+ *
+ * Nothing else is fetched: the profile bundle is compiled into the wasm module,
+ * and the profile selection (Wwise generation + PCM geometry, include/wem.h
+ * "PROFILE SELECTION") is auto-selected from the WAV's own geometry — no
+ * index, manifest, resource file, profile name or data directory is involved.
  */
 
-import init, { WemEncoder, WemSession, wem_parse_wav } from "../../js/pkg/wem_wasm.js";
+import init, { WemSession, wem_parse_wav, wem_versions } from "../../js/pkg/wem_wasm.js";
 
 const statusEl = document.getElementById("status");
 const dropEl = document.getElementById("drop");
@@ -19,59 +23,20 @@ const dlBtnEl = document.getElementById("dlbtn");
 const againEl = document.getElementById("again");
 const summaryEl = document.getElementById("summary");
 
-const query = new URLSearchParams(location.search);
-const profileBase = query.get("profileBase")
-  ?? "../../src/wwise_wem/data/profiles";
-const requestedProfile = query.get("profile");
-
-async function fetchBytes(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`fetch ${url}: ${res.status} ${res.statusText}`);
-  return new Uint8Array(await res.arrayBuffer());
-}
-
-async function loadProfileBundle(base, requestedName) {
-  const indexBytes = await fetchBytes(`${base}/index.json`);
-  const index = JSON.parse(new TextDecoder().decode(indexBytes));
-  if (index.schema !== "wwise-wem.profile-index.v1") {
-    throw new Error(`unexpected index schema: ${index.schema}`);
-  }
-  const profileName = requestedName ?? index.default;
-  const entry = index.profiles?.[profileName];
-  if (!entry) throw new Error(`index has no '${profileName}' entry`);
-
-  // manifest + every logical resource, as profiles-dir-relative files
-  const manifestBytes = await fetchBytes(`${base}/${entry.manifest}`);
-  const manifest = JSON.parse(new TextDecoder().decode(manifestBytes));
-  const files = new Map();
-  files.set(entry.manifest, manifestBytes);
-  for (const [resourceName, resource] of Object.entries(manifest.resources ?? {})) {
-    const key = `${profileName}/${resource.path}`;
-    files.set(key, await fetchBytes(`${base}/${resource.path}`));
-  }
-  const setupSha256 = manifest.resources?.["vorbis.setup"]?.sha256;
-  if (!setupSha256) throw new Error("manifest lacks the vorbis.setup resource");
-  return { indexBytes, files, profileName, setupSha256 };
-}
-
 // ---------------------------------------------------------------------------
-// startup: wasm + profile
+// startup: wasm module only
 // ---------------------------------------------------------------------------
 
-let encoder = null;
-let bundle = null;
+let ready = false;
 
 try {
   statusEl.textContent = "loading wasm…";
   await init(); // resolves wem_wasm_bg.wasm relative to this module
-  statusEl.textContent = "loading profile…";
-  bundle = await loadProfileBundle(profileBase, requestedProfile);
-  // resolve geometry + verify the bundle through the kernel (one-shot handle)
-  encoder = new WemEncoder(bundle.profileName, bundle.indexBytes, bundle.files);
-  const info = encoder.profile_info();
-  statusEl.textContent =
-    `ready — profile ${info.name} (${info.channels}ch @ ${info.sampleRate}Hz, ` +
-    `setup ${info.setupSha256.slice(0, 12)}…), drop a .wav`;
+  const generations = wem_versions()
+    .map((version) => `Wwise ${version.label} (${version.generation})`)
+    .join(", ");
+  statusEl.textContent = `ready — ${generations} compiled in, drop a .wav`;
+  ready = true;
 } catch (error) {
   statusEl.textContent = `startup failed: ${error.message}`;
   console.error(error);
@@ -86,8 +51,8 @@ function setProgress(fraction) {
 }
 
 async function encodeFile(file) {
-  if (!encoder || !bundle) {
-    statusEl.textContent = "encoder not ready yet — retry in a moment";
+  if (!ready) {
+    statusEl.textContent = "wasm module not ready yet — retry in a moment";
     return;
   }
   const t0 = performance.now();
@@ -104,23 +69,24 @@ async function encodeFile(file) {
     return;
   }
 
-  const profile = encoder.profile_info();
-  if (wav.sampleRate !== profile.sampleRate || wav.channels !== profile.channels) {
+  let session;
+  let selection;
+  try {
+    // Auto-selection: no version named, so the compiled generation is
+    // resolved from the WAV's own geometry (a geometry no compiled
+    // configuration satisfies throws WEM_ERR_PROFILE_NOT_FOUND).
+    session = new WemSession(null, wav.channels, wav.sampleRate);
+    selection = session.selection();
+  } catch (error) {
     statusEl.textContent =
-      `geometry mismatch: file is ${wav.channels}ch @ ${wav.sampleRate}Hz, ` +
-      `profile is ${profile.channels}ch @ ${profile.sampleRate}Hz`;
+      `no compiled configuration for ${wav.channels}ch @ ${wav.sampleRate}Hz: ` +
+      `${error.message}`;
     return;
   }
 
   const totalFrames = wav.frames;
-  const frameBytes = profile.channels * 2;
+  const frameBytes = selection.channels * 2;
   const chunkBytes = Math.floor((512 * 1024) / frameBytes) * frameBytes;
-  const session = new WemSession(
-    bundle.indexBytes,
-    bundle.files,
-    bundle.setupSha256,
-    bundle.profileName,
-  );
 
   let result;
   try {
@@ -153,7 +119,7 @@ async function encodeFile(file) {
     `output     ${result.totalLen} bytes`,
     `sha256     ${result.sha256Hex}`,
     `packets    ${result.stats.audioPackets} (short ${result.stats.shortPackets} / long ${result.stats.longPackets})`,
-    `profile    ${profile.name} (${profile.setupSha256})`,
+    `selection  ${selection.description} (version code ${selection.versionCode})`,
     `time       ${(performance.now() - t0) / 1000} s (main thread)`,
   ].join("\n");
   resultEl.style.display = "block";

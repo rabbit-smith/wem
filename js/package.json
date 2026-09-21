@@ -1,7 +1,7 @@
 {
   "name": "wwise-wem-wasm",
   "version": "0.1.0",
-  "description": "Browser encoding for the WEM encoder kernel: wasm-bindgen shell (crates/wem-wasm) + typed JS wrapper. One-shot and streaming PCM->WEM, profile bytes in, WEM bytes out.",
+  "description": "Browser encoding for the WEM encoder kernel: wasm-bindgen shell (crates/wem-wasm) + typed JS wrapper. One-shot and streaming WAV/PCM->WEM, profile bundle compiled in, structured profile selection (Wwise generation + PCM geometry), WEM bytes out.",
   "type": "module",
   "main": "./src/index.ts",
   "module": "./src/index.ts",
@@ -19,8 +19,8 @@
     "README.md"
   ],
   "scripts": {
-    "build:web": "wasm-pack build ../crates/wem-wasm --target web --release --out-dir pkg",
-    "build:node": "wasm-pack build ../crates/wem-wasm --target nodejs --release --out-dir pkg-node",
+    "build:web": "wasm-pack build ../crates/wem-wasm --target web --release --out-dir \"$(pwd)/pkg\"",
+    "build:node": "wasm-pack build ../crates/wem-wasm --target nodejs --release --out-dir \"$(pwd)/pkg-node\"",
     "build": "npm run build:web && npm run build:node",
     "test": "node test-node.mjs"
   },

@@ -1,10 +1,12 @@
 # wwise-wem-wasm
 
 Browser encoding for the WEM encoder kernel — the wasm-bindgen shell
-(`crates/wem-wasm`) plus a typed JS wrapper. PCM in, WEM bytes out, profile
-data as bytes; SHA-256 verification of every profile resource happens in the
-kernel on load. One-shot and streaming APIs mirror the C ABI contract
-(`include/wem.h`): same lifecycle, same error codes, same bytes.
+(`crates/wem-wasm`) plus a typed JS wrapper. WAV/PCM in, WEM bytes out. The
+profile bundle is **compiled into the wasm module**: nothing is fetched,
+indexed, or passed in, and no entry touches the filesystem. One-shot and
+streaming APIs mirror the C ABI contract (`include/wem.h`, ABI revision 2):
+same lifecycle, same error codes, same bytes, selected by the structured
+profile selection (one Wwise generation plus the PCM geometry).
 
 ## Layout
 
@@ -14,7 +16,7 @@ js/
   src/index.ts     the wrapper (typed entry; erasable-TS only, no build step)
   pkg/             wasm-pack --target web      (browser/worker; .wasm fetched by URL)
   pkg-node/        wasm-pack --target nodejs   (Node; .wasm read from disk on import)
-  test-node.mjs    Node parity gate (golden sha256 + chunking consistency + error codes)
+  test-node.mjs    Node parity gate (golden sha256 + chunking consistency + selection/error codes)
 ```
 
 Rebuilds (need wasm-pack + a wasm32 toolchain):
@@ -26,10 +28,10 @@ npm test             # → node test-node.mjs (requires pkg-node)
 ```
 
 > **Build-tool note (wasm-pack 0.15+):** `--out-dir` is resolved relative to
-> the crate (`crates/wem-wasm`), not the current directory, so the npm scripts
-> above may no longer update `pkg/` and `pkg-node/` in place.  If the
-> `test-node.mjs` gate behaves as if it ran against stale kernel bytes, rebuild
-> with an absolute out-dir, e.g. from `crates/`:
+> the crate (`crates/wem-wasm`), not the current directory, so a relative
+> `--out-dir pkg` would write `crates/wem-wasm/pkg` and leave the committed
+> artifacts stale. The npm scripts therefore pass an absolute out-dir
+> (`--out-dir "$(pwd)/pkg"`); the equivalent from `crates/` is:
 >
 > ```sh
 > wasm-pack build wem-wasm --target web    --release --out-dir "$(pwd)/../js/pkg"
@@ -39,44 +41,50 @@ npm test             # → node test-node.mjs (requires pkg-node)
 > The committed `pkg/` and `pkg-node/` artifacts are refreshed that way and
 > must track the kernel source: the golden-sha gate in `test-node.mjs` fails
 > against stale kernel bytes, and its 2ch/48k positive gate fails against a
-> kernel that still refuses the 2ch profile.
+> kernel that still refuses the 2ch configuration.
 
 ## API (sketch)
 
 ```ts
 import {
-  initWasm, loadProfileBundle, parseWav,
-  encodeWav, createStreamSession,
+  initWasm, listVersions, parseWav,
+  encodeWav, createEncoder, createStreamSession,
   WEM_ERROR_CODES,
 } from "wwise-wem-wasm";
 
-// bytes travel from your loader (fetch / import / IndexedDB cache)
-const indexBytes = /* index.json bytes */;
-const files = new Map([ /* profiles-dir-relative path → bytes */ ]);
+await initWasm();                       // or initWasm(url | response | arrayBuffer)
+await listVersions();                   // [{ code: 0, label: "2013", generation: "2013.2" }]
 
-await initWasm();                              // or initWasm(url | response | arrayBuffer)
-const bundle = await loadProfileBundle("wwise2013-2ch-48000", indexBytes, files);
-// bundle.info → { name, setupSha256, channels, sampleRate }
-
-// one-shot: WAV bytes → WEM
+// one-shot: WAV bytes → WEM. No selection → auto-selected from the WAV geometry.
 const wav = /* ArrayBuffer | Uint8Array */;
-const out = await encodeWav(wav, bundle);      // { data, totalLen, sha256Hex, stats }
+const out = await encodeWav(wav);       // { data, totalLen, sha256Hex, stats }
+
+// …or name the selection explicitly ({ version?, channels, sampleRate });
+// version: code (0 = Wwise 2013), label ("2013"), generation ("2013.2"), or omit to auto-select
+const twoChannel = await encodeWav(wav, { version: 0, channels: 2, sampleRate: 48000 });
+
+// a reusable one-shot handle: selection() + encodeWav() + encodePcm16Interleaved()
+const encoder = await createEncoder({ channels: 6, sampleRate: 44100 });
+encoder.selection();                    // { versionCode, version, generation, channels, sampleRate, description }
+encoder.destroy();
 
 // streaming: Init → push* → Finish (frame-aligned chunks; boundaries never
-// affect the output bytes)
-const session = await createStreamSession(bundle);
-for (const chunk of chunksOfPcm(pcmBytes)) {
+// affect the output bytes). A parsed WAV is itself a geometry source.
+const parsed = await parseWav(wav);
+const session = await createStreamSession(parsed);   // auto-selected from parsed
+for (const chunk of chunksOf(parsed.pcm)) {
   session.push(chunk, (packets) => { /* seq 0 = setup packet, then audio */ });
 }
-const result = session.finish();               // { data, totalLen, sha256Hex, stats }
+const result = session.finish();        // { data, totalLen, sha256Hex, stats }
 session.destroy();
 ```
 
 Errors: kernel failures throw a JS `Error` with a stable `code` —
-`WEM_ERR_PROFILE_NOT_FOUND`, `WEM_ERR_STATE_ERROR`,
-`WEM_ERR_GEOMETRY_MISMATCH`, `WEM_ERR_INPUT_TOO_SHORT`,
-`WEM_ERR_FORMAT_UNSUPPORTED`, `WEM_ERR_INTERNAL` (1:1 with `include/wem.h`,
-append-only).
+`WEM_ERR_PROFILE_NOT_FOUND` (no compiled configuration satisfies the
+selection), `WEM_ERR_STATE_ERROR` (non-positive geometry, malformed
+argument), `WEM_ERR_GEOMETRY_MISMATCH`, `WEM_ERR_INPUT_TOO_SHORT`,
+`WEM_ERR_FORMAT_UNSUPPORTED` (unknown version code, non-PCM WAV),
+`WEM_ERR_INTERNAL` (1:1 with `include/wem.h`, append-only).
 
 ## Environments
 
@@ -90,8 +98,10 @@ append-only).
 
 ## Verification
 
-`test-node.mjs` pins byte-exactness: the fixture PCM encoded through the
-wasm package must match the kernel golden
+`test-node.mjs` pins byte-exactness: the representative 6ch/44.1kHz recording
+encoded through the wasm package must match the kernel golden
 (`17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247`),
-across one-shot and three chunking schemes, and kernel error codes must
-surface as `WEM_ERR_*` JS errors. Wired into CI (`.github/workflows/web.yml`).
+across one-shot (auto-selected, explicit, and raw-PCM paths) and three
+chunking schemes; the compiled-in version table, the resolved selection of
+every constructor, and the selection/error code mapping must hold. Wired into
+CI (`.github/workflows/web.yml`).

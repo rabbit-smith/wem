@@ -2,11 +2,48 @@
  * wwise-wem-wasm — typed wrapper over the wem-wasm kernel shell.
  *
  * The Rust side (crates/wem-wasm) is a parallel language shell over the
- * WEM encoder kernel (include/wem.h contract): one-shot and streaming
- * PCM -> WEM, profile data as bytes, errors as `WEM_ERR_*` codes. This
- * module adds a small ergonomic, promise-shaped API on top and NOTHING
- * else: no numerics, no profile logic, no WAV parsing of its own — the
- * kernel owns all of that.
+ * WEM encoder kernel (`include/wem.h` contract, ABI revision 2): one-shot
+ * and streaming WAV/PCM -> WEM, errors as `WEM_ERR_*` codes. This module
+ * adds a small ergonomic, promise-shaped API on top and NOTHING else: no
+ * numerics, no profile logic, no WAV parsing of its own — the kernel owns
+ * all of that.
+ *
+ * # Profile selection (ABI revision 2)
+ *
+ * The encoder configurations are compiled into the wasm module: nothing is
+ * fetched, downloaded, indexed, or passed in. A selection is one Wwise
+ * generation plus the PCM geometry — `{ version, channels, sampleRate }`
+ * mirroring `WemProfile` in `include/wem.h`:
+ *
+ * - `version`: the stable code (`0` = Wwise 2013), the label `"2013"`, the
+ *   generation `"2013.2"`, or omitted for **auto-selection**: the unique
+ *   compiled generation whose configuration satisfies the geometry (in the
+ *   browser flow, the geometry of the WAV the user picked).
+ * - `channels` / `sampleRate`: the PCM geometry to encode (> 0).
+ *
+ * A selection no compiled configuration satisfies is rejected with
+ * `WEM_ERR_PROFILE_NOT_FOUND`, an unknown version code with
+ * `WEM_ERR_FORMAT_UNSUPPORTED`, and a non-positive geometry with
+ * `WEM_ERR_STATE_ERROR` — never silently substituted by a default.
+ *
+ * ```ts
+ * import { initWasm, parseWav, encodeWav, createStreamSession } from "wwise-wem-wasm";
+ *
+ * await initWasm();
+ *
+ * // one-shot, auto-selected from the WAV's own geometry
+ * const out = await encodeWav(wavBytes);            // { data, totalLen, sha256Hex, stats }
+ *
+ * // one-shot, explicit selection
+ * const same = await encodeWav(wavBytes, { version: 0, channels: 6, sampleRate: 44100 });
+ *
+ * // streaming (Init -> push* -> Finish); chunk boundaries never change the bytes
+ * const wav = await parseWav(wavBytes);
+ * const session = await createStreamSession(wav);   // auto-selected from wav
+ * for (const chunk of chunksOf(wav.pcm)) session.push(chunk);
+ * const result = session.finish();
+ * session.destroy();
+ * ```
  *
  * # Environments (all first-class, no DOM used here)
  *
@@ -28,9 +65,13 @@
 // Core (wasm) surface — structural types over the generated bindings
 // ---------------------------------------------------------------------------
 
+/** The version argument the wasm constructors take. */
+type CoreVersionArg = number | string | null | undefined;
+
 interface CoreEncoder {
   encode_pcm16_interleaved(pcm: Uint8Array): WemResultRaw;
-  profile_info(): ProfileInfoRaw;
+  encode_wav(wav: Uint8Array): WemResultRaw;
+  selection(): SelectionInfoRaw;
   free(): void;
 }
 
@@ -38,31 +79,35 @@ interface CoreSession {
   push(pcm: Uint8Array): Uint8Array[];
   finish(): WemResultRaw;
   pcm_frames(): number;
+  selection(): SelectionInfoRaw;
   free(): void;
 }
 
 interface CoreModule {
   WemEncoder: new (
-    profileName: string,
-    profileIndex: Uint8Array,
-    files: Map<string, Uint8Array>,
+    version: CoreVersionArg,
+    channels: number,
+    sampleRate: number,
   ) => CoreEncoder;
   WemSession: new (
-    profileIndex: Uint8Array,
-    files: Map<string, Uint8Array>,
-    setupSha256: string,
-    profileName: string,
+    version: CoreVersionArg,
+    channels: number,
+    sampleRate: number,
   ) => CoreSession;
   wem_parse_wav(wav: Uint8Array): ParsedWavRaw;
+  /** The compiled-in `WemVersion` table (include/wem.h). */
+  wem_versions(): WwiseVersionInfo[];
   // web target only: async init (nodejs target self-initializes on import)
   default?: (input?: unknown) => Promise<unknown>;
 }
 
-interface ProfileInfoRaw {
-  name: string;
-  setupSha256: string;
+interface SelectionInfoRaw {
+  versionCode: number;
+  version: string;
+  generation: string;
   channels: number;
   sampleRate: number;
+  description: string;
 }
 
 interface ParsedWavRaw {
@@ -82,6 +127,67 @@ interface WemResultRaw {
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
+
+/**
+ * One Wwise generation selector: the stable cross-language code
+ * (`0` = Wwise 2013), its label (`"2013"`) or generation (`"2013.2"`).
+ * `null` / `undefined` asks for auto-selection from the geometry.
+ */
+export type WwiseVersionSelector = number | string | null | undefined;
+
+/** One selectable Wwise generation (a row of the compiled-in table). */
+export interface WwiseVersionInfo {
+  /** Stable cross-language code (`WemVersion` in include/wem.h). */
+  code: number;
+  /** Short label the generation is spelled with (`"2013"`). */
+  label: string;
+  /** Full generation string (`"2013.2"`). */
+  generation: string;
+}
+
+/**
+ * One structured profile selection (mirrors `WemProfile` in
+ * `include/wem.h`): a Wwise generation plus the PCM geometry to encode.
+ * Omit `version` to auto-select the compiled generation that satisfies the
+ * geometry.
+ */
+export interface ProfileSelection {
+  version?: WwiseVersionSelector;
+  channels: number;
+  sampleRate: number;
+}
+
+/** The selection a handle resolved to (and encodes). */
+export interface ResolvedSelection {
+  /** Stable cross-language version code (`0` = Wwise 2013). */
+  versionCode: number;
+  /** Short version label (`"2013"`). */
+  version: string;
+  /** Full generation (`"2013.2"`). */
+  generation: string;
+  /** PCM channel count being encoded. */
+  channels: number;
+  /** PCM sample rate being encoded. */
+  sampleRate: number;
+  /** Human description, e.g. `"2ch/48000Hz/2013"`. */
+  description: string;
+}
+
+/** A signed-16 PCM WAV parsed by the kernel. */
+export interface ParsedWav {
+  sampleRate: number;
+  channels: number;
+  frames: number;
+  /** Interleaved little-endian signed-16 PCM bytes. */
+  pcm: Uint8Array;
+}
+
+/**
+ * Where a geometry comes from: an explicit selection, or a WAV the kernel
+ * already parsed (then the generation is auto-selected from the WAV's own
+ * geometry).
+ */
+export type GeometrySource = ProfileSelection | ParsedWav;
 
 /** Terminal container summary (mirrors the kernel's WemMeta + stats). */
 export interface WemResult {
@@ -105,31 +211,27 @@ export interface WemStats {
   metadataSource: string;
 }
 
-/** A signed-16 PCM WAV parsed by the kernel. */
-export interface ParsedWav {
-  sampleRate: number;
-  channels: number;
-  frames: number;
-  /** Interleaved little-endian signed-16 PCM bytes. */
-  pcm: Uint8Array;
-}
-
 /**
- * One loaded profile bundle, verified by the kernel on load
- * (every logical resource's SHA-256 is checked by the `*_bytes` entries).
+ * One reusable one-shot encoder (Init once, encode many buffers). The
+ * underlying wasm handle is shareable; release it with `destroy()`.
  */
-export interface ProfileBundle {
-  /** The raw index.json bytes (kept for the streaming entry). */
-  readonly indexBytes: Uint8Array;
-  /** Profiles-dir-relative path -> bytes (Map form the kernel expects). */
-  readonly files: Map<string, Uint8Array>;
-  /** The kernel-verified identity of the selected (default) profile. */
-  readonly info: {
-    name: string;
-    setupSha256: string;
-    channels: number;
-    sampleRate: number;
-  };
+export interface Encoder {
+  /** The selection this handle resolved to. */
+  selection(): ResolvedSelection;
+  /**
+   * Encode one interleaved s16-LE PCM buffer. The buffer carries no
+   * geometry of its own: it is read at the selection's rate and channel
+   * count, so it must match the selection (the C ABI contract for raw PCM).
+   */
+  encodePcm16Interleaved(pcm: Uint8Array | ArrayBuffer): WemResult;
+  /**
+   * Parse one signed-16 PCM WAV and encode it. The kernel cross-checks the
+   * WAV's geometry against the selection
+   * (`WEM_ERR_GEOMETRY_MISMATCH` when they disagree).
+   */
+  encodeWav(wavBytes: Uint8Array | ArrayBuffer): WemResult;
+  /** Release the handle. */
+  destroy(): void;
 }
 
 /**
@@ -142,6 +244,8 @@ export interface ProfileBundle {
  * frame each).
  */
 export interface StreamSession {
+  /** The selection this session resolved to. */
+  selection(): ResolvedSelection;
   /**
    * Push one interleaved s16-LE PCM chunk.
    *
@@ -185,8 +289,14 @@ export const WEM_ERROR_CODES = [
 let corePromise: Promise<CoreModule> | null = null;
 let initInput: unknown;
 
+/**
+ * Whether this module runs under Node (the nodejs build self-initializes on
+ * import; the web build needs an explicit init call). Read through
+ * `globalThis` so the file type-checks and runs without `@types/node`.
+ */
 function isNodeEnvironment(): boolean {
-  return typeof process !== "undefined" && typeof process.versions?.node === "string";
+  const process = (globalThis as { process?: { versions?: { node?: string } } }).process;
+  return typeof process?.versions?.node === "string";
 }
 
 /**
@@ -220,69 +330,92 @@ async function core(): Promise<CoreModule> {
 }
 
 // ---------------------------------------------------------------------------
-// Profile bundles
+// Small helpers (no numerics, no profile logic)
 // ---------------------------------------------------------------------------
 
-/**
- * Accept the profile files as a Map or a plain object; normalize
- * ArrayBuffer values to Uint8Array (the kernel accepts both, the
- * wrapper keeps one canonical form).
- */
-function normalizeFiles(
-  files: Map<string, Uint8Array | ArrayBuffer> | Record<string, Uint8Array | ArrayBuffer>,
-): Map<string, Uint8Array> {
-  const out = new Map<string, Uint8Array>();
-  const push = (key: string, value: Uint8Array | ArrayBuffer) => {
-    if (value instanceof Uint8Array) {
-      out.set(key, value);
-    } else if (typeof ArrayBuffer !== "undefined" && value instanceof ArrayBuffer) {
-      out.set(key, new Uint8Array(value));
-    } else {
-      throw WemErrorLike("WEM_ERR_STATE_ERROR: profile file bytes must be Uint8Array or ArrayBuffer");
-    }
-  };
-  if (files instanceof Map) {
-    for (const [key, value] of files) push(key, value);
-  } else if (files && typeof files === "object") {
-    for (const key of Object.keys(files)) push(key, (files as Record<string, Uint8Array | ArrayBuffer>)[key]);
-  } else {
-    throw new WemErrorLike("WEM_ERR_STATE_ERROR: profile files must be a Map or object");
-  }
-  return out;
-}
-
-function WemErrorLike(codeMessage: string): Error & { code: string } {
+/** One wrapper-side argument error carrying a stable `WEM_ERR_*` code. */
+function wemError(codeMessage: string): Error & { code: string } {
   const code = codeMessage.split(":")[0];
-  const err = new Error(codeMessage);
-  (err as { code: string }).code = code;
+  const err = new Error(codeMessage) as Error & { code: string };
+  err.code = code;
   return err;
 }
 
-/**
- * Load (and kernel-verify) one profile bundle from bytes.
- *
- * The kernel's bytes entry re-checks every resource's SHA-256 on load
- * and selects the requested profile; a failing bundle throws
- * `WEM_ERR_PROFILE_NOT_FOUND` / `WEM_ERR_STATE_ERROR` / `WEM_ERR_INTERNAL`.
- * The bundle carries a resolved encoder handle for one-shot encodes.
- */
-export async function loadProfileBundle(
-  profileName: string,
-  indexBytes: Uint8Array | ArrayBuffer,
-  files: Map<string, Uint8Array | ArrayBuffer> | Record<string, Uint8Array | ArrayBuffer>,
-): Promise<ProfileBundle & { readonly encoder: CoreEncoder }> {
-  const coreModule = await core();
-  const index =
-    indexBytes instanceof Uint8Array ? indexBytes : new Uint8Array(indexBytes);
-  const filesMap = normalizeFiles(files);
-  // Throws (with a WEM_ERR_* code) when the bundle fails verification.
-  const encoder = new coreModule.WemEncoder(profileName, index, filesMap);
-  const info = encoder.profile_info();
+/** Accept `Uint8Array` or `ArrayBuffer` (one canonical form downstream). */
+function asBytes(value: Uint8Array | ArrayBuffer, what: string): Uint8Array {
+  if (value instanceof Uint8Array) return value;
+  if (typeof ArrayBuffer !== "undefined" && value instanceof ArrayBuffer) {
+    return new Uint8Array(value);
+  }
+  throw wemError(`WEM_ERR_STATE_ERROR: ${what} must be Uint8Array or ArrayBuffer`);
+}
+
+/** The kernel result object as the public shape. */
+function toResult(raw: WemResultRaw): WemResult {
   return {
-    indexBytes: index,
-    files: filesMap,
-    info,
-    encoder,
+    data: raw.data,
+    totalLen: raw.totalLen,
+    sha256Hex: raw.sha256Hex,
+    stats: raw.stats,
+  };
+}
+
+/** Whether one geometry source is an already-parsed WAV. */
+function isParsedWav(source: GeometrySource): source is ParsedWav {
+  return (source as ParsedWav).pcm instanceof Uint8Array;
+}
+
+/**
+ * The selection one geometry source means: an explicit selection is taken
+ * as given (with `version` omitted, the shell auto-selects the compiled
+ * generation); a parsed WAV yields its own geometry.
+ */
+function asSelection(source: GeometrySource): ProfileSelection {
+  return isParsedWav(source)
+    ? { version: null, channels: source.channels, sampleRate: source.sampleRate }
+    : source;
+}
+
+// ---------------------------------------------------------------------------
+// Profile selection
+// ---------------------------------------------------------------------------
+
+/** Every Wwise generation this build can select (the compiled-in table). */
+export async function listVersions(): Promise<WwiseVersionInfo[]> {
+  const coreModule = await core();
+  return coreModule.wem_versions();
+}
+
+/**
+ * Open one reusable one-shot encoder on a selection (or on a parsed WAV's
+ * own geometry).
+ *
+ * Throws `WEM_ERR_FORMAT_UNSUPPORTED` on an unknown version code,
+ * `WEM_ERR_STATE_ERROR` on a non-positive geometry, and
+ * `WEM_ERR_PROFILE_NOT_FOUND` when no compiled configuration satisfies the
+ * selection.
+ */
+export async function createEncoder(source: GeometrySource): Promise<Encoder> {
+  const coreModule = await core();
+  const selection = asSelection(source);
+  const encoder = new coreModule.WemEncoder(
+    selection.version ?? null,
+    selection.channels,
+    selection.sampleRate,
+  );
+  return {
+    selection() {
+      return encoder.selection();
+    },
+    encodePcm16Interleaved(pcm) {
+      return toResult(encoder.encode_pcm16_interleaved(asBytes(pcm, "PCM input")));
+    },
+    encodeWav(wavBytes) {
+      return toResult(encoder.encode_wav(asBytes(wavBytes, "WAV input")));
+    },
+    destroy() {
+      encoder.free();
+    },
   };
 }
 
@@ -293,9 +426,7 @@ export async function loadProfileBundle(
 /** Parse one signed-16 PCM WAV (kernel parser; throws on non-conforming files). */
 export async function parseWav(wavBytes: Uint8Array | ArrayBuffer): Promise<ParsedWav> {
   const coreModule = await core();
-  const wav =
-    wavBytes instanceof Uint8Array ? wavBytes : new Uint8Array(wavBytes);
-  const parsed = coreModule.wem_parse_wav(wav);
+  const parsed = coreModule.wem_parse_wav(asBytes(wavBytes, "WAV input"));
   return {
     sampleRate: parsed.sampleRate,
     channels: parsed.channels,
@@ -304,59 +435,68 @@ export async function parseWav(wavBytes: Uint8Array | ArrayBuffer): Promise<Pars
   };
 }
 
-/**
- * One-shot encode: WAV bytes -> complete WEM container.
- *
- * The WAV is parsed by the kernel (`parse_pcm16`); PCM geometry must
- * match the selected profile, otherwise
- * `WEM_ERR_GEOMETRY_MISMATCH` / `WEM_ERR_INPUT_TOO_SHORT` is thrown.
- */
-export async function encodeWav(
-  wavBytes: Uint8Array | ArrayBuffer,
-  bundle: ProfileBundle,
-): Promise<WemResult> {
-  const parsed = await parseWav(wavBytes);
-  const resultRaw = bundle.encoder.encode_pcm16_interleaved(parsed.pcm);
-  return {
-    data: resultRaw.data,
-    totalLen: resultRaw.totalLen,
-    sha256Hex: resultRaw.sha256Hex,
-    stats: resultRaw.stats,
-  };
+/** The selection a WAV's own geometry asks for (generation auto-selected). */
+function selectionFromWav(coreModule: CoreModule, wav: Uint8Array): ProfileSelection {
+  const parsed = coreModule.wem_parse_wav(wav);
+  return { version: null, channels: parsed.channels, sampleRate: parsed.sampleRate };
 }
 
 /**
- * Open one streaming encode session on a loaded bundle.
+ * One-shot encode: WAV bytes -> complete WEM container.
  *
- * Drives the kernel's bytes-entry `StreamSession::for_profile_ref_bytes`
- * (Init): the reference asserts the bundle's setup SHA-256 (hard) and
- * profile name (soft) — the same verification runs again here, which is
- * the kernel doing its job, not duplicated logic.
+ * Without `selection` the generation and geometry are auto-selected from
+ * the WAV itself; with one, the kernel cross-checks the WAV geometry
+ * against it (`WEM_ERR_GEOMETRY_MISMATCH` on disagreement) and rejects a
+ * stream shorter than the 4096-frame minimum
+ * (`WEM_ERR_INPUT_TOO_SHORT`).
  */
-export async function createStreamSession(bundle: ProfileBundle): Promise<StreamSession> {
+export async function encodeWav(
+  wavBytes: Uint8Array | ArrayBuffer,
+  selection?: GeometrySource,
+): Promise<WemResult> {
   const coreModule = await core();
+  const wav = asBytes(wavBytes, "WAV input");
+  const resolved = asSelection(selection ?? selectionFromWav(coreModule, wav));
+  const encoder = new coreModule.WemEncoder(
+    resolved.version ?? null,
+    resolved.channels,
+    resolved.sampleRate,
+  );
+  try {
+    return toResult(encoder.encode_wav(wav));
+  } finally {
+    encoder.free();
+  }
+}
+
+/**
+ * Open one streaming encode session on a selection (or on a parsed WAV's
+ * own geometry).
+ *
+ * Drives the kernel's `StreamSession::for_selection` (Init); the reply
+ * framing (seq 0 = setup packet, then audio packets) and the chunk contract
+ * are the kernel's — chunk boundaries never affect the output bytes.
+ */
+export async function createStreamSession(source: GeometrySource): Promise<StreamSession> {
+  const coreModule = await core();
+  const selection = asSelection(source);
   const session = new coreModule.WemSession(
-    bundle.indexBytes,
-    bundle.files,
-    bundle.info.setupSha256,
-    bundle.info.name,
+    selection.version ?? null,
+    selection.channels,
+    selection.sampleRate,
   );
   return {
+    selection() {
+      return session.selection();
+    },
     push(pcmChunk, onPackets) {
-      const bytes =
-        pcmChunk instanceof Uint8Array ? pcmChunk : new Uint8Array(pcmChunk);
+      const bytes = asBytes(pcmChunk, "PCM chunk");
       const packets = session.push(bytes);
       if (onPackets) onPackets(packets);
       return packets;
     },
     finish() {
-      const resultRaw = session.finish();
-      return {
-        data: resultRaw.data,
-        totalLen: resultRaw.totalLen,
-        sha256Hex: resultRaw.sha256Hex,
-        stats: resultRaw.stats,
-      };
+      return toResult(session.finish());
     },
     pcmFrames() {
       return session.pcm_frames();

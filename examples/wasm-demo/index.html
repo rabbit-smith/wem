@@ -32,12 +32,12 @@
 
   <div id="drop">
     Drop a <code>.wav</code> here, or click to choose
-    <small>(profile data is fetched from the repo's <code>src/wwise_wem/data/profiles</code>; override with <code>?profileBase=…</code>)</small>
+    <small>(the profile data is compiled into the wasm module; the configuration is auto-selected from the file's geometry)</small>
     <input type="file" id="file" accept=".wav,audio/wav,audio/x-wav" hidden />
   </div>
 
   <div class="bar"><div id="progress"></div></div>
-  <p id="status">loading wasm + profile…</p>
+  <p id="status">loading wasm…</p>
 
   <div id="result" style="display:none">
     <p>

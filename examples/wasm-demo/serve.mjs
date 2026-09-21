@@ -10,8 +10,8 @@
  *   http://localhost:8090/examples/wasm-demo/
  *
  * The repo root is the root because the demo reaches into
- * ../../js/pkg (the wasm build) and ../../src/wwise_wem/data/profiles
- * (the profile data) via relative URLs.
+ * ../../js/pkg (the wasm build) via a relative URL. The profile bundle
+ * travels inside that wasm module — nothing else is served to the page.
  */
 
 import { createServer } from "node:http";
