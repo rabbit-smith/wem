@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import tempfile
 import unittest
 from dataclasses import FrozenInstanceError
+from pathlib import Path
 
 from wwise_wem.application.models import EncodeResult, EncodeStats
 from wwise_wem.model import (
@@ -100,6 +102,20 @@ class EncodeResultTests(unittest.TestCase):
         self.assertEqual(result.stats.bytes, 4)
         with self.assertRaises(FrozenInstanceError):
             result.data = b"other"
+
+    def test_result_reports_its_length_and_writes_itself(self):
+        stats = EncodeStats(2, 1, 1, 1, 0, 4, "profile:test")
+        result = EncodeResult(b"wem!", stats)
+
+        self.assertEqual(len(result), 4)
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "out.wem"
+            result.write_to(target)
+            self.assertEqual(target.read_bytes(), result.data)
+            # str paths work the same way (PathLike is not required).
+            other = Path(directory) / "out-str.wem"
+            result.write_to(str(other))
+            self.assertEqual(other.read_bytes(), result.data)
 
     def test_rejects_inconsistent_counts_and_data_size(self):
         with self.assertRaisesRegex(ValueError, "packet counts"):

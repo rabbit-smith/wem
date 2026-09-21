@@ -550,7 +550,7 @@ pub unsafe extern "C" fn wem_session_finish(
             }
             let sha = result.sha256();
             unsafe {
-                (*out_meta).total_len = result.data.len() as u64;
+                (*out_meta).total_len = result.len() as u64;
                 (&mut (*out_meta).sha256_hex)[..sha.len()].copy_from_slice(sha.as_bytes());
             }
             state.failed = true;

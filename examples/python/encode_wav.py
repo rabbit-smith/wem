@@ -35,9 +35,9 @@ def main() -> None:
         )
 
     result = encode(args.input, profile=profile, quality=args.quality)
-    args.output.write_bytes(result.data)
+    result.write_to(args.output)
     print(
-        f"wrote {len(result.data)} bytes to {args.output} "
+        f"wrote {len(result)} bytes to {args.output} "
         f"({result.stats.audio_packets} audio packets, sha256={result.sha256})"
     )
 

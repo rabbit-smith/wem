@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from pathlib import Path
 
 
 def _require_int(value: int, label: str, *, positive: bool = False) -> int:
@@ -67,3 +68,15 @@ class EncodeResult:
     @property
     def sha256(self) -> str:
         return hashlib.sha256(self.data).hexdigest()
+
+    def __len__(self) -> int:
+        """Byte length of the completed container."""
+        return len(self.data)
+
+    def write_to(self, path: str | Path) -> None:
+        """Write the completed container to ``path``.
+
+        The counterpart of reading ``data`` and calling ``write_bytes``, so a
+        caller does not have to reach into the result to persist it.
+        """
+        Path(path).write_bytes(self.data)

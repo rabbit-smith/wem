@@ -97,7 +97,9 @@ deterministic and matches the repository's reference encoder after conversion.
 
 `EncodeResult.data` contains the completed WEM bytes, `EncodeResult.stats`
 contains an immutable `EncodeStats`, and `EncodeResult.sha256` returns the
-lowercase SHA-256 digest. `EncodeStats.to_dict()` returns the stable JSON-ready
+lowercase SHA-256 digest. `len(result)` is the container's byte length and
+`result.write_to(path)` persists it, so a caller need not reach into `data` to
+save a result. `EncodeStats.to_dict()` returns the stable JSON-ready
 statistics fields.
 
 For `tests/fixtures/input.wav`, the contract is 205 audio packets (77 short and

@@ -89,7 +89,7 @@ fn run() -> Result<(), String> {
     let stage_start = Instant::now();
     match output {
         Some(path) if path != "-" => {
-            std::fs::write(&path, &result.data).map_err(|error| format!("{path}: {error}"))?;
+            result.write_to(&path).map_err(|error| error.to_string())?;
         }
         _ => {
             use std::io::Write;
@@ -110,7 +110,7 @@ fn run() -> Result<(), String> {
     }
     eprintln!(
         "wem-core: {} bytes, sha256 {} ({} frames, {} audio packets)",
-        result.data.len(),
+        result.len(),
         result.sha256(),
         result.stats.pcm_frames,
         result.stats.audio_packets,

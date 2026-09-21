@@ -12,6 +12,9 @@
 //! ```
 
 use sha2::{Digest, Sha256};
+
+use std::path::Path;
+
 use wem_analysis::config::AnalysisProfileResources;
 use wem_analysis::session::AnalysisSession;
 use wem_container::fmt::VorbisFmtFields;
@@ -285,6 +288,34 @@ impl EncodeResult {
     pub fn sha256(&self) -> String {
         let digest = Sha256::digest(&self.data);
         wem_profiles::resources::hex(digest.as_slice())
+    }
+
+    /// Byte length of the assembled container.
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    /// Whether the container carries no bytes.
+    ///
+    /// A successful encode always carries a container, so this is `false`
+    /// on every result the encoder produces; it exists because a type with
+    /// a `len` should answer the question.
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
+    /// Write the container bytes to `path`.
+    ///
+    /// The library-user counterpart of reading `data` and calling
+    /// `std::fs::write`: the path is named in the error, so a failed write
+    /// says which file failed.
+    pub fn write_to(&self, path: impl AsRef<Path>) -> Result<(), EncoderError> {
+        let path = path.as_ref();
+        std::fs::write(path, &self.data).map_err(|error| {
+            EncoderError::Internal(InternalError::Io {
+                message: format!("{}: {error}", path.display()),
+            })
+        })
     }
 }
 

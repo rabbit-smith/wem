@@ -38,11 +38,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let encoder = Encoder::new(selection)?;
     let result = encoder.encode_pcm(&pcm)?;
-    fs::write(&output, &result.data)?;
+    result.write_to(&output)?;
 
     println!(
         "wrote {} bytes to {output} ({} audio packets, sha256={})",
-        result.data.len(),
+        result.len(),
         result.stats.audio_packets,
         result.sha256()
     );

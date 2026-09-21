@@ -274,3 +274,42 @@ fn chunk_partial_frame_is_a_geometry_mismatch() {
         Ok(_) => panic!("partial frame must fail"),
     }
 }
+
+/// The result carries the container without the caller reaching into `data`:
+/// `len`/`is_empty` describe it and `write_to` persists it, naming the path
+/// in the error when the write fails.
+#[test]
+fn encode_result_length_and_write_to_round_trip() {
+    let pcm =
+        Pcm16::from_interleaved_le(44_100, 6, &fixture_le_bytes()).expect("fixture PCM parses");
+    let result = Encoder::new(fixture_selection())
+        .expect("encoder builds")
+        .encode_pcm(&pcm)
+        .expect("encode succeeds");
+
+    assert_eq!(result.len(), result.data.len());
+    assert_eq!(result.len(), 108_771, "the golden container length");
+    assert!(!result.is_empty());
+
+    let path = std::env::temp_dir().join("wem-encode-result-write-to.wem");
+    let _ = std::fs::remove_file(&path);
+    result.write_to(&path).expect("write_to succeeds");
+    assert_eq!(
+        std::fs::read(&path).expect("written file reads"),
+        result.data,
+        "write_to must persist exactly the container bytes"
+    );
+    std::fs::remove_file(&path).expect("temporary output is removable");
+
+    // A path that cannot be written reports the path it failed on.
+    let unwritable = std::env::temp_dir().join("wem-does-not-exist-dir/out.wem");
+    match result.write_to(&unwritable) {
+        Err(EncoderError::Internal(wem_core::InternalError::Io { message })) => {
+            assert!(
+                message.contains("wem-does-not-exist-dir"),
+                "the write error must name the path: {message}"
+            );
+        }
+        other => panic!("expected an Io internal error, got {other:?}"),
+    }
+}
