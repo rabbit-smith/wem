@@ -21,13 +21,20 @@
 //! * [`WemSession`] has single-threaded ownership: never share it
 //!   between threads (it is intentionally not `Send`).
 
-use std::ffi::{c_void, CStr};
-use std::path::PathBuf;
+use std::ffi::c_void;
 
 use wem_core::encoder::{Encoder, Pcm16};
 use wem_core::error::EncoderError;
 use wem_core::stream::StreamSession;
-use wem_profiles::data::DataDir;
+use wem_core::{WwiseProfile, WwiseVersion};
+
+/// ABI revision this crate implements (include/wem.h `WEM_ABI_REVISION`).
+///
+/// Revision 2 replaced the `profile_name` + `data_dir` argument pair of
+/// `wem_encoder_new`, `wem_encode_pcm16_interleaved` and `wem_session_new`
+/// with one `const WemProfile *` selection. The header and this crate are
+/// pinned together by [`tests::header_matches_this_crate`].
+pub const ABI_REVISION: u32 = 2;
 
 /// Callback that receives output bytes in blocks: the one-shot container
 /// bytes and the terminal streaming container bytes. The `data` pointer
@@ -88,6 +95,64 @@ pub struct WemMeta {
     pub sha256_hex: [u8; 64],
 }
 
+/// Wwise generation selector (include/wem.h `WemVersion`).
+///
+/// Codes are stable and append-only, exactly like [`WemError`]: a new Wwise
+/// generation appends a variant and a code, it never renumbers or reuses one.
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WemVersion {
+    /// Wwise 2013.2.
+    Wwise2013 = 0,
+}
+
+/// Structured profile selection (include/wem.h `WemProfile`): one Wwise
+/// generation plus the PCM geometry. This is the whole profile contract of
+/// the ABI — no entry accepts a profile name, a profile directory, profile
+/// bytes, or an environment variable.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct WemProfile {
+    /// Wwise generation (`WemVersion`).
+    pub version: WemVersion,
+    /// PCM channel count to encode (must be positive).
+    pub channels: i32,
+    /// PCM sample rate to encode (must be positive).
+    pub sample_rate: i32,
+}
+
+impl WemProfile {
+    /// Decode one C selection into the kernel's structured selector.
+    ///
+    /// An unrecognized version code is a value this revision does not
+    /// support; a non-positive geometry is a malformed argument. Neither is
+    /// silently replaced by a default.
+    fn selection(&self) -> Result<WwiseProfile, WemError> {
+        let version = WwiseVersion::from_code(self.version as u32)
+            .map_err(|_| WemError::FormatUnsupported)?;
+        WwiseProfile::new(
+            version,
+            i64::from(self.channels),
+            i64::from(self.sample_rate),
+        )
+        .map_err(|_| WemError::StateError)
+    }
+}
+
+/// Borrow one caller-supplied selection, rejecting NULL.
+///
+/// # Safety
+///
+/// `profile` must be NULL or point to a readable `WemProfile` of this
+/// revision that stays valid for the duration of the call.
+unsafe fn read_profile(profile: *const WemProfile) -> Result<WwiseProfile, WemError> {
+    if profile.is_null() {
+        return Err(WemError::StateError);
+    }
+    let profile = unsafe { &*profile };
+    profile.selection()
+}
+
 /// Shareable profile-resolved encoder (include/wem.h `WemEncoder`).
 pub struct WemEncoder {
     encoder: Encoder,
@@ -109,37 +174,6 @@ pub struct WemSession {
 /// Output block size for the write callback (bounded, no size limit on
 /// the whole container).
 const WRITE_BLOCK: usize = 65536;
-
-fn load_encoder(name: &str, dir: Option<PathBuf>) -> Result<Encoder, EncoderError> {
-    match dir {
-        Some(dir) => Encoder::from_profile_in(&DataDir::from_profiles_dir(dir), name),
-        None => Encoder::from_profile(name),
-    }
-}
-
-fn load_stream(name: &str, dir: Option<PathBuf>) -> Result<StreamSession, EncoderError> {
-    match dir {
-        Some(dir) => StreamSession::for_profile_in(&DataDir::from_profiles_dir(dir), name),
-        None => StreamSession::for_profile(name),
-    }
-}
-
-/// Decode a NUL-terminated C string (None when NULL or non-UTF-8).
-fn cstr_to_string(ptr: *const u8) -> Option<String> {
-    if ptr.is_null() {
-        return None;
-    }
-    let cstr = unsafe { CStr::from_ptr(ptr as *const i8) };
-    cstr.to_str().ok().map(str::to_string)
-}
-
-/// A NUL-terminated optional string argument (NULL or empty -> None).
-fn cstr_opt(ptr: *const u8) -> Option<PathBuf> {
-    match cstr_to_string(ptr) {
-        Some(value) if !value.is_empty() => Some(PathBuf::from(value)),
-        _ => None,
-    }
-}
 
 /// Wrap one kernel call so a panic cannot cross the FFI.
 fn guarded<T>(
@@ -206,34 +240,36 @@ fn encode_with(
 // Encoder handle (shareable)
 // ---------------------------------------------------------------------------
 
-/// Resolve one installed profile into a shareable encoder handle
+/// Resolve one profile selection into a shareable encoder handle
 /// (include/wem.h `wem_encoder_new`).
 ///
-/// `data_dir` selects an explicit profile tree without changing process
-/// environment; NULL uses the profiles compiled into the library. On
-/// `WEM_OK`, `*out_encoder` owns the handle; on error it is set to NULL.
+/// On `WEM_OK`, `*out_encoder` owns the handle; on error it is set to NULL.
 ///
 /// # Safety
 ///
-/// - `profile_name` must be NUL-terminated UTF-8 (or NULL: rejected, no
-///   UB), `data_dir` the same;
+/// - `profile` must be NULL or a readable `WemProfile` valid for the call
+///   (NULL is rejected, no UB);
 /// - `out_encoder` must not be NULL.
 #[no_mangle]
 pub unsafe extern "C" fn wem_encoder_new(
-    profile_name: *const u8,
-    data_dir: *const u8,
+    profile: *const WemProfile,
     out_encoder: *mut *mut WemEncoder,
 ) -> WemError {
     if out_encoder.is_null() {
         return WemError::StateError;
     }
-    let Some(name) = cstr_to_string(profile_name) else {
-        return WemError::StateError;
+    let selection = match unsafe { read_profile(profile) } {
+        Ok(selection) => selection,
+        Err(code) => {
+            unsafe {
+                *out_encoder = std::ptr::null_mut();
+            }
+            return code;
+        }
     };
-    let dir = cstr_opt(data_dir);
     let outcome = guarded(move || {
         Ok(WemEncoder {
-            encoder: load_encoder(&name, dir)?,
+            encoder: Encoder::new(selection)?,
         })
     });
     match outcome {
@@ -301,34 +337,33 @@ pub unsafe extern "C" fn wem_encoder_encode(
 // One-shot convenience entry
 // ---------------------------------------------------------------------------
 
-/// One-shot encode: resolve the profile, encode, deliver the container
+/// One-shot encode: resolve the selection, encode, deliver the container
 /// bytes (include/wem.h `wem_encode_pcm16_interleaved`).
 ///
 /// `pcm` must hold `frames * channels` little-endian signed-16 samples
-/// (interleaved, `channels` from the profile); `data_dir` NULL uses profiles
-/// compiled into the library. Output goes through `write_cb` in bounded blocks —
-/// callback-style output, so there is no container size limit.
+/// (interleaved, `channels` from the selection). Output goes through
+/// `write_cb` in bounded blocks — callback-style output, so there is no
+/// container size limit.
 ///
 /// # Safety
 ///
-/// - `profile_name` / `data_dir` as in `wem_encoder_new`;
+/// - `profile` as in `wem_encoder_new`;
 /// - `pcm` must hold at least `frames * channels * 2` bytes for the
 ///   duration of the call;
 /// - `write_cb` must be a live callback (or NULL: rejected).
 #[no_mangle]
 pub unsafe extern "C" fn wem_encode_pcm16_interleaved(
-    profile_name: *const u8,
-    data_dir: *const u8,
+    profile: *const WemProfile,
     pcm: *const u8,
     frames: usize,
     write_cb: Option<WemWriteFn>,
     user_data: *mut c_void,
 ) -> WemError {
-    let Some(name) = cstr_to_string(profile_name) else {
-        return WemError::StateError;
+    let selection = match unsafe { read_profile(profile) } {
+        Ok(selection) => selection,
+        Err(code) => return code,
     };
-    let dir = cstr_opt(data_dir);
-    let outcome = guarded(move || load_encoder(&name, dir));
+    let outcome = guarded(move || Encoder::new(selection));
     match outcome {
         Ok(encoder) => match encode_with(&encoder, pcm, frames, write_cb, user_data) {
             Ok(()) => WemError::Ok,
@@ -342,7 +377,7 @@ pub unsafe extern "C" fn wem_encode_pcm16_interleaved(
 // Streaming session
 // ---------------------------------------------------------------------------
 
-/// Open a streaming session on one installed profile
+/// Open a streaming session on one profile selection
 /// (include/wem.h `wem_session_new`).
 ///
 /// Lifecycle: `wem_session_new` (Init) -> `wem_session_push`* ->
@@ -354,7 +389,7 @@ pub unsafe extern "C" fn wem_encode_pcm16_interleaved(
 ///
 /// # Safety
 ///
-/// - `profile_name` / `data_dir` as in `wem_encoder_new`;
+/// - `profile` as in `wem_encoder_new`;
 /// - `write_cb` must be a live callback (or NULL: rejected); `packet_cb`
 ///   must be NULL or a live callback;
 /// - `out_session` must not be NULL;
@@ -362,8 +397,7 @@ pub unsafe extern "C" fn wem_encode_pcm16_interleaved(
 ///   lifetime; never share it).
 #[no_mangle]
 pub unsafe extern "C" fn wem_session_new(
-    profile_name: *const u8,
-    data_dir: *const u8,
+    profile: *const WemProfile,
     write_cb: Option<WemWriteFn>,
     packet_cb: Option<WemPacketFn>,
     user_data: *mut c_void,
@@ -372,16 +406,21 @@ pub unsafe extern "C" fn wem_session_new(
     if out_session.is_null() {
         return WemError::StateError;
     }
-    let Some(name) = cstr_to_string(profile_name) else {
-        return WemError::StateError;
+    let selection = match unsafe { read_profile(profile) } {
+        Ok(selection) => selection,
+        Err(code) => {
+            unsafe {
+                *out_session = std::ptr::null_mut();
+            }
+            return code;
+        }
     };
     if write_cb.is_none() {
         return WemError::StateError;
     }
     let write_cb = Some(write_cb.expect("validated non-null above"));
-    let dir = cstr_opt(data_dir);
     let outcome = guarded(move || {
-        load_stream(&name, dir).map(|session| WemSession {
+        StreamSession::for_selection(selection).map(|session| WemSession {
             session,
             write_cb,
             packet_cb,
@@ -565,5 +604,112 @@ mod tests {
             std::mem::size_of::<u64>() + 64,
             std::mem::size_of::<WemMeta>()
         );
+    }
+
+    #[test]
+    fn version_codes_follow_the_wem_h_table() {
+        assert_eq!(WemVersion::Wwise2013 as u32, 0);
+    }
+
+    /// The header is the normative contract, so the crate must not drift
+    /// from it: the declared revision has to match, and no declaration may
+    /// reintroduce a profile name or a profile directory (ABI revision 2
+    /// replaced both with the `WemProfile` selection).
+    #[test]
+    fn header_matches_this_crate() {
+        let header = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../include/wem.h"),
+        )
+        .expect("include/wem.h reads");
+
+        assert!(
+            header.contains(&format!("#define WEM_ABI_REVISION {ABI_REVISION}")),
+            "include/wem.h must declare WEM_ABI_REVISION {ABI_REVISION}"
+        );
+        assert!(header.contains("} WemProfile;"), "WemProfile is contract");
+        assert!(
+            header.contains("WEM_WWISE_2013 = 0"),
+            "version table is contract"
+        );
+
+        // Check the declarations only: the header's evolution note names the
+        // removed arguments on purpose, so strip comments before looking.
+        let declarations = strip_c_comments(&header);
+        for removed in ["profile_name", "data_dir"] {
+            assert!(
+                !declarations.contains(removed),
+                "include/wem.h declares {removed:?} again; ABI revision 2 removed it"
+            );
+        }
+    }
+
+    /// Remove `/* ... */` and `// ...` comments so a check can look at the
+    /// declarations alone.
+    fn strip_c_comments(source: &str) -> String {
+        let chars: Vec<char> = source.chars().collect();
+        let mut out = String::with_capacity(source.len());
+        let mut i = 0usize;
+        while i < chars.len() {
+            let at = |n: usize| chars.get(n).copied();
+            if chars[i] == '/' && at(i + 1) == Some('*') {
+                i += 2;
+                while i < chars.len() && !(chars[i] == '*' && at(i + 1) == Some('/')) {
+                    i += 1;
+                }
+                i += 2;
+            } else if chars[i] == '/' && at(i + 1) == Some('/') {
+                while i < chars.len() && chars[i] != '\n' {
+                    i += 1;
+                }
+            } else {
+                out.push(chars[i]);
+                i += 1;
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn profile_layout_matches_wem_h() {
+        // WemVersion code + two i32 geometry fields — exactly 12 bytes.
+        assert_eq!(std::mem::size_of::<WemProfile>(), 12);
+        assert_eq!(
+            std::mem::size_of::<WemProfile>(),
+            3 * std::mem::size_of::<u32>()
+        );
+    }
+
+    #[test]
+    fn profile_selection_decodes_and_rejects_bad_geometry() {
+        let supported = WemProfile {
+            version: WemVersion::Wwise2013,
+            channels: 2,
+            sample_rate: 48_000,
+        };
+        let selection = supported
+            .selection()
+            .expect("known version, positive geometry");
+        assert_eq!(selection.channels(), 2);
+        assert_eq!(selection.sample_rate(), 48_000);
+
+        for (channels, sample_rate) in [(0, 48_000), (2, 0), (-2, 48_000)] {
+            let malformed = WemProfile {
+                version: WemVersion::Wwise2013,
+                channels,
+                sample_rate,
+            };
+            assert_eq!(malformed.selection().err(), Some(WemError::StateError));
+        }
+    }
+
+    #[test]
+    fn null_profile_is_a_malformed_call() {
+        // ABI contract: a NULL selection is rejected and the out-pointer is
+        // cleared, never dereferenced. FFI requires the unsafe call; no
+        // pointer is read.
+        let mut encoder: *mut WemEncoder = std::ptr::null_mut();
+        let code = unsafe { wem_encoder_new(std::ptr::null(), &mut encoder) };
+        assert_eq!(code, WemError::StateError);
+        assert!(encoder.is_null());
     }
 }

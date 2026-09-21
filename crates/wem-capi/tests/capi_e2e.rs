@@ -6,20 +6,39 @@
 //! * streaming with seven uneven chunks == the same bytes, seq-ordered
 //!   packets, correct terminal meta;
 //! * encoder-handle path matches the one-shot convenience entry;
-//! * NULL arguments, unknown profiles, and lifecycle violations return
-//!   the expected stable codes;
-//! * the error-code table and the `WemMeta` layout stay in sync with
-//!   include/wem.h.
+//! * NULL arguments, unsatisfiable selections, and lifecycle violations
+//!   return the expected stable codes;
+//! * an out-of-table `WemVersion` code is a revision mismatch
+//!   (FORMAT_UNSUPPORTED), never a silent fallback;
+//! * the error-code table and the `WemProfile` / `WemMeta` layouts stay in
+//!   sync with include/wem.h.
 
 use std::ffi::c_void;
 use std::path::PathBuf;
 
 use sha2::{Digest, Sha256};
-use wem_capi::{WemError, WemMeta};
+use wem_capi::{WemError, WemMeta, WemProfile, WemVersion};
 use wem_core::usecases::wav::read_pcm16;
 
-const PROFILE_NAME: &str = "wwise2013-6ch-44100";
 const GOLDEN_SHA256: &str = "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247";
+
+/// The fixture's encoder configuration: Wwise 2013.2, 6ch @ 44.1kHz.
+fn fixture_profile() -> WemProfile {
+    WemProfile {
+        version: WemVersion::Wwise2013,
+        channels: 6,
+        sample_rate: 44_100,
+    }
+}
+
+/// The other installed configuration: Wwise 2013.2, 2ch @ 48kHz.
+fn stereo_profile() -> WemProfile {
+    WemProfile {
+        version: WemVersion::Wwise2013,
+        channels: 2,
+        sample_rate: 48_000,
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Test sinks (what a C client would do with its callbacks).
@@ -93,15 +112,6 @@ fn read_fixture_pcm() -> (Vec<u8>, usize, usize) {
     (wav.interleaved_le_bytes(), wav.frames(), wav.channels())
 }
 
-fn cstr(value: &str) -> std::ffi::CString {
-    std::ffi::CString::new(value).expect("no NUL in test strings")
-}
-
-/// The C-ABI string argument form (char bytes as u8).
-fn p(cstring: &std::ffi::CString) -> *const u8 {
-    cstring.as_ptr() as *const u8
-}
-
 fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
@@ -122,14 +132,12 @@ fn setup_packet_of(wem_bytes: &[u8]) -> Vec<u8> {
 #[test]
 fn one_shot_fixture_rebuilds_golden() {
     let (pcm, frames, _channels) = read_fixture_pcm();
-    let profile = cstr(PROFILE_NAME);
     let mut sinks = Sinks::new();
     let ud = sinks.user_data();
 
     let code = unsafe {
         wem_capi::wem_encode_pcm16_interleaved(
-            p(&profile),
-            std::ptr::null(),
+            &fixture_profile(),
             pcm.as_ptr(),
             frames,
             Some(sink_write),
@@ -154,10 +162,9 @@ fn one_shot_fixture_rebuilds_golden() {
 #[test]
 fn encoder_handle_matches_one_shot_and_reuses() {
     let (pcm, frames, _channels) = read_fixture_pcm();
-    let profile = cstr(PROFILE_NAME);
 
     let mut handle = std::ptr::null_mut();
-    let code = unsafe { wem_capi::wem_encoder_new(p(&profile), std::ptr::null(), &mut handle) };
+    let code = unsafe { wem_capi::wem_encoder_new(&fixture_profile(), &mut handle) };
     assert_eq!(code, WemError::Ok, "encoder_new rejected");
     assert!(!handle.is_null());
 
@@ -199,15 +206,13 @@ fn streaming_seven_uneven_chunks_match_one_shot() {
     bounds.push(pcm.len());
     assert!(bounds[6] < pcm.len(), "the seventh chunk must be non-empty");
 
-    let profile = cstr(PROFILE_NAME);
     let mut sinks = Sinks::new();
     let ud = sinks.user_data();
 
     let mut session = std::ptr::null_mut();
     let code = unsafe {
         wem_capi::wem_session_new(
-            p(&profile),
-            std::ptr::null(),
+            &fixture_profile(),
             Some(sink_write),
             Some(sink_packet),
             ud,
@@ -264,20 +269,12 @@ fn streaming_seven_uneven_chunks_match_one_shot() {
 #[test]
 fn streaming_null_packet_cb_still_streams_bytes() {
     let (pcm, _frames, _channels) = read_fixture_pcm();
-    let profile = cstr(PROFILE_NAME);
     let mut sinks = Sinks::new();
     let ud = sinks.user_data();
 
     let mut session = std::ptr::null_mut();
     let code = unsafe {
-        wem_capi::wem_session_new(
-            p(&profile),
-            std::ptr::null(),
-            Some(sink_write),
-            None,
-            ud,
-            &mut session,
-        )
+        wem_capi::wem_session_new(&fixture_profile(), Some(sink_write), None, ud, &mut session)
     };
     assert_eq!(code, WemError::Ok);
     let code = unsafe { wem_capi::wem_session_push(session, pcm.as_ptr(), pcm.len()) };
@@ -300,25 +297,23 @@ fn streaming_null_packet_cb_still_streams_bytes() {
 #[test]
 fn null_arguments_reject_with_state_error() {
     let (pcm, frames, _channels) = read_fixture_pcm();
-    let profile = cstr(PROFILE_NAME);
     let mut sinks = Sinks::new();
     let ud = sinks.user_data();
 
     let mut handle = std::ptr::null_mut();
     assert_eq!(
-        unsafe { wem_capi::wem_encoder_new(std::ptr::null(), std::ptr::null(), &mut handle) },
+        unsafe { wem_capi::wem_encoder_new(std::ptr::null(), &mut handle) },
         WemError::StateError,
-        "NULL profile name must reject"
+        "NULL selection must reject"
     );
     assert_eq!(
-        unsafe { wem_capi::wem_encoder_new(p(&profile), std::ptr::null(), std::ptr::null_mut()) },
+        unsafe { wem_capi::wem_encoder_new(&fixture_profile(), std::ptr::null_mut()) },
         WemError::StateError,
         "NULL out handle must reject"
     );
     assert_eq!(
         unsafe {
             wem_capi::wem_encode_pcm16_interleaved(
-                std::ptr::null(),
                 std::ptr::null(),
                 pcm.as_ptr(),
                 frames,
@@ -327,13 +322,12 @@ fn null_arguments_reject_with_state_error() {
             )
         },
         WemError::StateError,
-        "NULL profile name must reject"
+        "NULL selection must reject"
     );
     assert_eq!(
         unsafe {
             wem_capi::wem_encode_pcm16_interleaved(
-                p(&profile),
-                std::ptr::null(),
+                &fixture_profile(),
                 std::ptr::null(),
                 frames,
                 Some(sink_write),
@@ -346,8 +340,7 @@ fn null_arguments_reject_with_state_error() {
     assert_eq!(
         unsafe {
             wem_capi::wem_encode_pcm16_interleaved(
-                p(&profile),
-                std::ptr::null(),
+                &fixture_profile(),
                 pcm.as_ptr(),
                 frames,
                 None,
@@ -362,8 +355,7 @@ fn null_arguments_reject_with_state_error() {
     assert_eq!(
         unsafe {
             wem_capi::wem_session_new(
-                p(&profile),
-                std::ptr::null(),
+                &fixture_profile(),
                 Some(sink_write),
                 None,
                 ud,
@@ -374,9 +366,7 @@ fn null_arguments_reject_with_state_error() {
         "NULL out session must reject"
     );
     assert_eq!(
-        unsafe {
-            wem_capi::wem_session_new(p(&profile), std::ptr::null(), None, None, ud, &mut session)
-        },
+        unsafe { wem_capi::wem_session_new(&fixture_profile(), None, None, ud, &mut session) },
         WemError::StateError,
         "NULL write callback must reject"
     );
@@ -403,73 +393,137 @@ fn null_arguments_reject_with_state_error() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn unknown_profile_rejects_with_profile_not_found() {
-    let (pcm, frames, _channels) = read_fixture_pcm();
-    let missing = cstr("no-such-profile-xyz");
-    let mut sinks = Sinks::new();
-    let ud = sinks.user_data();
-
-    let mut handle = std::ptr::null_mut();
-    assert_eq!(
-        unsafe { wem_capi::wem_encoder_new(p(&missing), std::ptr::null(), &mut handle) },
-        WemError::ProfileNotFound,
-        "unknown profile name must map to PROFILE_NOT_FOUND"
-    );
-    assert!(
-        handle.is_null(),
-        "failed encoder_new must leave a NULL handle"
-    );
-
-    assert_eq!(
+fn both_installed_selections_resolve() {
+    for profile in [fixture_profile(), stereo_profile()] {
+        let mut handle = std::ptr::null_mut();
+        assert_eq!(
+            unsafe { wem_capi::wem_encoder_new(&profile, &mut handle) },
+            WemError::Ok,
+            "{}ch/{}Hz/2013 must resolve",
+            profile.channels,
+            profile.sample_rate
+        );
+        assert!(!handle.is_null());
         unsafe {
-            wem_capi::wem_encode_pcm16_interleaved(
-                p(&missing),
-                std::ptr::null(),
-                pcm.as_ptr(),
-                frames,
-                Some(sink_write),
-                ud,
-            )
-        },
-        WemError::ProfileNotFound
-    );
-
-    let mut session = std::ptr::null_mut();
-    assert_eq!(
-        unsafe {
-            wem_capi::wem_session_new(
-                p(&missing),
-                std::ptr::null(),
-                Some(sink_write),
-                None,
-                ud,
-                &mut session,
-            )
-        },
-        WemError::ProfileNotFound
-    );
-    assert!(
-        session.is_null(),
-        "failed session_new must leave a NULL handle"
-    );
+            wem_capi::wem_encoder_free(handle);
+        }
+    }
 }
 
 #[test]
-fn explicit_data_dir_selects_profile_tree() {
-    let profiles_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join("src/wwise_wem/data/profiles");
-    let dir_cstr = cstr(&profiles_dir.to_string_lossy());
-    let profile = cstr(PROFILE_NAME);
-    let mut handle = std::ptr::null_mut();
-    assert_eq!(
-        unsafe { wem_capi::wem_encoder_new(p(&profile), p(&dir_cstr), &mut handle) },
-        WemError::Ok,
-        "explicit data_dir must resolve the installed profile"
-    );
-    unsafe {
-        wem_capi::wem_encoder_free(handle);
+fn unsatisfiable_selection_rejects_with_profile_not_found() {
+    let (pcm, frames, _channels) = read_fixture_pcm();
+    let mut sinks = Sinks::new();
+    let ud = sinks.user_data();
+
+    // Geometries no installed configuration provides: an uninstalled rate on
+    // an installed channel count, and an uninstalled channel count.
+    let unsupported = [
+        WemProfile {
+            version: WemVersion::Wwise2013,
+            channels: 6,
+            sample_rate: 48_000,
+        },
+        WemProfile {
+            version: WemVersion::Wwise2013,
+            channels: 3,
+            sample_rate: 44_100,
+        },
+        WemProfile {
+            version: WemVersion::Wwise2013,
+            channels: 2,
+            sample_rate: 44_100,
+        },
+    ];
+
+    for profile in unsupported {
+        let mut handle = std::ptr::null_mut();
+        assert_eq!(
+            unsafe { wem_capi::wem_encoder_new(&profile, &mut handle) },
+            WemError::ProfileNotFound,
+            "{}ch/{}Hz must not resolve",
+            profile.channels,
+            profile.sample_rate
+        );
+        assert!(
+            handle.is_null(),
+            "a failed encoder_new must leave a NULL handle"
+        );
+
+        assert_eq!(
+            unsafe {
+                wem_capi::wem_encode_pcm16_interleaved(
+                    &profile,
+                    pcm.as_ptr(),
+                    frames,
+                    Some(sink_write),
+                    ud,
+                )
+            },
+            WemError::ProfileNotFound
+        );
+
+        let mut session = std::ptr::null_mut();
+        assert_eq!(
+            unsafe {
+                wem_capi::wem_session_new(&profile, Some(sink_write), None, ud, &mut session)
+            },
+            WemError::ProfileNotFound
+        );
+        assert!(
+            session.is_null(),
+            "a failed session_new must leave a NULL handle"
+        );
     }
+}
+
+#[test]
+fn malformed_selection_geometry_rejects_with_state_error() {
+    for (channels, sample_rate) in [(0, 44_100), (6, 0), (-6, 44_100)] {
+        let profile = WemProfile {
+            version: WemVersion::Wwise2013,
+            channels,
+            sample_rate,
+        };
+        let mut handle = std::ptr::null_mut();
+        assert_eq!(
+            unsafe { wem_capi::wem_encoder_new(&profile, &mut handle) },
+            WemError::StateError,
+            "{channels}ch/{sample_rate}Hz is malformed, not merely uninstalled"
+        );
+        assert!(handle.is_null());
+    }
+}
+
+/// A selection struct as a client built against a *newer* header would pass
+/// it: same layout, a version code this revision does not implement.
+#[repr(C)]
+struct ForeignSelection {
+    version: u32,
+    channels: i32,
+    sample_rate: i32,
+}
+
+#[test]
+fn out_of_table_version_code_rejects_with_format_unsupported() {
+    let foreign = ForeignSelection {
+        version: 7,
+        channels: 6,
+        sample_rate: 44_100,
+    };
+    let mut handle = std::ptr::null_mut();
+    let code = unsafe {
+        wem_capi::wem_encoder_new(
+            std::ptr::from_ref(&foreign).cast::<WemProfile>(),
+            &mut handle,
+        )
+    };
+    assert_eq!(
+        code,
+        WemError::FormatUnsupported,
+        "an unimplemented WemVersion code must not fall back to a default"
+    );
+    assert!(handle.is_null());
 }
 
 // ---------------------------------------------------------------------------
@@ -479,21 +533,13 @@ fn explicit_data_dir_selects_profile_tree() {
 #[test]
 fn lifecycle_violations_reject_with_state_error() {
     let (pcm, _frames, _channels) = read_fixture_pcm();
-    let profile = cstr(PROFILE_NAME);
     let mut sinks = Sinks::new();
     let ud = sinks.user_data();
 
     let mut session = std::ptr::null_mut();
     assert_eq!(
         unsafe {
-            wem_capi::wem_session_new(
-                p(&profile),
-                std::ptr::null(),
-                Some(sink_write),
-                None,
-                ud,
-                &mut session,
-            )
+            wem_capi::wem_session_new(&fixture_profile(), Some(sink_write), None, ud, &mut session)
         },
         WemError::Ok
     );
@@ -532,21 +578,13 @@ fn short_stream_rejects_with_input_too_short() {
     assert!(frames > 4096, "fixture is longer than the minimum");
     let short_frames = 100usize;
     let short_len = short_frames * channels * 2;
-    let profile = cstr(PROFILE_NAME);
     let mut sinks = Sinks::new();
     let ud = sinks.user_data();
 
     let mut session = std::ptr::null_mut();
     assert_eq!(
         unsafe {
-            wem_capi::wem_session_new(
-                p(&profile),
-                std::ptr::null(),
-                Some(sink_write),
-                None,
-                ud,
-                &mut session,
-            )
+            wem_capi::wem_session_new(&fixture_profile(), Some(sink_write), None, ud, &mut session)
         },
         WemError::Ok
     );

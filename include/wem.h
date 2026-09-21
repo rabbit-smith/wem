@@ -9,6 +9,7 @@
  *
  * The sections below are normative:
  *
+ *   PROFILE SELECTION
  *   1. LIFECYCLE
  *   2. ERROR CODES
  *   3. MEMORY OWNERSHIP
@@ -18,6 +19,15 @@
  * codes are appended, never renumbered or reused. Lifecycle semantics
  * and callback behavior are likewise contract: a change that breaks a
  * conforming client is a new major revision of this header, not an edit.
+ *
+ * ABI revision 2 replaced the `profile_name` + `data_dir` argument pair
+ * of `wem_encoder_new`, `wem_encode_pcm16_interleaved` and
+ * `wem_session_new` with one `const WemProfile *` selection, so that
+ * PROFILE SELECTION below is the entire profile contract: no entry
+ * accepts a profile name, a profile directory, profile index/manifest
+ * bytes, or an environment variable. A conforming revision 1 client
+ * must be recompiled against this header; WemError values were not
+ * renumbered and remain stable.
  */
 #ifndef WEM_H
 #define WEM_H
@@ -25,14 +35,59 @@
 #include <stdint.h>
 #include <stddef.h>
 
+/* Current ABI revision of this header (see the evolution note above). */
+#define WEM_ABI_REVISION 2
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /*
+ * PROFILE SELECTION
+ *
+ * One structured selection names the encoder configuration to use: a
+ * Wwise generation plus the PCM geometry. Nothing else selects a profile
+ * — how the kernel stores and addresses an encoder configuration is its
+ * own business, and never crosses this boundary.
+ *
+ * A WemProfile denotes exactly one configuration compiled into this
+ * library:
+ *
+ *   - `version`      the Wwise generation (WemVersion below);
+ *   - `channels`     the PCM channel count to encode, > 0;
+ *   - `sample_rate`  the PCM sample rate to encode, > 0.
+ *
+ * A selection no compiled configuration satisfies fails with
+ * WEM_ERR_PROFILE_NOT_FOUND. A `version` outside the table below is not a
+ * supported value of this revision and fails with
+ * WEM_ERR_FORMAT_UNSUPPORTED. A non-positive geometry is a malformed
+ * argument and fails with WEM_ERR_STATE_ERROR. The selection is never
+ * silently substituted by a default.
+ *
+ * The struct is passed by pointer, and the pointer need only stay valid
+ * for the duration of the call that takes it. Its layout (two 32-bit
+ * geometry fields after a 32-bit version code) is part of this contract;
+ * fields are appended, never reordered.
+ *
+ * Evolution: WemVersion codes are stable and append-only, exactly like
+ * WemError values — a new Wwise generation appends a code, it never
+ * renumbers or reuses one.
+ */
+typedef enum WemVersion {
+  /* Wwise 2013.2. */
+  WEM_WWISE_2013 = 0
+} WemVersion;
+
+typedef struct WemProfile {
+  WemVersion version;
+  int32_t channels;
+  int32_t sample_rate;
+} WemProfile;
+
+/*
  * 1. LIFECYCLE
  *
- * The kernel exposes two equivalent encoders over the same profile:
+ * The kernel exposes two equivalent encoders over the same selection:
  *
  *  (a) ONE-SHOT:
  *      wem_encode_pcm16_interleaved(...)      — profile + PCM in,
@@ -40,7 +95,7 @@ extern "C" {
  *      wem_encoder_new / wem_encoder_encode / wem_encoder_free.
  *
  *  (b) STREAMING:
- *      wem_session_new(...)    — Init: open on one installed profile
+ *      wem_session_new(...)    — Init: open on one profile selection
  *      wem_session_push(...)   — chunk*: zero or more PCM chunks
  *      wem_session_finish(...) — Finish: complete the encode; container
  *                                bytes out via the write callback, plus
@@ -76,16 +131,16 @@ typedef struct WemSession WemSession;
  *
  * 1:1 with the kernel error classes (wem-core EncoderError):
  *   WEM_OK                      — success
- *   WEM_ERR_PROFILE_NOT_FOUND   — no installed profile matches the
- *                                 requested reference
+ *   WEM_ERR_PROFILE_NOT_FOUND   — no compiled profile satisfies the
+ *                                 WemProfile selection
  *   WEM_ERR_STATE_ERROR         — lifecycle violation, or a malformed
  *                                 argument (NULL where a value is
  *                                 required)
  *   WEM_ERR_GEOMETRY_MISMATCH   — PCM geometry disagrees with the
- *                                 profile
+ *                                 selection
  *   WEM_ERR_INPUT_TOO_SHORT     — fewer than 4096 PCM frames
- *   WEM_ERR_FORMAT_UNSUPPORTED  — sample layout not supported by this
- *                                 revision
+ *   WEM_ERR_FORMAT_UNSUPPORTED  — sample layout, or a WemVersion code,
+ *                                 not supported by this revision
  *   WEM_ERR_INTERNAL            — internal fault (a kernel panic can
  *                                 never unwind across this boundary; it
  *                                 surfaces as this code)
@@ -130,35 +185,34 @@ typedef struct WemMeta {
  *  - All output flows through the write callback in bounded blocks; the
  *    kernel owns every buffer it passes and the client copies.
  *  - The client must back `pcm` with at least frames * channels * 2
- *    bytes (channels per the selected profile) for the duration of the
- *    call; the kernel never writes into client PCM memory.
+ *    bytes (channels per the selection) for the duration of the call;
+ *    the kernel never writes into client PCM memory.
+ *  - A `const WemProfile *` is borrowed for the duration of the call
+ *    that takes it; the kernel never retains it.
  *  - Handles returned through `out_...` pointers are owned by the
  *    client and released with the matching *_free (NULL is a no-op).
  *  - `user_data` is an opaque client pointer, passed back verbatim.
  */
 
 /* Profile-resolved shareable encoder (concurrent encodes OK). */
-WemError wem_encoder_new(const char *profile_name, const char *data_dir,
-                         WemEncoder **out_encoder);
+WemError wem_encoder_new(const WemProfile *profile, WemEncoder **out_encoder);
 void wem_encoder_free(WemEncoder *encoder);
 WemError wem_encoder_encode(const WemEncoder *encoder, const int16_t *pcm,
                             size_t frames, WemWriteCb write_cb,
                             void *user_data);
 
 /* One-shot convenience: profile + PCM in, container bytes out via
- * write_cb. NULL/"" `data_dir` uses the profiles compiled into this library.
- * A non-empty `data_dir` is an explicit development/test override. */
-WemError wem_encode_pcm16_interleaved(const char *profile_name,
-                                      const char *data_dir,
+ * write_cb. */
+WemError wem_encode_pcm16_interleaved(const WemProfile *profile,
                                       const int16_t *pcm, size_t frames,
                                       WemWriteCb write_cb, void *user_data);
 
 /* Streaming session: Init -> push* -> Finish -> free. `write_cb` is
  * required (terminal container bytes); `packet_cb` may be NULL to
  * discard intermediate packets. */
-WemError wem_session_new(const char *profile_name, const char *data_dir,
-                         WemWriteCb write_cb, WemPacketCb packet_cb,
-                         void *user_data, WemSession **out_session);
+WemError wem_session_new(const WemProfile *profile, WemWriteCb write_cb,
+                         WemPacketCb packet_cb, void *user_data,
+                         WemSession **out_session);
 WemError wem_session_push(WemSession *session, const uint8_t *data,
                           size_t len);
 WemError wem_session_finish(WemSession *session, WemMeta *out_meta);
