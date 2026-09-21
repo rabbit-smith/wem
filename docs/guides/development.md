@@ -149,8 +149,10 @@ the rules the failure mode taught us.
   out. Untracked scratch files in a shared tree belong to whoever made them.
 - **Finish the loop.** Once the commit is on `main`, remove your worktree and its
   branch (`git worktree remove <path>`, `git branch -d <branch>`). `git branch -d`
-  refuses an unmerged branch — that refusal means the commit never reached
-  `main`; fix that instead of forcing `-D`.
+  compares against *the branch you are standing on*, not against `main`, so in a
+  shared checkout its "not fully merged" refusal is not proof that the commit is
+  missing. Decide with `git merge-base --is-ancestor <sha> main`, and only then
+  delete with `-D`.
 
 ## Conventions
 
