@@ -6,7 +6,10 @@
 //! (docs/reference/architecture.md). Mirrors the Python `wwise_wem/profiles` package.
 //!
 //! Entry points:
-//! * [`DataDir`] — where the profile tree lives (WEM_DATA_DIR / repo layout)
+//! * [`WwiseVersion`] / [`WwiseProfile`] — the caller-facing structured
+//!   selector (generation + geometry); the only profile selector any binding
+//!   exposes
+//! * [`DataDir`] — where an explicit development profile tree lives
 //! * [`load_profile_bundle`] — index -> manifest -> verified resources
 //! * [`load_profile_bundle_from_bytes`] — the same assembly from in-memory
 //!   bytes (threadless targets; no filesystem, shared validation)
@@ -32,6 +35,7 @@ pub mod psychoacoustics;
 pub mod quality;
 pub mod registry;
 pub mod resources;
+pub mod selection;
 pub mod transform;
 pub mod transient;
 
@@ -56,9 +60,11 @@ pub use quality::{
 };
 pub use registry::{
     embedded_registry, installed_registry, load_wem_profile, load_wem_profile_quality,
-    resolve_wem_profile, resolve_wem_profile_quality, ProfileRegistry,
+    resolve_wem_profile, resolve_wem_profile_quality, resolve_wem_profile_selection,
+    resolve_wem_profile_selection_quality, ProfileRegistry,
 };
 pub use resources::{normalize_resource_path, ResourceBackend, ResourceRef};
+pub use selection::{WwiseProfile, WwiseVersion};
 pub use transform::load_mdct_looks;
 pub use transient::load_transient_tables;
 

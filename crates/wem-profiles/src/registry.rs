@@ -9,6 +9,7 @@ use crate::embedded::{embedded_profile_names, load_embedded_profile_bundle};
 use crate::error::ProfileError;
 use crate::key::{ProfileKey, WWISE_GENERATION};
 use crate::model::EncoderProfile;
+use crate::selection::WwiseProfile;
 
 /// Read-only exact lookup by full profile key or stable profile name.
 #[derive(Debug, Clone, Default)]
@@ -95,6 +96,65 @@ impl ProfileRegistry {
             });
         }
         Ok(matches[0])
+    }
+
+    /// Resolve from a structured selection: generation + channels + sample
+    /// rate, all three participating (the caller-facing selector).
+    ///
+    /// Unlike [`resolve_geometry`](Self::resolve_geometry) this never ignores
+    /// the generation, so a selection stays unambiguous once two installed
+    /// profiles share a geometry across Wwise generations.
+    pub fn resolve_selection(
+        &self,
+        selection: WwiseProfile,
+    ) -> Result<&EncoderProfile, ProfileError> {
+        let matches: Vec<&EncoderProfile> = self
+            .by_key
+            .iter()
+            .filter(|(key, _)| selection.matches_key(key))
+            .map(|(_, profile)| profile)
+            .collect();
+        if matches.is_empty() {
+            return Err(ProfileError::NoProfileForSelection {
+                version: selection.version().label().to_string(),
+                channels: selection.channels(),
+                sample_rate: selection.sample_rate(),
+                installed: self.describe_installed(),
+            });
+        }
+        if matches.len() != 1 {
+            let names = matches
+                .iter()
+                .map(|profile| profile.name().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(ProfileError::AmbiguousProfileSelection {
+                version: selection.version().label().to_string(),
+                channels: selection.channels(),
+                sample_rate: selection.sample_rate(),
+                names,
+            });
+        }
+        Ok(matches[0])
+    }
+
+    /// Every installed profile as `{channels}ch/{rate}Hz/{generation}`, for
+    /// resolution diagnostics.
+    fn describe_installed(&self) -> String {
+        let mut described: Vec<String> = self
+            .by_key
+            .iter()
+            .map(|(key, _)| {
+                format!(
+                    "{}ch/{}Hz/{}",
+                    key.channels(),
+                    key.sample_rate(),
+                    key.generation()
+                )
+            })
+            .collect();
+        described.sort();
+        described.join(", ")
     }
 
     /// Resolve a complete profile identity carried by a template setup
@@ -267,6 +327,28 @@ pub fn resolve_wem_profile_quality(
 ) -> Result<EncoderProfile, ProfileError> {
     let registry = embedded_registry()?;
     let profile = registry.resolve_geometry(channels, sample_rate)?;
+    match quality {
+        None => Ok(profile.clone()),
+        Some(quality) => profile.clone().with_quality(quality),
+    }
+}
+
+/// Resolve an installed exact profile from a structured selection — the
+/// caller-facing selector (generation + channels + sample rate).
+pub fn resolve_wem_profile_selection(
+    selection: WwiseProfile,
+) -> Result<EncoderProfile, ProfileError> {
+    resolve_wem_profile_selection_quality(selection, None)
+}
+
+/// Resolve an installed exact profile from a structured selection,
+/// optionally bound to a quality factor.
+pub fn resolve_wem_profile_selection_quality(
+    selection: WwiseProfile,
+    quality: Option<f64>,
+) -> Result<EncoderProfile, ProfileError> {
+    let registry = embedded_registry()?;
+    let profile = registry.resolve_selection(selection)?;
     match quality {
         None => Ok(profile.clone()),
         Some(quality) => profile.clone().with_quality(quality),

@@ -152,6 +152,29 @@ pub enum ProfileError {
     /// Runtime manifest differs from the installed bundle.
     InstalledBundleMismatch { profile: String },
     // ------------------------------------------------------------------
+    // structured profile selection (WwiseVersion / WwiseProfile)
+    // ------------------------------------------------------------------
+    /// A cross-language `WemVersion` code outside this revision's table.
+    UnknownWwiseVersion { code: u32 },
+    /// A profile-key `generation` string outside this revision's table.
+    UnsupportedWwiseGeneration { generation: String },
+    /// No installed profile satisfies the structured selection.
+    NoProfileForSelection {
+        version: String,
+        channels: i64,
+        sample_rate: i64,
+        installed: String,
+    },
+    /// More than one installed profile satisfies the structured selection.
+    AmbiguousProfileSelection {
+        version: String,
+        channels: i64,
+        sample_rate: i64,
+        names: String,
+    },
+    /// A selection's geometry is not positive.
+    SelectionGeometryNonPositive,
+    // ------------------------------------------------------------------
     // book tables / codebook resolution
     // ------------------------------------------------------------------
     /// Unknown book table name (Python: "missing decoded codebook table").
@@ -383,6 +406,15 @@ impl std::fmt::Display for ProfileError {
                 write!(f, "template setup SHA-256 {setup_sha256} has no installed profile for {channels}ch/{sample_rate}Hz; installed: {installed}")
             }
             InstalledBundleMismatch { profile } => write!(f, "profile {profile} differs from installed profile bundle"),
+            UnknownWwiseVersion { code } => write!(f, "unknown Wwise version code {code}"),
+            UnsupportedWwiseGeneration { generation } => write!(f, "unsupported Wwise generation {generation:?}"),
+            NoProfileForSelection { version, channels, sample_rate, installed } => {
+                write!(f, "no installed Wwise {version} profile for {channels}ch/{sample_rate}Hz; installed: {installed}")
+            }
+            AmbiguousProfileSelection { version, channels, sample_rate, names } => {
+                write!(f, "Wwise {version} profile selection {channels}ch/{sample_rate}Hz is ambiguous: {names}")
+            }
+            SelectionGeometryNonPositive => write!(f, "selected channels and sample rate must be positive"),
             UnknownBookTable { table } => write!(f, "missing decoded codebook table {table:?}"),
             BookTableMalformed { table, expected_count } => {
                 write!(f, "decoded codebook table {table:?} must contain {expected_count} object rows")
