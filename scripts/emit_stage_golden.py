@@ -17,7 +17,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-for entry in (ROOT, ROOT / "src"):
+# `reference` carries the pure-Python oracle the stage support drives, so the
+# script resolves both trees from this file and needs no PYTHONPATH.
+for entry in (ROOT, ROOT / "src", ROOT / "reference"):
     if str(entry) not in sys.path:
         sys.path.insert(0, str(entry))
 

@@ -24,7 +24,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "tests/data/stage-golden/transcendental"
 
-sys.path.insert(0, str(ROOT / "src"))
+# Both trees are resolved from this file, so the script runs from any cwd and
+# needs no PYTHONPATH: `src` is the distribution facade, `reference` the
+# pure-Python oracle that owns the site recorder.
+for entry in (ROOT / "src", ROOT / "reference"):
+    if str(entry) not in sys.path:
+        sys.path.insert(0, str(entry))
 
 from wwise_wem import encode  # noqa: E402
 from wwise_wem_reference._tmath import start_recording, write_recording  # noqa: E402
