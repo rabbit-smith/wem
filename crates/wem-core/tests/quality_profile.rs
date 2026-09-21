@@ -2,27 +2,13 @@
 //! profile is forwarded to the analysis assembly; with quality=None the
 //! historical golden bytes are unchanged.
 
-use sha2::{Digest, Sha256};
 use wem_core::encoder::Encoder;
 use wem_core::usecases::wav::read_pcm16;
-use wem_core::{WwiseProfile, WwiseVersion};
 use wem_profiles::{resolve_wem_profile_selection, resolve_wem_profile_selection_quality};
 
-const GOLDEN_WEM_SHA256: &str = "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247";
+mod common;
 
-/// The fixture profile selection: the installed Wwise 2013 6ch/44100
-/// configuration.
-fn fixture_selection() -> WwiseProfile {
-    WwiseProfile::new(WwiseVersion::Wwise2013, 6, 44_100).expect("fixture selection")
-}
-
-fn fixtures_dir() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join("tests/fixtures")
-        .canonicalize()
-        .expect("fixtures directory resolves")
-}
+use common::{fixture_selection, fixtures_dir, read_fixture};
 
 #[test]
 fn selection_resolution_returns_additive_quality_copies() {
@@ -47,14 +33,16 @@ fn selection_resolution_returns_additive_quality_copies() {
 }
 
 #[test]
-fn quality_none_encode_bytes_match_the_golden_sha() {
+fn quality_none_encode_bytes_match_the_reference_container() {
     let encoder = Encoder::new_with_quality(fixture_selection(), None).expect("encoder builds");
     let wav = read_pcm16(&fixtures_dir().join("input.wav")).expect("input.wav reads");
     let pcm = wav.to_pcm16().expect("wav converts to Pcm16");
     let encoded = encoder.encode_pcm(&pcm).expect("encode runs");
-    let sha = wem_profiles::resources::hex(Sha256::digest(&encoded.data));
+    // Byte equality against the committed reference is the whole claim:
+    // quality=None must reproduce the historical golden container exactly.
     assert_eq!(
-        sha, GOLDEN_WEM_SHA256,
+        encoded.data,
+        read_fixture("reference.wem"),
         "quality=None must reproduce the historical golden bytes exactly"
     );
 }

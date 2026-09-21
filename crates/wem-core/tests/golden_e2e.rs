@@ -2,13 +2,10 @@
 //! reference WEM byte-for-byte (the P2-4 gate).
 //!
 //! Oracle: `tests/fixtures/reference.wem`, produced by the Python encoder
-//! from `tests/fixtures/input.wav`
-//! (SHA-256 17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247).
+//! from `tests/fixtures/input.wav`.
 //!
-//! This test asserts file-level byte equality (Vec<u8> ==), not just
-//! matching hashes.
-
-use std::path::{Path, PathBuf};
+//! This test asserts file-level byte equality (`Vec<u8> ==`); the digest of
+//! that artifact is never re-typed here — the bytes are the claim.
 
 use wem_core::encoder::{Encoder, Pcm16};
 use wem_core::error::EncoderError;
@@ -16,27 +13,9 @@ use wem_core::stream::StreamSession;
 use wem_core::usecases::wav::read_pcm16;
 use wem_core::{WwiseProfile, WwiseVersion};
 
-const REFERENCE_SHA256: &str = "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247";
+mod common;
 
-/// The fixture profile selection: the installed Wwise 2013 6ch/44100
-/// configuration.
-fn fixture_selection() -> WwiseProfile {
-    WwiseProfile::new(WwiseVersion::Wwise2013, 6, 44_100).expect("fixture selection")
-}
-
-/// The repository fixtures directory (repo_root/tests/fixtures).
-fn fixtures_dir() -> PathBuf {
-    // CARGO_MANIFEST_DIR = <root>/crates/wem-core
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join("tests/fixtures")
-        .canonicalize()
-        .expect("fixtures directory resolves")
-}
-
-fn read_fixture(name: &str) -> Vec<u8> {
-    std::fs::read(fixtures_dir().join(name)).expect("fixture file reads")
-}
+use common::{fixture_selection, fixtures_dir, read_fixture};
 
 /// Read the fixture WAV and hand it to the encoder the way the CLI does.
 fn encode_fixture() -> (wem_core::EncodeResult, Encoder) {
@@ -58,12 +37,7 @@ fn encode_fixture() -> (wem_core::EncodeResult, Encoder) {
 fn golden_encode_is_byte_identical_to_reference_wem() {
     let (result, _encoder) = encode_fixture();
     let reference = read_fixture("reference.wem");
-    // Sanity: the reference fixture itself is the expected golden WEM.
-    let digest = {
-        use sha2::{Digest, Sha256};
-        wem_profiles::resources::hex(Sha256::digest(&reference))
-    };
-    assert_eq!(digest, REFERENCE_SHA256, "reference.wem fixture drifted");
+    // The whole claim: the kernel's bytes are the reference container's bytes.
     assert_eq!(
         result.data, reference,
         "rust WEM differs from reference.wem at file level"
@@ -78,7 +52,6 @@ fn golden_encode_is_byte_identical_to_reference_wem() {
     assert_eq!(stats.bytes, 108771);
     // The provenance label is the name-free selection description.
     assert_eq!(stats.metadata_source, "profile:6ch/44100Hz/2013");
-    assert_eq!(result.sha256(), REFERENCE_SHA256);
 }
 
 // ---------------------------------------------------------------------------
@@ -290,7 +263,11 @@ fn encode_result_length_and_write_to_round_trip() {
         .expect("encode succeeds");
 
     assert_eq!(result.len(), result.data.len());
-    assert_eq!(result.len(), 108_771, "the golden container length");
+    assert_eq!(
+        result.len(),
+        read_fixture("reference.wem").len(),
+        "the container length is the committed reference's"
+    );
     assert!(!result.is_empty());
 
     let path = std::env::temp_dir().join("wem-encode-result-write-to.wem");

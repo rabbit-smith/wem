@@ -22,11 +22,17 @@ use crate::bundle::ProfileBundle;
 use crate::error::ProfileError;
 use crate::selection::{WwiseProfile, WwiseVersion};
 
-const PROFILE_NAME: &str = "wwise2013-6ch-44100";
-const SETUP_SHA256: &str = "3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3";
-const TWO_CHANNEL_PROFILE_NAME: &str = "wwise2013-2ch-48000";
-const TWO_CHANNEL_SETUP_SHA256: &str =
-    "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc";
+/// The installed 6ch/44100 profile's index key.
+///
+/// This suite addresses profiles by key on purpose — key addressing *is* its
+/// subject — so the installed key is spelled exactly once, here, instead of
+/// being re-typed at every loader call.
+const SIX_CHANNEL_INDEX_KEY: &str = "wwise2013-6ch-44100";
+
+/// The index key of the 6ch/44100 manifest document inside the profile tree.
+fn six_channel_manifest_key() -> String {
+    format!("{SIX_CHANNEL_INDEX_KEY}/manifest.json")
+}
 
 /// The fixture profile selection: the installed Wwise 2013 6ch/44100
 /// configuration.
@@ -101,37 +107,61 @@ fn bytes_bundle_matches_the_installed_selection() {
     let installed =
         crate::resolve_wem_profile_selection(fixture_selection()).expect("6ch resolves");
 
-    // One identity, one setup digest: the bytes assembly and the installed
-    // selection agree on what the 6ch/44100 configuration is.
-    assert_eq!(from_bytes.name(), PROFILE_NAME);
-    assert_eq!(from_bytes.setup_sha256(), SETUP_SHA256);
+    // One identity, one setup packet: the bytes assembly and the installed
+    // selection agree on what the 6ch/44100 configuration is. The name is the
+    // one the selection resolves to, and the setup identity is the one the
+    // crate declares (`key::WWISE2013_6CH_44100_SETUP_IDENTITY`), never a
+    // digest re-typed here.
+    assert_eq!(from_bytes.name(), installed.name());
+    assert_eq!(
+        from_bytes.key().quality_setup_identity(),
+        crate::WWISE2013_6CH_44100_SETUP_IDENTITY
+    );
     assert_eq!(from_bytes.key(), installed.key());
     assert_eq!(from_bytes.setup_sha256(), installed.setup_sha256());
 
     // The filesystem loader resolves the same identity from the same tree.
     let data = crate::data::DataDir::from_profiles_dir(profiles_dir());
-    let from_fs = crate::bundle::load_profile_bundle(&data, Some(PROFILE_NAME), true)
+    let from_fs = crate::bundle::load_profile_bundle(&data, Some(SIX_CHANNEL_INDEX_KEY), true)
         .expect("fs bundle verifies")
         .to_encoder_profile()
         .expect("fs bundle profile");
     assert_eq!(from_fs.key(), from_bytes.key());
-    assert_eq!(from_fs.setup_sha256(), from_bytes.setup_sha256());
+    assert_eq!(from_fs.name(), from_bytes.name());
+    // Byte equality across the two backends is what a shared digest would
+    // only restate.
+    assert_eq!(
+        from_fs.setup_packet().expect("fs setup packet"),
+        from_bytes.setup_packet().expect("bytes setup packet"),
+        "the filesystem loader and the bytes loader must hand back the same setup packet"
+    );
 }
 
 #[test]
 fn bytes_bundle_carries_the_two_channel_profile_identity() {
     let (index, files) = read_profile_bytes_bundle();
-    let from_bytes =
-        load_profile_bundle_from_bytes(&index, files, Some(TWO_CHANNEL_PROFILE_NAME), true)
-            .expect("named 2ch bytes bundle verifies")
-            .to_encoder_profile()
-            .expect("2ch bytes bundle profile");
     let installed = crate::resolve_wem_profile_selection(two_channel_selection())
         .expect("2ch selection resolves");
+    // The index key is the name the selection resolves to: addressed by key,
+    // never by a name typed into the test.
+    let from_bytes = load_profile_bundle_from_bytes(&index, files, Some(installed.name()), true)
+        .expect("named 2ch bytes bundle verifies")
+        .to_encoder_profile()
+        .expect("2ch bytes bundle profile");
 
-    assert_eq!(from_bytes.name(), TWO_CHANNEL_PROFILE_NAME);
-    assert_eq!(from_bytes.setup_sha256(), TWO_CHANNEL_SETUP_SHA256);
+    assert_eq!(from_bytes.name(), installed.name());
     assert_eq!(from_bytes.key(), installed.key());
+    assert_eq!(from_bytes.setup_sha256(), installed.setup_sha256());
+    // Byte equality against the compiled-in bundle's setup packet is the
+    // claim the setup digest only restated.
+    assert_eq!(
+        from_bytes.setup_packet().expect("bytes setup packet"),
+        crate::bundle_for_selection(two_channel_selection())
+            .expect("embedded 2ch bundle resolves")
+            .setup_packet()
+            .expect("embedded setup packet"),
+        "the bytes loader must hand back the compiled-in 2ch setup packet"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -188,8 +218,8 @@ fn unsafe_resource_paths_are_rejected_from_bytes() {
     // check passes and the resource-path rejection (the drift-critical
     // condition) is exercised.
     let dir = profiles_dir();
-    let manifest_text = std::fs::read_to_string(dir.join("wwise2013-6ch-44100/manifest.json"))
-        .expect("manifest reads");
+    let manifest_text =
+        std::fs::read_to_string(dir.join(six_channel_manifest_key())).expect("manifest reads");
     let index_text = std::fs::read_to_string(dir.join("index.json")).expect("index reads");
 
     let old_path_field = "\"path\": \"vorbis/setup.bin\"";
@@ -220,10 +250,7 @@ fn unsafe_resource_paths_are_rejected_from_bytes() {
         .replace(current_index_sha, &tampered_sha)
         .into_bytes();
 
-    let files: Vec<(String, Vec<u8>)> = vec![(
-        "wwise2013-6ch-44100/manifest.json".to_string(),
-        tampered_manifest_bytes,
-    )];
+    let files: Vec<(String, Vec<u8>)> = vec![(six_channel_manifest_key(), tampered_manifest_bytes)];
     let err =
         load_profile_bundle_from_bytes(&tampered_index_bytes, files, None, false).unwrap_err();
     assert!(
@@ -260,10 +287,9 @@ fn bundle_with_curves(curves_json: &str) -> (ProfileBundle, String) {
     let curves_sha = sha256_hex(&curves_bytes);
 
     // Patch the manifest.
-    let manifest_key = "wwise2013-6ch-44100/manifest.json";
     let manifest_entry = files
         .iter_mut()
-        .find(|(key, _)| key == manifest_key)
+        .find(|(key, _)| *key == six_channel_manifest_key())
         .expect("6ch manifest present");
     let mut manifest: serde_json::Value =
         serde_json::from_slice(manifest_entry.1.as_slice()).expect("manifest json");
@@ -287,7 +313,7 @@ fn bundle_with_curves(curves_json: &str) -> (ProfileBundle, String) {
 
     // Register the curves file.
     files.push((
-        "wwise2013-6ch-44100/analysis/quality-curves.json".to_string(),
+        format!("{SIX_CHANNEL_INDEX_KEY}/analysis/quality-curves.json"),
         curves_bytes,
     ));
 
@@ -301,7 +327,7 @@ fn bundle_with_curves(curves_json: &str) -> (ProfileBundle, String) {
         .as_object_mut()
         .expect("profiles map");
     let six_ch_entry = profiles_map
-        .get_mut("wwise2013-6ch-44100")
+        .get_mut(SIX_CHANNEL_INDEX_KEY)
         .expect("6ch entry")
         .as_object_mut()
         .expect("6ch entry object");

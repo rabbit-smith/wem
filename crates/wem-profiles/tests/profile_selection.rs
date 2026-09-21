@@ -12,16 +12,9 @@ use wem_profiles::model::EncoderProfile;
 use wem_profiles::selection::{WwiseProfile, WwiseVersion};
 use wem_profiles::ProfileRegistry;
 
-const SIX_CHANNEL: &str = "wwise2013-6ch-44100";
-const TWO_CHANNEL: &str = "wwise2013-2ch-48000";
+mod common;
 
-fn six() -> WwiseProfile {
-    WwiseProfile::new(WwiseVersion::Wwise2013, 6, 44_100).expect("6ch/44100 selection")
-}
-
-fn stereo() -> WwiseProfile {
-    WwiseProfile::new(WwiseVersion::Wwise2013, 2, 48_000).expect("2ch/48000 selection")
-}
+use common::{six_selection, two_channel_selection};
 
 // ---------------------------------------------------------------------------
 // Version table
@@ -81,6 +74,8 @@ fn generation_and_label_spellings_round_trip() {
     // A label that is neither spelling is rejected, never silently defaulted.
     assert!(WwiseVersion::parse("2014").is_err());
     assert!(WwiseVersion::parse("").is_err());
+    // A profile name is not a version label: this literal is the input under
+    // rejection, not a way to mean "the 6ch profile".
     assert!(WwiseVersion::parse("wwise2013-6ch-44100").is_err());
 }
 
@@ -102,24 +97,24 @@ fn selection_requires_positive_geometry() {
 fn selection_matches_on_generation_and_geometry_together() {
     let installed =
         ProfileKey::new(6, 44_100, "2013.2".into(), "5.1".into(), "sha256:0".into()).expect("key");
-    assert!(six().matches_key(&installed));
-    assert!(!stereo().matches_key(&installed));
+    assert!(six_selection().matches_key(&installed));
+    assert!(!two_channel_selection().matches_key(&installed));
 
     // The generation participates: the same geometry from another Wwise
     // generation is a different selection. This is the ambiguity that
     // geometry-only resolution could not express.
     let other_generation =
         ProfileKey::new(6, 44_100, "2012.1".into(), "5.1".into(), "sha256:0".into()).expect("key");
-    assert!(!six().matches_key(&other_generation));
+    assert!(!six_selection().matches_key(&other_generation));
 }
 
 #[test]
 fn selection_describes_itself_for_diagnostics() {
-    assert_eq!(six().describe(), "6ch/44100Hz/2013");
-    assert_eq!(stereo().describe(), "2ch/48000Hz/2013");
-    assert_eq!(six().version(), WwiseVersion::Wwise2013);
-    assert_eq!(six().channels(), 6);
-    assert_eq!(six().sample_rate(), 44_100);
+    assert_eq!(six_selection().describe(), "6ch/44100Hz/2013");
+    assert_eq!(two_channel_selection().describe(), "2ch/48000Hz/2013");
+    assert_eq!(six_selection().version(), WwiseVersion::Wwise2013);
+    assert_eq!(six_selection().channels(), 6);
+    assert_eq!(six_selection().sample_rate(), 44_100);
 }
 
 // ---------------------------------------------------------------------------
@@ -131,26 +126,46 @@ fn both_installed_selections_resolve_by_generation_and_geometry() {
     let registry = wem_profiles::embedded_registry().expect("embedded registry");
     assert_eq!(registry.len(), 2);
 
-    let six_channel = registry.resolve_selection(six()).expect("6ch resolves");
-    assert_eq!(six_channel.name(), SIX_CHANNEL);
+    // Every name compared below is read off the tree the selection resolves
+    // to — with two entry points that must agree on it, never a literal.
+    let six_channel = registry
+        .resolve_selection(six_selection())
+        .expect("6ch resolves");
     assert!(six_channel.setup_available());
-
-    let two_channel = registry.resolve_selection(stereo()).expect("2ch resolves");
-    assert_eq!(two_channel.name(), TWO_CHANNEL);
+    let two_channel = registry
+        .resolve_selection(two_channel_selection())
+        .expect("2ch resolves");
     assert!(two_channel.setup_available());
+
+    assert_eq!(
+        six_channel.name(),
+        wem_profiles::resolve_wem_profile_selection(six_selection())
+            .expect("6ch resolves")
+            .name()
+    );
+    assert_eq!(
+        two_channel.name(),
+        wem_profiles::resolve_wem_profile_selection(two_channel_selection())
+            .expect("2ch resolves")
+            .name()
+    );
+    assert_ne!(six_channel.name(), two_channel.name());
 }
 
 #[test]
 fn the_free_resolvers_agree_with_the_registry() {
-    for (selection, name) in [(six(), SIX_CHANNEL), (stereo(), TWO_CHANNEL)] {
-        let profile = wem_profiles::resolve_wem_profile_selection(selection).expect("resolves");
-        assert_eq!(profile.name(), name);
-        assert_eq!(profile.quality(), None);
+    for selection in [six_selection(), two_channel_selection()] {
+        let resolved = wem_profiles::resolve_wem_profile_selection(selection).expect("resolves");
+        let bundle = wem_profiles::bundle_for_selection(selection).expect("bundle resolves");
+        // The name is the one the tree resolves for this selection; the two
+        // intake paths must not disagree on it.
+        assert_eq!(resolved.name(), bundle.name());
+        assert_eq!(resolved.quality(), None);
 
         // The quality-bound form is an additive copy, never a mutation.
         let bound = wem_profiles::resolve_wem_profile_selection_quality(selection, Some(4.0))
             .expect("quality copy");
-        assert_eq!(bound.name(), name);
+        assert_eq!(bound.name(), resolved.name());
         assert_eq!(bound.quality(), Some(4.0));
         assert_eq!(
             wem_profiles::resolve_wem_profile_selection(selection)
@@ -170,7 +185,7 @@ fn the_bundle_intake_resolves_what_the_registry_resolves() {
     // name, path or bytes; it must agree with the registry's own exactly-one
     // resolution for every installed configuration.
     let registry = wem_profiles::embedded_registry().expect("embedded registry");
-    for selection in [six(), stereo()] {
+    for selection in [six_selection(), two_channel_selection()] {
         let resolved = registry
             .resolve_selection(selection)
             .expect("selection resolves");
@@ -230,9 +245,13 @@ fn an_ambiguous_selection_is_rejected_rather_than_picked() {
     // returning whichever came first.
     let base = wem_profiles::embedded_registry()
         .expect("embedded registry")
-        .resolve_selection(six())
+        .resolve_selection(six_selection())
         .expect("6ch installs")
         .clone();
+    // The twin is a synthetic profile derived from the installed one: its name
+    // is the installed name plus a suffix, so no profile name is typed here.
+    let installed_name = base.name().to_string();
+    let twin_name = format!("{installed_name}-twin");
     let twin_key = ProfileKey::new(
         base.channels(),
         base.sample_rate(),
@@ -242,7 +261,7 @@ fn an_ambiguous_selection_is_rejected_rather_than_picked() {
     )
     .expect("twin key");
     let twin = EncoderProfile::new(
-        "wwise2013-6ch-44100-twin".to_string(),
+        twin_name.clone(),
         twin_key,
         base.setup_path().cloned(),
         base.setup_sha256().to_string(),
@@ -257,10 +276,10 @@ fn an_ambiguous_selection_is_rejected_rather_than_picked() {
     let registry =
         ProfileRegistry::new(vec![base, twin]).expect("distinct keys are not duplicates");
     assert_eq!(registry.len(), 2);
-    match registry.resolve_selection(six()).unwrap_err() {
+    match registry.resolve_selection(six_selection()).unwrap_err() {
         ProfileError::AmbiguousProfileSelection { names, .. } => {
-            assert!(names.contains(SIX_CHANNEL), "{names}");
-            assert!(names.contains("wwise2013-6ch-44100-twin"), "{names}");
+            assert!(names.contains(&installed_name), "{names}");
+            assert!(names.contains(&twin_name), "{names}");
         }
         other => panic!("expected AmbiguousProfileSelection, got {other:?}"),
     }

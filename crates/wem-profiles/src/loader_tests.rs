@@ -23,6 +23,19 @@ use crate::registry::installed_registry;
 use crate::resources::{normalize_resource_path, ResourceRef};
 use crate::selection::{WwiseProfile, WwiseVersion};
 
+/// The installed 6ch/44100 profile's index key.
+///
+/// This suite addresses profiles by key on purpose — key addressing *is* its
+/// subject — so the installed key is spelled exactly once, here, instead of
+/// being re-typed at every loader call.
+const INSTALLED_SIX_CHANNEL_KEY: &str = "wwise2013-6ch-44100";
+
+/// The profile key used by the synthetic temp trees.
+///
+/// Deliberately not a name any installed profile has, so a synthetic tree can
+/// never be mistaken for one of the shipped profiles.
+const SYNTHETIC_PROFILE_KEY: &str = "synthetic-test-profile";
+
 fn repo_root() -> PathBuf {
     // crates/wem-profiles -> repo root (two levels up from the manifest dir).
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -47,6 +60,12 @@ fn two_channel_selection() -> WwiseProfile {
     WwiseProfile::new(WwiseVersion::Wwise2013, 2, 48_000).expect("2ch/48000 selection")
 }
 
+/// The compiled-in bundle for one selection: the other side of every
+/// dev-tree/embedded agreement check below.
+fn embedded_bundle(selection: WwiseProfile) -> crate::bundle::ProfileBundle {
+    crate::bundle_for_selection(selection).expect("compiled-in bundle resolves")
+}
+
 fn sha256_hex(payload: &[u8]) -> String {
     let digest = Sha256::digest(payload);
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
@@ -66,14 +85,14 @@ fn temp_tree(tag: &str) -> PathBuf {
     let dir =
         std::env::temp_dir().join(format!("wem-profiles-test-{}-{}", tag, std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(dir.join("wwise2013-6ch-44100")).expect("temp dirs");
+    std::fs::create_dir_all(dir.join(SYNTHETIC_PROFILE_KEY)).expect("temp dirs");
     dir
 }
 
 /// Build a minimal valid profile tree and return the DataDir.
 fn valid_tree(tag: &str) -> DataDir {
     let root = temp_tree(tag);
-    let profile_dir = root.join("wwise2013-6ch-44100");
+    let profile_dir = root.join(SYNTHETIC_PROFILE_KEY);
 
     let setup_payload = b"setup-payload";
     write(&profile_dir.join("vorbis_setup.bin"), setup_payload);
@@ -81,17 +100,17 @@ fn valid_tree(tag: &str) -> DataDir {
 
     let index = serde_json::json!({
         "schema": "wwise-wem.profile-index.v1",
-        "default": "wwise2013-6ch-44100",
+        "default": SYNTHETIC_PROFILE_KEY,
         "profiles": {
-            "wwise2013-6ch-44100": {
-                "manifest": "wwise2013-6ch-44100/manifest.json",
+            SYNTHETIC_PROFILE_KEY: {
+                "manifest": format!("{SYNTHETIC_PROFILE_KEY}/manifest.json"),
                 "sha256": format!("pending-{tag}")
             }
         }
     });
     let manifest = serde_json::json!({
         "schema": "wwise-wem.profile-manifest.v1",
-        "name": "wwise2013-6ch-44100",
+        "name": SYNTHETIC_PROFILE_KEY,
         "key": {
             "generation": "2013.2",
             "channels": 6,
@@ -122,7 +141,7 @@ fn valid_tree(tag: &str) -> DataDir {
     write(&profile_dir.join("manifest.json"), &manifest_bytes);
 
     let mut index = serde_json::to_value(&index).unwrap();
-    index["profiles"]["wwise2013-6ch-44100"]["sha256"] = serde_json::Value::String(manifest_sha);
+    index["profiles"][SYNTHETIC_PROFILE_KEY]["sha256"] = serde_json::Value::String(manifest_sha);
     write(
         &root.join("index.json"),
         &serde_json::to_vec(&index).unwrap(),
@@ -138,21 +157,25 @@ fn valid_tree(tag: &str) -> DataDir {
 #[test]
 fn installed_tree_verifies_and_matches_the_embedded_bundle() {
     // The development seam must accept exactly what the compiled-in bundle
-    // accepts: same name, same key, same setup digest, every resource
+    // accepts: same name, same key, same setup bytes, every resource
     // SHA-256-verified (payload -> manifest SHA -> index SHA).
     let from_tree = load_profile_bundle(&data_dir(), None, true).expect("tree verifies");
-    let embedded = crate::bundle_for_selection(six_selection()).expect("embedded bundle");
+    let embedded = embedded_bundle(six_selection());
 
-    assert_eq!(from_tree.name(), "wwise2013-6ch-44100");
+    assert_eq!(from_tree.name(), embedded.name());
     assert_eq!(from_tree.key(), embedded.key());
     assert_eq!(from_tree.block_sizes(), embedded.block_sizes());
     assert_eq!(
         from_tree.container_metadata(),
         embedded.container_metadata()
     );
+    // Byte equality across the two backends (filesystem tree vs compile-time
+    // embedded bytes) replaces any shared-digest comparison: it is the same
+    // claim, and it localises a difference to the bytes.
     assert_eq!(
-        from_tree.setup().expect("vorbis.setup").sha256(),
-        embedded.setup().expect("vorbis.setup").sha256()
+        from_tree.setup_packet().expect("vorbis.setup bytes"),
+        embedded.setup_packet().expect("vorbis.setup bytes"),
+        "the development tree and the compiled-in bundle must carry the same setup packet"
     );
     assert_eq!(from_tree.runtime_manifest().resources().len(), 10);
     from_tree.verify_all().expect("verify_all over the tree");
@@ -166,7 +189,7 @@ fn installed_tree_verifies_and_matches_the_embedded_bundle() {
 fn synthetic_tree_loads_and_verifies() {
     let data = valid_tree("ok");
     let bundle = load_profile_bundle(&data, None, true).expect("synthetic tree loads");
-    assert_eq!(bundle.name(), "wwise2013-6ch-44100");
+    assert_eq!(bundle.name(), SYNTHETIC_PROFILE_KEY);
     let setup = bundle.setup_packet().expect("setup payload");
     assert_eq!(setup, b"setup-payload");
 }
@@ -177,7 +200,8 @@ fn tamper_detection_sha_mismatch() {
     // Mutate the resource payload after the manifest digest was recorded.
     let file = data
         .profiles_dir()
-        .join("wwise2013-6ch-44100/vorbis_setup.bin");
+        .join(SYNTHETIC_PROFILE_KEY)
+        .join("vorbis_setup.bin");
     std::fs::write(&file, b"setup-payload-MUTATED").unwrap();
     let err = load_profile_bundle(&data, None, true).unwrap_err();
     match err {
@@ -195,7 +219,8 @@ fn tamper_detection_truncated_resource() {
     let data = valid_tree("trunc");
     let file = data
         .profiles_dir()
-        .join("wwise2013-6ch-44100/vorbis_setup.bin");
+        .join(SYNTHETIC_PROFILE_KEY)
+        .join("vorbis_setup.bin");
     std::fs::write(&file, b"short").unwrap();
     let err = load_profile_bundle(&data, None, true).unwrap_err();
     assert!(
@@ -207,14 +232,14 @@ fn tamper_detection_truncated_resource() {
 #[test]
 fn tamper_detection_path_traversal_in_manifest() {
     let root = temp_tree("trav");
-    let profile_dir = root.join("wwise2013-6ch-44100");
+    let profile_dir = root.join(SYNTHETIC_PROFILE_KEY);
     let setup_payload = b"setup";
     let setup_sha = sha256_hex(setup_payload);
     write(&profile_dir.join("setup.bin"), setup_payload);
 
     let manifest = serde_json::json!({
         "schema": "wwise-wem.profile-manifest.v1",
-        "name": "wwise2013-6ch-44100",
+        "name": SYNTHETIC_PROFILE_KEY,
         "key": {
             "generation": "2013.2", "channels": 6, "sample_rate": 44100,
             "channel_layout": "5.1",
@@ -244,10 +269,10 @@ fn tamper_detection_path_traversal_in_manifest() {
 
     let index = serde_json::json!({
         "schema": "wwise-wem.profile-index.v1",
-        "default": "wwise2013-6ch-44100",
+        "default": SYNTHETIC_PROFILE_KEY,
         "profiles": {
-            "wwise2013-6ch-44100": {
-                "manifest": "wwise2013-6ch-44100/manifest.json",
+            SYNTHETIC_PROFILE_KEY: {
+                "manifest": format!("{SYNTHETIC_PROFILE_KEY}/manifest.json"),
                 "sha256": manifest_sha
             }
         }
@@ -267,7 +292,7 @@ fn tamper_detection_path_traversal_in_manifest() {
 #[test]
 fn tamper_detection_index_sha_mismatch() {
     let root = temp_tree("idx");
-    let profile_dir = root.join("wwise2013-6ch-44100");
+    let profile_dir = root.join(SYNTHETIC_PROFILE_KEY);
     let manifest = serde_json::json!({
         "schema": "wwise-wem.profile-manifest.v1",
         "name": "wrong-name",
@@ -294,10 +319,10 @@ fn tamper_detection_index_sha_mismatch() {
     // Index carries a deliberately wrong manifest sha256.
     let index = serde_json::json!({
         "schema": "wwise-wem.profile-index.v1",
-        "default": "wwise2013-6ch-44100",
+        "default": SYNTHETIC_PROFILE_KEY,
         "profiles": {
-            "wwise2013-6ch-44100": {
-                "manifest": "wwise2013-6ch-44100/manifest.json",
+            SYNTHETIC_PROFILE_KEY: {
+                "manifest": format!("{SYNTHETIC_PROFILE_KEY}/manifest.json"),
                 "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
             }
         }
@@ -320,7 +345,7 @@ fn tamper_detection_schema_strings() {
     let root = temp_tree("schema-index");
     let index = serde_json::json!({
         "schema": "wwise-wem.profile-index.v0",
-        "default": "wwise2013-6ch-44100",
+        "default": SYNTHETIC_PROFILE_KEY,
         "profiles": {}
     });
     write(
@@ -351,20 +376,20 @@ fn resource_ref_rejections() {
     // Bad digest shapes.
     assert!(ResourceRef::new(
         data.clone(),
-        "wwise2013-6ch-44100/vorbis/setup.bin",
+        &format!("{INSTALLED_SIX_CHANNEL_KEY}/vorbis/setup.bin"),
         "ABCDEF"
     )
     .is_err());
     assert!(ResourceRef::new(
         data.clone(),
-        "wwise2013-6ch-44100/vorbis/setup.bin",
+        &format!("{INSTALLED_SIX_CHANNEL_KEY}/vorbis/setup.bin"),
         "g000000000000000000000000000000000000000000000000000000000000000"
     )
     .is_err());
     // Uppercase digest is normalized to lowercase.
     let ref_ = ResourceRef::new(
         data.clone(),
-        "wwise2013-6ch-44100/vorbis/setup.bin",
+        &format!("{INSTALLED_SIX_CHANNEL_KEY}/vorbis/setup.bin"),
         &crate::WWISE2013_6CH_44100_SETUP_IDENTITY
             .strip_prefix("sha256:")
             .unwrap()
@@ -384,7 +409,7 @@ fn resource_ref_rejections() {
     // Missing resource.
     let missing = ResourceRef::new(
         data,
-        "wwise2013-6ch-44100/does-not-exist.bin",
+        &format!("{INSTALLED_SIX_CHANNEL_KEY}/does-not-exist.bin"),
         &"0".repeat(64),
     )
     .expect("ref constructs");
@@ -403,7 +428,10 @@ fn resource_keys_are_canonical_slash_form() {
     // fails here — asserted at the code level, no OS reproduction needed.
     let bundle = load_profile_bundle(&data_dir(), None, false).expect("profile loads");
     let manifest = bundle.runtime_manifest();
-    assert_eq!(manifest.ref_path(), "wwise2013-6ch-44100/manifest.json");
+    assert_eq!(
+        manifest.ref_path(),
+        format!("{INSTALLED_SIX_CHANNEL_KEY}/manifest.json")
+    );
     for (name, ref_) in manifest.resources() {
         assert!(
             !ref_.path().contains('\\'),
@@ -415,7 +443,7 @@ fn resource_keys_are_canonical_slash_form() {
         );
         assert!(
             ref_.path()
-                .strip_prefix("wwise2013-6ch-44100/")
+                .strip_prefix(&format!("{INSTALLED_SIX_CHANNEL_KEY}/"))
                 .is_some_and(|rel| !rel.is_empty()),
             "resource key of {name} is profiles-dir-relative"
         );
@@ -458,7 +486,11 @@ fn installed_registry_resolutions() {
     let six_channel = registry
         .resolve_selection(six_selection())
         .expect("6ch selection resolves");
-    assert_eq!(six_channel.name(), "wwise2013-6ch-44100");
+    assert_eq!(
+        six_channel.name(),
+        embedded_bundle(six_selection()).name(),
+        "the development tree and the compiled-in bundle are one profile"
+    );
     assert!(six_channel.setup_available());
 
     // The 2ch/48000 profile resolves by its geometry and carries its setup
@@ -467,11 +499,25 @@ fn installed_registry_resolutions() {
     let stereo = registry
         .resolve_selection(two_channel_selection())
         .expect("2ch selection resolves");
-    assert_eq!(stereo.name(), "wwise2013-2ch-48000");
+    let stereo_embedded = embedded_bundle(two_channel_selection());
+    assert_eq!(stereo.name(), stereo_embedded.name());
     assert!(stereo.setup_available());
+    // Byte equality across the two independent backends (filesystem tree vs
+    // compile-time embedded bytes) is the claim a shared digest would only
+    // restate.
+    assert_eq!(
+        load_profile_bundle(&data_dir(), Some(stereo.name()), true)
+            .expect("dev-tree 2ch bundle loads")
+            .setup_packet()
+            .expect("dev-tree setup packet"),
+        stereo_embedded
+            .setup_packet()
+            .expect("embedded setup packet"),
+        "the development tree and the compiled-in bundle must carry the same 2ch setup packet"
+    );
     assert_eq!(
         stereo.setup_sha256(),
-        "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc"
+        stereo_embedded.setup().expect("setup ref").sha256()
     );
     assert!(stereo.pending_reason().is_none());
     // The two selections resolve to distinct setup digests: a setup digest
@@ -491,7 +537,7 @@ fn installed_registry_resolutions() {
 
     // The free resolvers agree with the registry.
     let resolved = crate::resolve_wem_profile_selection(six_selection()).expect("6ch selection");
-    assert_eq!(resolved.name(), "wwise2013-6ch-44100");
+    assert_eq!(resolved.name(), embedded_bundle(six_selection()).name());
     assert_eq!(resolved.block_sizes(), [256, 2048]);
     assert_eq!(resolved.quality(), None);
 
@@ -519,18 +565,27 @@ fn installed_registry_resolutions() {
 /// calibration.
 #[test]
 fn two_channel_profile_lists_in_the_registry_as_setup_available() {
-    const TWO_CHANNEL_NAME: &str = "wwise2013-2ch-48000";
-    const TWO_CHANNEL_SETUP_SHA: &str =
-        "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc";
-
     let registry = installed_registry(&data_dir()).expect("registry loads");
     assert_eq!(registry.len(), 2);
     let profile = registry
         .resolve_selection(two_channel_selection())
         .expect("2ch selection resolves");
-    assert_eq!(profile.name(), TWO_CHANNEL_NAME);
+    let embedded = embedded_bundle(two_channel_selection());
+    // The name and the setup digest are properties of the tree the selection
+    // resolves to; the setup *bytes* below are what pins them.
+    assert_eq!(profile.name(), embedded.name());
     assert!(profile.setup_available());
-    assert_eq!(profile.setup_sha256(), TWO_CHANNEL_SETUP_SHA);
+    assert_eq!(
+        profile.setup_sha256(),
+        embedded.setup().expect("setup ref").sha256()
+    );
+    assert_eq!(
+        load_profile_bundle(&data_dir(), Some(profile.name()), true)
+            .expect("dev-tree 2ch bundle loads")
+            .setup_packet()
+            .expect("dev-tree setup packet"),
+        embedded.setup_packet().expect("embedded setup packet")
+    );
     assert!(profile.pending_reason().is_none());
 
     // The two installed selections resolve to distinct setup digests, so a
@@ -550,8 +605,17 @@ fn development_tree_and_compiled_in_bundle_agree_for_every_selection() {
         let from_tree = registry
             .resolve_selection(selection)
             .expect("tree profile resolves");
-        let bundle = crate::bundle_for_selection(selection).expect("embedded bundle");
+        let bundle = embedded_bundle(selection);
         assert_eq!(from_tree.key(), bundle.key());
-        assert_eq!(from_tree.setup_sha256(), bundle.setup().unwrap().sha256());
+        assert_eq!(from_tree.name(), bundle.name());
+        // The two backends must hand back the same setup bytes — a stronger
+        // statement than any shared digest.
+        assert_eq!(
+            load_profile_bundle(&data_dir(), Some(from_tree.name()), true)
+                .expect("dev-tree bundle loads")
+                .setup_packet()
+                .expect("dev-tree setup packet"),
+            bundle.setup_packet().expect("embedded setup packet")
+        );
     }
 }

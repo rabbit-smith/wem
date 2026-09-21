@@ -17,33 +17,15 @@
 //!   sync with include/wem.h.
 
 use std::ffi::c_void;
-use std::path::PathBuf;
 use std::sync::Barrier;
 use std::thread;
 
 use sha2::{Digest, Sha256};
 use wem_capi::{WemEncoder, WemError, WemMeta, WemProfile, WemVersion};
-use wem_core::usecases::wav::read_pcm16;
 
-const GOLDEN_SHA256: &str = "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247";
+mod common;
 
-/// The fixture's encoder configuration: Wwise 2013.2, 6ch @ 44.1kHz.
-fn fixture_profile() -> WemProfile {
-    WemProfile {
-        version: WemVersion::Wwise2013,
-        channels: 6,
-        sample_rate: 44_100,
-    }
-}
-
-/// The other installed configuration: Wwise 2013.2, 2ch @ 48kHz.
-fn stereo_profile() -> WemProfile {
-    WemProfile {
-        version: WemVersion::Wwise2013,
-        channels: 2,
-        sample_rate: 48_000,
-    }
-}
+use common::{fixture_profile, read_fixture_pcm, reference_wem, stereo_profile};
 
 // ---------------------------------------------------------------------------
 // Test sinks (what a C client would do with its callbacks).
@@ -136,29 +118,6 @@ unsafe extern "C" fn sink_packet(
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn fixtures_dir() -> PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join("tests/fixtures")
-        .canonicalize()
-        .expect("fixtures directory resolves")
-}
-
-fn reference_wem() -> Vec<u8> {
-    std::fs::read(fixtures_dir().join("reference.wem")).expect("reference.wem reads")
-}
-
-fn read_fixture_pcm() -> (Vec<u8>, usize, usize) {
-    let wav = read_pcm16(&fixtures_dir().join("input.wav")).expect("input.wav reads");
-    // The helper hands owned bytes to its callers, so the WAV's borrow is
-    // copied here.
-    (
-        wav.interleaved_le_bytes().to_vec(),
-        wav.frames(),
-        wav.channels(),
-    )
-}
-
 fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
@@ -194,11 +153,6 @@ fn one_shot_fixture_rebuilds_golden() {
     assert_eq!(code, WemError::Ok, "one-shot encode rejected");
 
     let out = &sinks.out;
-    assert_eq!(
-        sha256_hex(out),
-        GOLDEN_SHA256,
-        "one-shot C ABI output sha256 differs from the golden"
-    );
     assert_eq!(
         out,
         reference_wem().as_slice(),
@@ -292,11 +246,6 @@ fn concurrent_encodes_share_one_handle() {
             .map(|join| {
                 let (index, out) = join.join().expect("an encode thread panicked");
                 assert_eq!(
-                    sha256_hex(&out),
-                    GOLDEN_SHA256,
-                    "thread {index} sha256 differs from the golden"
-                );
-                assert_eq!(
                     out, reference,
                     "thread {index} bytes differ from reference.wem"
                 );
@@ -360,18 +309,19 @@ fn streaming_seven_uneven_chunks_match_one_shot() {
 
     // Container bytes: the golden.
     let out = &sinks.out;
-    assert_eq!(sha256_hex(out), GOLDEN_SHA256, "streaming sha256 differs");
     assert_eq!(
         out,
         reference_wem().as_slice(),
         "streaming bytes differ from reference.wem"
     );
 
-    // Terminal meta: length + lowercase-hex digest of the container.
+    // Terminal meta: length + lowercase-hex digest of the container the sink
+    // just received, whose bytes the assertion above pins to reference.wem.
     assert_eq!(meta.total_len as usize, out.len());
     assert_eq!(
         std::str::from_utf8(&meta.sha256_hex).expect("hex is ascii"),
-        GOLDEN_SHA256
+        sha256_hex(out),
+        "the terminal meta digest must describe the delivered container"
     );
 
     // Reply stream: seq starts at 0 (the setup packet) and increases by

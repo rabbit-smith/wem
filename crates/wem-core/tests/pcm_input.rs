@@ -9,28 +9,13 @@
 //!   container bytes. The row shape is the reference: it is the form every
 //!   caller used before the byte-backed shapes existed.
 
-use std::path::{Path, PathBuf};
-
 use wem_core::encoder::{Encoder, Pcm16};
 use wem_core::error::EncoderError;
 use wem_core::usecases::wav::read_pcm16;
-use wem_core::{WwiseProfile, WwiseVersion};
 
-/// The repository fixtures directory (repo_root/tests/fixtures).
-fn fixtures_dir() -> PathBuf {
-    // CARGO_MANIFEST_DIR = <root>/crates/wem-core
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join("tests/fixtures")
-        .canonicalize()
-        .expect("fixtures directory resolves")
-}
+mod common;
 
-/// The fixture profile selection: the installed Wwise 2013 6ch/44100
-/// configuration.
-fn fixture_selection() -> WwiseProfile {
-    WwiseProfile::new(WwiseVersion::Wwise2013, 6, 44_100).expect("fixture selection")
-}
+use common::{fixture_selection, fixtures_dir, read_fixture};
 
 /// Transpose interleaved little-endian s16 bytes into channel-major bytes
 /// (byte level only: no `i16` participates, so the kernel's own decode is what
@@ -233,7 +218,7 @@ fn the_three_pcm_shapes_encode_to_identical_containers() {
         containers.push((name, result.data));
     }
 
-    let golden = std::fs::read(fixtures_dir().join("reference.wem")).expect("reference.wem reads");
+    let golden = read_fixture("reference.wem");
     for (name, bytes) in &containers {
         assert_eq!(
             bytes, &golden,

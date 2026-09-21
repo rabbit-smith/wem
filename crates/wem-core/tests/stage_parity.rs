@@ -13,6 +13,10 @@ use serde_json::Value;
 use wem_analysis::model::PsyFrame;
 use wem_analysis::session::AnalysisSession;
 
+mod common;
+
+use common::{fixtures_dir, repo_root};
+
 const FLOAT_STAGES: [&str; 8] = [
     "window",
     "coefficients",
@@ -23,15 +27,6 @@ const FLOAT_STAGES: [&str; 8] = [
     "post",
     "side",
 ];
-
-fn repo_root() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("crates dir")
-        .parent()
-        .expect("repo root")
-        .to_path_buf()
-}
 
 fn stage_dir() -> std::path::PathBuf {
     repo_root().join("tests/data/stage-golden/stages")
@@ -152,7 +147,7 @@ fn stage_parity_all_frames() {
         .collect();
 
     // Load PCM + profile.
-    let (pcm, channels, sample_rate) = read_pcm16(&repo_root().join("tests/fixtures/input.wav"));
+    let (pcm, channels, sample_rate) = read_pcm16(&fixtures_dir().join("input.wav"));
     assert_eq!(channels, 6, "6 channels");
     assert_eq!(sample_rate, 44100, "44.1 kHz");
 

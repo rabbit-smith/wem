@@ -20,26 +20,14 @@
 
 use std::time::Instant;
 
-use sha2::{Digest, Sha256};
 use wem_container::load_wem_parts_bytes;
 use wem_core::encoder::{Encoder, Pcm16};
 use wem_core::stream::StreamSession;
 use wem_core::usecases::wav::read_pcm16;
-use wem_core::{WwiseProfile, WwiseVersion};
 
-/// The fixture profile selection: the installed Wwise 2013 6ch/44100
-/// configuration.
-fn fixture_selection() -> WwiseProfile {
-    WwiseProfile::new(WwiseVersion::Wwise2013, 6, 44_100).expect("fixture selection")
-}
+mod common;
 
-fn fixtures_dir() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join("tests/fixtures")
-        .canonicalize()
-        .expect("fixtures directory resolves")
-}
+use common::{fixture_selection, fixtures_dir, read_fixture};
 
 // ---------------------------------------------------------------------------
 // 1. Chunking invariance
@@ -484,6 +472,7 @@ fn encode_pcm_release_median_within_gate() {
     let encoder = Encoder::new(fixture_selection()).expect("fs encoder builds");
     let wav = read_pcm16(&fixtures_dir().join("input.wav")).expect("input.wav reads");
     let pcm = wav.to_pcm16().expect("wav converts to Pcm16");
+    let reference = read_fixture("reference.wem");
 
     // Warm-up: page faults, allocator growth, I-cache.
     encoder.encode_pcm(&pcm).expect("warm-up encode");
@@ -493,11 +482,11 @@ fn encode_pcm_release_median_within_gate() {
         let start = Instant::now();
         let result = encoder.encode_pcm(&pcm).expect("encode runs");
         durations_ms.push(start.elapsed().as_secs_f64() * 1e3);
-        // Guard against silent bit drift: the golden hash is the contract.
-        let sha = wem_profiles::resources::hex(Sha256::digest(&result.data));
+        // Guard against silent bit drift: the released bytes are the
+        // committed reference container's, compared as bytes.
         assert_eq!(
-            sha, "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247",
-            "encode_pcm output hash drifted from the golden WEM"
+            result.data, reference,
+            "encode_pcm output drifted from the committed reference WEM"
         );
     }
     durations_ms.sort_by(|a, b| a.partial_cmp(b).expect("durations order"));

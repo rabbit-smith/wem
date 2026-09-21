@@ -606,9 +606,6 @@ mod tests {
     use super::*;
     use std::path::Path;
 
-    const REFERENCE_SHA256: &str =
-        "17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247";
-
     fn repo_root() -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
@@ -618,6 +615,12 @@ mod tests {
 
     fn fixtures_dir() -> std::path::PathBuf {
         repo_root().join("tests/fixtures")
+    }
+
+    /// The committed reference container every byte-exact case compares
+    /// against. The digest of those bytes is never re-typed here.
+    fn reference_wem() -> Vec<u8> {
+        std::fs::read(fixtures_dir().join("reference.wem")).expect("reference.wem reads")
     }
 
     /// Import the module under test (0.25 test pattern: wrap_pymodule).
@@ -823,6 +826,8 @@ for bad_geometry in ("6", None, 6.5):
         pass
     else:
         raise AssertionError(bad_geometry)
+# A profile name is not a selection: the literal is the input under
+# rejection, not a way to mean "the 6ch profile".
 for bad_profile in (2013, 6.5, None, v, "wwise2013-6ch-44100"):
     try:
         m.Encoder(bad_profile)
@@ -850,7 +855,7 @@ for bad_profile in (2013, 6.5, None, v, "wwise2013-6ch-44100"):
             globals.set_item("rate", rate).unwrap();
             globals.set_item("channels", channels as i64).unwrap();
             globals.set_item("selection", selection_object(&m)).unwrap();
-            globals.set_item("expected_sha", REFERENCE_SHA256).unwrap();
+            globals.set_item("expected_bytes", reference_wem()).unwrap();
             py.run(
                 c_str!(
                     r#"
@@ -863,7 +868,7 @@ rows = [
     for c in range(channels)
 ]
 by_selection = m.Encoder(selection).encode_pcm(rate, rows)
-assert by_selection.sha256() == expected_sha, by_selection.sha256()
+assert bytes(by_selection.data) == expected_bytes, by_selection.sha256()
 assert by_selection.audio_packets == 205, by_selection.audio_packets
 assert by_selection.pcm_frames == frames, by_selection.pcm_frames
 assert by_selection.channels == channels, by_selection.channels
@@ -871,7 +876,7 @@ assert by_selection.metadata_source == (
     "profile:" + str(channels) + "ch/" + str(rate) + "Hz/2013"
 ), by_selection.metadata_source
 packed = m.Encoder(selection).encode_pcm16_interleaved(rate, channels, raw)
-assert packed.sha256() == expected_sha, packed.sha256()
+assert bytes(packed.data) == expected_bytes, packed.sha256()
 assert bytes(packed.data) == bytes(by_selection.data)
 "#
                 ),
@@ -893,7 +898,7 @@ assert bytes(packed.data) == bytes(by_selection.data)
             globals.set_item("rate", rate).unwrap();
             globals.set_item("channels", channels as i64).unwrap();
             globals.set_item("frames", frames as i64).unwrap();
-            globals.set_item("expected_sha", REFERENCE_SHA256).unwrap();
+            globals.set_item("expected_bytes", reference_wem()).unwrap();
             py.run(
                 c_str!(
                     r#"
@@ -906,7 +911,7 @@ for i in range(len(cuts) - 1):
     lo, hi = cuts[i] * step, cuts[i + 1] * step
     packets.extend(session.push(raw[lo:hi]))
 complete = session.finish()
-assert complete.sha256 == expected_sha, complete.sha256
+assert bytes(complete.bytes) == expected_bytes, complete.sha256
 assert complete.total_len == len(bytes(complete.bytes))
 assert [p.seq for p in packets] == list(range(len(packets))), "seq must be 0..n-1"
 assert session.pcm_frames == frames, session.pcm_frames
@@ -976,7 +981,7 @@ m.Encoder(m.WwiseProfile(v, 2, 48000))
             globals.set_item("rate", rate).unwrap();
             globals.set_item("channels", channels as i64).unwrap();
             globals.set_item("selection", selection_object(&m)).unwrap();
-            globals.set_item("expected_sha", REFERENCE_SHA256).unwrap();
+            globals.set_item("expected_bytes", reference_wem()).unwrap();
             py.run(
                 c_str!(
                     r#"
@@ -989,7 +994,7 @@ rows = [
     for c in range(channels)
 ]
 res = m.Encoder(selection).encode_pcm(rate, rows)
-assert res.sha256() == expected_sha, res.sha256()
+assert bytes(res.data) == expected_bytes, res.sha256()
 assert len(bytes(res.data)) == res.bytes_out
 assert res.audio_packets == 205, res.audio_packets
 assert res.short_packets == 77, res.short_packets
@@ -1019,7 +1024,7 @@ assert res.metadata_source == (
             globals.set_item("rate", rate).unwrap();
             globals.set_item("channels", channels as i64).unwrap();
             globals.set_item("selection", selection_object(&m)).unwrap();
-            globals.set_item("expected_sha", REFERENCE_SHA256).unwrap();
+            globals.set_item("expected_bytes", reference_wem()).unwrap();
             py.run(
                 c_str!(
                     r#"
@@ -1032,7 +1037,7 @@ rows_flat = [vals[f * channels + c]
 cm_bytes = b''.join(struct.pack('<h', v) for v in rows_flat)
 mv = memoryview(cm_bytes).cast('h', [channels, frames])
 res = m.Encoder(selection).encode_pcm(rate, mv)
-assert res.sha256() == expected_sha, res.sha256()
+assert bytes(res.data) == expected_bytes, res.sha256()
 assert res.bytes_out == len(bytes(res.data))
 "#
                 ),
@@ -1059,9 +1064,13 @@ assert res.bytes_out == len(bytes(res.data))
                     (rate, channels, PyBytes::new(py, &raw)),
                 )
                 .unwrap();
-            let digest: String = result.call_method0("sha256").unwrap().extract().unwrap();
+            let data: Vec<u8> = result.getattr("data").unwrap().extract().unwrap();
             let pcm_frames: i64 = result.getattr("pcm_frames").unwrap().extract().unwrap();
-            assert_eq!(digest, REFERENCE_SHA256);
+            assert_eq!(
+                data,
+                reference_wem(),
+                "the extension's container bytes must be reference.wem"
+            );
             assert_eq!(pcm_frames, frames as i64);
         });
     }
@@ -1185,10 +1194,10 @@ else:
     #[test]
     fn stream_session_five_uneven_chunks_is_bit_exact() {
         let (raw, _rate, channels, frames) = fixture_pcm_bytes();
-        // The reference WEM's setup packet, parsed by the kernel's own
-        // container reader (the kernel's stream emits it as seq 0).
-        let reference =
-            std::fs::read(fixtures_dir().join("reference.wem")).expect("reference reads");
+        // The committed reference container: its setup packet is what the
+        // kernel's stream emits as seq 0, and its full bytes are what the
+        // case below compares against.
+        let reference = reference_wem();
         let parts = wem_container::load_wem_parts_bytes(&reference).expect("wem parses");
         let setup_packet = parts
             .setup_packet
@@ -1200,7 +1209,9 @@ else:
             globals.set_item("m", m.clone()).unwrap();
             globals.set_item("raw", raw).unwrap();
             globals.set_item("selection", selection_object(&m)).unwrap();
-            globals.set_item("expected_sha", REFERENCE_SHA256).unwrap();
+            globals
+                .set_item("expected_bytes", reference.clone())
+                .unwrap();
             globals.set_item("setup_packet", setup_packet).unwrap();
             globals.set_item("channels", channels as i64).unwrap();
             globals.set_item("frames", frames as i64).unwrap();
@@ -1216,7 +1227,7 @@ for i in range(len(cuts) - 1):
     lo, hi = cuts[i] * step, cuts[i + 1] * step
     packets.extend(session.push(raw[lo:hi]))
 complete = session.finish()
-assert complete.sha256 == expected_sha, complete.sha256
+assert bytes(complete.bytes) == expected_bytes, complete.sha256
 assert complete.total_len == len(bytes(complete.bytes))
 assert [p.seq for p in packets] == list(range(len(packets))), "seq must be 0..n-1"
 assert len(packets) >= 1

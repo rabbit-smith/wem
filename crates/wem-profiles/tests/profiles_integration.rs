@@ -16,23 +16,16 @@ use wem_profiles::psychoacoustics::{
     config::load_short_seed_surface, long_tables::load_long_psy_tables,
     long_variants::load_long_variant, short_tables::load_short_psy_profiles,
 };
-use wem_profiles::selection::{WwiseProfile, WwiseVersion};
 use wem_profiles::{
     assemble_encoder_profile_resources, bundle_for_selection, load_book_table, load_frozen_tables,
-    load_mdct_looks, load_transient_tables, resolve_book_id, ProfileKey, T219_COUNT, T282_COUNT,
-    T97_COUNT,
+    load_mdct_looks, load_transient_tables, resolve_book_id, resolve_wem_profile_selection,
+    ProfileKey, T219_COUNT, T282_COUNT, T97_COUNT,
 };
 use wem_vorbis::setup::{pack_setup, parse_setup};
 
-/// The installed Wwise 2013 6ch/44100 selection.
-fn six_selection() -> WwiseProfile {
-    WwiseProfile::new(WwiseVersion::Wwise2013, 6, 44_100).expect("6ch/44100 selection")
-}
+mod common;
 
-/// The installed Wwise 2013 2ch/48000 selection.
-fn two_channel_selection() -> WwiseProfile {
-    WwiseProfile::new(WwiseVersion::Wwise2013, 2, 48_000).expect("2ch/48000 selection")
-}
+use common::{six_selection, two_channel_selection};
 
 fn bundle() -> wem_profiles::ProfileBundle {
     bundle_for_selection(six_selection()).expect("installed profile resolves")
@@ -45,7 +38,12 @@ fn bundle() -> wem_profiles::ProfileBundle {
 #[test]
 fn verify_all_on_real_assets() {
     let bundle = bundle_for_selection(six_selection()).expect("verify_all passes");
-    assert_eq!(bundle.name(), "wwise2013-6ch-44100");
+    // The bundle's name and key are what the registry resolves for the same
+    // selection: the identity is cross-checked between the two intake paths,
+    // never re-typed as a profile name literal.
+    let installed = resolve_wem_profile_selection(six_selection()).expect("6ch/44100 resolves");
+    assert_eq!(bundle.name(), installed.name());
+    assert_eq!(bundle.key(), installed.key());
     assert_eq!(
         (bundle.key().channels(), bundle.key().sample_rate()),
         (6, 44100)

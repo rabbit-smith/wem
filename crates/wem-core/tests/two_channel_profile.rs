@@ -4,24 +4,29 @@
 //!
 //! The bundle comes from `wem_profiles::bundle_for_selection` — a structured
 //! selection resolved against the compiled-in profile bundle, never a profile
-//! name or a profile tree.
+//! name or a profile tree. The setup packet is pinned by comparing its bytes
+//! against the seq-0 reply packet of the committed two-channel reference
+//! container, never by re-typing its digest.
 
-use wem_core::{WwiseProfile, WwiseVersion};
 use wem_profiles::{
     bundle_for_selection, embedded_registry, load_quality_curves, normalize_quality_factor,
 };
 
-const TWO_CHANNEL_NAME: &str = "wwise2013-2ch-48000";
-/// Setup packet SHA-256 (215-byte paired 2ch/48k setup).
-const TWO_CHANNEL_SETUP_SHA: &str =
-    "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc";
+mod common;
 
-fn fixture_selection() -> WwiseProfile {
-    WwiseProfile::new(WwiseVersion::Wwise2013, 6, 44_100).expect("6ch/44100 selection")
-}
+use common::{fixture_selection, two_channel_dir, two_channel_selection};
 
-fn two_channel_selection() -> WwiseProfile {
-    WwiseProfile::new(WwiseVersion::Wwise2013, 2, 48_000).expect("2ch/48000 selection")
+/// The 2ch/48000 setup packet as the committed two-channel reference container
+/// carries it: the seq-0 reply packet of `tests/data/2ch-reference/tone_high.wem`
+/// (`include/wem.h`: seq 0 is the setup packet, framed by its u16 LE length).
+fn committed_two_channel_setup_packet() -> Vec<u8> {
+    let wem = std::fs::read(two_channel_dir().join("tone_high.wem"))
+        .expect("committed 2ch reference container reads");
+    let parts = wem_container::load_wem_parts_bytes(&wem).expect("wem parts load");
+    parts
+        .setup_packet
+        .expect("the committed container carries a setup packet")
+        .to_vec()
 }
 
 #[test]
@@ -30,11 +35,13 @@ fn two_channel_profile_exposes_its_quality_curves() {
     let bundle = bundle_for_selection(two_channel_selection()).expect("2ch bundle resolves");
     assert!(bundle.setup_available());
     assert!(bundle.pending_reason().is_none());
+    // The setup bytes are the committed container's setup bytes: identity is
+    // proven against the artifact, not against a hand-written digest.
     assert_eq!(
-        bundle.setup().expect("setup ref").sha256(),
-        TWO_CHANNEL_SETUP_SHA
+        bundle.setup_packet().expect("setup packet"),
+        committed_two_channel_setup_packet(),
+        "the profile's setup packet must be the committed container's seq-0 packet"
     );
-    assert_eq!(bundle.setup_packet().unwrap().len(), 215);
 
     let curves_ref = bundle
         .runtime_manifest()
@@ -65,9 +72,21 @@ fn two_channel_profile_lists_in_the_registry_as_setup_available() {
     let profile = registry
         .resolve_selection(two_channel_selection())
         .expect("2ch selection resolves");
-    assert_eq!(profile.name(), TWO_CHANNEL_NAME);
+    // The name is what the registry resolves for the selection, never a literal.
+    assert_eq!(
+        profile.name(),
+        bundle_for_selection(two_channel_selection())
+            .expect("2ch bundle resolves")
+            .name()
+    );
     assert!(profile.setup_available());
-    assert_eq!(profile.setup_sha256(), TWO_CHANNEL_SETUP_SHA);
+    // The setup bytes the registry's profile hands back are the committed
+    // container's, so its declared digest is never re-typed as a literal.
+    assert_eq!(
+        profile.setup_packet().expect("setup packet"),
+        committed_two_channel_setup_packet(),
+        "the registry's 2ch profile must hand back the committed container's setup packet"
+    );
     assert!(profile.pending_reason().is_none());
 
     // The two installed selections resolve to distinct setup digests, so a

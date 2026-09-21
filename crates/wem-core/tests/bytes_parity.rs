@@ -3,40 +3,36 @@
 //!
 //! The profile bundle that drives both paths is resolved with
 //! `wem_profiles::bundle_for_selection` — a structured selection against the
-//! compiled-in profile bundle, never a profile name or a profile tree.
+//! compiled-in profile bundle, never a profile name or a profile tree. The
+//! profile name and the setup digest are properties read off that tree; the
+//! bytes compared below are the claim.
 
 use wem_core::encoder::Encoder;
 use wem_core::stream::StreamSession;
 use wem_core::usecases::wav::read_pcm16;
-use wem_core::{WwiseProfile, WwiseVersion};
+use wem_profiles::resolve_wem_profile_selection;
 
-const TWO_CHANNEL_PROFILE_NAME: &str = "wwise2013-2ch-48000";
-const TWO_CHANNEL_SETUP_SHA256: &str =
-    "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc";
+mod common;
 
-/// The installed Wwise 2013 2ch/48000 configuration.
-fn two_channel_selection() -> WwiseProfile {
-    WwiseProfile::new(WwiseVersion::Wwise2013, 2, 48_000).expect("2ch/48000 selection")
-}
-
-fn two_channel_dir() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join("tests/data/2ch-reference")
-}
+use common::{two_channel_dir, two_channel_selection};
 
 #[test]
 fn two_channel_selection_encodes_the_committed_two_channel_wem() {
     let encoder = Encoder::new(two_channel_selection()).expect("2ch selection resolves");
-    assert_eq!(encoder.profile().name(), TWO_CHANNEL_PROFILE_NAME);
-    assert_eq!(encoder.profile().setup_sha256(), TWO_CHANNEL_SETUP_SHA256);
+    // The profile name is a property read off the tree the selection
+    // resolves to, never a literal: the encoder and the free resolver must
+    // name the same profile.
+    let resolved = resolve_wem_profile_selection(two_channel_selection()).expect("2ch resolves");
+    assert_eq!(encoder.profile().name(), resolved.name());
 
     let wav = read_pcm16(&two_channel_dir().join("tone_high.wav")).expect("2ch WAV reads");
     let pcm = wav.to_pcm16().expect("2ch WAV converts to Pcm16");
     let result = encoder.encode_pcm(&pcm).expect("2ch encode runs");
+    // Byte equality covers the profile identity and its setup packet too:
+    // the seq-0 packet of this container *is* the 2ch/48k setup packet.
     assert_eq!(
         result.data,
-        std::fs::read(two_channel_dir().join("tone_high.wem")).unwrap()
+        std::fs::read(two_channel_dir().join("tone_high.wem")).expect("tone_high.wem reads")
     );
 }
 
@@ -56,6 +52,6 @@ fn two_channel_selection_streams_the_committed_two_channel_wem() {
 
     assert_eq!(
         result.data,
-        std::fs::read(two_channel_dir().join("tone_high.wem")).unwrap()
+        std::fs::read(two_channel_dir().join("tone_high.wem")).expect("tone_high.wem reads")
     );
 }

@@ -18,11 +18,13 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use wem_profiles::{
-    assemble_encoder_profile_resources, bundle_for_selection, WwiseProfile, WwiseVersion,
-};
+use wem_profiles::{assemble_encoder_profile_resources, bundle_for_selection};
 use wem_vorbis::floor_fit::floor1_fit_wwise;
 use wem_vorbis::packet_encoder::pack_block_packet_details;
+
+mod common;
+
+use common::{fixture_selection, repo_root};
 
 const SCHEMA: &str = "wwise-wem.stage-golden.v1";
 
@@ -30,20 +32,8 @@ const SCHEMA: &str = "wwise-wem.stage-golden.v1";
 /// resolved from a structured selection against the compiled-in profile
 /// bundle (never a profile name or a profile tree).
 fn encoder_resources() -> wem_profiles::EncoderProfileResources {
-    let selection =
-        WwiseProfile::new(WwiseVersion::Wwise2013, 6, 44_100).expect("6ch/44100 selection");
-    let bundle = bundle_for_selection(selection).expect("installed 6ch profile resolves");
+    let bundle = bundle_for_selection(fixture_selection()).expect("installed 6ch profile resolves");
     assemble_encoder_profile_resources(&bundle, None, None).expect("assembly succeeds")
-}
-
-fn repo_root() -> PathBuf {
-    // crates/wem-vorbis -> repo root (two levels up from the manifest dir).
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("crates dir")
-        .parent()
-        .expect("repo root")
-        .to_path_buf()
 }
 
 fn stages_dir() -> PathBuf {
@@ -199,7 +189,16 @@ fn index_schema_is_current() {
         serde_json::from_str(&raw).expect("index parses")
     };
     assert_eq!(index["schema"].as_str(), Some(SCHEMA));
-    assert_eq!(index["profile"].as_str(), Some("wwise2013-6ch-44100"));
+    // The recorded profile name is the name the fixture selection resolves
+    // to: read off the tree, never typed into the test.
+    assert_eq!(
+        index["profile"].as_str(),
+        Some(
+            bundle_for_selection(fixture_selection())
+                .expect("installed 6ch profile resolves")
+                .name()
+        )
+    );
     assert_eq!(index["audio_packets"].as_u64(), Some(205));
 }
 
