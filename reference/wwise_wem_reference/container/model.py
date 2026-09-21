@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from wwise_wem.profiles.bundle import WWISE_GENERATION_LABEL
 from wwise_wem.profiles.model import EncoderProfile
 
 
@@ -38,6 +39,10 @@ class ContainerPlan:
 
     @classmethod
     def from_profile(cls, profile: EncoderProfile) -> "ContainerPlan":
+        # The provenance label names the selected configuration, not the
+        # bundle it happens to live in: it mirrors the kernel's
+        # `ContainerPlan::from_profile`, so the oracle and the kernel report
+        # the same `metadata_source` for the same selection.
         return cls(
             fmt=profile.container_metadata.to_fmt_dict(
                 frame_count=profile.container_metadata.dwTotalPCMFrames
@@ -45,7 +50,10 @@ class ContainerPlan:
             endian=profile.endian,
             seek_table=profile.seek_table,
             extra_chunks=profile.extra_chunks,
-            metadata_source=f"profile:{profile.name}",
+            metadata_source=(
+                f"profile:{profile.channels}ch/{profile.sample_rate}Hz/"
+                f"{WWISE_GENERATION_LABEL}"
+            ),
         )
 
 

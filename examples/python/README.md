@@ -7,6 +7,7 @@ pip install -e .
 python3 examples/python/encode_wav.py tests/fixtures/input.wav out.wem
 ```
 
-`encode` reads the RIFF header and automatically selects an installed profile
-for the WAV geometry. Pass `--profile wwise2013-2ch-48000` only when the input
-geometry is already known and you want to assert the choice.
+`encode` reads the RIFF header and selects the installed configuration for that
+geometry. Pass `--wwise-version 2013` (or `2013.2`) only when you want to name
+the Wwise generation explicitly; the geometry still comes from the input, and
+the two together are the whole selection.
