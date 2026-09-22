@@ -1,8 +1,8 @@
 """The vendored geometry materializer reproduces every registered
-psychoacoustic surface byte-for-byte (the round pipeline lock).
+psychoacoustic surface byte-for-byte (pipeline lock).
 
 The materializer is the per-instruction port of the paired build's init-time
-geometry builder (analysis_geometry_builder on the paired build); this test checks that
+geometry builder of the paired build; this test checks that
 the profile data and the builder port have not drifted apart, and fails loudly
 when they have. The kernel-side check (Rust == this builder) lives in
 crates/wem-analysis/tests/psy_geom*_parity.rs.

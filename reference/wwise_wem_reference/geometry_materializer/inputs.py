@@ -1,11 +1,10 @@
-"""Vendored geometry materializer (the round promotion of the corpus builder).
+"""Vendored geometry materializer: the SHORT/LONG analysis-geometry builder.
 
-Source of truth: corpus/paired-build/the round (per-instruction port of
-analysis_geometry_builder on the paired build, carrier the paired build). Inputs come
-from data/materializer_inputs.json (gen_r20 extracts them); 6ch outputs are
+Per-operation port of the paired build's geometry builder. Inputs come from
+data/materializer_inputs.json, extracted from the paired build; 6ch outputs are
 locked against the registered profile by tests/parity/
-test_geometry_materializer_parity.py. Keep numerics byte-identical to
-the corpus; regenerate, do not retype.
+test_geometry_materializer_parity.py. Keep numerics byte-identical to the
+extracted inputs; regenerate, do not retype.
 """
 
 import json
@@ -17,7 +16,7 @@ try:
     )
 except (OSError, ValueError) as exc:  # package data is a build artifact: fail loud, never silent
     raise RuntimeError(
-        "materializer_inputs.json missing/corrupt; regenerate via corpus gen_r20"
+        "materializer_inputs.json missing/corrupt; regenerate from the paired build"
     ) from exc
 
 

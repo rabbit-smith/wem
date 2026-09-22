@@ -17,8 +17,8 @@ def build(d, key, geo):
         ]
         for field in ("field_19_curve", "interval_u32"):
             out[f"variants[{mode}].{field}"] = base[f"analysis.{field}"]
-    # 100161a1..10016486: same 87-segment ATH writer and f32 tail.
+    # Same 87-segment ATH writer and f32 tail as SHORT.
     out["seed.base_curve"] = [short_seed.f32_bits(v) for v in short_seed.ath(1024, rate)]
-    # 1001671f..10016785: bin log-coordinate, converted toward zero.
+    # Bin log-coordinate, converted toward zero.
     out["seed.group_labels_u32"] = [v & 0xFFFFFFFF for v in short_seed.octave(1024, rate)]
     return out

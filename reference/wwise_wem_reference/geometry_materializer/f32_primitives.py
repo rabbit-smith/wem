@@ -1,8 +1,8 @@
-"""Deterministic f32 / x87 primitives for the the round builder port.
+"""Deterministic f32 / x87 primitives for the analysis-geometry builder.
 
 The paired 2013.2 build is 32-bit x86. All surface computation goes through the
-x87 FPU (double) with explicit f32 re-rounds at the points the disassembly marks
-(fstps / calls to the round helper the build's code). To reproduce registered bytes
+x87 FPU (double) with explicit f32 re-rounds wherever a segment ends in an x87
+store or in a call to the build's round helper. To reproduce registered bytes
 exactly, every such re-round must be modeled with Python struct '<f' (IEEE-754
 round-to-nearest-even), matching the x86 default.
 
@@ -29,43 +29,40 @@ def f64(x: float) -> float:
     return to_float(x)
 
 
-# ---- the paired-build x87 constants (file offset -> value), read from the DLL
+# ---- the paired-build x87 constants (name -> value)
 # These are the literals the builders reference. Kept here so a ported builder
-# reads the SAME constants the C code reads (no second source).
-#
-# file=VA-the build's code for the read-only data region (verified against 127.0/0.5/pi).
-# VA              -> (file_off, value, label)
+# reads the SAME constants the paired build reads (no second source).
 F64_C = {
-    "C_127": (0x25168, 127.0),  # the build's code
-    "PI_PREC": (0x193BC0, 3.1415927410125732),  # the build's code  "Vorbis pi" (f32 pi as f64)
-    "HALF": (0x25180, 0.5),  # the build's code
-    "LOG_L": (0x193BB8, 7.177114298428933e-07),  # the build's code  wwise_float_log L
-    "LOG_M": (0x193BB0, 764.6162109375),  # the build's code  wwise_float_log M
-    "WWISE_LOG_ADD": (0x19BDA8, 0.345),  # the build's code
-    "FOUR": (0x189C68, 4.0),  # the build's code
-    "F15": (0x25170, 15.0),  # the build's code
-    "F00625": (0x25190, 0.0625),  # the build's code
-    "F8": (0x25148, 8.0),  # the build's code
-    "F2": (0x25160, 2.0),  # the build's code
-    "F02": (0x189C80, 0.2),  # the build's code  (fmull in the build's code)
-    "F07": (0x189C98, 0.7),  # the build's code  (fmull in the build's code)
+    "C_127": 127.0,
+    "PI_PREC": 3.1415927410125732,  # "Vorbis pi" (the f32 pi widened to f64)
+    "HALF": 0.5,
+    "LOG_L": 7.177114298428933e-07,  # wwise_float_log L
+    "LOG_M": 764.6162109375,  # wwise_float_log M
+    "WWISE_LOG_ADD": 0.345,
+    "FOUR": 4.0,
+    "F15": 15.0,
+    "F00625": 0.0625,
+    "F8": 8.0,
+    "F2": 2.0,
+    "F02": 0.2,  # multiplies in the seed-curve builder
+    "F07": 0.7,  # multiplies in the seed-curve builder
 }
 
 # f32 constants
 F32_C = {
-    "NEG130": -130.0,  # f32@the build's code (peak floor, specmax builder the build's code)
-    "POS140": 140.0,  # f32@the build's code (seed curve level distance)
-    "DECAY045": 0.45,  # f64@the build's code (specmax decay)
-    "HALF_F32": 0.5,  # f32@the build's code
-    "NEG1": -1.0,  # f32@the build's code
+    "NEG130": -130.0,  # specmax peak floor
+    "POS140": 140.0,  # seed curve level distance
+    "DECAY045": 0.45,  # specmax decay (stored as f64 in the paired build)
+    "HALF_F32": 0.5,
+    "NEG1": -1.0,
 }
 
-# Static sub-band geometry LUTs (read as u32 by the build's code; stored into ctx+0x28..)
-LUT50 = [2, 4, 6, 9, 13, 17, 22, 12, 8, 3, 2, 1]  # @ the build's code (12 u32)
-LUT80 = [4, 5, 6, 8, 8, 8, 8, 4, 4, 3, 2, 4]  # @ the build's code (12 u32), sum=64=n/2
+# Static sub-band geometry LUTs (consumed as u32 and stored into the seed context)
+LUT50 = [2, 4, 6, 9, 13, 17, 22, 12, 8, 3, 2, 1]  # 12 u32
+LUT80 = [4, 5, 6, 8, 8, 8, 8, 4, 4, 3, 2, 4]  # 12 u32, sum=64=n/2
 
 
-# NOTE (the round beat 3, verified against r6-d990-master §S3/§S6 + disasm):
+# NOTE (verified against the paired build's registered surfaces):
 # The paired 2013.2 build's wwise_float_log is a BIT-MANIPULATION trick, not
 # math.log(x). It reads the f32 bit pattern (sign cleared), treats it as a large
 # integer/float, then *LOG_L - LOG_M. This yields ~6.0206*log2(x).
@@ -78,24 +75,24 @@ LUT80 = [4, 5, 6, 8, 8, 8, 8, 4, 4, 3, 2, 4]  # @ the build's code (12 u32), sum
 def wwise_float_log(x: float) -> float:
     """Core wwise_float_log(x) = f32( float(absbits(f32(x))) * LOG_L - LOG_M ).
 
-    This is the bit-manipulation log used by the D990 S3 / Pass-B paths
-    (r6-d990-master §S3/§S6). It does NOT include the +0.345 (WWISE_LOG_ADD);
-    that is added at the call site AFTER this f32 rounding (see offset_for_n).
+    This is the bit-manipulation log used by the seed and analysis paths. It does
+    NOT include the +0.345 (WWISE_LOG_ADD); that is added at the call site AFTER
+    this f32 rounding (see offset_for_n).
     """
-    L = F64_C["LOG_L"][1]
-    M = F64_C["LOG_M"][1]
+    L = F64_C["LOG_L"]
+    M = F64_C["LOG_M"]
     bits = f32_bits(f32(x)) & 0x7FFFFFFF  # clear sign bit
     return f32(to_float(bits) * L - M)
 
 
 def offset_for_n(n: int) -> float:
-    """S3 offset construction (r6-d990-master §S3), byte-exact:
+    """Seed/analysis offset construction, byte-exact:
         offset = f32( f32(float(absbits(f32(4.0/n))) * LOG_L - LOG_M) + 0.345 )
-    The 4.0 numerator is read from f64@the build's code. Two f32 roundings: one in
-    wwise_float_log, one after adding WWISE_LOG_ADD.
+    The 4.0 numerator is the paired build's f64 constant. Two f32 roundings: one
+    in wwise_float_log, one after adding WWISE_LOG_ADD.
     """
-    val = f32(F64_C["FOUR"][1] / to_float(n))
-    ADD = F64_C["WWISE_LOG_ADD"][1]
+    val = f32(F64_C["FOUR"] / to_float(n))
+    ADD = F64_C["WWISE_LOG_ADD"]
     return f32(wwise_float_log(val) + ADD)
 
 
@@ -136,9 +133,18 @@ def add80(left, right):
     return _round80(Fraction(left) + Fraction(right))
 
 
-# Supplied crt90/_ciatan.txt: SSE2 callee the build's code..10039666.
-# Constants read from work/msvcr90.dll using its OWN PE section table:
-# the corresponding locations..10087027 -> file offset 0x85560.
+# Table-relative origins for the three extracted read-only constant regions.
+# Every coefficient lookup below is written `TABLE + byte_offset`, where the
+# offset counts from the first byte of that region's blob (`_CIATAN_DATA`,
+# `_CIEXP_DATA`, `_CILOG_DATA`); the names keep the two same-shaped exp/log
+# regions apart at the call sites. These are table origins, not addresses.
+CIATAN = 0
+CIEXP = 0
+CILOG = 0
+
+# Supplied CRT _CIatan: the SSE2 value implementation the paired build links.
+# Constants are extracted from the supplied runtime library and indexed by their
+# offset within that region (see the table origins above).
 _CIATAN_DATA = bytes.fromhex(
     "e2652f227f2b7a3c075c143326a6813cbdcbf07a8807703c075c143326a6913c"
     "4fbb610567acdd3f182d4454fb21e93f9bf681d20b73ef3f182d4454fb21f93f"
@@ -155,75 +161,74 @@ def ciatan(x):
 
     Models all numeric branches, including signed zero, subnormal, infinity,
     and NaN. Does not emulate FPU status flags or the wrapper's stack save.
-    This is the supplied DLL implementation, not proof of another CRT version.
+    This is the supplied runtime's implementation, not proof of another CRT
+    version.
     """
-    x = to_float(x)  # the build's code: wrapper fstpl.
+    x = to_float(x)  # wrapper fstpl.
     bits = struct.unpack("<Q", struct.pack("<d", x))[0]
     high = (bits >> 32) & 0x7FFFFFFF
     negative = bits >> 63
 
-    def c(va):
-        return struct.unpack_from("<d", _CIATAN_DATA, va - the build's code)[0]
+    def c(off):
+        return struct.unpack_from("<d", _CIATAN_DATA, off)[0]
 
-    # the build's code..100393ee / 10039538..100395f1: large, NaN, tiny.
+    # Large, NaN and tiny argument classes.
     if high > 0x440FFFFF:
         if (bits & 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000:
             return x
-        return c(the build's code if negative else the build's code)
+        return c(CIATAN + 0x48 if negative else CIATAN + 0x40)
     if high <= 0x3E3FFFFF:
         return x
     region = -1
     if high > 0x3FDBFFFF:
-        x = abs(x)  # the build's code..100394f3: fabs and fstpl.
+        x = abs(x)  # fabs and fstpl.
         if high <= 0x3FF2FFFF:
             if high <= 0x3FE5FFFF:
-                # the build's code..1003952b, preserve each SSE2 operation.
+                # Preserve each SSE2 operation, in order.
                 numerator = x + x
-                denominator = x + c(the build's code)
-                numerator = numerator - c(the build's code)
+                denominator = x + c(CIATAN + 0x58)
+                numerator = numerator - c(CIATAN + 0x50)
                 x = numerator / denominator
                 region = 0
             else:
-                # the build's code..1003963d.
-                x = (x - c(the build's code)) / (x + c(the build's code))
+                x = (x - c(CIATAN + 0x50)) / (x + c(CIATAN + 0x50))
                 region = 1
         elif high <= 0x40037FFF:
-            # the build's code..100395a1.
-            denominator = x * c(the build's code)
-            numerator = x - c(the build's code)
-            denominator = denominator + c(the build's code)
+            denominator = x * c(CIATAN + 0x60)
+            numerator = x - c(CIATAN + 0x60)
+            denominator = denominator + c(CIATAN + 0x50)
             x = numerator / denominator
             region = 2
         else:
-            x = c(the build's code) / x  # the build's code..10039661.
+            x = c(CIATAN + 0x68) / x
             region = 3
-    # the build's code..10039449: even polynomial in x^4, times x^2.
+    # Even polynomial in x^4, times x^2.
     z = x * x
     w = z * z
-    even = c(the build's code) * w
-    for va in range(the build's code, the build's code, 8):
-        even = even + c(va)
-        if va != the build's code:
+    even = c(CIATAN + 0x70) * w
+    for off in range(0x78, 0xA0, 8):
+        even = even + c(CIATAN + off)
+        if off != 0x98:
             even = even * w
     even = even * z
-    # the build's code..10039485: odd polynomial; subtraction signs are literal.
-    odd = c(the build's code) * w
-    for va in range(the build's code, the build's code, 8):
-        odd = odd - c(va)
-        if va != the build's code:
+    # Odd polynomial; subtraction signs are literal.
+    odd = c(CIATAN + 0xA0) * w
+    for off in range(0xA8, 0xC8, 8):
+        odd = odd - c(CIATAN + off)
+        if off != 0xC0:
             odd = odd * w
     odd = w * odd
-    correction = (even + odd) * x  # the build's code..1003948d.
+    correction = (even + odd) * x
     if region == -1:
-        return x - correction  # the build's code..10039619.
-    # the build's code..100394cc: low part, reduced argument, high part, sign.
-    correction = correction - c(the build's code + 8 * region)
+        return x - correction
+    # Low part, reduced argument, high part, sign.
+    correction = correction - c(CIATAN + 8 * region)
     correction = correction - x
-    result = c(the build's code + 8 * region) - correction
+    result = c(CIATAN + 0x20 + 8 * region) - correction
     return -result if negative else result
 
 
-# R16: constants from the same read-only CRT carrier as _CIATAN_DATA.
+# Constants from the same read-only CRT region as _CIATAN_DATA.
 _CILOG_DATA = bytes.fromhex(
     "000000000000f03f000000000000f0bf000000000000a0410000000000003043"
     "6c6f673130000000000000000000f0bf0000000000005043362bf111f3fe593d"
@@ -447,34 +452,34 @@ def _from_bits64(bits):
 
 
 def ciexp(x):
-    """Supplied _CIexp -> 41a40 -> fb70, default CRT value semantics.
+    """Supplied _CIexp, default CRT value semantics.
 
     Both wrapper fstpl stores round to binary64. The callee uses SSE2;
     its x87 loads/stores and fisttp carry already-integral binary64 values.
     No host transcendental, FPU flags, errno or matherr callback execution.
     """
-    x = to_float(x)  # 1000c23a; return store is 1000c264.
+    x = to_float(x)  # wrapper fstpl; the return store is the same shape.
     bits = _bits64(x)
     exponent = (bits >> 52) & 0x7FF
 
-    def c(va):
-        return struct.unpack_from("<d", _CIEXP_DATA, va - the build's code)[0]
+    def c(off):
+        return struct.unpack_from("<d", _CIEXP_DATA, off)[0]
 
     if (bits & 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000:
-        # 15ce0 class 2; fcc0 default callback returns argument, fld quiets it.
+        # Default callback class: returns the argument, the load quiets it.
         return _from_bits64(bits | 0x8000000000000)
-    if exponent < 0x3C9:  # 1000fe38: 1+x, including both zeros/subnormals
-        return x + c(the build's code)
+    if exponent < 0x3C9:  # 1+x, including both zeros and subnormals
+        return x + c(CIEXP + 0x00)
     if exponent > 0x408:
-        if bits == 0xFFF0000000000000:  # 1000fd0c..fd16: fldz
+        if bits == 0xFFF0000000000000:  # -inf: fldz
             return 0.0
-        if exponent == 0x7FF:  # +inf -> 1000fe38
-            return x + c(the build's code)
-        # fd2f/ff0b: default error result from overflow/underflow multiply.
-        huge_or_tiny = c(the build's code if bits >> 63 else the build's code)
+        if exponent == 0x7FF:  # +inf takes the same 1+x path
+            return x + c(CIEXP + 0x00)
+        # Default error result from the overflow/underflow multiply.
+        huge_or_tiny = c(CIEXP + 0x08 if bits >> 63 else CIEXP + 0x10)
         return huge_or_tiny * huge_or_tiny
-    # fbc8 -> 5a770: bitwise round to nearest, ties AWAY from zero.
-    scaled = x * c(the build's code)
+    # Bitwise round to nearest, ties AWAY from zero.
+    scaled = x * c(CIEXP + 0x30)
     scaled_bits = _bits64(scaled)
     e = ((scaled_bits >> 52) & 0x7FF) - 0x3FF
     if e < -1:
@@ -486,39 +491,39 @@ def ciexp(x):
         rounded = _from_bits64((scaled_bits + (1 << (51 - e))) & ~mask)
     else:
         rounded = scaled
-    # fbd5 fstl -> xmm1; fbe3 fisttp consumes the same integral value.
+    # The fstl result and the fisttp consumer see the same integral value.
     k = to_int(rounded)
-    v0 = c(the build's code) * rounded
-    v1 = rounded * c(the build's code)
+    v0 = c(CIEXP + 0x40) * rounded
+    v1 = rounded * c(CIEXP + 0x48)
     v0 = v0 + x
     v0 = v0 + v1
     j = 2 * (k & 127)
-    v1 = c(the build's code) * v0
-    v1 = v1 + c(the build's code)
+    v1 = c(CIEXP + 0x58) * v0
+    v1 = v1 + c(CIEXP + 0x50)
     v2 = v0 * v0
-    table_bits = _bits64(c(the build's code + (j + 15) * 8))
+    table_bits = _bits64(c(CIEXP + 0x30 + (j + 15) * 8))
     scale_bits = (table_bits + ((k & 0xFFFFFFFF) << 45)) & 0xFFFFFFFFFFFFFFFF
-    v3 = c(the build's code + (j + 14) * 8)
+    v3 = c(CIEXP + 0x30 + (j + 14) * 8)
     v1 = v1 * v2
     v3 = v3 + v0
     v2 = v2 * v2
-    v0 = v0 * c(the build's code)
-    v0 = v0 + c(the build's code)
+    v0 = v0 * c(CIEXP + 0x68)
+    v0 = v0 + c(CIEXP + 0x60)
     v1 = v1 + v3
     v0 = v0 * v2
     v1 = v1 + v0
-    if exponent <= 0x407:  # fc91..fcad
+    if exponent <= 0x407:  # normal range: scale by the table word
         scale = _from_bits64(scale_bits)
         v1 = v1 * scale
         return v1 + scale
-    if k >= 0:  # fde0..fe28: split overflow scaling
+    if k >= 0:  # split overflow scaling
         scale = _from_bits64(scale_bits - (0x3F100000 << 32))
         v1 = v1 * scale
         v1 = v1 + scale
-        return v1 * c(the build's code)
-    # fd88..fdca: split underflow scaling; fe58 compensates before store.
+        return v1 * c(CIEXP + 0x18)
+    # Split underflow scaling; the compensation runs before the store.
     scale = _from_bits64(scale_bits + (0x3FE00000 << 32))
-    one = c(the build's code)
+    one = c(CIEXP + 0x00)
     v1 = v1 * scale
     v0 = scale + v1
     if v0 < one:
@@ -528,132 +533,132 @@ def ciexp(x):
         v2 = one - v4
         v0 = v0 + v2
         v0 = v0 + v1
-        v0 = v0 + v4  # fe86/fe8c binary64 spill/reload
+        v0 = v0 + v4  # binary64 spill/reload
         v0 = v0 - one
-    return v0 * c(the build's code)
+    return v0 * c(CIEXP + 0x08)
 
 
 def cilog(x):
     """Supplied _CIlog value path, default rounding and no matherr override.
 
-    Wrapper fstpl at c2be/c2e8 bounds SSE2 binary64 operations. There are
-    no extended-precision arithmetic instructions inside this callee.
-    Status flags, errno and user-installed CRT callbacks are not emulated.
+    The wrapper fstpl stores bound SSE2 binary64 operations. There are no
+    extended-precision arithmetic instructions inside this callee. Status
+    flags, errno and user-installed CRT callbacks are not emulated.
     """
     x = to_float(x)
     bits = _bits64(x)
     high = bits >> 32
 
-    def c(va):
-        return struct.unpack_from("<d", _CILOG_DATA, va - the build's code)[0]
+    def c(off):
+        return struct.unpack_from("<d", _CILOG_DATA, off)[0]
 
     if ((high - 0x3FEE0000) & 0xFFFFFFFF) <= 0x308FF:
-        if bits == 0x3FF0000000000000:  # 10049998: fldz
+        if bits == 0x3FF0000000000000:  # fldz
             return 0.0
-        v0 = x  # 1004977a
-        v0 = v0 - c(the build's code)  # 1004977f
-        v4 = c(the build's code)  # 10049787
-        v1 = c(the build's code)  # 1004978f
-        v3 = v0  # 10049797
-        v2 = v0  # 1004979b
-        v5 = c(the build's code)  # 1004979f
-        v6 = c(the build's code)  # 100497a7
-        v3 = v3 * v0  # 100497af
-        v1 = v1 * v0  # 100497b3
-        v1 = v1 + c(the build's code)  # 100497b7
-        v4 = v4 * v3  # 100497bf
-        v2 = v2 * v3  # 100497c3
-        v5 = v5 * v3  # 100497c7
-        v3 = v3 * c(the build's code)  # 100497cb
-        v1 = v1 + v4  # 100497d3
-        v4 = c(the build's code)  # 100497d7
-        v4 = v4 * v2  # 100497df
-        v1 = v1 + v4  # 100497e3
-        v4 = c(the build's code)  # 100497e7
-        v4 = v4 * v0  # 100497ef
-        v4 = v4 + c(the build's code)  # 100497f3
-        v1 = v1 * v2  # 100497fb
-        v4 = v4 + v5  # 100497ff
-        v5 = v0  # 10049803
-        v1 = v1 + v4  # 10049807
-        v4 = c(the build's code)  # 1004980b
-        v4 = v4 * v0  # 10049813
-        v4 = v4 + c(the build's code)  # 10049817
-        v1 = v1 * v2  # 1004981f
-        v3 = v3 + v4  # 10049823
-        v4 = v0  # 10049827
-        v1 = v1 + v3  # 1004982b
-        v3 = v0  # 1004982f
-        v1 = v1 * v2  # 10049833
-        v2 = c(the build's code)  # 10049837
-        v2 = v2 * v0  # 1004983f
-        v5 = v5 + v2  # 10049843
-        v5 = v5 - v2  # 10049847
-        v2 = v5  # 1004984b
-        v2 = v2 * v5  # 1004984f
-        v2 = v2 * v6  # 10049853
-        v3 = v3 + v2  # 10049857
-        v4 = v4 - v3  # 1004985b
-        v4 = v4 + v2  # 1004985f
-        v2 = v0  # 10049863
-        v2 = v2 - v5  # 10049867
-        v0 = v0 + v5  # 1004986b
-        v2 = v2 * v6  # 1004986f
-        v0 = v0 * v2  # 10049873
-        v0 = v0 + v4  # 10049877
-        v0 = v0 + v1  # 1004987b
-        v3 = v3 + v0  # 1004987f
+        v0 = x
+        v0 = v0 - c(CILOG + 0x00)
+        v4 = c(CILOG + 0x138)
+        v1 = c(CILOG + 0x130)
+        v3 = v0
+        v2 = v0
+        v5 = c(CILOG + 0x120)
+        v6 = c(CILOG + 0xF0)
+        v3 = v3 * v0
+        v1 = v1 * v0
+        v1 = v1 + c(CILOG + 0x128)
+        v4 = v4 * v3
+        v2 = v2 * v3
+        v5 = v5 * v3
+        v3 = v3 * c(CILOG + 0x108)
+        v1 = v1 + v4
+        v4 = c(CILOG + 0x140)
+        v4 = v4 * v2
+        v1 = v1 + v4
+        v4 = c(CILOG + 0x118)
+        v4 = v4 * v0
+        v4 = v4 + c(CILOG + 0x110)
+        v1 = v1 * v2
+        v4 = v4 + v5
+        v5 = v0
+        v1 = v1 + v4
+        v4 = c(CILOG + 0x100)
+        v4 = v4 * v0
+        v4 = v4 + c(CILOG + 0xF8)
+        v1 = v1 * v2
+        v3 = v3 + v4
+        v4 = v0
+        v1 = v1 + v3
+        v3 = v0
+        v1 = v1 * v2
+        v2 = c(CILOG + 0x10)
+        v2 = v2 * v0
+        v5 = v5 + v2
+        v5 = v5 - v2
+        v2 = v5
+        v2 = v2 * v5
+        v2 = v2 * v6
+        v3 = v3 + v2
+        v4 = v4 - v3
+        v4 = v4 + v2
+        v2 = v0
+        v2 = v2 - v5
+        v0 = v0 + v5
+        v2 = v2 * v6
+        v0 = v0 * v2
+        v0 = v0 + v4
+        v0 = v0 + v1
+        v3 = v3 + v0
         return v3
-    # 10049898..100499d6: classify before normalizing subnormals.
+    # Classify before normalizing subnormals.
     absolute = bits & 0x7FFFFFFFFFFFFFFF
     if absolute == 0:
         return -math.inf  # +/-0: signed reciprocal, default error return
     if absolute > 0x7FF0000000000000:
-        return _from_bits64(bits | 0x8000000000000)  # fld/fst quiets sNaN
+        return _from_bits64(bits | 0x8000000000000)  # the load/store quiets sNaN
     if bits == 0x7FF0000000000000:
         return x
     if bits >> 63:
         return _from_bits64(0xFFF8000000000000)  # SSE invalid indefinite
     if high < 0x100000:
-        bits = (_bits64(x * c(the build's code)) + (0xFCC00000 << 32)) & 0xFFFFFFFFFFFFFFFF
+        bits = (_bits64(x * c(CILOG + 0x18)) + (0xFCC00000 << 32)) & 0xFFFFFFFFFFFFFFFF
         high = bits >> 32
-    # 10049651..100496e9: integer exponent/index and split table reduction.
+    # Integer exponent/index and split table reduction.
     delta = (high - 0x3FE60000) & 0xFFFFFFFF
     index = (delta >> 13) & 0x7F
     signed = delta if delta < 0x80000000 else delta - 0x100000000
     v2 = to_float(signed >> 20)
     v1 = _from_bits64(bits - ((delta & 0xFFF00000) << 32))
-    v0 = c(the build's code)
-    v3 = c(the build's code)
-    v6 = c(the build's code)
-    at = the build's code + (index + 0x89) * 16
+    v0 = c(CILOG + 0xE8)
+    v3 = c(CILOG + 0xB8)
+    v6 = c(CILOG + 0xD8)
+    at = CILOG + 0xB8 + (index + 0x89) * 16
     v1 = v1 - c(at)
     v1 = v1 - c(at + 8)
-    at = the build's code + (index + 9) * 16
+    at = CILOG + 0xB8 + (index + 9) * 16
     v3 = v3 * v2
     v1 = v1 * c(at)
     v3 = v3 + c(at + 8)
-    v2 = v2 * c(the build's code)
-    v0 = v0 * v1  # 100496f1
-    v5 = v1  # 100496f5
-    v4 = v1  # 100496f9
-    v5 = v5 * v1  # 100496fd
-    v4 = v4 + v3  # 10049701
-    v0 = v0 + c(the build's code)  # 10049705
-    v6 = v6 * v1  # 1004970d
-    v6 = v6 + c(the build's code)  # 10049711
-    v3 = v3 - v4  # 10049719
-    v0 = v0 * v5  # 1004971d
-    v3 = v3 + v1  # 10049721
-    v2 = v2 + v3  # 10049725
-    v0 = v0 + v6  # 10049729
-    v6 = v1  # 1004972d
-    v6 = v6 * v5  # 10049731
-    v5 = v5 * c(the build's code)  # 10049735
-    v0 = v0 * v6  # 1004973d
-    v2 = v2 + v5  # 10049741
-    v0 = v0 + v2  # 10049745
-    v0 = v0 + v4  # 10049749
+    v2 = v2 * c(CILOG + 0xC0)
+    v0 = v0 * v1
+    v5 = v1
+    v4 = v1
+    v5 = v5 * v1
+    v4 = v4 + v3
+    v0 = v0 + c(CILOG + 0xE0)
+    v6 = v6 * v1
+    v6 = v6 + c(CILOG + 0xD0)
+    v3 = v3 - v4
+    v0 = v0 * v5
+    v3 = v3 + v1
+    v2 = v2 + v3
+    v0 = v0 + v6
+    v6 = v1
+    v6 = v6 * v5
+    v5 = v5 * c(CILOG + 0xC8)
+    v0 = v0 * v6
+    v2 = v2 + v5
+    v0 = v0 + v2
+    v0 = v0 + v4
     return v0
 
 

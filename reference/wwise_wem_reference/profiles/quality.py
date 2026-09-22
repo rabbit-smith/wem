@@ -17,17 +17,17 @@ kept for provenance and are not consumed by the override path). The override
 resolution in the assembly layer keys off these semantics, so the curve
 names stay exactly as recorded in the paired build.
 
-The kernel is aligned to the authoritative quality formula
-(``corpus/extracted/quality-formula-spec.md``) and is intentionally isolated in
-``_linear_frac`` so that any later re-calibration can replace the math and its
-tests in one place without touching the loaders or the assembly wiring. The
-normalization entry (``normalize_quality_factor``) and the two-step fractional
-breakpoint arithmetic (``frac = i + ratio`` written, ``f = frac - i`` read) are
-pinned to the reference behavior; both implementations agree bit for bit on the
-shared test vectors. Out-of-domain quality values are clamped to the first
-control point or carried by the ``(N-1, N)`` segment and reported as
-extrapolated (honesty: the caller must be able to tell that a quality fell
-outside the recorded control points).
+The kernel is aligned to the authoritative quality formula recorded for the
+paired build and is intentionally isolated in ``_linear_frac`` so that any
+later re-calibration can replace the math and its tests in one place without
+touching the loaders or the assembly wiring. The normalization entry
+(``normalize_quality_factor``) and the two-step fractional breakpoint
+arithmetic (``frac = i + ratio`` written, ``f = frac - i`` read) are pinned to
+the reference behavior; both implementations agree bit for bit on the shared
+test vectors. Out-of-domain quality values are clamped to the first control
+point or carried by the ``(N-1, N)`` segment and reported as extrapolated
+(honesty: the caller must be able to tell that a quality fell outside the
+recorded control points).
 """
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ QUALITY_SEMANTIC_NO_OP = "no-op"
 QUALITY_SEMANTIC_TRANSIENT_RECORD_INDEX_AXIS = "transient.record-index-axis"
 QUALITY_SEMANTIC_SHORT_PREFIX = "short."
 
-# Spec normalization constants (profile-select entry, §1):
+# Spec normalization constants (profile-select entry):
 #   qnorm = quality / 10.0 + 1e-7, clamped to the float32 constant promoted
 #   to double whenever it reaches 1.0.
 QUALITY_NORMALIZE_ADDEND = 1e-7
@@ -164,8 +164,8 @@ def _linear_frac(
 ) -> tuple[float, bool]:
     """Linear piecewise interpolation over a strictly increasing table.
 
-    Returns ``(value, extrapolated)``. Spec-aligned kernel (§2/§3 of the
-    quality-formula spec): the fractional breakpoint index is written as
+    Returns ``(value, extrapolated)``. Spec-aligned kernel: the fractional
+    breakpoint index is written as
     ``frac = i + (q - bp[i]) / (bp[i+1] - bp[i])`` and read back as
     ``f = frac - i`` (the two-step arithmetic is not the identity for
     large ``i``); at or past the last breakpoint the index is clamped to
