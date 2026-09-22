@@ -20,8 +20,7 @@
 //!
 //! # Authoritative formula (spec-aligned)
 //!
-//! The kernel follows the converted-encoder behavior pinned by
-//! `corpus/extracted/quality-formula-spec.md`:
+//! The kernel follows the paired build's converted-encoder behavior:
 //!
 //! * normalization (profile-selection entry):
 //!   `qnorm = quality / 10.0 + 1e-7`, clamped to `0.9998999834060669`

@@ -21,10 +21,9 @@ use crate::quality::{linear_frac, normalize_quality_factor};
 // wem.transient-record-family.v1: the static record library from the paired
 // encoder build, materialized per quality.
 //
-// Selection/interpolation mechanism (instruction-pinned by the the extraction
-// extraction, the internal record, the corresponding locations): the whole record
-// at v5 = floor(index) is copied into the runtime block first; only
-// upper[0..3] and lower[0..3] are then overwritten with a linear
+// Selection/interpolation mechanism, established against the paired build:
+// the whole record at v5 = floor(index) is copied into the runtime block
+// first; only upper[0..3] and lower[0..3] are then overwritten with a linear
 // interpolation between records v5 and v5+1 at the fractional part. So all
 // non-interpolated fields (bias, carry, marker, tail, upper[4..11],
 // lower[4..11]) come verbatim from the FLOOR record.

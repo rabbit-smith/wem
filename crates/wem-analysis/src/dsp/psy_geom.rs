@@ -2,13 +2,13 @@
 //!
 //! These builders preserve reference x87 rounding and comparison boundaries;
 //! their output is locked bit-for-bit by `tests/psy_geom_parity.rs`. Function
-//! and local names describe the data being built so disassembly vocabulary
-//! stays out of callers.
+//! and local names describe the data being built, keeping provenance
+//! vocabulary out of caller-facing names.
 
 use super::crt90::{ciatan, ciexp, cilog};
 use super::psy_geom_data::{
-    ATH_OFF_BITS, AXIS, EIGHTH_BITS, EPS_F64_BITS, paired_ath_source_curve, HALF_BITS, LN2_BITS, LOG2E_BITS,
-    MASK_POOL, PSYCHO_BITS, QUARTER_BITS, SIX_F64_BITS, TWO_BITS,
+    ATH_OFF_BITS, ATH_SOURCE_CURVE, AXIS, EIGHTH_BITS, EPS_F64_BITS, HALF_BITS, LN2_BITS,
+    LOG2E_BITS, MASK_POOL, PSYCHO_BITS, QUARTER_BITS, SIX_F64_BITS, TWO_BITS,
 };
 use super::x87::{f32_bits, f32_round};
 use crate::config::AnalysisError;
@@ -29,7 +29,7 @@ const EIGHTH: f64 = d(EIGHTH_BITS);
 
 #[inline]
 fn e60(i: usize) -> f64 {
-    f32::from_bits(paired_ath_source_curve[i]) as f64
+    f32::from_bits(ATH_SOURCE_CURVE[i]) as f64
 }
 
 /// Truncation toward zero (Python `int(x)`, finite builder inputs).
@@ -134,7 +134,7 @@ pub fn interval_table(
 ) -> Result<Vec<u32>, AnalysisError> {
     validate_geometry(spectrum_bins, sample_rate)?;
     use super::x87::{add80, cmp_f64, ge_f64, mul80, F80};
-    // mapped() constants: paired_tail_end/F0/E8/E0/D8 (constants.json, root-verified)
+    // mapped() constants (verified against the paired build)
     const K_SQ: f64 = 1.8499999754340024e-08;
     const K_FIRST: f64 = 2.240000009536743;
     const K_LIN: f64 = 0.0007399999885819852;

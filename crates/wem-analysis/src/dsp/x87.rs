@@ -1,8 +1,10 @@
 //! x87 / f32 primitives of the paired 2013.2 build.
 //!
-//! Port of `corpus/paired-build/the round/src/f32.py` (single source of the
-//! semantics). The paired build is 32-bit x86: intermediates live in 80-bit
-//! x87 registers (64-bit significand) and are re-rounded only at explicit
+//! Port of the analysis-geometry primitives in
+//! `reference/wwise_wem_reference/geometry_materializer/f32_primitives.py`
+//! (single source of the semantics). The paired build is 32-bit x86:
+//! intermediates live in 80-bit x87 registers (64-bit significand) and are
+//! re-rounded only at explicit
 //! store points. `F80` holds a register value exactly as
 //! `(-1)^neg * man * 2^(exp - 63)` with `man` a 64-bit integer whose MSB
 //! (integer bit) is set. `mul80`/`add80` compute the exact aligned integer
