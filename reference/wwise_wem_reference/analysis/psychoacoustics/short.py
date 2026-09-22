@@ -17,6 +17,7 @@ import struct
 from dataclasses import dataclass
 from typing import Sequence
 
+from ..._f32 import _f32
 from .temporal import TemporalKernelInputs, relax_short_history, compute_temporal_kernel
 from ..config import ShortPsyProfile
 
@@ -29,11 +30,6 @@ _NEG_17_2 = -17.20000076293945
 _F64_0_1 = 0.10000000149011612
 _F64_0_2 = 0.20000000298023224
 _F64_0_3 = 0.30000001192092896
-
-
-def _f32(value: float) -> float:
-    """Round at a float32 storage boundary."""
-    return struct.unpack("<f", struct.pack("<f", float(value)))[0]
 
 
 def _u32_f32(value: int) -> float:

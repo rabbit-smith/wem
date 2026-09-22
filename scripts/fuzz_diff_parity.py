@@ -223,7 +223,7 @@ def _differential_case(
     oracle = python_engine.encode_pcm_python(
         profile=profile,
         container=container,
-        pcm=_pcm_buffer(sample_rate, pcm_float, frames),
+        pcm=_pcm_buffer(sample_rate, pcm_float),
     )
     oracle_bytes = bytes(oracle.data)
 
@@ -252,8 +252,7 @@ def _differential_case(
         )
 
 
-def _pcm_buffer(sample_rate: int, channels: tuple[tuple[float, ...], ...],
-                frames: int):
+def _pcm_buffer(sample_rate: int, channels: tuple[tuple[float, ...], ...]):
     from wwise_wem.model import PcmBuffer
 
     return PcmBuffer(sample_rate, channels)

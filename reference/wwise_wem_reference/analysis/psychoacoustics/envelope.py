@@ -11,7 +11,7 @@ from ..config import (
     WwisePsyLongTables,
     make_long_floor_envelope_look,
 )
-from ..dsp.transform import _f32
+from ..._f32 import _f32
 
 @dataclass
 class FloorEnvelopeScratch:
