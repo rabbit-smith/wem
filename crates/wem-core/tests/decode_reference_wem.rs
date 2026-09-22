@@ -83,7 +83,9 @@ fn source_samples(path: &Path) -> (Vec<f32>, usize) {
     let wav = read_pcm16(path).expect("the fixture WAV reads");
     let bytes = wav.interleaved_le_bytes();
     let samples = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| i16::from_le_bytes([pair[0], pair[1]]) as f32 / 32768.0)
         .collect();
     (samples, wav.channels())

@@ -2281,7 +2281,9 @@ assert result.channels == 6, result.channels
     fn fixture_source_samples() -> (Vec<f32>, usize) {
         let (raw, _rate, channels, _frames) = fixture_pcm_bytes();
         let samples = raw
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| i16::from_le_bytes([pair[0], pair[1]]) as f32 / 32768.0)
             .collect();
         (samples, channels)

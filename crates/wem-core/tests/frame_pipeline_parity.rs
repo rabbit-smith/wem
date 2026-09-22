@@ -166,7 +166,9 @@ fn hex_words(row: &str, context: &str) -> Vec<u32> {
         row.len()
     );
     row.as_bytes()
-        .chunks_exact(8)
+        .as_chunks::<8>()
+        .0
+        .iter()
         .map(|chunk| {
             chunk
                 .iter()
@@ -291,7 +293,9 @@ fn compare_packet(frame: usize, kernel: &[u8], expected_hex: &str) {
     );
     let expected: Vec<u8> = expected_hex
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| ((hex_digit(pair[0], "packet") << 4) | hex_digit(pair[1], "packet")) as u8)
         .collect();
     assert_eq!(
