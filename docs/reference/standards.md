@@ -214,11 +214,12 @@ resource intake and the frozen transcendental tables are in
 
 A profile's values are Rust constants in the same artifact as the setup packet
 they belong to, so there is nothing to locate, address or verify at run time:
-the recorded setup SHA-256 is re-checked against the packet when the value model
-is built from the carrier (`crates/wem-profiles/src/model.rs`), and the carrier
-itself is proved value-for-value against the recorded material. A construction
-path that requests a value outside the frozen domain fails loudly instead of
-consulting the host libm. The carrier layout is in
+the identity the key carries is the digest of exactly the packet the carrier
+holds, recomputed from those bytes when the value model is built from the
+carrier (`crates/wem-profiles/src/model.rs`), so no stored digest copy can drift
+from them; the carrier itself is proved value-for-value against the recorded
+material. A construction path that requests a value outside the frozen domain
+fails loudly instead of consulting the host libm. The carrier layout is in
 [`architecture.md`](architecture.md#profile-ownership), and provenance — no
 profile value is fitted to an output — is in [`profiles.md`](profiles.md).
 

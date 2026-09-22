@@ -76,7 +76,6 @@ impl CompiledProfile {
         EncoderProfile::new(
             self.key.clone(),
             Some(self.tables.setup_packet.to_vec()),
-            self.tables.setup_sha256.to_string(),
             None,
             self.tables.block_sizes,
             self.tables.container_metadata,
@@ -94,11 +93,6 @@ impl CompiledProfile {
     /// carries no stored name.
     pub fn label(&self) -> String {
         self.key.label()
-    }
-
-    /// The recorded setup-packet SHA-256 (lowercase hex).
-    pub fn setup_sha256(&self) -> &'static str {
-        self.tables.setup_sha256
     }
 
     /// The verified setup packet bytes.

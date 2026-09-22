@@ -16,7 +16,7 @@ use wem_vorbis::packet_encoder::PacketError;
 /// Terminal encoder failure carrying the kernel error class.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EncoderError {
-    /// No installed profile matches the requested setup digest.
+    /// No installed profile matches the requested selection.
     ProfileNotFound { requested: String },
     /// A request arrived outside the Init -> chunk -> Finish lifecycle, or
     /// a soft profile cross-check failed.

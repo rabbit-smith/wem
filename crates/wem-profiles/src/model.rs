@@ -39,7 +39,8 @@ pub struct ContainerMetadata {
 /// (Python `EncoderProfile`).
 ///
 /// Two construction shapes coexist, both additive:
-/// * complete profiles: the setup packet bytes plus their SHA-256 identity;
+/// * complete profiles: the setup packet bytes, whose digest the key's
+///   quality/setup identity names;
 /// * draft profiles (setup pending corpus): no setup packet, with
 ///   `setup_available == false` and a `pending_reason`, so every encode
 ///   attempt on one fails with a clear pending error instead of silently
@@ -54,12 +55,13 @@ pub struct ContainerMetadata {
 ///
 /// The setup packet is carried as bytes, not as a resource reference: the
 /// packet is a compiled profile fact, and a reference would make the value
-/// model depend on where a tree happens to live.
+/// model depend on where a tree happens to live. Its digest is not stored
+/// beside it — the key's identity names the packet, so the digest is computed
+/// from the bytes when a construction is validated.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EncoderProfile {
     key: ProfileKey,
     setup_packet: Option<Vec<u8>>,
-    setup_sha256: String,
     block_sizes: [i64; 2],
     container_metadata: ContainerMetadata,
     endian: String,
@@ -77,14 +79,11 @@ pub struct EncoderProfile {
 impl EncoderProfile {
     /// Validate and construct (Python `__post_init__` checks).
     ///
-    /// `setup_packet` is `Some` for complete profiles (its SHA-256 must match
-    /// `setup_sha256` and the key quality/setup identity) and `None` for
-    /// draft profiles, whose `setup_sha256` must be empty.
-    #[allow(clippy::too_many_arguments)]
+    /// `setup_packet` is `Some` for complete profiles — its SHA-256 must be
+    /// the setup identity the key declares — and `None` for draft profiles.
     pub fn new(
         key: ProfileKey,
         setup_packet: Option<Vec<u8>>,
-        setup_sha256: String,
         quality: Option<f64>,
         block_sizes: [i64; 2],
         container_metadata: ContainerMetadata,
@@ -99,19 +98,12 @@ impl EncoderProfile {
         if setup_available != setup_packet.is_some() {
             return Err(ProfileError::BundleMissingVorbisSetup);
         }
-        match setup_packet.as_ref() {
-            Some(packet) => {
-                if hex(sha256_hex(packet)) != setup_sha256 {
-                    return Err(ProfileError::ProfileSetupIdentityMismatch);
-                }
-                if key.quality_setup_identity() != format!("sha256:{setup_sha256}") {
-                    return Err(ProfileError::ProfileSetupIdentityMismatch);
-                }
-            }
-            None => {
-                if !setup_sha256.is_empty() {
-                    return Err(ProfileError::ProfileSetupIdentityMismatch);
-                }
+        if let Some(packet) = setup_packet.as_ref() {
+            // The key names the packet: its setup identity is the digest of
+            // exactly these bytes. Only the packet is stored, so the digest
+            // is computed from it here rather than carried beside it.
+            if key.quality_setup_identity() != format!("sha256:{}", hex(sha256_hex(packet))) {
+                return Err(ProfileError::ProfileSetupIdentityMismatch);
             }
         }
         if (key.channels(), key.sample_rate())
@@ -135,7 +127,6 @@ impl EncoderProfile {
         Ok(Self {
             key,
             setup_packet,
-            setup_sha256,
             block_sizes,
             container_metadata,
             endian: "le".to_string(),
@@ -185,10 +176,6 @@ impl EncoderProfile {
     /// The compiled setup packet, when this profile carries one.
     pub fn setup_bytes(&self) -> Option<&[u8]> {
         self.setup_packet.as_deref()
-    }
-
-    pub fn setup_sha256(&self) -> &str {
-        &self.setup_sha256
     }
 
     pub fn block_sizes(&self) -> [i64; 2] {

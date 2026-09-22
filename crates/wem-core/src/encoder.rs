@@ -561,15 +561,6 @@ impl Encoder {
                 message: draft_pending_message(profile),
             });
         }
-        let setup_sha = compiled.tables().setup_sha256;
-        if profile.setup_sha256() != setup_sha {
-            return Err(EncoderError::StateError {
-                message: format!(
-                    "selected profile {} differs from installed profile setup",
-                    profile.label()
-                ),
-            });
-        }
         // A compiled profile carries its analysis resources by construction
         // (they are Rust constants in the same artifact), so the pending
         // analysis-resources state the resource-backed loader could reach

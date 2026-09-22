@@ -4,8 +4,8 @@
 //! The profile bundle that drives both paths is resolved with
 //! `wem_profiles::compiled_profile_for_selection` — a structured selection against the
 //! compiled-in profile bundle, never a profile name or a profile tree. The
-//! profile name and the setup digest are properties read off that tree; the
-//! bytes compared below are the claim.
+//! profile identity is read off that carrier; the bytes compared below are the
+//! claim.
 
 use wem_core::encoder::Encoder;
 use wem_core::stream::StreamSession;

@@ -4,9 +4,6 @@ use crate::error::ProfileError;
 
 /// Wwise generation of the installed profiles.
 pub const WWISE_GENERATION: &str = "2013.2";
-/// Setup identity of the installed 2013.2 6ch/44100 profile.
-pub const WWISE2013_6CH_44100_SETUP_IDENTITY: &str =
-    "sha256:3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3";
 
 /// The human label for one profile identity: its geometry plus its generation.
 ///
