@@ -26,7 +26,8 @@ proportional to the stream length is held") and
 decision ("nothing proportional to the stream length"). See
 [finding 1](#1-the-overlap-add-retains-the-whole-timeline--contract-defect-the-headline).
 
-**Fixed, and re-measured.** Both mechanisms were repaired in f64c871 and the
+**Fixed, and re-measured.** Both mechanisms were repaired by *fix(rust): bound
+the decode session's retained state* and the
 curve was taken again with the same tool: **256×** the stream now grows peak RSS
 **1.68×** (10.76 → 18.04 MB, 0.17 bytes/frame over four points), where 64× grew
 it 10.19× before, and the whole-WEM-push penalty fell from +51.0% to +0.6%. The
@@ -222,7 +223,7 @@ point:
 
 Both were false as written when this page was recorded, and the measurement in
 this section is what falsified them; the code read in finding 1 says why. They
-are true again as of f64c871 — see
+are true again as of that fix — see
 [the fix](#the-fix-and-what-it-measured).
 
 ## Findings
@@ -376,12 +377,13 @@ time-versus-memory trade to make here: bounded pushes are both.
 
 ## The fix, and what it measured
 
-Both defects were repaired in f64c871, and the curve was taken again with
+Both defects were repaired by *fix(rust): bound the decode session's retained
+state*, and the curve was taken again with
 `scripts/measure_decode_perf.py`, the same tool and the same command that found
-them. The before column is this page's own record, on its base; the after column
-is the fixed tree.
+them. The before column is this page's own record, taken on the tree the rest of
+this page describes; the after column is the fixed tree.
 
-| point | before (base b3a6bf7) | after (base f64c871) |
+| point | before, as recorded | after the fix |
 |---|---:|---:|
 | 1× (139 398 frames) | 21.97 MB | **10.73 MB** |
 | 64× (8 921 472) | 232.90 MB | **16.09 MB** |

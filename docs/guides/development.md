@@ -173,14 +173,24 @@ timers, min/median/p95/spread, the machine identity the numbers belong to, and
 the load average before and after each series),
 `crates/wem-core/tests/stage_timings.rs` and its decode counterpart (the
 per-stage split of one run, `#[ignore]`d, run with `--ignored --nocapture`), and
-the RSS reporters in `crates/wem-core/tests/streaming.rs`. The measurements read
-a release build, which is not the build the suites use:
+the RSS reporters in `crates/wem-core/tests/streaming.rs`. `make benchmark` runs
+the two scripts over a release build it makes first; it is the one name this tree
+gives a tool invocation, because the two are always read together — encode and
+decode, one machine, one load. The measurements read a release build, which is
+not the build the suites use:
+
+```bash
+make benchmark                          # both scripts, release build first
+python3 scripts/measure_encode_perf.py  # or each one on its own
+python3 scripts/measure_decode_perf.py
+```
+
+The CLI's own timer is a separate one-shot, worth it when one fixture encode is
+all you want to see:
 
 ```bash
 cd crates && cargo build --release -p wem-core --features parallel   # the CLI needs the feature
 cd crates && target/release/wwise-wem ../tests/fixtures/input.wav --output /dev/null --time
-python3 scripts/measure_encode_perf.py
-python3 scripts/measure_decode_perf.py
 ```
 
 The timing instruments **report**: an instrument that can fail a build has
