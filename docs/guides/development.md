@@ -152,8 +152,9 @@ measurement that accompanies it is a paired before/after with the run order
 alternated and **the machine's load stated** — a naive pair on a busy machine
 once reported a 152 ms "after" against a 116 ms "before" for a stage nobody had
 touched. No optimization that could move a byte lands until the crate's targets
-are green under both feature configurations, `--all-targets` with default
-features and with `--no-default-features`.
+are green under both feature configurations: `--all-targets` as it builds by
+default — scalar, the `parallel` feature being opt-in — and `--all-targets
+--features parallel`.
 
 The finding is the ledger, and it is append-only in spirit: a closed item stays
 there, marked closed with the number that closed it, because an entry deleted

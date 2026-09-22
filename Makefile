@@ -68,8 +68,8 @@ rust-test:
 	cd crates && cargo test -p wem-analysis -p wem-core --features parallel
 
 # The CLI is built only with the feature it requires: `wwise-wem` encodes one
-# file at a time, where the internal parallelism pays, and the nightly
-# performance check reads the binary this target builds.
+# file at a time, where the internal parallelism pays, and the nightly encode
+# measurement reads the binary this target builds.
 rust-bench:
 	cd crates && cargo build --release -p wem-core --features parallel && target/release/wwise-wem ../tests/fixtures/input.wav --output /dev/null --time
 

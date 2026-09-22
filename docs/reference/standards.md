@@ -313,7 +313,7 @@ feature. `crates/wem-wasm` builds `wem-core` with `default-features = false`,
 which is now the default restated rather than a difference; our own CLI
 (`crates/wem-core/src/bin/wwise-wem.rs`) is the binary that enables the feature
 explicitly, because it encodes one file at a time, where the threads pay, and the
-nightly performance check reads that binary. The scalar path is the one a default
+nightly encode measurement reads that binary. The scalar path is the one a default
 build runs; the parity comparisons read both configurations.
 
 Where the cap lives, and what it does without the feature:
