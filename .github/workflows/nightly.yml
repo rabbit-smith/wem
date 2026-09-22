@@ -26,6 +26,36 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      # The neutral-path rewrite this job's two Rust builds need, computed here
+      # because both go through cargo directly rather than through the
+      # Makefile, whose own export covers `make native`, `make build`,
+      # `make wasm-build` and `make benchmark` (its "Neutral build paths"
+      # section). The compiler writes the absolute path of every file it reads
+      # -- registry sources, toolchain files -- into the binary it produces,
+      # so without this the editable wheel and the measurement binary name the
+      # account that built them. Cargo's encoded form: separator-delimited, so
+      # a path containing a space survives, and it takes precedence over any
+      # RUSTFLAGS another tool sets. Python is the shell because it reports
+      # the native home on every runner -- a bash `$HOME` is a POSIX view of a
+      # Windows path, which would remap nothing.
+      - name: neutral build paths (no builder home in the built artifacts)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import pathlib
+
+          home = str(pathlib.Path.home())
+          cargo_home = os.environ.get("CARGO_HOME") or str(pathlib.Path(home) / ".cargo")
+          remaps = [
+              f"--remap-path-prefix={home}=/build",
+              f"--remap-path-prefix={cargo_home}=/cargo",
+          ]
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write("CARGO_ENCODED_RUSTFLAGS=" + "\x1f".join(remaps) + "\n")
+          print("neutral build paths: " + " | ".join(remaps))
+          PY
       - name: editable install (maturin builds the native kernel)
         run: python -m pip install -e ".[dev]"
       - name: nightly differential fuzz (oracle vs native, deterministic seeds)

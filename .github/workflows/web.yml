@@ -30,7 +30,7 @@ jobs:
         run: cd crates && cargo clippy -p wem-wasm --target wasm32-unknown-unknown -- -D warnings
       - name: unit tests (native; error-code table)
         run: cd crates && cargo test -p wem-wasm
-      - name: wasm packages (wasm-pack: js/pkg web, js/pkg-node nodejs)
+      - name: "wasm packages (wasm-pack: js/pkg web, js/pkg-node nodejs)"
         # Build and test in one run: this step builds both packages, and the
         # next one runs js/test-node.mjs against the bytes it just built.
         # wasm-pack resolves --out-dir against the crate directory rather than

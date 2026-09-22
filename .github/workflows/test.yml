@@ -18,6 +18,15 @@ jobs:
       - run: python -m pip install "ruff>=0.6" "mypy>=1.11"
       - run: ruff check src reference tests scripts
       - run: mypy src reference
+      - name: tracked tree (asset, development-tree and repository-root rules)
+        # The same three rules the pre-commit hook runs, over `git ls-files`
+        # rather than over the staged diff. A hook is local-only -- a checkout
+        # whose `core.hooksPath` was never armed (`make hooks`) and any `git
+        # commit --no-verify` reach this job with the tree unexamined -- and the
+        # rules guard published surfaces, so the whole tracked tree is asserted
+        # here. This job is the right place for it: no kernel, no build, no
+        # network.
+        run: python3 scripts/check_staged_assets.py --all-tracked
 
   regression:
     # Single execution path: the facade's byte-producing calls run on the
@@ -41,6 +50,35 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      # The kernel is compiled Rust, and the compiler writes the absolute path
+      # of every file it reads -- registry sources, toolchain files -- into the
+      # binary it produces: left alone, the extension names the home directory
+      # of the account that built it. The rewrite has to expand that home, and
+      # a committed cargo config cannot (its strings do not expand a
+      # variable), so it is computed here and exported to the steps that
+      # follow. Cargo's encoded form, not RUSTFLAGS: it is separator-delimited,
+      # so a path containing a space survives, and the encoded form is what
+      # takes precedence over a RUSTFLAGS some other tool sets. Python is the
+      # shell because it reports the native home on every runner -- a bash
+      # `$HOME` is a POSIX view of a Windows path, which would remap nothing.
+      - name: neutral build paths (no builder home in the compiled extension)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import pathlib
+
+          home = str(pathlib.Path.home())
+          cargo_home = os.environ.get("CARGO_HOME") or str(pathlib.Path(home) / ".cargo")
+          remaps = [
+              f"--remap-path-prefix={home}=/build",
+              f"--remap-path-prefix={cargo_home}=/cargo",
+          ]
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write("CARGO_ENCODED_RUSTFLAGS=" + "\x1f".join(remaps) + "\n")
+          print("neutral build paths: " + " | ".join(remaps))
+          PY
       # dev extras without the package itself (the package imports from
       # PYTHONPATH; pip-installing it would run a second maturin build);
       # the kernel build goes through the maturin develop step below

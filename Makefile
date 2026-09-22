@@ -13,8 +13,10 @@
 # `2ch-long` (`tests/parity/two_channel_long_run.py`). Anything else a developer
 # might want to run alone is the underlying tool's own command, and
 # docs/guides/development.md shows that command rather than a name invented for
-# it here. One exception is named below -- `benchmark`, the measurement entry --
-# and it is not a check: `test` never runs it and it never fails on a number.
+# it here. Two targets below are exceptions and neither is a check:
+# `benchmark`, the measurement entry -- `test` never runs it and it never fails
+# on a number -- and `hooks`, which arms this clone's pre-commit layer. Neither
+# is a second opinion on the tree.
 # =============================================================================
 
 PY ?= python3
@@ -50,6 +52,42 @@ export PATH := $(RUSTUP_BIN):$(PATH)
 export RUSTDOC := $(RUSTUP_BIN)/rustdoc
 endif
 
+# -----------------------------------------------------------------------------
+# Neutral build paths.
+#
+# The compiler writes the absolute path of every file it reads into the binary
+# it produces -- registry sources, toolchain files -- so an artifact built in a
+# checkout from a developer's account names that account's home directory. That
+# is not reproducible, and it is not the artifact's business: the prefixes are
+# rewritten to fixed roots before the compiler records them.
+#
+# The rewrite expands the building account's `HOME` and `CARGO_HOME`, which are
+# per machine, so it is built here and exported into the environment of every
+# command this file runs: maturin (`native`, `build`), wasm-pack
+# (`wasm-build`), cargo (`benchmark`). One export rather than one env prefix
+# per recipe is what keeps those three build paths from drifting apart. A
+# committed `.cargo/config.toml` cannot carry it -- its strings do not expand a
+# variable, and the prefix differs on every machine -- so this tree has none.
+#
+# `CARGO_ENCODED_RUSTFLAGS`, not `RUSTFLAGS`: its values are `0x1f`-separated
+# rather than space-separated, so a home directory containing a space still
+# reaches rustc as one argument, and cargo ignores `RUSTFLAGS` outright once
+# the encoded form is set -- one mechanism, so a tool that sets a `RUSTFLAGS`
+# of its own for the builds that ask for one (wasm-pack has that path) cannot
+# displace the rewrite. Order matters as well: of the prefixes matching a path
+# the last one wins, `CARGO_HOME` normally sits inside `HOME` and matches both,
+# so it is written second and the registry lands under `/cargo`, not
+# `/build/.cargo`.
+#
+# The value replaces one the developer exported by hand, deliberately: a second
+# mechanism is the failure mode this file is avoiding. `make <target>
+# CARGO_ENCODED_RUSTFLAGS=...` still wins, because a command-line assignment
+# beats an assignment made here.
+# -----------------------------------------------------------------------------
+CARGO_HOME_DIR := $(if $(CARGO_HOME),$(CARGO_HOME),$(HOME)/.cargo)
+FLAG_SEPARATOR := $(shell printf '\037')
+export CARGO_ENCODED_RUSTFLAGS := --remap-path-prefix=$(HOME)=/build$(FLAG_SEPARATOR)--remap-path-prefix=$(CARGO_HOME_DIR)=/cargo
+
 # Lint and build tools come from the project venv when it exists, so `make test`
 # works in a checkout whose venv is not activated (ruff, mypy and maturin are
 # not on a bare PATH). Without the venv they resolve from PATH as before, which
@@ -62,7 +100,7 @@ RUFF ?= $(VENV_BIN)ruff
 MYPY ?= $(VENV_BIN)mypy
 MATURIN ?= $(firstword $(wildcard $(VENV_BIN)maturin) maturin)
 
-.PHONY: test test-fast wem-bytes 2ch-long native build wasm-build clean benchmark
+.PHONY: test test-fast wem-bytes 2ch-long native build wasm-build clean hooks benchmark
 
 # -----------------------------------------------------------------------------
 # The verdict. Cheap first: the static checks, then the suites, then the checks
@@ -146,6 +184,19 @@ wasm-build:
 
 clean:
 	$(PY) scripts/clean.py
+
+# -----------------------------------------------------------------------------
+# The local pre-commit layer: arm the versioned hooks in this clone.
+#
+# `core.hooksPath` is per clone -- it lives in .git/config, so cloning, a new
+# worktree and CI do not carry it. This is the one command that sets it, and it
+# prints the setting back so the run says what it did. The hook is early
+# feedback, not the verdict: `make test` and CI still decide
+# (docs/guides/hooks.md).
+# -----------------------------------------------------------------------------
+hooks:
+	git config core.hooksPath .githooks
+	@printf 'core.hooksPath = %s\n' "$$(git config core.hooksPath)"
 
 # -----------------------------------------------------------------------------
 # The one measurement entry, and not a check.
