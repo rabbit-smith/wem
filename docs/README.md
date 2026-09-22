@@ -37,14 +37,16 @@ at these documents instead of restating them.
 | [`guides/usage.md`](guides/usage.md) | Installing the encoder, encoding a file, calling it from each language |
 | [`guides/development.md`](guides/development.md) | Building, running the tests, and the rules the work is held to |
 | [`findings/2ch-byte-exactness.md`](findings/2ch-byte-exactness.md) | Needing the 2ch evidence, its root causes, its retractions, or its trust boundary |
-| [`findings/concurrency-curves.md`](findings/concurrency-curves.md) | Asking how many encodes this machine runs at once, whether the kernel's internal parallelism pays for itself, or how to size a worker pool |
+| [`findings/concurrency-curves.md`](findings/concurrency-curves.md) | Asking how many encodes this machine runs at once, whether the kernel's internal parallelism pays for itself, or how to size a worker pool (that page's later change: the feature is opt-in now, and the instrument is `crates/wem-core/tests/concurrency_worker.rs`) |
 | [`findings/duration-curves.md`](findings/duration-curves.md) | Asking how peak memory and encode time behave as the input grows from seconds to ten minutes, in both installed geometries and on both the one-shot and streaming paths |
-| [`findings/pool-sizing.md`](findings/pool-sizing.md) | Asking what the long-frame channel pool is sized to, why it is not the process-global pool, or what the parallel feature's CPU actually goes on |
+| [`findings/pool-sizing.md`](findings/pool-sizing.md) | Asking what the long-frame channel pool is sized to, why it is not the process-global pool, or what the parallel feature's CPU actually goes on (that page's later change: a caller can bound the size now) |
 | [`findings/internal-parallelism-practice.md`](findings/internal-parallelism-practice.md) | Asking what other libraries document about owning threads — rayon, BLAS and `threadpoolctl`, OpenMP, FFTW, the codec encoders, the Rust ecosystem and the platform limits — and which of it this repository matches or conflicts with |
 | [`findings/profile-as-code.md`](findings/profile-as-code.md) | Asking where the profile values live now, or what established that the move into the kernel is exact |
 | [`findings/browser-shell-toolchain-options.md`](findings/browser-shell-toolchain-options.md) | Asking whether the browser shell should stay Rust and what C, Zig or MoonBit would actually buy |
 | [`findings/encode-performance.md`](findings/encode-performance.md) | Needing the encode's measured stage split, its scaling in stream length, or the list of what is worth optimizing and what is not |
 | [`findings/decode-transform-feasibility.md`](findings/decode-transform-feasibility.md) | Asking whether a `decode` surface is bounded work, which chain segments already exist in the kernel, and why bit-exactness against libvorbis is not a shippable claim |
+| [`findings/decode-performance.md`](findings/decode-performance.md) | Needing the decode's measured stage split, how peak RSS behaves as the stream grows, or which state a live decode session retains |
+| [`findings/decode-concurrency-curves.md`](findings/decode-concurrency-curves.md) | Asking how many decodes this machine runs at once, where decode scaling stops, or what one concurrent decode costs in CPU and resident memory |
 | [`methodology/byte-exact-diagnosis.md`](methodology/byte-exact-diagnosis.md) | Chasing any byte difference against an external build |
 | [`roadmap.md`](roadmap.md) | Asking what is still open |
 
@@ -83,3 +85,14 @@ at these documents instead of restating them.
   the documents that describe it in the same change and correcting this map;
   the checklist is in
   [`guides/development.md`](guides/development.md#adding-and-removing-files).
+- **A command or a path in a document is a live artifact: it must work today and
+  select what the text claims it selects.** A rename, a split or a new required
+  feature is not finished until every command that names the old target, module,
+  file or flag is re-pointed — and re-pointed at the *selection* the text
+  describes, so the counts recorded beside it stay true (a file that became
+  `mod reference_bytes` in `encoder.rs` is selected as
+  `cargo test -p wem-core --test encoder reference_bytes`, not left as the file
+  it used to be). Only the numbers a run produced are history. Where a selection
+  genuinely changed shape and no invocation reproduces its count, re-take the
+  number and say at the table that you did, rather than leaving a command that
+  fails or a count that no longer describes what runs.

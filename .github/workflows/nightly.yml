@@ -37,6 +37,14 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/reference
       - name: release build for the encode measurement
-        run: cd crates && cargo build --release -p wem-core
+        # The CLI requires the opt-in `parallel` feature: a default build is
+        # scalar (the library imposes no threads), and this job measures the
+        # binary in the configuration that carries it.
+        run: cd crates && cargo build --release -p wem-core --features parallel
       - name: encode measurement (numbers only; nothing here is red)
         run: python scripts/measure_encode_perf.py
+      - name: the opt-in configuration's byte parity suites
+        # The wheel and the C ABI are built scalar (the library default); this
+        # step keeps the other configuration honest against the same oracle.
+        # The suites resolve their own interpreter and PYTHONPATH.
+        run: cd crates && cargo test -p wem-core --features parallel --test encoder --test frame_pipeline_parity

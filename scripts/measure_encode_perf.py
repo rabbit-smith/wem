@@ -33,7 +33,7 @@ average are part of the result, and the clock is what is being measured.
 Nothing else is read from the environment, and nothing is written anywhere.
 
 Usage:
-  cargo build --release -p wem-core        # or: make rust-bench
+  cargo build --release -p wem-core --features parallel   # or: make rust-bench
   python3 scripts/measure_encode_perf.py
   python3 scripts/measure_encode_perf.py --runs 15 --no-stages
   python3 scripts/measure_encode_perf.py --bin /path/to/wwise-wem
@@ -296,7 +296,11 @@ def run_stage_harness(cargo: str, runs: int) -> tuple[list[str], tuple[float | N
     ]
     print(f"\n$ {' '.join(command)}", flush=True)
     load_before = load_1m()
-    result = subprocess.run(command, capture_output=True, text=True)
+    # The harness owns its own default; `--runs` reaches it here. Before this,
+    # the flag was accepted and never used, so it silently changed nothing
+    # about the stage split while appearing to.
+    harness_env = {**os.environ, "WEM_STAGE_RUNS": str(runs)}
+    result = subprocess.run(command, capture_output=True, text=True, env=harness_env)
     load_after = load_1m()
     if result.returncode != 0:
         raise RuntimeError(
@@ -452,7 +456,8 @@ def main() -> int:
     if not bin_path.is_file():
         print(
             f"measure-encode-perf: no release binary at {bin_path}.\n"
-            "  build it first:  cargo build --release -p wem-core   (or: make rust-bench)",
+            "  build it first:  cargo build --release -p wem-core --features parallel   "
+            "(or: make rust-bench)",
             file=sys.stderr,
         )
         return 2

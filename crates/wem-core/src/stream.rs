@@ -54,7 +54,7 @@ use wem_analysis::session::AnalysisSession;
 use wem_profiles::selection::WwiseProfile;
 use wem_scheduling::{append_samples, emit_block, required_samples, FramePlan, SchedulerState};
 
-use crate::encoder::{EncodeResult, EncodeStats, Encoder, MIN_PCM_FRAMES};
+use crate::encoder::{EncodeResult, EncodeStats, Encoder, EncoderOptions, MIN_PCM_FRAMES};
 use crate::error::{EncoderError, InternalError};
 use crate::pack::pack_analysis_packet;
 
@@ -84,9 +84,10 @@ const STREAM_LOOKAHEAD: i64 = 2048;
 
 /// One streaming encode session (the core streaming lifecycle).
 ///
-/// Build with [`StreamSession::for_selection`] (the only caller-facing
-/// opener: it resolves a structured [`WwiseProfile`] against the bundle
-/// compiled into this library) and drive `push_pcm_chunk`* -> `finish`;
+/// Build with [`StreamSession::for_selection`] (the caller-facing openers:
+/// they resolve a structured [`WwiseProfile`] against the bundle compiled into
+/// this library, and [`StreamSession::for_selection_with_options`] carries the
+/// caller's [`EncoderOptions`]) and drive `push_pcm_chunk`* -> `finish`;
 /// [`StreamSession::new`] is the unopened state the shells construct
 /// before a selection is known.
 pub struct StreamSession {
@@ -150,11 +151,12 @@ impl StreamPipeline {
         let channels = profile.channels();
         let blocksizes = profile.block_sizes();
         let sample_rate = profile.sample_rate();
-        let session = AnalysisSession::new(
+        let session = AnalysisSession::new_with_channel_pool_cap(
             channels,
             sample_rate,
             blocksizes,
             encoder.analysis_resources().clone(),
+            encoder.max_channel_pool_workers(),
         )
         .map_err(|error| EncoderError::Internal(InternalError::Analysis(error)))?;
         let feeder = StreamingPcmFeeder::new(channels, blocksizes)
@@ -475,7 +477,30 @@ impl StreamSession {
         selection: WwiseProfile,
         quality: Option<f64>,
     ) -> Result<Self, EncoderError> {
-        Self::from_encoder(Encoder::new_with_quality(selection, quality)?)
+        Self::for_selection_with_options(
+            selection,
+            EncoderOptions {
+                quality,
+                ..EncoderOptions::default()
+            },
+        )
+    }
+
+    /// Open a streaming session from a structured profile selection plus the
+    /// caller's [`EncoderOptions`] — the quality factor and the cap on this
+    /// session's internal channel parallelism.
+    ///
+    /// [`EncoderOptions::max_channel_pool_workers`] bounds the workers the
+    /// long-frame channel waves may use, and the session is where a caller reads
+    /// back what it got ([`StreamSession::channel_pool_workers`]); with the
+    /// `parallel` feature off the cap is inert and that reading is one, the
+    /// calling thread. The session's pool is built here, with the session, so
+    /// the cap is stated at construction rather than set on a live session.
+    pub fn for_selection_with_options(
+        selection: WwiseProfile,
+        options: EncoderOptions,
+    ) -> Result<Self, EncoderError> {
+        Self::from_encoder(Encoder::new_with_options(selection, options)?)
     }
 
     fn from_encoder(encoder: Encoder) -> Result<Self, EncoderError> {
@@ -648,6 +673,22 @@ impl StreamSession {
             .map(|pipeline| pipeline.total())
             .unwrap_or(0)
     }
+
+    /// How many workers this session's long-frame channel waves run on: the
+    /// encode's own size — one per channel — after the cap the caller stated in
+    /// [`EncoderOptions::max_channel_pool_workers`], and one — the calling
+    /// thread — in a build without the `parallel` feature.
+    ///
+    /// A reading, not a knob: the pool is built with the session, so this
+    /// reports what the geometry and the caller's cap produced and cannot resize
+    /// anything. An unopened session ([`StreamSession::new`]) has no pool yet
+    /// and reports zero.
+    pub fn channel_pool_workers(&self) -> usize {
+        self.pipeline
+            .as_ref()
+            .map(|pipeline| pipeline.session.channel_pool_workers())
+            .unwrap_or(0)
+    }
 }
 
 /// PCM frame count per internal processing segment (bounds the
@@ -673,5 +714,64 @@ fn chunk_to_float_rows(data: &[u8], channels: usize) -> Vec<Vec<f64>> {
 impl Default for StreamSession {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::num::NonZeroUsize;
+    use wem_profiles::selection::WwiseVersion;
+
+    /// The fixture geometry: the 6-channel configuration compiled into every
+    /// native library.
+    fn fixture_selection() -> WwiseProfile {
+        WwiseProfile::new(WwiseVersion::Wwise2013, 6, 44_100)
+            .expect("fixture geometry is in domain")
+    }
+
+    /// The cap reaches the pool, and the session reports what it got: the
+    /// encode's own size — one worker per channel — when the caller states none,
+    /// the cap when it is lower, and one worker, the calling thread, in a build
+    /// without the `parallel` feature, where the cap is inert. An unopened
+    /// session has no pool yet and reports zero.
+    #[test]
+    fn the_session_reports_the_pool_the_cap_produced() {
+        assert_eq!(StreamSession::new().channel_pool_workers(), 0);
+
+        let uncapped = StreamSession::for_selection(fixture_selection()).expect("session opens");
+        #[cfg(feature = "parallel")]
+        assert_eq!(uncapped.channel_pool_workers(), 6);
+        #[cfg(not(feature = "parallel"))]
+        assert_eq!(uncapped.channel_pool_workers(), 1);
+
+        let capped = StreamSession::for_selection_with_options(
+            fixture_selection(),
+            EncoderOptions {
+                quality: None,
+                max_channel_pool_workers: NonZeroUsize::new(2),
+            },
+        )
+        .expect("session opens");
+        #[cfg(feature = "parallel")]
+        assert_eq!(capped.channel_pool_workers(), 2);
+        #[cfg(not(feature = "parallel"))]
+        assert_eq!(capped.channel_pool_workers(), 1);
+    }
+
+    /// A cap above the channel count is a bound and not a target: the pool never
+    /// holds more workers than the wave has jobs.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn a_cap_above_the_job_count_leaves_the_size_alone() {
+        let session = StreamSession::for_selection_with_options(
+            fixture_selection(),
+            EncoderOptions {
+                quality: None,
+                max_channel_pool_workers: NonZeroUsize::new(16),
+            },
+        )
+        .expect("session opens");
+        assert_eq!(session.channel_pool_workers(), 6);
     }
 }

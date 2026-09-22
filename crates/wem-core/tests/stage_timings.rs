@@ -24,6 +24,10 @@
 //! without executing it, and `scripts/measure_encode_perf.py` runs it with
 //! `--ignored --nocapture` and reads the `wem_perf` lines.
 //!
+//! | variable | meaning |
+//! |---|---|
+//! | `WEM_STAGE_RUNS` | repetitions per corpus (default 7); the driver sets it from `--runs` |
+//!
 //! Release only. A debug build is 10-30x slower and says nothing about the
 //! shipped artifact, so the harness prints a skip notice and returns.
 
@@ -50,7 +54,22 @@ const BLOCKSIZES: [i64; 2] = [256, 2048];
 
 /// Repetitions per corpus. The statistics (min/median/p95/spread) are the
 /// caller's job; this harness prints raw samples so the caller owns them.
-const RUNS: usize = 7;
+const DEFAULT_RUNS: usize = 7;
+
+/// The repetition count for this run: `WEM_STAGE_RUNS`, or the default.
+///
+/// `scripts/measure_encode_perf.py` sets it from its `--runs`, which is why
+/// the variable exists at all: the driver offered the flag and the harness
+/// ignored it, so `--runs` silently changed nothing about the stage split. The
+/// harness stays runnable by hand, hence the default rather than a required
+/// variable.
+fn runs() -> usize {
+    std::env::var("WEM_STAGE_RUNS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_RUNS)
+}
 
 // ---------------------------------------------------------------------------
 // Report plumbing
@@ -579,7 +598,7 @@ fn measure_fixture() -> Result<(), String> {
     );
 
     let mut first_mismatch: Option<bool> = None;
-    for run in 0..RUNS {
+    for run in 0..runs() {
         let sample = staged_run(&encoder, &pcm);
         if run == 0 {
             first_mismatch = Some(sample.matches_encode_pcm);
@@ -623,7 +642,7 @@ fn measure_two_channel() -> Result<(), String> {
     for (name, path) in corpus {
         let wav = read_pcm16(&path).map_err(|e| e.to_string())?;
         let pcm = wav.to_pcm16().map_err(|e| e.to_string())?;
-        for run in 0..RUNS {
+        for run in 0..runs() {
             let start = Instant::now();
             let result = encoder.encode_pcm(&pcm).map_err(|e| e.to_string())?;
             let elapsed = start.elapsed();
@@ -660,7 +679,7 @@ fn measure_streaming() -> Result<(), String> {
         ("one-chunk", bytes.len() / frame_bytes),
         ("4096-frame-chunks", 4096usize),
     ] {
-        for run in 0..RUNS {
+        for run in 0..runs() {
             let mut session =
                 StreamSession::for_selection(fixture_selection()).map_err(|e| e.to_string())?;
             let start = Instant::now();
