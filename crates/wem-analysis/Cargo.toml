@@ -6,13 +6,13 @@ edition.workspace = true
 
 [features]
 # Per-channel rayon partitioning inside a single long-frame analysis call
-# (see pipeline.rs). NOT a default feature: it is enabled by the top-level
-# orchestration crate (wem-core) so native builds get it by default, while a
-# threadless target (e.g. wasm32-unknown-unknown) stays pure-scalar unless a
-# consumer explicitly opts in. Safe: each channel reads only its own slice +
-# immutable looks; cross-frame state updates stay strictly sequential. Bit-
-# exact parity is backed by the encoder / frame_pipeline_parity /
-# vorbis_codec tests.
+# (see pipeline.rs). NOT a default feature: a consumer opts in explicitly — the
+# top-level orchestration crate (wem-core) forwards its own non-default
+# `parallel`, and our CLI requires it — so a library build, a wheel and a
+# threadless target (e.g. wasm32-unknown-unknown) all stay pure-scalar unless
+# asked. Safe: each channel reads only its own slice + immutable looks;
+# cross-frame state updates stay strictly sequential. Bit-exact parity is backed
+# by the encoder / frame_pipeline_parity / vorbis_codec tests.
 parallel = ["dep:rayon"]
 
 [dependencies]

@@ -5,12 +5,30 @@ version.workspace = true
 edition.workspace = true
 
 [features]
-default = ["parallel"]
-# Forward wem-analysis's per-channel rayon partitioning to the top level so a
-# native build gets it by default while a threadless target (wasm32-
-# unknown-unknown) can drop it via `default-features = false`. See
-# wem-analysis for the safety argument and the scalar fallback path.
+# The library imposes no threads on a caller that did not ask: `parallel` is
+# opt-in, not a default (the libvpx/FFTW shape). Every comparable library
+# documents a lever for the threads it owns, and a prebuilt wheel's user cannot
+# change a compile-time feature — while the cost of not opting in is wall clock
+# on one encode. See docs/findings/internal-parallelism-practice.md (N1, N2) and
+# docs/reference/standards.md ("Portability floor") for the deviation this
+# repository carries: our lever is an argument, not an environment variable.
+default = []
+# Forward wem-analysis's per-channel rayon partitioning to the top level. A
+# consumer opts in here (`features = ["parallel"]`), a threadless target stays
+# pure-scalar by construction, and the scalar path is the one a default build
+# runs.
 parallel = ["wem-analysis/parallel"]
+
+# The CLI. Our own binary enables the kernel's internal parallelism explicitly,
+# because it is our binary and it encodes one file at a time: at one encode the
+# threads pay (docs/findings/concurrency-curves.md), and the nightly performance
+# check reads this binary. `required-features` is what makes the configuration
+# explicit — a scalar build does not carry a slower CLI, it carries no CLI, and
+# cargo names the feature the target needs.
+[[bin]]
+name = "wwise-wem"
+path = "src/bin/wwise-wem.rs"
+required-features = ["parallel"]
 
 [dependencies]
 wem-scheduling = { workspace = true }

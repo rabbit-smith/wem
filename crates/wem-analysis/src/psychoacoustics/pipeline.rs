@@ -149,8 +149,8 @@ pub fn analyze_long_frame(
     // in index order, so the results are bit-identical to the sequential
     // loop. The scope joins every job it spawned before returning, so a slot
     // is always published by the time it is read, at any pool size.
-    // Guarded end-to-end by the complete_wem_bytes / frame_pipeline_parity /
-    // vorbis_oracle_values byte-parity tests.
+    // Guarded end-to-end by the encoder / frame_pipeline_parity /
+    // vorbis_codec byte-parity tests.
     //
     // Without `parallel` (threadless targets such as wasm32), the same jobs run
     // sequentially on the calling thread.

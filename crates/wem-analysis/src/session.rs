@@ -77,9 +77,9 @@ pub struct AnalysisSession {
     /// shared read-only with the per-channel long-frame jobs.
     long_seed_look: MaterializedLongSeedLook,
     /// The worker pool the long-frame channel waves run in: this session's own,
-    /// sized to this encode's channel count when the session is built, and never
-    /// rayon's process-global pool. See `psychoacoustics::pool` for the
-    /// measurement and the ambient-state argument.
+    /// sized to this encode's channel count — or to the caller's cap on it —
+    /// when the session is built, and never rayon's process-global pool. See
+    /// `psychoacoustics::pool` for the measurement and the argument.
     channel_pool: ChannelPool,
     transient_detector: TransientDetector,
     mode_selector: ModeSelector,
@@ -127,6 +127,29 @@ impl AnalysisSession {
         blocksizes: [i64; 2],
         resources: AnalysisProfileResources,
     ) -> Result<Self, AnalysisError> {
+        Self::new_with_channel_pool_cap(channels, sample_rate, blocksizes, resources, None)
+    }
+
+    /// [`AnalysisSession::new`] with the caller's cap on the long-frame channel
+    /// pool: `None` leaves the encode's own size in place — one worker per
+    /// channel, which is the number of jobs each wave has — and `Some(n)` bounds
+    /// the pool at `n` workers, `Some(1)` being the off switch.
+    ///
+    /// The caller states the cap on the encoder it is about to use
+    /// (`wem_core::encoder::EncoderOptions::max_channel_pool_workers`, and the
+    /// streaming session's opener), and this constructor is where it reaches the
+    /// pool: the pool is built here, with the session, so there is no setter to
+    /// call later and no environment variable in between. It is a bound and not
+    /// a target — a cap above the channel count changes nothing. Without the
+    /// `parallel` feature there is no pool to size, so the cap is accepted and
+    /// has no effect.
+    pub fn new_with_channel_pool_cap(
+        channels: i64,
+        sample_rate: i64,
+        blocksizes: [i64; 2],
+        resources: AnalysisProfileResources,
+        max_channel_pool_workers: Option<std::num::NonZeroUsize>,
+    ) -> Result<Self, AnalysisError> {
         use AnalysisError::*;
         if channels <= 0 {
             return Err(SessionChannelsNonPositive { channels });
@@ -167,10 +190,10 @@ impl AnalysisSession {
         // read-only by the per-channel jobs (see `MaterializedLongSeedLook`).
         let long_seed_look = MaterializedLongSeedLook::from_tables(&resources.long_base)?;
         // The channel pool belongs to this session and to this geometry: one
-        // worker per channel, built here so the long-frame waves have it from
-        // the first frame. A host that refuses the workers fails this
-        // constructor, not the first frame.
-        let channel_pool = ChannelPool::for_channels(channels)?;
+        // worker per channel unless the caller capped it, built here so the
+        // long-frame waves have it from the first frame. A host that refuses the
+        // workers fails this constructor, not the first frame.
+        let channel_pool = ChannelPool::for_channels(channels, max_channel_pool_workers)?;
         let mut session = Self {
             channels,
             sample_rate,
@@ -195,14 +218,14 @@ impl AnalysisSession {
         Ok(session)
     }
 
-    /// How many workers this session's long-frame channel waves run on: one per
-    /// channel, derived from the geometry this session was built for, and one —
+    /// How many workers this session's long-frame channel waves run on: the
+    /// encode's own size — one per channel — after the caller's cap, and one —
     /// the calling thread — in a build without the `parallel` feature.
     ///
-    /// A reading, not a knob. The pool's size is the encode's own: it is the
-    /// number of per-channel jobs each wave spawns, so there is nothing to set
-    /// and nothing to choose, and a caller reading this learns what the geometry
-    /// produced rather than deciding anything.
+    /// A reading, not a knob. The pool is built with the session from the
+    /// geometry and the cap the caller stated on the encoder, so a live session
+    /// cannot be resized and this reports what it got rather than deciding
+    /// anything.
     pub fn channel_pool_workers(&self) -> usize {
         self.channel_pool.workers()
     }

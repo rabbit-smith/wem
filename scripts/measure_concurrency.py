@@ -19,7 +19,7 @@ Reported per cell:
     honestly);
   * **per-encode latency** — median and p95 of the caller-visible interval
     (first spawn of the batch to that child's exit), plus the child's own
-    ``--time`` encode stage so the process floor can be separated from work;
+    reported encode stage so the process floor can be separated from work;
   * **total CPU** — the batch's summed user + sys, and CPU per encode;
   * **peak RSS** — per child and the projected resident for N concurrent
     encodes (N x median per-child peak).
@@ -40,13 +40,26 @@ meaningless without. The clock cannot be made deterministic and is not claimed
 to be; the *script* is deterministic in its matrix, its order and its output
 path.
 
+The instrument is ``crates/wem-core/tests/concurrency_worker.rs``, and **both
+arms are that worker**: one test target built in the two feature configurations,
+so an arm cannot differ from the other by its entry point or its startup. The
+CLI is deliberately not the instrument — it is a bin target that *requires* the
+``parallel`` feature (``crates/wem-core/Cargo.toml``), so it does not exist in
+the scalar configuration at all, and a matrix whose two arms cannot both be
+built is not a comparison. The worker's line and this script move together; the
+contract is at the top of that file.
+
 Usage:
-  cargo build --release -p wem-core
-  cargo build --release -p wem-core --no-default-features \\
-      --target-dir target/no-parallel
-  python3 scripts/measure_concurrency.py                 # writes the JSON
+  python3 scripts/measure_concurrency.py                 # builds both arms
   python3 scripts/measure_concurrency.py --repetitions 3 --no-json
   python3 scripts/measure_concurrency.py --n-values 1,2,4,8
+
+Both arms are built here, in release, from the crate that holds the kernel:
+``cargo test --release -p wem-core --test concurrency_worker --no-run`` with and
+without ``--features parallel``. Pass ``--parallel-bin``/``--scalar-bin`` to
+measure prebuilt worker executables instead, and ``--cargo`` to pick the
+toolchain. Nothing else is required — there is no binary to build by hand — and
+the script reads no number as a threshold.
 
 Exit codes: 0 measured, 1 measurement failed, 2 usage/environment error.
 """
@@ -90,23 +103,27 @@ GEOMETRIES = (
     ),
 )
 
-# Absolute paths, because a relative path resolved against a child's working
-# directory is a different file.
-DEFAULT_PARALLEL_BIN = REPO / "crates" / "target" / "release" / "wwise-wem"
-DEFAULT_SCALAR_BIN = (
-    REPO / "crates" / "target" / "no-parallel" / "release" / "wwise-wem"
-)
+# Both arms come from this one test target (see the module docstring): the
+# `parallel` arm is built with `--features parallel`, the `scalar` arm is the
+# library's default configuration. Absolute paths, because a relative path
+# resolved against a child's working directory is a different file.
+CRATES = REPO / "crates"
+WORKER_TEST = "concurrency_worker"
 
-# `parallel` on is the shipping default; `scalar` is `--no-default-features`.
+# `parallel` is the opt-in configuration (`--features parallel`); `scalar` is the
+# library default, which is what a caller who asks for nothing gets.
 CONFIGS = ("parallel", "scalar")
 
 DEFAULT_N_VALUES = (1, 2, 3, 4, 6, 8, 16)
 DEFAULT_REPETITIONS = 7
 OUTPUT = REPO / "docs" / "figures" / "concurrency-samples.json"
 
-CLI_STAGE_PATTERN = re.compile(
-    r"stages: wav_load ([\d.]+)ms \| profile_assembly ([\d.]+)ms \| "
-    r"encode ([\d.]+)ms \| output_write ([\d.]+)ms"
+# The worker's one line: `wem_concurrency_worker encode_ms=<ms> load_ms=<ms>
+# write_ms=<ms> bytes=<n>`. The instrument's name is in the line, so a stray
+# line from another harness can never be read as this one.
+WORKER_LINE = re.compile(
+    r"wem_concurrency_worker encode_ms=([\d.]+) load_ms=([\d.]+) "
+    r"write_ms=([\d.]+) bytes=(\d+)"
 )
 
 
@@ -290,22 +307,32 @@ def run_batch(
     start = time.monotonic()
     for index in range(n):
         out_path = stderr_dir / f"{geometry.replace('/', '-')}-{config}-r{repetition}-n{n}-{index}.log"
-        argv = [str(binary), str(wav), "--output", "/dev/null", "--time"]
-        # stderr to a per-child file: a pipe would need draining, and the
-        # `--time` line is one short line, so a file is both simpler and safe
-        # against a full pipe buffer blocking a child forever.
+        # One worker test per child, in the configuration this arm was built in:
+        # the input WAV and the output path travel in the environment because
+        # libtest owns this binary's argv.
+        argv = [str(binary), "--ignored", "--exact", WORKER_TEST, "--nocapture"]
+        child_env = dict(os.environ)
+        child_env["WEM_CONCURRENCY_WAV"] = str(wav)
+        child_env["WEM_CONCURRENCY_OUTPUT"] = "/dev/null"
+        # Both streams to the per-child file: the worker's line is printed on
+        # stdout (libtest's `--nocapture`) and its own harness chatter shares
+        # that stream, while a failure report arrives on stderr. A pipe would
+        # need draining and a full buffer would block a child forever; a file is
+        # simpler and the whole output is a few short lines.
         pid = os.posix_spawn(
             str(binary),
             argv,
-            os.environ,
+            child_env,
             file_actions=[
                 (
                     os.POSIX_SPAWN_OPEN,
-                    2,
+                    1,
                     str(out_path),
                     os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
                     0o644,
-                )
+                ),
+                # stderr to the same file: `dup2(1, 2)` after the open above.
+                (os.POSIX_SPAWN_DUP2, 1, 2),
             ],
         )
         launched[pid] = (out_path, time.monotonic())
@@ -360,13 +387,60 @@ def run_batch(
 
 
 def read_encode_ms(path: Path) -> float | None:
-    """The child's own ``--time`` encode stage, or None if it did not report."""
+    """The child's own reported encode stage, or None if it did not report."""
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
-    match = CLI_STAGE_PATTERN.search(text)
-    return float(match.group(3)) if match else None
+    match = WORKER_LINE.search(text)
+    return float(match.group(1)) if match else None
+
+
+# ---------------------------------------------------------------------------
+# The two arms
+# ---------------------------------------------------------------------------
+
+
+def build_arm(cargo: str, parallel: bool) -> Path:
+    """Build the measurement worker in one feature configuration.
+
+    ``cargo test --no-run`` compiles the test target without running it, and the
+    executable's name carries a hash, so its path is read from cargo's own
+    artifact stream rather than guessed from a glob. A failed build is a usage
+    error (the toolchain cannot produce the arm), not a failed measurement.
+    """
+    command = [
+        cargo,
+        "test",
+        "--release",
+        "-p",
+        "wem-core",
+        "--test",
+        WORKER_TEST,
+        "--no-run",
+        "--message-format=json",
+    ]
+    if parallel:
+        command += ["--features", "parallel"]
+    result = subprocess.run(command, cwd=CRATES, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise SystemExit(
+            f"building the {WORKER_TEST} worker "
+            f"({'parallel' if parallel else 'scalar'}) failed:\n{result.stderr[-4000:]}"
+        )
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            message = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if message.get("reason") != "compiler-artifact":
+            continue
+        if message.get("target", {}).get("name") == WORKER_TEST and message.get("executable"):
+            return Path(message["executable"])
+    raise SystemExit(f"cargo reported no executable for the {WORKER_TEST} target")
 
 
 # ---------------------------------------------------------------------------
@@ -389,11 +463,13 @@ def run_matrix(args: argparse.Namespace) -> dict[str, object]:
     for config, path in binaries.items():
         if not path.is_file():
             raise SystemExit(
-                f"missing {config} binary {path}\n"
-                "build it with:\n"
-                "  cargo build --release -p wem-core\n"
-                "  cargo build --release -p wem-core --no-default-features "
-                "--target-dir target/no-parallel"
+                f"missing {config} worker {path}\n"
+                f"--{config}-bin overrides the arm this script builds itself, "
+                "and it must be a release build of "
+                f"crates/wem-core/tests/{WORKER_TEST}.rs in that configuration:\n"
+                "  cargo test --release -p wem-core --test "
+                f"{WORKER_TEST} --no-run"
+                + ("  --features parallel" if config == "parallel" else "")
             )
 
     divisor = maxrss_unit_divisor()
@@ -609,10 +685,14 @@ def main(argv: list[str] | None = None) -> int:
                         help="batches per cell (default: %(default)s)")
     parser.add_argument("--geometry", action="append", default=None,
                         help="restrict to one installed geometry; repeatable")
-    parser.add_argument("--parallel-bin", type=Path, default=DEFAULT_PARALLEL_BIN,
-                        help="release CLI with the parallel feature (default: %(default)s)")
-    parser.add_argument("--scalar-bin", type=Path, default=DEFAULT_SCALAR_BIN,
-                        help="release CLI built --no-default-features (default: %(default)s)")
+    parser.add_argument("--cargo", default=shutil.which("cargo") or "cargo",
+                        help="cargo used to build the two arms (default: %(default)s)")
+    parser.add_argument("--parallel-bin", type=Path, default=None,
+                        help="prebuilt release concurrency_worker built with "
+                             "--features parallel (default: built here)")
+    parser.add_argument("--scalar-bin", type=Path, default=None,
+                        help="prebuilt release concurrency_worker in the library's "
+                             "default (scalar) configuration (default: built here)")
     parser.add_argument("--output", type=Path, default=OUTPUT,
                         help="where the raw samples are written (default: %(default)s)")
     parser.add_argument("--no-json", action="store_true",
@@ -629,6 +709,15 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"\nload now (1/5/15m): "
         f"{'/'.join(f'{value:.1f}' for value in load_triple())}"
+    )
+    # Both arms, in the two feature configurations of one test target. The
+    # matrix is meaningless if the two were not built differently, so the paths
+    # are printed before anything is measured and recorded in the JSON.
+    args.parallel_bin = args.parallel_bin or build_arm(args.cargo, parallel=True)
+    args.scalar_bin = args.scalar_bin or build_arm(args.cargo, parallel=False)
+    print(
+        f"arms: parallel={display(args.parallel_bin)} "
+        f"scalar={display(args.scalar_bin)}"
     )
     print(
         f"matrix: N={args.n_values} x configs={list(CONFIGS)} x "
@@ -699,6 +788,7 @@ def main(argv: list[str] | None = None) -> int:
             "order": "N ascending; config order alternates with the repetition index",
         },
         "bins": {
+            "instrument": f"crates/wem-core/tests/{WORKER_TEST}.rs",
             "parallel": str(args.parallel_bin),
             "scalar": str(args.scalar_bin),
         },

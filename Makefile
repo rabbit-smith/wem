@@ -37,6 +37,7 @@ rust-fmt:
 
 rust-lint:
 	cd crates && cargo clippy --workspace --all-targets -- -D warnings
+	cd crates && cargo clippy -p wem-analysis -p wem-core --all-targets --features parallel -- -D warnings
 
 # Rustdoc resolves every intra-doc link and reports the ones it cannot follow.
 # clippy does not read doc comments, so a public item whose documentation links
@@ -57,11 +58,20 @@ build:
 wheel-smoke:
 	$(PY) scripts/wheel_smoke.py
 
+# Both configurations, because the kernel ships one and is verified in the
+# other: a default build is scalar (the library imposes no threads — the
+# `parallel` feature is opt-in), and the second leg is the opt-in configuration
+# our CLI requires. Testing the default alone would hide the parallel path the
+# flip makes non-default.
 rust-test:
 	cd crates && cargo test --workspace
+	cd crates && cargo test -p wem-analysis -p wem-core --features parallel
 
+# The CLI is built only with the feature it requires: `wwise-wem` encodes one
+# file at a time, where the internal parallelism pays, and the nightly encode
+# measurement reads the binary this target builds.
 rust-bench:
-	cd crates && cargo build --release -p wem-core && target/release/wwise-wem ../tests/fixtures/input.wav --output /dev/null --time
+	cd crates && cargo build --release -p wem-core --features parallel && target/release/wwise-wem ../tests/fixtures/input.wav --output /dev/null --time
 
 # Web/Node shell packages: wasm-pack builds both targets — js/pkg (web) and
 # js/pkg-node (nodejs). They are wasm-pack output and are not committed, so

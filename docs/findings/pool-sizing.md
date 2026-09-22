@@ -15,6 +15,27 @@ encodes one machine should run at once — is
 [`concurrency-curves.md`](concurrency-curves.md), and the code is
 `crates/wem-analysis/src/psychoacoustics/pool.rs`.
 
+**Later change — `parallel` is opt-in and the size has a caller-visible cap.**
+This page was measured on a tree whose `parallel` feature was on by default and
+whose pool had no knob at all. The feature is now opt-in (a default build is
+scalar) and a caller can bound the pool at construction, so the two places below
+that say the library offers no worker count — "a session builds one size, its
+channel count" in *The sweep, and where the optimum sits*, and the "no way for a
+caller to choose it" sentence in the pool module's own comment history — describe
+that tree, not today's. What changed is the lever, not the shape: the cap is a
+*bound* rather than a target (`min(cap, channels)`, `Some(1)` being the off
+switch), the reading is still `channel_pool_workers()`, and the norm, the
+consequence for an application that caps rayon by environment, and the deviation
+this repository carries are in
+[`../reference/standards.md`](../reference/standards.md#portability-floor)
+("Portability floor"), with the option at
+`EncoderOptions::max_channel_pool_workers`. Everything measured here — the CPU
+and system-time savings, the conclusion that the size is the encode's geometry,
+and the byte equality at every worker count — stands, and the cap sweep the
+option makes reachable is pinned end-to-end by
+`crates/wem-core/tests/streaming.rs`'s
+`the_caller_cap_sizes_the_pool_and_never_the_bytes`.
+
 **Result.** The size of the pool is a property of the encode, not of the host:
 one worker per channel, because one worker per channel is how many jobs each wave
 has. Against the process-global pool the same machine would otherwise hand it
@@ -56,11 +77,16 @@ with:
 
 ```sh
 cd crates
-cargo build --release -p wem-core --bin wwise-wem          # the change
+cargo build --release -p wem-core --features parallel --bin wwise-wem   # the change
 # and, for the before arm, the same binary from a pristine tree unpacked beside it:
 #   git archive main | tar -x -C "$SCRATCH/wem-base"
-#   (cd "$SCRATCH/wem-base/crates" && cargo build --release -p wem-core --bin wwise-wem)
+#   (cd "$SCRATCH/wem-base/crates" && cargo build --release --features parallel -p wem-core --bin wwise-wem)
 ```
+
+The `--features parallel` is what today's manifest requires for that binary — the
+CLI is built only in the parallel configuration, which is the one these tables
+measure — and it is accepted by the older tree too, where the feature was on by
+default.
 
 The many-sessions table additionally needs the extension built in each tree
 (`cargo build --release -p wem-python --features extension-module`, its cdylib
@@ -194,9 +220,10 @@ before-default arm burned 460.1 ms of CPU against the after arm's 278.2 ms, or
 15 paired repetitions per arm, medians, per encode in ms. The before rows sweep
 the process-global pool through `RAYON_NUM_THREADS`. The "shape at n workers" rows
 below are *history*: they were taken with a lane-time instrument that could name a
-worker count, which the shipped library deliberately does not offer — a session
-builds one size, its channel count, and reports it through
-`channel_pool_workers()`. The rows are kept because they are what chose the size
+worker count, which the library did not offer at the time of this record — a
+session built one size, its channel count, and reported it through
+`channel_pool_workers()`. (A caller can bound that size now; see the later-change
+note at the top.) The rows are kept because they are what chose the size
 and because they show the shape is not size-sensitive; the property they establish
 (a wave completes, in channel order, byte-identically, at any worker count
 including one) is pinned in tree by this module's unit tests rather than by a
@@ -306,21 +333,26 @@ files.
 - **The same inputs through a second implementation** of the one-shot path,
   written against the shipped public surface rather than the CLI: byte-identical
   output for the fixture and for both corpus geometries.
-- **The suite.** `cargo test -p wem-core --test complete_wem_bytes` and
-  `--test frame_pipeline_parity` (the per-frame, per-channel, per-bin comparison
-  against the live Python oracle over all 205 fixture frames) pass under both
-  feature configurations, as do `bytes_parity`, `error_variants` and
+- **The suite.** `cargo test -p wem-core --test encoder reference_bytes` (the
+  fixture's container against the committed one) and
+  `cargo test -p wem-core --test frame_pipeline_parity` (the per-frame,
+  per-channel, per-bin comparison against the live Python oracle over all 205
+  fixture frames) pass under both feature configurations, as do
+  `cargo test -p wem-core --test encoder two_channel_bytes`,
+  `cargo test -p wem-core --test errors variants` and
   `cargo test -p wem-analysis --all-targets` both ways; `cargo clippy
   --workspace -- -D warnings`, `cargo fmt --all --check` and `cargo doc
   --workspace --no-deps` are clean (the doc build emits no warnings, including
   the new module's links), and `cargo check -p wem-wasm --target
   wasm32-unknown-unknown` confirms the scalar configuration still builds for a
   threadless target, where the pool type exists but has no threads at all. One
-  target set is red for a reason outside this change: `--all-targets` cannot
-  compile `crates/wem-core/tests/stage_timings.rs`, which imports
+  target was red for a reason outside this change: `--all-targets` could not
+  compile `crates/wem-core/tests/stage_timings.rs`, which imported
   `wem_analysis::dsp::transform::vorbis_window`, deleted by the refactor `main`
-  took after the base named above; it fails the same way on a pristine `main`,
-  and that path belongs to the lane that owns it.
+  took after the base named above; it failed the same way on a pristine `main`,
+  and that path belonged to the lane that owned it. That import has since been
+  fixed and the target builds again — it is part of the workspace run recorded
+  under *The suite* today, with its two `#[ignore]`d checks.
 
 ## Many sessions in one process
 

@@ -203,6 +203,18 @@ profile data compiled into the library rather than locating any at run time.
 The caller-facing consequences are in [`public-interface.md`](public-interface.md)
 (execution path) and [`profiles.md`](profiles.md) (access boundary).
 
+That sentence is about **what** is encoded, and it is worth saying what it does
+not decide on its own. How much of the machine one encode takes is a resource
+choice, not an encoding one: the worker pool's size provably cannot change a
+byte, at any size ([`../findings/pool-sizing.md`](../findings/pool-sizing.md)).
+Excluding the environment from **sizing** as well is this repository's own
+position rather than the scope of the sentence above, and it reads as one where
+the size is decided: the `parallel` feature is opt-in, the cap is an argument
+the caller passes at construction, and no environment variable is read for it —
+see [Portability floor](#portability-floor) and
+[`../findings/internal-parallelism-practice.md`](../findings/internal-parallelism-practice.md)
+(N1, N2, and the deviation recorded below).
+
 ## Profile data ownership
 
 A profile owns its complete calibration set: the Wwise Vorbis setup packet and
@@ -291,10 +303,51 @@ by the test suites, and never imported by runtime code.
 The kernel stays compilable for `wasm32-unknown-unknown` in a scalar
 configuration. `wem-core`'s `parallel` feature — per-channel rayon partitioning
 inside `wem-analysis`, run in a worker pool the analysis session owns and sizes
-to its channel count rather than in rayon's process-global pool — is default-on
-for native builds and can be dropped by a threadless consumer, which is how
-`crates/wem-wasm` builds it; the scalar path is the one the parity comparisons
-read.
+to its channel count rather than in rayon's process-global pool — is **opt-in**,
+not a default: a default build is the scalar path, and a consumer that wants the
+threads asks for them (`features = ["parallel"]`). The default is off because a
+library imposes no threads on a caller that did not ask — a prebuilt wheel's user
+cannot change a compile-time feature, while the cost of not opting in is wall
+clock on one encode — and the only switch for the internal parallelism is that
+feature. `crates/wem-wasm` builds `wem-core` with `default-features = false`,
+which is now the default restated rather than a difference; our own CLI
+(`crates/wem-core/src/bin/wwise-wem.rs`) is the binary that enables the feature
+explicitly, because it encodes one file at a time, where the threads pay, and the
+nightly encode measurement reads that binary. The scalar path is the one a default
+build runs; the parity comparisons read both configurations.
+
+Where the cap lives, and what it does without the feature:
+
+- it is an explicit construction option on the encoder surface —
+  `encoder::EncoderOptions::max_channel_pool_workers`, a bound on the workers one
+  encode's long-frame channel waves may use, `Some(1)` being the off switch — and
+  `StreamSession::for_selection_with_options` carries it for a streaming encode.
+  An argument, not a setter on a live session and not an environment variable.
+- with `parallel` off there is no pool and no thread, so the cap is accepted and
+  inert, and the reading below reports one worker, the calling thread.
+- what a caller reads back is `StreamSession::channel_pool_workers()`, or the
+  analysis session's `channel_pool_workers()` for a caller driving that domain
+  directly. The pool is built with the session, so nothing can be resized
+  afterwards.
+
+**Deviation: our lever is an argument, and the ecosystem's is an environment
+variable.** A library that owns threads is expected to expose a cap or an off
+switch the caller can set without recompiling, and the near-universal shape is an
+environment variable — `RAYON_NUM_THREADS` for rayon's pools, `OMP_NUM_THREADS`,
+`OPENBLAS_NUM_THREADS` and `MKL_NUM_THREADS` for OpenMP and BLAS, and the whole
+reason `threadpoolctl` exists. Ours is
+`EncoderOptions::max_channel_pool_workers` at construction, with
+`StreamSession::channel_pool_workers()` reporting what it got. This is a
+deviation from that practice, not an instance of it, and it has a consequence a
+caller must know: an application that caps rayon through `RAYON_NUM_THREADS` or
+`build_global` sizes rayon's pools, and this encode's pool is deliberately not one
+of them — rayon consults that variable only for a pool built without an explicit
+count, and this pool is built with one — so the application's own lever does not
+reach these workers and the option is the way to ask for fewer. No environment
+variable is read for sizing in either configuration
+([`../findings/internal-parallelism-practice.md`](../findings/internal-parallelism-practice.md),
+N1 and N2; the measurement behind the size is
+[`../findings/pool-sizing.md`](../findings/pool-sizing.md)).
 
 Profile bytes are consumable without filesystem I/O: the tables are compiled
 into the library and resolved by selection

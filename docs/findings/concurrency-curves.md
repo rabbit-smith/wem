@@ -43,13 +43,29 @@ actually did and what is still extrapolation.
 Reproduce with:
 
 ```sh
-cd crates
-cargo build --release -p wem-core
-cargo build --release -p wem-core --no-default-features --target-dir target/no-parallel
-cd ..
-python3 scripts/measure_concurrency.py                    # writes the JSON
+python3 scripts/measure_concurrency.py                    # builds both arms, writes the JSON
 ./.venv/bin/python scripts/plot_concurrency_curves.py     # re-renders the figure
 ```
+
+**Later change — the feature is opt-in, and the CLI is not the instrument.**
+This page was measured on a tree whose `parallel` feature was on by default and
+whose two arms were the `wwise-wem` CLI built with and without it — the two
+commands that stood in the block above, `cargo build --release -p wem-core` and
+`cargo build --release -p wem-core --no-default-features --target-dir
+target/no-parallel`. Today a default build is scalar, the CLI *requires* the
+feature (so it has no scalar build to pair against), and the matrix is measured
+from its own instrument on both sides:
+`crates/wem-core/tests/concurrency_worker.rs`, one test target built in the two
+configurations, which `scripts/measure_concurrency.py` builds itself — the block
+above is that recipe, and it needs no binary built by hand. A caller can also
+bound the pool at construction
+(`EncoderOptions::max_channel_pool_workers`, with
+`StreamSession::channel_pool_workers()` as the reading), so "the feature on"
+below is the geometry-sized configuration a caller who asks for it gets; the
+norm and the deviation from the ecosystem's environment-variable lever are in
+[`../reference/standards.md`](../reference/standards.md#portability-floor). The
+finding itself stands: internal parallelism pays at low concurrency, stops paying
+at a load-dependent N, and never pays for stereo.
 
 `scripts/measure_concurrency.py` starts N child processes as close together as
 the spawn syscall allows and reaps each with `os.wait4`, so every child yields
@@ -95,7 +111,7 @@ the raw rate tables are the context for it.
 | Memory | 64 GB |
 | OS | macOS 27.0, Darwin 27.0.0, arm64 |
 | Toolchain | rustc 1.96.0 (ac68faa20), host aarch64-apple-darwin |
-| Build | release; `parallel` default-on, and `--no-default-features` for the sequential binary |
+| Build | release; both arms are `crates/wem-core/tests/concurrency_worker.rs`, built with and without `--features parallel` (at the time of these numbers: `parallel` default-on, and `--no-default-features` for the sequential binary) |
 | Load average, 1 min, 6-channel cells | **145–231** (loaded record, the tables below) / **25–60** (quiet record) |
 
 Both binaries were checked to emit the same bytes before anything was timed:
