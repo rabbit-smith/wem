@@ -101,6 +101,19 @@
 //! puts `fmt ` first, and the exception is a memory bound, never a wrong
 //! sample.
 //!
+//! Three pieces of state are what a live session costs, and none of them grows
+//! with the stream: the framing's unconsumed bytes (one packet, plus the
+//! consumed prefix `ContainerStream::consume` has not compacted away yet), one
+//! block awaiting its follower's mode, and one [`SynthesisOla`] window per
+//! channel — which releases the finalized front of its timeline on every push,
+//! so it holds at most one long block's worth of samples. The *delivered* PCM
+//! is the caller's: each step's `pcm` is the reply, and nothing here keeps a
+//! copy. `crates/wem-core/tests/decode_memory.rs` measures the whole of it as
+//! the peak RSS of a child process decoding a stream 64x the fixture's length;
+//! the encode side's equivalent check is
+//! `crates/wem-core/tests/streaming.rs`. A bound stated in a comment and
+//! measured in no test is how this one drifted, so both are named here.
+//!
 //! # Failures, and what they leave behind
 //!
 //! A rejection never advances the stream: the packet (or container region) a
@@ -222,9 +235,19 @@ struct ContainerHeader {
 /// complete, then the data payload is consumed as it arrives.
 #[derive(Debug, Default)]
 struct ContainerStream {
-    /// Bytes not yet consumed. Holds the whole header region until it
-    /// resolves, and only the current incomplete packet afterwards.
+    /// Bytes not yet consumed, preceded by the consumed prefix that has not
+    /// been compacted away yet: `pending[cursor..]` is what is left to read.
+    ///
+    /// The prefix is dropped only when it is at least as large as what remains
+    /// ([`ContainerStream::consume`]), which is what keeps the walk linear: a
+    /// front `Vec::drain` per packet moves every unconsumed byte once per
+    /// packet, so one push of a whole WEM costs O(packets x buffer) in
+    /// `memmove` — 845 ms (49.9%) more than the same bytes pushed in 64 KiB
+    /// chunks on a 7 MB WEM, and growing with the square of the push size
+    /// (`docs/findings/decode-performance.md`, finding 3).
     pending: Vec<u8>,
+    /// Bytes of `pending` already consumed, not yet compacted away.
+    cursor: usize,
     endian: Endian,
     header: Option<ContainerHeader>,
     /// Data payload bytes not yet consumed.
@@ -247,6 +270,26 @@ struct Packet {
 }
 
 impl ContainerStream {
+    /// The bytes pushed but not consumed yet. The packet walk reads only this.
+    fn unread(&self) -> &[u8] {
+        &self.pending[self.cursor..]
+    }
+
+    /// Consume `count` bytes from the front of [`ContainerStream::unread`],
+    /// releasing the consumed prefix once it is worth the move.
+    ///
+    /// The release threshold is the whole point: the prefix is dropped when it
+    /// is at least as long as the bytes it would move, so the `memmove` cost of
+    /// a consumed byte is at most one byte, whatever the push size. Pushing a
+    /// whole WEM therefore costs O(bytes) rather than O(packets x bytes).
+    fn consume(&mut self, count: usize) {
+        self.cursor = (self.cursor + count).min(self.pending.len());
+        if self.cursor >= self.pending.len() - self.cursor {
+            self.pending.drain(..self.cursor);
+            self.cursor = 0;
+        }
+    }
+
     /// Resolve the header region if the accumulated bytes complete it.
     ///
     /// Returns whether the region is resolved. `finishing` turns an incomplete
@@ -255,13 +298,13 @@ impl ContainerStream {
         if self.header.is_some() {
             return Ok(true);
         }
-        if self.pending.len() < 12 {
+        if self.unread().len() < 12 {
             return self.shortfall(finishing, "the RIFF/WAVE header");
         }
         // The walk is deliberately the permissive one the container crate
         // exposes: a prefix of the container yields the chunks whose headers
         // are complete, with the last one's payload possibly partial.
-        let (endian, chunks) = parse_chunks(&self.pending)?;
+        let (endian, chunks) = parse_chunks(self.unread())?;
         self.endian = endian;
         let fmt_chunk = chunks
             .iter()
@@ -293,8 +336,8 @@ impl ContainerStream {
         // Everything before the data payload is framing; only the payload is
         // streamed, and the walk's own accounting is what makes a short or
         // surplus payload visible.
-        let drop = (data_chunk.off + 8).min(self.pending.len());
-        self.pending.drain(..drop);
+        let drop = (data_chunk.off + 8).min(self.unread().len());
+        self.consume(drop);
         self.remaining = data_size;
         self.seek_left = seek_left;
         self.header = Some(ContainerHeader { fmt, data_size });
@@ -330,8 +373,8 @@ impl ContainerStream {
             return Ok(None);
         }
         if self.seek_left > 0 {
-            let skip = self.seek_left.min(self.pending.len());
-            self.pending.drain(..skip);
+            let skip = self.seek_left.min(self.unread().len());
+            self.consume(skip);
             self.seek_left -= skip;
             self.remaining -= skip;
             if self.seek_left > 0 {
@@ -341,29 +384,29 @@ impl ContainerStream {
         if self.remaining == 0 {
             return Ok(None);
         }
-        if self.pending.len() < 2 {
+        if self.unread().len() < 2 {
             return self.packet_shortfall(finishing, "a packet size prefix");
         }
         let size = match self.endian {
-            Endian::Little => u16::from_le_bytes([self.pending[0], self.pending[1]]),
-            Endian::Big => u16::from_be_bytes([self.pending[0], self.pending[1]]),
+            Endian::Little => u16::from_le_bytes([self.unread()[0], self.unread()[1]]),
+            Endian::Big => u16::from_be_bytes([self.unread()[0], self.unread()[1]]),
         } as usize;
         if size + 2 > self.remaining {
             return self.packet_shortfall(finishing, "a packet payload inside the data payload");
         }
-        if self.pending.len() < 2 + size {
+        if self.unread().len() < 2 + size {
             return self.packet_shortfall(finishing, "a packet payload");
         }
         Ok(Some(Packet {
             is_setup: !self.setup_taken,
             index: self.audio_packets,
-            payload: self.pending[2..2 + size].to_vec(),
+            payload: self.unread()[2..2 + size].to_vec(),
         }))
     }
 
     /// Release a peeked packet, after the codec accepted it.
     fn commit_packet(&mut self, packet: &Packet) {
-        self.pending.drain(..2 + packet.payload.len());
+        self.consume(2 + packet.payload.len());
         self.remaining -= 2 + packet.payload.len();
         if packet.is_setup {
             self.setup_taken = true;
@@ -441,20 +484,21 @@ impl Codec {
             ..
         } = self;
         let look = &looks[block.mode as usize];
-        let mut before = Vec::with_capacity(ola.len());
-        for state in ola.iter() {
-            before.push(state.pcm().len());
-        }
+        // The overlap-add hands back exactly the samples this push finalized,
+        // in order; those are what gets interleaved. Nothing here indexes a
+        // timeline the state has already released, which is what keeps this
+        // session's own footprint independent of the stream's length.
+        let mut released = Vec::with_capacity(ola.len());
         for (channel, state) in ola.iter_mut().enumerate() {
-            state.push(
+            released.push(state.push(
                 look,
                 windows,
                 block.mode,
                 following,
                 &block.spectra[channel],
-            )?;
+            )?);
         }
-        append_completed(ola, &before, *channels, *total_frames, emitted, pcm)
+        append_completed(&released, *channels, *total_frames, emitted, pcm)
     }
 
     /// Release the last block's tail (`Finish`).
@@ -469,38 +513,37 @@ impl Codec {
             emitted,
             ..
         } = self;
-        let mut before = Vec::with_capacity(ola.len());
-        for state in ola.iter() {
-            before.push(state.pcm().len());
-        }
+        let mut released = Vec::with_capacity(ola.len());
         for state in ola.iter_mut() {
-            state.finish();
+            released.push(state.finish());
         }
-        append_completed(ola, &before, *channels, *total_frames, emitted, pcm)
+        append_completed(&released, *channels, *total_frames, emitted, pcm)
     }
 }
 
-/// Interleave whatever the overlap-add states completed past `before`,
-/// clamped to the frames the container declares.
+/// Interleave what the overlap-add states released in one call, clamped to the
+/// frames the container declares.
+///
+/// `released` is one slice per channel, each holding the samples that channel
+/// finalized in the call that produced it (`SynthesisOla::push`'s or
+/// `finish`'s return value). The slices are the samples: a released window is
+/// not re-read from the state, because the state's own window is bounded and
+/// its front is gone by the next push.
 fn append_completed(
-    ola: &[SynthesisOla],
-    before: &[usize],
+    released: &[&[f64]],
     channels: usize,
     total_frames: u64,
     emitted: &mut u64,
     pcm: &mut Vec<f32>,
 ) -> Result<(), DecoderError> {
-    let mut completed = 0usize;
-    if ola.len() != channels {
+    if released.len() != channels {
         return Err(DecoderError::Internal(InternalError::Invariant {
             message: "overlap-add state count differs from the container's channels",
         }));
     }
-    for (channel, state) in ola.iter().enumerate() {
-        let grew = state.pcm().len() - before[channel];
-        if channel == 0 {
-            completed = grew;
-        } else if grew != completed {
+    let completed = released.first().map_or(0, |first| first.len());
+    for slice in released {
+        if slice.len() != completed {
             // Every channel is driven by the same mode sequence, so the
             // overlap-add advances in lockstep or an invariant is broken.
             return Err(DecoderError::Internal(InternalError::Invariant {
@@ -511,8 +554,8 @@ fn append_completed(
     let room = total_frames.saturating_sub(*emitted);
     let allowed = room.min(completed as u64) as usize;
     for frame in 0..allowed {
-        for (channel, state) in ola.iter().enumerate() {
-            pcm.push(state.pcm()[before[channel] + frame] as f32);
+        for slice in released {
+            pcm.push(slice[frame] as f32);
         }
     }
     *emitted += allowed as u64;
@@ -550,6 +593,18 @@ impl DecodeSession {
     ///
     /// Chunk boundaries never affect the emitted samples: any chunking of the
     /// same WEM bytes emits the same PCM. An empty chunk is a no-op.
+    ///
+    /// **Chunking is not a time/memory trade on this surface — bounded pushes
+    /// are both.** The framing holds what it is given until it is consumed, and
+    /// this step's own reply carries every frame the call completed, so one
+    /// push of a whole stream materializes that stream's whole PCM in the reply
+    /// buffer before the caller sees any of it. A caller that pushes bounded
+    /// chunks holds one chunk of input and one chunk's PCM instead. The walk
+    /// itself adds nothing either way: it compacts the consumed prefix only
+    /// when releasing it moves no more bytes than it frees, so its cost is
+    /// linear in the bytes pushed whatever the push size
+    /// (`docs/findings/decode-performance.md`, finding 3, for the measurement
+    /// that used to be the other way round).
     ///
     /// `STATE_ERROR` after `Finish`. A rejection with any other code is not
     /// terminal: the session keeps the bytes it could not read and reports the

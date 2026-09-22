@@ -456,7 +456,7 @@ def main() -> int:
     if not bin_path.is_file():
         print(
             f"measure-encode-perf: no release binary at {bin_path}.\n"
-"  build it first:  cd crates && cargo build --release -p wem-core "
+            "  build it first:  cd crates && cargo build --release -p wem-core "
             "--features parallel",
             file=sys.stderr,
         )

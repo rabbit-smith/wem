@@ -165,19 +165,22 @@ not a review topic: the formatting and lint steps of `make test` decide it.
 
 Performance is watched, not held to a number. A reading — a leaf or stage, its
 share of an encode, and the machine it came from — becomes an entry in the
-[encode performance finding](../findings/encode-performance.md); it never
+[encode performance finding](../findings/encode-performance.md) or the
+[decode performance finding](../findings/decode-performance.md); it never
 becomes a threshold in a test or a budget in CI. The instruments are
-`scripts/measure_encode_perf.py` (CLI stage timers, min/median/p95/spread, the
-machine identity the numbers belong to, and the load average before and after
-each series), `crates/wem-core/tests/stage_timings.rs` (the per-stage split of
-one encode, `#[ignore]`d, run with `--ignored --nocapture`), and the RSS
-reporters in `crates/wem-core/tests/streaming.rs`. The measurement reads a
-release build, which is not the build the suites use:
+`scripts/measure_encode_perf.py` and `scripts/measure_decode_perf.py` (stage
+timers, min/median/p95/spread, the machine identity the numbers belong to, and
+the load average before and after each series),
+`crates/wem-core/tests/stage_timings.rs` and its decode counterpart (the
+per-stage split of one run, `#[ignore]`d, run with `--ignored --nocapture`), and
+the RSS reporters in `crates/wem-core/tests/streaming.rs`. The measurements read
+a release build, which is not the build the suites use:
 
 ```bash
 cd crates && cargo build --release -p wem-core --features parallel   # the CLI needs the feature
 cd crates && target/release/wwise-wem ../tests/fixtures/input.wav --output /dev/null --time
 python3 scripts/measure_encode_perf.py
+python3 scripts/measure_decode_perf.py
 ```
 
 The timing instruments **report**: an instrument that can fail a build has

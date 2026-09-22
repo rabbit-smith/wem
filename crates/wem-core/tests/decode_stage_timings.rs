@@ -374,33 +374,29 @@ fn staged_audio_packet(
     })
 }
 
-/// Interleave whatever the overlap-add states completed past `before`, clamped
-/// to the frames the container declares (`decoder.rs`'s `append_completed`).
+/// Interleave what the overlap-add states released in one call, clamped to the
+/// frames the container declares (`decoder.rs`'s `append_completed`).
 fn append_completed(
-    ola: &[SynthesisOla],
-    before: &[usize],
+    released: &[&[f64]],
     channels: usize,
     total_frames: u64,
     emitted: &mut u64,
     pcm: &mut Vec<f32>,
 ) -> Result<(), String> {
-    if ola.len() != channels {
+    if released.len() != channels {
         return Err("overlap-add state count differs from the container's channels".to_string());
     }
-    let mut completed = 0usize;
-    for (channel, state) in ola.iter().enumerate() {
-        let grew = state.pcm().len() - before[channel];
-        if channel == 0 {
-            completed = grew;
-        } else if grew != completed {
+    let completed = released.first().map_or(0, |first| first.len());
+    for slice in released {
+        if slice.len() != completed {
             return Err("channel overlap-add states diverged".to_string());
         }
     }
     let room = total_frames.saturating_sub(*emitted);
     let allowed = room.min(completed as u64) as usize;
     for frame in 0..allowed {
-        for (channel, state) in ola.iter().enumerate() {
-            pcm.push(state.pcm()[before[channel] + frame] as f32);
+        for slice in released {
+            pcm.push(slice[frame] as f32);
         }
     }
     *emitted += allowed as u64;
@@ -426,25 +422,24 @@ fn push_block(
         ..
     } = codec;
     let look = &looks[block.mode as usize];
-    let mut before = Vec::with_capacity(ola.len());
-    for state in ola.iter() {
-        before.push(state.pcm().len());
-    }
+    let mut released = Vec::with_capacity(ola.len());
     let start = Instant::now();
     for (channel, state) in ola.iter_mut().enumerate() {
-        state
-            .push(
-                look,
-                windows,
-                block.mode,
-                following,
-                &block.spectra[channel],
-            )
-            .map_err(|error| error.to_string())?;
+        released.push(
+            state
+                .push(
+                    look,
+                    windows,
+                    block.mode,
+                    following,
+                    &block.spectra[channel],
+                )
+                .map_err(|error| error.to_string())?,
+        );
     }
     stages.ola += start.elapsed();
     let start = Instant::now();
-    append_completed(ola, &before, *channels, *total_frames, emitted, pcm)?;
+    append_completed(&released, *channels, *total_frames, emitted, pcm)?;
     stages.interleave += start.elapsed();
     Ok(())
 }
@@ -639,22 +634,19 @@ fn staged_decode(wem: &[u8], chunk_bytes: usize) -> Result<StagedRun, String> {
         push_block(codec, &block, TERMINAL_FOLLOWING, &mut pcm, &mut stages)?;
     }
     let start = Instant::now();
+    let mut released: Vec<&[f64]> = Vec::with_capacity(codec.ola.len());
     for state in codec.ola.iter_mut() {
-        state.finish();
+        released.push(state.finish());
     }
     stages.ola += start.elapsed();
     let start = Instant::now();
-    {
-        let Codec {
-            channels,
-            ola,
-            total_frames,
-            emitted,
-            ..
-        } = codec;
-        let before: Vec<usize> = ola.iter().map(|state| state.pcm().len()).collect();
-        append_completed(ola, &before, *channels, *total_frames, emitted, &mut pcm)?;
-    }
+    append_completed(
+        &released,
+        codec.channels,
+        codec.total_frames,
+        &mut codec.emitted,
+        &mut pcm,
+    )?;
     stages.interleave += start.elapsed();
     let declared_frames = codec.total_frames;
     let channels = codec.channels;
