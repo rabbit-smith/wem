@@ -7,14 +7,18 @@
 //!    and the packets emitted through `push_pcm_chunk` replay exactly
 //!    the WEM container's packet sequence.
 //! 2. **Bounded input memory** — 300 s / 600 s / giant-chunk synthetic 6 ch
-//!    /44100 streams each run in a freshly forked child process whose peak
-//!    RSS is read via `wait4().ru_maxrss`; each child must stay under the
-//!    150 MB ceiling. Measuring in the shared test process is unreliable:
-//!    parallel `#[test]` threads share one allocator that never returns
-//!    memory to the OS, so any in-process reading would be inflated and
-//!    mask the real bound. The only in-process memory assertion is a static
-//!    structural invariant (ring keep == `STREAM_RING_KEEP`), in
-//!    `wem-analysis`.
+//!    /44100 streams, and one short one-shot `Encoder::encode_pcm` batch
+//!    encode of the same synthetic material, each run in a freshly forked
+//!    child process whose peak RSS is read via `wait4().ru_maxrss`; each
+//!    child must stay under its ceiling. Measuring in the shared test
+//!    process is unreliable: parallel `#[test]` threads share one allocator
+//!    that never returns memory to the OS, so any in-process reading would
+//!    be inflated and mask the real bound. The only in-process memory
+//!    assertion is a static structural invariant (ring keep ==
+//!    `STREAM_RING_KEEP`), in `wem-analysis`. The batch case is what pins
+//!    the one-shot analysis input: it holds the caller's PCM (by
+//!    definition) but must not additionally materialize the frame sequence
+//!    before analysing any frame.
 //! 3. **Performance regression** — `encode_pcm`'s release-mode median
 //!    stays within the 150 ms budget documented for the fixture encode.
 
@@ -187,6 +191,18 @@ fn stream_bytes_match_encode_pcm_across_chunking_strategies() {
 /// ~310 MB of i16 PCM; if the session accumulated it, the child would blow
 /// far past this. A bounded implementation stays near output+baseline.
 const RSS_CEILING_BYTES: usize = 150 * 1024 * 1024;
+/// Peak-RSS ceiling for one *one-shot* batch encode of
+/// [`BATCH_RSS_DURATION_SECONDS`]. The batch path necessarily holds the
+/// caller-supplied PCM twice (the i16 bytes it was handed, plus the
+/// channel-major float rows the analysis reads) and the analysis input
+/// keeps the LPC priming/tail source it derives from them; what it must
+/// not hold is a second whole-frame pass over that PCM. At 10 s / 6 ch the
+/// float rows are ~21 MB, so the ceiling leaves room for the session's own
+/// input state plus the baseline and rejects a materialized frame
+/// sequence (~21 MB more at this duration, growing with the stream).
+const BATCH_RSS_CEILING_BYTES: usize = 100 * 1024 * 1024;
+/// Duration of the synthetic one-shot stream the batch RSS worker encodes.
+const BATCH_RSS_DURATION_SECONDS: i64 = 10;
 const SAMPLE_RATE: i64 = 44100;
 const CHANNELS: usize = 6;
 
@@ -265,6 +281,24 @@ fn drive_giant_chunk() {
     );
 }
 
+/// Encode one [`BATCH_RSS_DURATION_SECONDS`] synthetic stream through the
+/// one-shot path (`Encoder::encode_pcm`, no RSS assertion — the parent
+/// reads the child's peak). The batch path owns the caller's whole PCM by
+/// definition; what this worker measures is everything the analysis input
+/// adds on top of it. Runs in the child worker process.
+fn drive_batch_encode() {
+    let encoder = Encoder::new(fixture_selection()).expect("profile loads");
+    let frames = (SAMPLE_RATE * BATCH_RSS_DURATION_SECONDS) as usize;
+    let bytes = synthetic_chunk(CHANNELS, frames, 0);
+    let pcm = Pcm16::from_interleaved_le(SAMPLE_RATE, CHANNELS, bytes).expect("PCM geometry");
+    let result = encoder.encode_pcm(&pcm).expect("batch encode ok");
+    assert_eq!(
+        result.stats.pcm_frames,
+        BATCH_RSS_DURATION_SECONDS * SAMPLE_RATE,
+        "frame accounting must match the batch duration"
+    );
+}
+
 // --- Child-process worker tests ---
 //
 // These do the real streaming work, but only when the parent memory check
@@ -290,6 +324,12 @@ fn stream_memory_rss_worker_giant_chunk() {
     drive_giant_chunk();
 }
 
+#[test]
+#[ignore = "child worker: the memory check runs it with --ignored --exact"]
+fn batch_memory_rss_worker() {
+    drive_batch_encode();
+}
+
 // --- Parent memory check (forks workers, reads their peak RSS) ---
 
 #[test]
@@ -302,11 +342,28 @@ fn stream_memory_stays_bounded_across_duration() {
     }
     let exe = std::env::current_exe().expect("current exe path");
     let cases = [
-        ("stream_memory_rss_worker_duration_300", "300s"),
-        ("stream_memory_rss_worker_duration_600", "600s"),
-        ("stream_memory_rss_worker_giant_chunk", "giant 60s"),
+        (
+            "stream_memory_rss_worker_duration_300",
+            "300s".to_string(),
+            RSS_CEILING_BYTES,
+        ),
+        (
+            "stream_memory_rss_worker_duration_600",
+            "600s".to_string(),
+            RSS_CEILING_BYTES,
+        ),
+        (
+            "stream_memory_rss_worker_giant_chunk",
+            "giant 60s".to_string(),
+            RSS_CEILING_BYTES,
+        ),
+        (
+            "batch_memory_rss_worker",
+            format!("batch {BATCH_RSS_DURATION_SECONDS}s one-shot"),
+            BATCH_RSS_CEILING_BYTES,
+        ),
     ];
-    for (worker, label) in cases {
+    for (worker, label, ceiling) in cases {
         match child_peak_rss(&exe, worker) {
             Some(Ok(peak)) => {
                 eprintln!(
@@ -314,8 +371,8 @@ fn stream_memory_stays_bounded_across_duration() {
                     peak as f64 / 1e6
                 );
                 assert!(
-                    peak < RSS_CEILING_BYTES,
-                    "{label} child peaked at {peak} bytes RSS (>{RSS_CEILING_BYTES}); \
+                    peak < ceiling,
+                    "{label} child peaked at {peak} bytes RSS (>{ceiling}); \
                      the session must not accumulate the input PCM"
                 );
             }

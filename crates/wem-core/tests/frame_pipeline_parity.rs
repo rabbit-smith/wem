@@ -349,9 +349,8 @@ fn every_frame_matches_the_python_oracle() {
         encoder.analysis_resources().clone(),
     )
     .expect("analysis session constructs");
-    let conditioned = session
-        .condition_pcm(&pcm.to_float_rows())
-        .expect("PCM conditions");
+    let pcm_rows = pcm.to_float_rows();
+    let conditioned = session.condition_pcm(&pcm_rows).expect("PCM conditions");
     let (modes, windows) = session
         .selected_windows(&conditioned)
         .expect("mode/window plan selects");

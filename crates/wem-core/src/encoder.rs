@@ -6,7 +6,8 @@
 //!
 //! ```text
 //! profiles (bundle + resources)
-//!   -> analysis session: selected_windows -> analyze_window per frame
+//!   -> analysis session: selected_window_source
+//!   -> one windowed frame at a time -> analyze_window
 //!   -> pack_analysis_frame per analysis frame
 //!   -> build_vorbis_wem container assembly
 //! ```
@@ -16,6 +17,7 @@ use sha2::{Digest, Sha256};
 use std::path::Path;
 
 use wem_analysis::config::AnalysisProfileResources;
+use wem_analysis::preprocessing::windowing::WindowedFrame;
 use wem_analysis::session::AnalysisSession;
 use wem_container::fmt::VorbisFmtFields;
 use wem_container::riff::Endian;
@@ -632,12 +634,24 @@ impl Encoder {
             self.resources.analysis.clone(),
         )?;
 
-        let pcm_rows = session.condition_pcm(&pcm.to_float_rows())?;
-        let (modes, windows) = session.selected_windows(&pcm_rows)?;
+        let pcm_rows = pcm.to_float_rows();
+        let conditioned = session.condition_pcm(&pcm_rows)?;
+        let (modes, source) = session.selected_window_source(&conditioned)?;
 
         let channels = self.profile.channels() as u32;
-        let mut audio_packets: Vec<Vec<u8>> = Vec::with_capacity(windows.len());
-        for window in windows {
+        let mut audio_packets: Vec<Vec<u8>> = Vec::with_capacity(source.plans().len());
+        // The frame's row buffers are scratch: the analysis takes the frame
+        // and the finished `PsyFrame` hands the rows back, so every frame
+        // after the first refills the buffers this loop already owns.
+        // Storage stays here; only one frame is ever resident.
+        let mut scratch: Option<WindowedFrame> = None;
+        for plan in source.plans() {
+            let frozen = session
+                .resources
+                .frozen
+                .as_ref()
+                .map(|frozen| &frozen.window_halves);
+            let window = source.materialize(plan, frozen, scratch.take())?;
             let analysis = session.analyze_window(window, None)?;
             let packet = pack_analysis_packet(
                 &self.resources.setup,
@@ -646,6 +660,7 @@ impl Encoder {
                 channels,
             )?;
             audio_packets.push(packet);
+            scratch = Some(analysis.into_window());
         }
         if audio_packets.len() != modes.len() {
             return Err(EncoderError::Internal(InternalError::Invariant {
