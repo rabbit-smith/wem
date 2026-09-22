@@ -49,12 +49,20 @@
 //!
 //! # Panics
 //!
-//! Kernel invariants are unreachable for well-formed inputs (the kernel
-//! returns typed errors on every input-derived path). On
-//! wasm32-unknown-unknown the default `panic = "abort"` applies, so a
-//! genuine invariant violation terminates the wasm instance instead of
-//! unwinding — the web equivalent of the C ABI's `WEM_ERR_INTERNAL`
-//! boundary.
+//! `wasm32-unknown-unknown` does not unwind, so this shell cannot catch a
+//! panic and has nothing to return in its place: a panic becomes a trap
+//! (`unreachable`), which terminates the wasm instance. The caller receives no
+//! `WEM_ERR_*` code, no container bytes and nothing to retry — the module must
+//! be re-instantiated. That is not the web equivalent of the C ABI's
+//! `WEM_ERR_INTERNAL` boundary: the C ABI and the PyO3 shell catch the panic
+//! and hand back a value, and here there is no value to hand back.
+//!
+//! What follows is therefore a requirement on the kernel, not a promise this
+//! shell can keep: with no way to convert a panic into a typed rejection,
+//! every input-derived path reachable from here must be provably panic-free.
+//! Malformed input is answered by the typed errors of the table above; a panic
+//! on such a path is a defect whose only outcome in this shell is a dead
+//! instance, and it is fixed in the kernel rather than papered over here.
 //!
 //! # No DOM
 //!

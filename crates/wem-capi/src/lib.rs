@@ -15,13 +15,51 @@
 //! * Every entry validates its arguments (NULL checks, length checks)
 //!   before touching kernel state.
 //!
+//! The panic rule (normative: include/wem.h, "Panics"). A caught panic means
+//! the kernel broke an invariant, never that the caller passed something bad,
+//! and it is reported as `WEM_ERR_INTERNAL`. What it costs the caller is
+//! decided by the entry, not by the fault:
+//! * One-shot entries — `wem_encode_pcm16_interleaved`, `wem_encoder_new`,
+//!   `wem_session_new` — carry no state across calls: the failing call is
+//!   rejected and the caller may call again.
+//! * Handle-carrying entries — `wem_encoder_encode`, `wem_session_push`,
+//!   `wem_session_finish` — run inside a handle whose state the panic leaves
+//!   unknown, so the handle is dead and every later call on it returns
+//!   `WEM_ERR_STATE_ERROR` until it is freed. A rejection carrying any other
+//!   code (`WEM_ERR_GEOMETRY_MISMATCH`, ...) says nothing about the handle:
+//!   it stays usable, exactly as the kernel's own session survives it.
+//!
+//! `catch_unwind` only catches while panics unwind, so this crate must be
+//! built with the default `panic = "unwind"` (include/wem.h, "Panics"; the
+//! `compile_error!` guard below makes the alternative a build failure).
+//!
+//! No handle holds a lock, so there is no poisoned-mutex path to answer here:
+//! the kernel encoder is `Sync` and needs no interior mutability, the session
+//! is single-threaded, and the terminal flags are a `bool` and an
+//! `AtomicBool`. If a lock is ever introduced under a handle, poisoning is a
+//! defect like any other and must take the same terminal path as a caught
+//! panic — mark the handle dead and report the code — never `unwrap()`, which
+//! would turn one panic into a second one inside the guard.
+//!
 //! Thread-safety semantics (normative, mirrored in include/wem.h):
 //! * [`WemEncoder`] is shareable: concurrent `wem_encoder_encode` /
 //!   `wem_encode_pcm16_interleaved` calls may share one handle.
 //! * [`WemSession`] has single-threaded ownership: never share it
 //!   between threads (it is intentionally not `Send`).
 
+#[cfg(panic = "abort")]
+compile_error!(
+    "wem-capi's panic contract requires unwinding: a kernel panic is caught and \
+     reported as WEM_ERR_INTERNAL (include/wem.h, \"Panics\"), and under \
+     `panic = \"abort\"` catch_unwind silently stops catching, turning every \
+     one of them into a process abort. Remove the `panic = \"abort\"` setting \
+     from the profile that builds this crate, or build it with the default \
+     unwinding strategy."
+);
+
 use std::ffi::c_void;
+use std::panic::{AssertUnwindSafe, UnwindSafe};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use wem_core::encoder::{Encoder, Pcm16};
 use wem_core::error::EncoderError;
@@ -156,6 +194,48 @@ unsafe fn read_profile(profile: *const WemProfile) -> Result<WwiseProfile, WemEr
 /// Shareable profile-resolved encoder (include/wem.h `WemEncoder`).
 pub struct WemEncoder {
     encoder: Encoder,
+    /// Terminal state of this handle (include/wem.h, "Panics"): set when a
+    /// call has reported `WEM_ERR_INTERNAL`, after which the state the panic
+    /// left behind is not something a caller may build on.
+    ///
+    /// An atomic instead of a `Mutex<..>`/`bool` because the handle is
+    /// shareable: `wem_encoder_encode` takes `*const WemEncoder` — a shared
+    /// borrow — so the flag is the one piece of state a call mutates. Sharing
+    /// it this way also keeps the handle free of a lock, and a lock that can
+    /// be poisoned would need the same terminal mapping as the flag (see
+    /// [`WemEncoder::mark_dead`]).
+    dead: AtomicBool,
+}
+
+impl WemEncoder {
+    /// One live handle over a kernel encoder.
+    fn new(encoder: Encoder) -> Self {
+        Self {
+            encoder,
+            dead: AtomicBool::new(false),
+        }
+    }
+
+    /// Whether a call has already reported `WEM_ERR_INTERNAL` on this handle.
+    fn is_dead(&self) -> bool {
+        self.dead.load(Ordering::SeqCst)
+    }
+
+    /// Mark the handle dead after a defect.
+    ///
+    /// This is the terminal path of include/wem.h, "Panics". Any future
+    /// interior state that can fail independently — a poisoned lock, a
+    /// half-written buffer — must call this and report `WEM_ERR_INTERNAL`
+    /// (and `WEM_ERR_STATE_ERROR` on every later call), never `unwrap()` its
+    /// way into a second panic: a second panic inside a guard would abort the
+    /// escape a caller was promised, which is exactly the failure mode the
+    /// rule exists to remove. There is no lock on this handle today — the
+    /// kernel encoder is `Sync` and needs no interior mutability, so
+    /// `PoisonError` cannot arise here; this is the path a lock would have to
+    /// take if one is ever added.
+    fn mark_dead(&self) {
+        self.dead.store(true, Ordering::SeqCst);
+    }
 }
 
 /// The header's shareability promise, machine-checked.
@@ -181,7 +261,7 @@ const _: fn() = || {
 };
 
 /// Streaming encode session (include/wem.h `WemSession`):
-/// single-threaded ownership; `failed` marks the terminal error state.
+/// single-threaded ownership; `failed` marks the terminal state.
 pub struct WemSession {
     session: StreamSession,
     write_cb: Option<WemWriteFn>,
@@ -189,7 +269,10 @@ pub struct WemSession {
     user_data: *mut c_void,
     /// Next reply-packet sequence number (seq 0 = setup packet).
     next_seq: u32,
-    /// Terminal state set by `finish` (success or error).
+    /// Terminal state: set by `finish` (success or error), by a `packet_cb`
+    /// that aborts the encode, and by a call that reported
+    /// `WEM_ERR_INTERNAL`. Every entry checks it before touching the kernel
+    /// session again.
     failed: bool,
 }
 
@@ -197,15 +280,100 @@ pub struct WemSession {
 /// the whole container).
 const WRITE_BLOCK: usize = 65536;
 
-/// Wrap one kernel call so a panic cannot cross the FFI.
-fn guarded<T>(
-    work: impl FnOnce() -> Result<T, EncoderError> + std::panic::UnwindSafe,
-) -> Result<T, WemError> {
-    match std::panic::catch_unwind(work) {
-        Ok(Ok(value)) => Ok(value),
-        Ok(Err(error)) => Err(WemError::from_kernel(&error)),
-        Err(_) => Err(WemError::Internal),
+/// Where one entry point sits in the panic rule (include/wem.h, "Panics").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PanicScope {
+    /// The call owns no state that survives it: a one-shot encode, or the
+    /// construction of a handle. A caught panic rejects this call alone and
+    /// the caller may call again.
+    OneShot,
+    /// The call ran inside a handle that outlives it. A caught panic leaves
+    /// that handle's state unknown, so the handle is dead afterwards.
+    Handle,
+}
+
+/// One guarded kernel call, as the entry points report it.
+struct Guarded<T> {
+    /// What the entry returns.
+    outcome: Result<T, WemError>,
+    /// Whether the handle the call ran in is dead afterwards. True only for
+    /// `WEM_ERR_INTERNAL` inside a [`PanicScope::Handle`] call: the defect
+    /// code is what says the state can no longer be trusted, whether the
+    /// kernel panicked or reported the fault (`guarded_outcome` below).
+    handle_dead: bool,
+}
+
+impl<T> Guarded<T> {
+    /// A call the boundary rejected before the kernel saw it: the handle is
+    /// untouched.
+    fn rejected(code: WemError) -> Self {
+        Self {
+            outcome: Err(code),
+            handle_dead: false,
+        }
     }
+
+    /// Continue with the guarded value, keeping the terminal verdict: the
+    /// callback that delivers output runs after the kernel call, and it may
+    /// not resurrect a handle a panic just killed.
+    fn and_then<U>(self, next: impl FnOnce(T) -> Result<U, WemError>) -> Guarded<U> {
+        Guarded {
+            outcome: self.outcome.and_then(next),
+            handle_dead: self.handle_dead,
+        }
+    }
+}
+
+impl Guarded<()> {
+    /// The code the entry returns for a call that produces no value.
+    fn into_code(self) -> WemError {
+        match self.outcome {
+            Ok(()) => WemError::Ok,
+            Err(code) => code,
+        }
+    }
+}
+
+/// The whole panic rule, in one place: what a kernel failure produces for an
+/// entry point of the given scope.
+///
+/// This is the mapping the FFI bodies apply, kept apart from them so it can be
+/// tested as a pure function. Driving a real panic through an entry point
+/// would need a fault-injection switch inside the kernel, and a switch that
+/// can abort an encode is not something to ship in `src/`.
+fn guarded_outcome<T>(
+    scope: PanicScope,
+    caught: std::thread::Result<Result<T, EncoderError>>,
+) -> Guarded<T> {
+    match caught {
+        Ok(Ok(value)) => Guarded {
+            outcome: Ok(value),
+            handle_dead: false,
+        },
+        // A rejection the kernel reported: its own stable code, and the
+        // handle is only dead if that code is the defect code.
+        Ok(Err(error)) => {
+            let code = WemError::from_kernel(&error);
+            Guarded {
+                outcome: Err(code),
+                handle_dead: code == WemError::Internal && scope == PanicScope::Handle,
+            }
+        }
+        // A caught panic: include/wem.h pins this as WEM_ERR_INTERNAL, which
+        // means a defect and never bad input.
+        Err(_) => Guarded {
+            outcome: Err(WemError::Internal),
+            handle_dead: scope == PanicScope::Handle,
+        },
+    }
+}
+
+/// Wrap one kernel call so a panic cannot cross the FFI.
+fn guard<T>(
+    scope: PanicScope,
+    work: impl FnOnce() -> Result<T, EncoderError> + UnwindSafe,
+) -> Guarded<T> {
+    guarded_outcome(scope, std::panic::catch_unwind(work))
 }
 
 /// Deliver one byte blob through the write callback in bounded blocks.
@@ -228,37 +396,38 @@ fn emit_bytes(
 
 /// Encode one interleaved PCM buffer with one encoder; deliver the
 /// container bytes through the write callback.
+///
+/// `scope` is the caller's side of the panic rule: the same encode run for a
+/// one-shot entry and for a handle differs only in what a caught panic costs.
 fn encode_with(
+    scope: PanicScope,
     encoder: &Encoder,
     pcm: *const u8,
     frames: usize,
     write_cb: Option<WemWriteFn>,
     user_data: *mut c_void,
-) -> Result<(), WemError> {
+) -> Guarded<()> {
     if frames == 0 || pcm.is_null() || write_cb.is_none() {
         // The caller guarantees `frames` complete frames behind `pcm`;
         // NULL/zero arguments are malformed calls, never encodable input.
-        return Err(WemError::StateError);
+        return Guarded::rejected(WemError::StateError);
     }
     let channels = encoder.profile().channels() as usize;
-    let byte_len = frames
-        .checked_mul(channels * 2)
-        .ok_or(WemError::StateError)?;
+    let byte_len = match frames.checked_mul(channels * 2) {
+        Some(byte_len) => byte_len,
+        None => return Guarded::rejected(WemError::StateError),
+    };
     let bytes = unsafe { std::slice::from_raw_parts(pcm, byte_len) };
     // The client's buffer is borrowed for this call only and the kernel owns
     // its input, so this is the ownership boundary where the samples are
     // copied in — a reviewed design decision, not an oversight.
-    let pcm16 = Pcm16::from_interleaved_le(encoder.profile().sample_rate(), channels, bytes)
-        .map_err(|error| WemError::from_kernel(&error))?;
+    let pcm16 = match Pcm16::from_interleaved_le(encoder.profile().sample_rate(), channels, bytes) {
+        Ok(pcm16) => pcm16,
+        Err(error) => return Guarded::rejected(WemError::from_kernel(&error)),
+    };
     // CPU-bound kernel work behind the FFI boundary: catch any panic.
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-        encoder.encode_pcm(&pcm16)
-    }));
-    match outcome {
-        Ok(Ok(result)) => emit_bytes(&result.data, write_cb, user_data),
-        Ok(Err(error)) => Err(WemError::from_kernel(&error)),
-        Err(_) => Err(WemError::Internal),
-    }
+    guard(scope, AssertUnwindSafe(move || encoder.encode_pcm(&pcm16)))
+        .and_then(|result| emit_bytes(&result.data, write_cb, user_data))
 }
 
 // ---------------------------------------------------------------------------
@@ -267,6 +436,9 @@ fn encode_with(
 
 /// Resolve one profile selection into a shareable encoder handle
 /// (include/wem.h `wem_encoder_new`).
+///
+/// One-shot: nothing was handed out when this fails, so a caught panic here
+/// is retryable, like any other rejection.
 ///
 /// On `WEM_OK`, `*out_encoder` owns the handle; on error it is set to NULL.
 ///
@@ -292,15 +464,11 @@ pub unsafe extern "C" fn wem_encoder_new(
             return code;
         }
     };
-    let outcome = guarded(move || {
-        Ok(WemEncoder {
-            encoder: Encoder::new(selection)?,
-        })
-    });
-    match outcome {
+    let outcome = guard(PanicScope::OneShot, move || Encoder::new(selection));
+    match outcome.outcome {
         Ok(encoder) => {
             unsafe {
-                *out_encoder = Box::into_raw(Box::new(encoder));
+                *out_encoder = Box::into_raw(Box::new(WemEncoder::new(encoder)));
             }
             WemError::Ok
         }
@@ -314,7 +482,7 @@ pub unsafe extern "C" fn wem_encoder_new(
 }
 
 /// Release one encoder handle (include/wem.h `wem_encoder_free`);
-/// NULL is a no-op.
+/// NULL is a no-op. A dead handle is freed exactly like a live one.
 ///
 /// # Safety
 ///
@@ -334,6 +502,10 @@ pub unsafe extern "C" fn wem_encoder_free(encoder: *mut WemEncoder) {
 /// delivered through `write_cb` in bounded blocks; concurrent calls on
 /// different threads sharing the handle are safe.
 ///
+/// Terminal on `WEM_ERR_INTERNAL`: the defect code means the handle's state
+/// can no longer be trusted, so this call marks it dead and every later call
+/// on it returns `WEM_ERR_STATE_ERROR` until it is freed.
+///
 /// # Safety
 ///
 /// - `encoder` must be NULL or a live handle (rejected when NULL);
@@ -352,10 +524,21 @@ pub unsafe extern "C" fn wem_encoder_encode(
         return WemError::StateError;
     }
     let handle = unsafe { &*encoder };
-    match encode_with(&handle.encoder, pcm, frames, write_cb, user_data) {
-        Ok(()) => WemError::Ok,
-        Err(code) => code,
+    if handle.is_dead() {
+        return WemError::StateError;
     }
+    let outcome = encode_with(
+        PanicScope::Handle,
+        &handle.encoder,
+        pcm,
+        frames,
+        write_cb,
+        user_data,
+    );
+    if outcome.handle_dead {
+        handle.mark_dead();
+    }
+    outcome.into_code()
 }
 
 // ---------------------------------------------------------------------------
@@ -368,7 +551,8 @@ pub unsafe extern "C" fn wem_encoder_encode(
 /// `pcm` must hold `frames * channels` little-endian signed-16 samples
 /// (interleaved, `channels` from the selection). Output goes through
 /// `write_cb` in bounded blocks — callback-style output, so there is no
-/// container size limit.
+/// container size limit. One-shot: a caught panic rejects this call and the
+/// caller may call again.
 ///
 /// # Safety
 ///
@@ -388,12 +572,17 @@ pub unsafe extern "C" fn wem_encode_pcm16_interleaved(
         Ok(selection) => selection,
         Err(code) => return code,
     };
-    let outcome = guarded(move || Encoder::new(selection));
-    match outcome {
-        Ok(encoder) => match encode_with(&encoder, pcm, frames, write_cb, user_data) {
-            Ok(()) => WemError::Ok,
-            Err(code) => code,
-        },
+    let outcome = guard(PanicScope::OneShot, move || Encoder::new(selection));
+    match outcome.outcome {
+        Ok(encoder) => encode_with(
+            PanicScope::OneShot,
+            &encoder,
+            pcm,
+            frames,
+            write_cb,
+            user_data,
+        )
+        .into_code(),
         Err(code) => code,
     }
 }
@@ -410,7 +599,9 @@ pub unsafe extern "C" fn wem_encode_pcm16_interleaved(
 /// are delivered through `packet_cb` (NULL discards them); the terminal
 /// container bytes are delivered through `write_cb` at `finish`
 /// (required). The session has single-threaded ownership. On `WEM_OK`,
-/// `*out_session` owns the handle; on error it is set to NULL.
+/// `*out_session` owns the handle; on error it is set to NULL. One-shot
+/// like `wem_encoder_new`: a caught panic here hands out no handle, so the
+/// caller may call again.
 ///
 /// # Safety
 ///
@@ -440,21 +631,23 @@ pub unsafe extern "C" fn wem_session_new(
             return code;
         }
     };
-    if write_cb.is_none() {
+    // A session without its write callback cannot deliver the container, so
+    // the missing callback is a malformed call — rejected here, never carried
+    // into the handle as a state a later call has to unwrap.
+    let Some(write_cb) = write_cb else {
         return WemError::StateError;
-    }
-    let write_cb = Some(write_cb.expect("validated non-null above"));
-    let outcome = guarded(move || {
+    };
+    let outcome = guard(PanicScope::OneShot, move || {
         StreamSession::for_selection(selection).map(|session| WemSession {
             session,
-            write_cb,
+            write_cb: Some(write_cb),
             packet_cb,
             user_data,
             next_seq: 0,
             failed: false,
         })
     });
-    match outcome {
+    match outcome.outcome {
         Ok(session) => {
             unsafe {
                 *out_session = Box::into_raw(Box::new(session));
@@ -474,6 +667,13 @@ pub unsafe extern "C" fn wem_session_new(
 /// (include/wem.h `wem_session_push`) and deliver the packets that just
 /// completed through `packet_cb`. Chunk boundaries never affect the
 /// output bytes; an empty chunk is a no-op.
+///
+/// Terminal on `WEM_ERR_INTERNAL` (a defect the kernel panicked on or
+/// reported): the session is marked dead, so every later call on it returns
+/// `WEM_ERR_STATE_ERROR`. A rejection with any other code — a chunk that
+/// carries a trailing partial frame, say — leaves the session usable, exactly
+/// as the kernel's own session survives it. A `packet_cb` that returns
+/// non-`WEM_OK` aborts the session on purpose.
 ///
 /// # Safety
 ///
@@ -501,16 +701,17 @@ pub unsafe extern "C" fn wem_session_push(
     } else {
         &[] as &[u8]
     };
-    let outcome = {
+    let guarded = {
         let state = unsafe { &mut *session };
         if state.failed {
             return WemError::StateError;
         }
-        guarded(std::panic::AssertUnwindSafe(move || {
-            state.session.push_pcm_chunk(bytes)
-        }))
+        guard(
+            PanicScope::Handle,
+            AssertUnwindSafe(move || state.session.push_pcm_chunk(bytes)),
+        )
     };
-    match outcome {
+    match guarded.outcome {
         Ok(packets) => {
             let state = unsafe { &mut *session };
             for packet in packets {
@@ -533,8 +734,10 @@ pub unsafe extern "C" fn wem_session_push(
             WemError::Ok
         }
         Err(code) => {
-            unsafe {
-                (*session).failed = true;
+            if guarded.handle_dead {
+                unsafe {
+                    (*session).failed = true;
+                }
             }
             code
         }
@@ -559,14 +762,17 @@ pub unsafe extern "C" fn wem_session_finish(
     if session.is_null() || out_meta.is_null() {
         return WemError::StateError;
     }
-    let outcome = {
+    if unsafe { (*session).failed } {
+        return WemError::StateError;
+    }
+    let guarded = {
         let state = unsafe { &mut *session };
-        if state.failed {
-            return WemError::StateError;
-        }
-        guarded(std::panic::AssertUnwindSafe(move || state.session.finish()))
+        guard(
+            PanicScope::Handle,
+            AssertUnwindSafe(move || state.session.finish()),
+        )
     };
-    match outcome {
+    match guarded.outcome {
         Ok(result) => {
             let state = unsafe { &mut *session };
             if let Err(code) = emit_bytes(&result.data, state.write_cb, state.user_data) {
@@ -591,7 +797,8 @@ pub unsafe extern "C" fn wem_session_finish(
 }
 
 /// Release one streaming session (include/wem.h `wem_session_free`);
-/// NULL is a no-op, safe before or after `finish`.
+/// NULL is a no-op, safe before or after `finish`, and safe on a session a
+/// defect has marked dead.
 ///
 /// # Safety
 ///
@@ -739,5 +946,147 @@ mod tests {
         let code = unsafe { wem_encoder_new(std::ptr::null(), &mut encoder) };
         assert_eq!(code, WemError::StateError);
         assert!(encoder.is_null());
+    }
+
+    /// A write callback that accepts everything: no case here delivers bytes
+    /// worth keeping.
+    unsafe extern "C" fn discard_write(
+        _data: *const u8,
+        _len: usize,
+        _user_data: *mut c_void,
+    ) -> WemError {
+        WemError::Ok
+    }
+
+    /// The panic rule of include/wem.h ("Panics") as the mapping the entries
+    /// apply to every kernel call.
+    ///
+    /// The mapping is tested directly instead of by panicking inside a kernel
+    /// call: forcing one would need a fault-injection switch in `src/`, and a
+    /// switch that can abort an encode is not something to ship. The caught
+    /// panic below is a real one, produced in the test.
+    #[test]
+    fn guarded_outcome_is_the_whole_panic_rule() {
+        // A call that returns a value: nothing is terminal, either scope.
+        for scope in [PanicScope::OneShot, PanicScope::Handle] {
+            let guarded = guarded_outcome::<u32>(scope, Ok(Ok(7)));
+            assert_eq!(guarded.outcome, Ok(7), "{scope:?}: the value passes");
+            assert!(!guarded.handle_dead, "{scope:?}: success kills nothing");
+        }
+
+        // A rejection the kernel reported: its own stable code survives, and
+        // no rejection other than the defect code is terminal.
+        for (error, code) in [
+            (
+                EncoderError::GeometryMismatch {
+                    message: "trailing partial frame".into(),
+                },
+                WemError::GeometryMismatch,
+            ),
+            (
+                EncoderError::StateError {
+                    message: "PCM channel count is not representable".into(),
+                },
+                WemError::StateError,
+            ),
+            (
+                EncoderError::InputTooShort { want: 4096, got: 1 },
+                WemError::InputTooShort,
+            ),
+            (
+                EncoderError::ProfileNotFound {
+                    requested: "2ch/44100Hz/2013".into(),
+                },
+                WemError::ProfileNotFound,
+            ),
+            (
+                EncoderError::FormatUnsupported {
+                    message: "not signed-16 PCM".into(),
+                },
+                WemError::FormatUnsupported,
+            ),
+        ] {
+            let guarded = guarded_outcome::<u32>(PanicScope::Handle, Ok(Err(error)));
+            assert_eq!(guarded.outcome, Err(code), "{code:?} must keep its code");
+            assert!(
+                !guarded.handle_dead,
+                "{code:?} refuses one call; it must leave the handle usable"
+            );
+        }
+
+        // The defect code — reported by the kernel or reached by a panic —
+        // keeps the code INTERNAL, and only a handle-carrying entry dies on
+        // it: a one-shot entry has nothing to kill and may be called again.
+        for scope in [PanicScope::OneShot, PanicScope::Handle] {
+            let terminal = scope == PanicScope::Handle;
+            let reported = guarded_outcome::<u32>(
+                scope,
+                Ok(Err(EncoderError::Internal(
+                    wem_core::InternalError::Invariant { message: "x" },
+                ))),
+            );
+            assert_eq!(reported.outcome, Err(WemError::Internal));
+            assert_eq!(
+                reported.handle_dead, terminal,
+                "{scope:?}: a reported kernel defect follows the same rule as a panic"
+            );
+
+            let panicked = guarded_outcome::<u32>(
+                scope,
+                std::panic::catch_unwind(|| -> Result<u32, EncoderError> {
+                    panic!("injected kernel invariant violation")
+                }),
+            );
+            assert_eq!(
+                panicked.outcome,
+                Err(WemError::Internal),
+                "{scope:?}: a caught panic is WEM_ERR_INTERNAL"
+            );
+            assert_eq!(
+                panicked.handle_dead, terminal,
+                "{scope:?}: only a handle-carrying entry dies on a panic"
+            );
+        }
+    }
+
+    /// The other half of the rule: what a dead handle answers afterwards.
+    #[test]
+    fn a_dead_encoder_handle_rejects_every_later_call() {
+        let profile = WemProfile {
+            version: WemVersion::Wwise2013,
+            channels: 6,
+            sample_rate: 44_100,
+        };
+        let mut handle: *mut WemEncoder = std::ptr::null_mut();
+        assert_eq!(
+            unsafe { wem_encoder_new(&profile, &mut handle) },
+            WemError::Ok,
+            "the fixture selection resolves"
+        );
+        // One frame of silence: enough to reach the kernel, which refuses it
+        // for its length. That refusal is what tells a live handle from a
+        // dead one below.
+        let pcm = [0i16; 6];
+        let pcm = pcm.as_ptr().cast::<u8>();
+        assert_eq!(
+            unsafe {
+                wem_encoder_encode(handle, pcm, 1, Some(discard_write), std::ptr::null_mut())
+            },
+            WemError::InputTooShort,
+            "a live handle runs the call and reports the kernel's own code"
+        );
+
+        unsafe { (*handle).mark_dead() };
+
+        assert_eq!(
+            unsafe {
+                wem_encoder_encode(handle, pcm, 1, Some(discard_write), std::ptr::null_mut())
+            },
+            WemError::StateError,
+            "a dead handle is refused before the kernel sees the call"
+        );
+        unsafe {
+            wem_encoder_free(handle);
+        }
     }
 }

@@ -22,6 +22,19 @@
 //!   Python exceptions.
 //! * Blocking/CPU-heavy kernel calls run under `Python::allow_threads` so
 //!   the GIL is not held while the kernel works.
+//! * No unwind into the interpreter: every kernel call is caught at this
+//!   boundary. A kernel panic means the kernel broke an invariant, never
+//!   that the caller passed something bad, and it reaches Python as
+//!   [`WemEncoderError`] carrying `.code == "INTERNAL"` — the code the C ABI
+//!   reports for the same fault, and the same `.code` every other kernel
+//!   error travels with, so `except Exception` sees it (pyo3's own
+//!   `PanicException` derives from `BaseException` and would escape that).
+//!   A panic inside a handle is terminal for that handle (include/wem.h,
+//!   "Panics"): the exception says so, and every later call on it raises
+//!   `STATE_ERROR` instead of touching the kernel again.
+
+use std::panic::{AssertUnwindSafe, UnwindSafe};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use pyo3::exceptions::{PyException, PyValueError};
 use pyo3::ffi::c_str;
@@ -31,8 +44,22 @@ use pyo3::types::{PyBytes, PyDict, PyType};
 
 use wem_core::encoder::{EncodeResult as WemEncodeResult, Encoder as WemEncoder, Pcm16};
 use wem_core::error::EncoderError;
-use wem_core::stream::{StreamPacket, StreamSession as WemStreamSession};
+use wem_core::stream::StreamSession as WemStreamSession;
 use wem_core::{WwiseProfile, WwiseVersion};
+
+/// This shell's panic contract needs unwinding panics: `catch_unwind` stops
+/// catching under `panic = "abort"`, where a kernel panic would abort the
+/// interpreter instead of raising `INTERNAL`. No profile in this workspace
+/// sets `panic`, so the default applies; this guard keeps a profile edit from
+/// breaking the promise silently.
+#[cfg(panic = "abort")]
+compile_error!(
+    "wem-python's panic contract requires unwinding: a kernel panic is caught and \
+     raised as WemEncoderError with code INTERNAL, and under `panic = \"abort\"` \
+     catch_unwind silently stops catching, aborting the interpreter instead. \
+     Remove the `panic = \"abort\"` setting from the profile that builds this \
+     crate."
+);
 
 // ---------------------------------------------------------------------------
 // Error surface (kernel encoder error codes)
@@ -54,19 +81,9 @@ const CODE_FORMAT_UNSUPPORTED: &str = "FORMAT_UNSUPPORTED";
 const CODE_STATE_ERROR: &str = "STATE_ERROR";
 const CODE_INTERNAL: &str = "INTERNAL";
 
-/// Map one kernel error to the Python exception: the stable `.code` string
-/// plus the kernel's own diagnostic message (zero drift — the message is
-/// `EncoderError`'s Display output, untouched).
-fn error_to_pyerr(err: EncoderError) -> PyErr {
-    let code = match &err {
-        EncoderError::ProfileNotFound { .. } => CODE_PROFILE_NOT_FOUND,
-        EncoderError::StateError { .. } => CODE_STATE_ERROR,
-        EncoderError::GeometryMismatch { .. } => CODE_GEOMETRY_MISMATCH,
-        EncoderError::InputTooShort { .. } => CODE_INPUT_TOO_SHORT,
-        EncoderError::FormatUnsupported { .. } => CODE_FORMAT_UNSUPPORTED,
-        EncoderError::Internal(_) => CODE_INTERNAL,
-    };
-    let message = err.to_string();
+/// The single place a `.code` is attached to the raised exception: the stable
+/// cross-language class plus a message, exactly as the caller will read both.
+fn error_with_code(code: &str, message: String) -> PyErr {
     Python::with_gil(|py| {
         let pyerr = WemEncoderError::new_err(message);
         let instance = pyerr.value(py);
@@ -75,11 +92,126 @@ fn error_to_pyerr(err: EncoderError) -> PyErr {
     })
 }
 
+/// The stable code name of one kernel error.
+fn code_of(err: &EncoderError) -> &'static str {
+    match err {
+        EncoderError::ProfileNotFound { .. } => CODE_PROFILE_NOT_FOUND,
+        EncoderError::StateError { .. } => CODE_STATE_ERROR,
+        EncoderError::GeometryMismatch { .. } => CODE_GEOMETRY_MISMATCH,
+        EncoderError::InputTooShort { .. } => CODE_INPUT_TOO_SHORT,
+        EncoderError::FormatUnsupported { .. } => CODE_FORMAT_UNSUPPORTED,
+        EncoderError::Internal(_) => CODE_INTERNAL,
+    }
+}
+
+/// Map one kernel error to the Python exception: the stable `.code` string
+/// plus the kernel's own diagnostic message (zero drift — the message is
+/// `EncoderError`'s Display output, untouched).
+fn error_to_pyerr(err: EncoderError) -> PyErr {
+    error_with_code(code_of(&err), err.to_string())
+}
+
 /// Binding-level rejection that is semantically a kernel STATE_ERROR
 /// (malformed input container; the kernel's own StateError Display is
 /// used so the error pipeline stays single-sourced).
 fn binding_state_error(message: String) -> PyErr {
     error_to_pyerr(EncoderError::StateError { message })
+}
+
+// ---------------------------------------------------------------------------
+// The panic rule at this boundary (include/wem.h, "Panics")
+// ---------------------------------------------------------------------------
+
+/// Where one Python entry point sits in the panic rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PanicScope {
+    /// The call owns no state that survives it (constructing a handle): a
+    /// panic means nothing was created, and the caller may try again.
+    OneShot,
+    /// The call ran inside a handle that outlives it: a panic leaves that
+    /// handle's state unknown, so the handle is dead afterwards.
+    Handle,
+}
+
+/// The exception a caught kernel panic becomes, for the entry of the given
+/// scope.
+///
+/// Two things must hold, and this is the one place both are decided:
+/// * the code is `INTERNAL`, the code the C ABI reports for a caught panic, so
+///   a caller branching on `.code` sees the same class on every shell;
+/// * the message names the consequence — the handle is unusable — instead of
+///   leaving the caller to guess whether the object is still worth anything.
+fn panic_error(scope: PanicScope, handle: &str) -> PyErr {
+    let message = match scope {
+        PanicScope::OneShot => format!(
+            "kernel panic while creating the {handle}: no {handle} was created and \
+             the library is in an unknown state; this is a defect in the kernel, \
+             not a rejection of the input"
+        ),
+        PanicScope::Handle => format!(
+            "kernel panic in the {handle}: this {handle} is unusable and must be \
+             discarded; this is a defect in the kernel, not a rejection of the input"
+        ),
+    };
+    error_with_code(CODE_INTERNAL, message)
+}
+
+/// The message of the rejection a dead handle answers with.
+fn unusable_error(handle: &str) -> PyErr {
+    error_with_code(
+        CODE_STATE_ERROR,
+        format!("{handle} is unusable: a kernel defect already killed it"),
+    )
+}
+
+/// One guarded kernel call.
+struct Guarded<T> {
+    /// The call's result, with a caught panic already mapped (see
+    /// [`panic_error`]).
+    outcome: Result<T, PyErr>,
+    /// Whether the handle the call ran in is dead afterwards: true for a
+    /// defect — a caught panic, or the kernel's own `INTERNAL` — inside a
+    /// [`PanicScope::Handle`] call. Every other code is a rejection of the
+    /// call and leaves the handle usable, exactly as the kernel's own session
+    /// survives it.
+    handle_dead: bool,
+}
+
+/// The whole panic rule as a pure function, kept out of the `#[pymethods]`
+/// bodies so it can be tested directly: forcing a real panic through a kernel
+/// call would need a fault-injection switch inside the kernel, and shipping a
+/// switch that can abort an encode is not worth the test.
+fn guarded_outcome<T>(
+    scope: PanicScope,
+    handle: &str,
+    caught: std::thread::Result<Result<T, EncoderError>>,
+) -> Guarded<T> {
+    match caught {
+        Ok(Ok(value)) => Guarded {
+            outcome: Ok(value),
+            handle_dead: false,
+        },
+        Ok(Err(error)) => {
+            let handle_dead = code_of(&error) == CODE_INTERNAL && scope == PanicScope::Handle;
+            Guarded {
+                outcome: Err(error_to_pyerr(error)),
+                handle_dead,
+            }
+        }
+        Err(_) => Guarded {
+            outcome: Err(panic_error(scope, handle)),
+            handle_dead: scope == PanicScope::Handle,
+        },
+    }
+}
+
+/// Run one kernel call under the panic rule.
+fn guard<T>(
+    scope: PanicScope,
+    handle: &str,
+    work: impl FnOnce() -> Result<T, EncoderError> + UnwindSafe,
+) -> Guarded<T> {
+    guarded_outcome(scope, handle, std::panic::catch_unwind(work))
 }
 
 // ---------------------------------------------------------------------------
@@ -343,6 +475,32 @@ impl PyWwiseProfile {
 #[pyclass(name = "Encoder", module = "wwise_wem._core")]
 struct PyEncoder {
     inner: WemEncoder,
+    /// Terminal state of this handle: set when a call has reported `INTERNAL`
+    /// (a kernel panic, or a defect the kernel reported), after which no call
+    /// may touch the kernel again. Atomic because the handle is shareable —
+    /// methods take `&self` and concurrent encodes are allowed, exactly as the
+    /// C ABI's `WemEncoder` is documented.
+    dead: AtomicBool,
+}
+
+impl PyEncoder {
+    /// The rejection every call on this handle answers with once a defect has
+    /// killed it.
+    fn unusable(&self) -> PyErr {
+        unusable_error("Encoder")
+    }
+
+    fn is_dead(&self) -> bool {
+        self.dead.load(Ordering::SeqCst)
+    }
+
+    /// Apply one guarded call's verdict to the handle.
+    fn settle<T>(&self, guarded: Guarded<T>) -> PyResult<T> {
+        if guarded.handle_dead {
+            self.dead.store(true, Ordering::SeqCst);
+        }
+        guarded.outcome
+    }
 }
 
 #[pymethods]
@@ -358,8 +516,15 @@ impl PyEncoder {
     #[new]
     #[pyo3(signature = (profile, quality=None))]
     fn new(profile: PyRef<'_, PyWwiseProfile>, quality: Option<f64>) -> PyResult<Self> {
-        let inner = WemEncoder::new_with_quality(profile.inner, quality).map_err(error_to_pyerr)?;
-        Ok(Self { inner })
+        // One-shot: a panic here created nothing, so it is reported and the
+        // caller may construct an encoder again.
+        let guarded = guard(PanicScope::OneShot, "Encoder", || {
+            WemEncoder::new_with_quality(profile.inner, quality)
+        });
+        Ok(Self {
+            inner: guarded.outcome?,
+            dead: AtomicBool::new(false),
+        })
     }
 
     /// Encode one independent PCM buffer into a complete WEM container.
@@ -372,13 +537,22 @@ impl PyEncoder {
         sample_rate: i64,
         channels: &Bound<'_, PyAny>,
     ) -> PyResult<PyEncodeResult> {
+        if self.is_dead() {
+            return Err(self.unusable());
+        }
         let pcm = pcm_from_argument(sample_rate, channels)?;
         // CPU-bound kernel work: release the GIL (the encoder is
-        // immutable after construction, so the shared borrow is safe).
-        let result = py
-            .allow_threads(|| self.inner.encode_pcm(&pcm))
-            .map_err(error_to_pyerr)?;
-        Ok(PyEncodeResult { inner: result })
+        // immutable after construction, so the shared borrow is safe). A
+        // panic unwinds through `allow_threads`, whose guard re-acquires the
+        // GIL on the way out, so the interpreter is never left without it.
+        let guarded = guard(
+            PanicScope::Handle,
+            "Encoder",
+            AssertUnwindSafe(|| py.allow_threads(|| self.inner.encode_pcm(&pcm))),
+        );
+        Ok(PyEncodeResult {
+            inner: self.settle(guarded)?,
+        })
     }
 
     /// Encode interleaved little-endian signed-16 PCM bytes directly.
@@ -389,12 +563,19 @@ impl PyEncoder {
         channel_count: usize,
         data: &Bound<'_, PyBytes>,
     ) -> PyResult<PyEncodeResult> {
+        if self.is_dead() {
+            return Err(self.unusable());
+        }
         let pcm = Pcm16::from_interleaved_le(sample_rate, channel_count, data.as_bytes())
             .map_err(error_to_pyerr)?;
-        let result = py
-            .allow_threads(|| self.inner.encode_pcm(&pcm))
-            .map_err(error_to_pyerr)?;
-        Ok(PyEncodeResult { inner: result })
+        let guarded = guard(
+            PanicScope::Handle,
+            "Encoder",
+            AssertUnwindSafe(|| py.allow_threads(|| self.inner.encode_pcm(&pcm))),
+        );
+        Ok(PyEncodeResult {
+            inner: self.settle(guarded)?,
+        })
     }
 }
 
@@ -473,6 +654,21 @@ impl PyEncodeResult {
 struct PyStreamSession {
     inner: WemStreamSession,
     next_seq: u32,
+    /// Terminal state of this handle: set when a call has reported `INTERNAL`
+    /// (a kernel panic, or a defect the kernel reported). The kernel's own
+    /// session survives every rejection it reports; a defect is where this
+    /// shell stops trusting it.
+    dead: bool,
+}
+
+impl PyStreamSession {
+    fn is_dead(&self) -> bool {
+        self.dead
+    }
+
+    fn unusable(&self) -> PyErr {
+        unusable_error("StreamSession")
+    }
 }
 
 #[pymethods]
@@ -482,6 +678,7 @@ impl PyStreamSession {
         Self {
             inner: WemStreamSession::new(),
             next_seq: 0,
+            dead: false,
         }
     }
 
@@ -500,20 +697,40 @@ impl PyStreamSession {
         selection: PyRef<'_, PyWwiseProfile>,
         quality: Option<f64>,
     ) -> PyResult<Self> {
-        let inner = WemStreamSession::for_selection_quality(selection.inner, quality)
-            .map_err(error_to_pyerr)?;
-        Ok(Self { inner, next_seq: 0 })
+        // One-shot: a panic here opened no session.
+        let guarded = guard(PanicScope::OneShot, "StreamSession", || {
+            WemStreamSession::for_selection_quality(selection.inner, quality)
+        });
+        Ok(Self {
+            inner: guarded.outcome?,
+            next_seq: 0,
+            dead: false,
+        })
     }
 
     /// Push one chunk of little-endian signed-16 interleaved PCM bytes
     /// and return the packets that just completed.
+    ///
+    /// A rejection (`GEOMETRY_MISMATCH` for a trailing partial frame, say)
+    /// leaves the session usable: it refused that chunk, nothing more. A
+    /// defect — `INTERNAL` — kills it, and every later call raises
+    /// `STATE_ERROR`.
     fn push(&mut self, py: Python<'_>, chunk: &Bound<'_, PyBytes>) -> PyResult<Vec<PyPacket>> {
+        if self.is_dead() {
+            return Err(self.unusable());
+        }
         // Copy out before releasing the GIL so no Python object pointer
         // crosses the thread boundary.
         let data: Vec<u8> = chunk.as_bytes().to_vec();
-        let kernel_packets: Vec<StreamPacket> = py
-            .allow_threads(|| self.inner.push_pcm_chunk(&data))
-            .map_err(error_to_pyerr)?;
+        let guarded = guard(
+            PanicScope::Handle,
+            "StreamSession",
+            AssertUnwindSafe(|| py.allow_threads(|| self.inner.push_pcm_chunk(&data))),
+        );
+        if guarded.handle_dead {
+            self.dead = true;
+        }
+        let kernel_packets = guarded.outcome?;
         let packets = kernel_packets
             .into_iter()
             .map(|packet| {
@@ -531,9 +748,18 @@ impl PyStreamSession {
     /// Mark the end of the PCM stream and assemble the container
     /// (`Finish`); returns the container summary.
     fn finish(&mut self, py: Python<'_>) -> PyResult<PyWemComplete> {
-        let result = py
-            .allow_threads(|| self.inner.finish())
-            .map_err(error_to_pyerr)?;
+        if self.is_dead() {
+            return Err(self.unusable());
+        }
+        let guarded = guard(
+            PanicScope::Handle,
+            "StreamSession",
+            AssertUnwindSafe(|| py.allow_threads(|| self.inner.finish())),
+        );
+        if guarded.handle_dead {
+            self.dead = true;
+        }
+        let result = guarded.outcome?;
         let sha256 = result.sha256();
         let total_len = result.data.len() as u64;
         Ok(PyWemComplete {
@@ -1337,5 +1563,270 @@ else:
             )
             .expect("partial chunk maps to GEOMETRY_MISMATCH");
         });
+    }
+
+    /// The panic rule at this boundary, as the mapping every guarded kernel
+    /// call applies.
+    ///
+    /// The mapping is tested directly rather than by panicking inside a kernel
+    /// call: forcing that would need a fault-injection switch in `src/`. The
+    /// caught panic below is a real one, produced in the test.
+    #[test]
+    fn guarded_outcome_maps_a_panic_to_internal_and_kills_only_a_handle() {
+        Python::with_gil(|py| {
+            // A call that returns: nothing is terminal, either scope.
+            for scope in [PanicScope::OneShot, PanicScope::Handle] {
+                let guarded = guarded_outcome::<u32>(scope, "Encoder", Ok(Ok(7)));
+                assert_eq!(guarded.outcome.ok(), Some(7), "{scope:?}");
+                assert!(!guarded.handle_dead, "{scope:?}: success kills nothing");
+            }
+
+            // A rejection keeps its own code, and none of them is terminal.
+            for (error, code) in [
+                (
+                    EncoderError::GeometryMismatch {
+                        message: "trailing partial PCM frame".into(),
+                    },
+                    CODE_GEOMETRY_MISMATCH,
+                ),
+                (
+                    EncoderError::StateError {
+                        message: "sample outside signed-16 range".into(),
+                    },
+                    CODE_STATE_ERROR,
+                ),
+                (
+                    EncoderError::InputTooShort { want: 4096, got: 1 },
+                    CODE_INPUT_TOO_SHORT,
+                ),
+                (
+                    EncoderError::ProfileNotFound {
+                        requested: "2ch/44100Hz/2013".into(),
+                    },
+                    CODE_PROFILE_NOT_FOUND,
+                ),
+                (
+                    EncoderError::FormatUnsupported {
+                        message: "float64 memoryview".into(),
+                    },
+                    CODE_FORMAT_UNSUPPORTED,
+                ),
+            ] {
+                let guarded = guarded_outcome::<u32>(PanicScope::Handle, "Encoder", Ok(Err(error)));
+                let pyerr = guarded.outcome.expect_err("a rejection stays a rejection");
+                assert_eq!(
+                    code_attribute(py, &pyerr),
+                    code,
+                    "{code} must survive the crossing, not be swallowed"
+                );
+                assert!(
+                    !guarded.handle_dead,
+                    "{code} refuses one call; the handle stays usable"
+                );
+            }
+
+            // A defect — reported by the kernel or raised as a panic — is
+            // INTERNAL, and only a handle-carrying entry dies on it.
+            for scope in [PanicScope::OneShot, PanicScope::Handle] {
+                let terminal = scope == PanicScope::Handle;
+
+                let reported = guarded_outcome::<u32>(
+                    scope,
+                    "Encoder",
+                    Ok(Err(EncoderError::Internal(
+                        wem_core::InternalError::Invariant { message: "x" },
+                    ))),
+                );
+                let pyerr = reported.outcome.expect_err("a defect is an error");
+                assert_eq!(code_attribute(py, &pyerr), CODE_INTERNAL);
+                assert_eq!(reported.handle_dead, terminal, "{scope:?}");
+
+                let panicked = guarded_outcome::<u32>(
+                    scope,
+                    "Encoder",
+                    std::panic::catch_unwind(|| -> Result<u32, EncoderError> {
+                        panic!("injected kernel invariant violation")
+                    }),
+                );
+                let pyerr = panicked
+                    .outcome
+                    .expect_err("a caught panic is raised, never re-raised");
+                assert_eq!(
+                    code_attribute(py, &pyerr),
+                    CODE_INTERNAL,
+                    "{scope:?}: a caught panic carries the code the C ABI reports"
+                );
+                // The message names the consequence for this scope: a
+                // one-shot entry created nothing, a handle is unusable.
+                let message = pyerr.to_string();
+                let expected = match scope {
+                    PanicScope::OneShot => "no Encoder was created",
+                    PanicScope::Handle => "unusable",
+                };
+                assert!(
+                    message.contains(expected),
+                    "{scope:?}: the message must say what the caller lost \
+                     ({expected:?}), got {message:?}"
+                );
+                assert_eq!(panicked.handle_dead, terminal, "{scope:?}");
+
+                // The exception type is the one the facade re-raises and
+                // `except Exception` sees: not pyo3's PanicException.
+                assert!(
+                    pyerr.is_instance_of::<WemEncoderError>(py),
+                    "{scope:?}: a caught panic must arrive as WemEncoderError"
+                );
+                assert!(
+                    !pyerr.is_instance_of::<pyo3::exceptions::PyBaseException>(py)
+                        || pyerr.is_instance_of::<pyo3::exceptions::PyException>(py),
+                    "{scope:?}: the error must stay inside `except Exception`"
+                );
+            }
+        });
+    }
+
+    /// The other half of the rule: a handle a defect has killed answers every
+    /// later call with the state error, without touching the kernel again.
+    #[test]
+    fn a_dead_handle_refuses_every_later_call() {
+        Python::with_gil(|py| {
+            let m = import_module(py).unwrap();
+            let selection = selection_object(&m);
+            let encoder = m
+                .getattr("Encoder")
+                .unwrap()
+                .call1((selection.clone(),))
+                .unwrap();
+
+            // The live handle encodes; then the defect is applied to it.
+            let rows = vec![vec![0i64; 4096]; 6];
+            let live = encoder
+                .call_method1("encode_pcm", (44_100i64, rows.clone()))
+                .expect("a live handle encodes");
+            assert_eq!(
+                live.getattr("pcm_frames")
+                    .unwrap()
+                    .extract::<i64>()
+                    .unwrap(),
+                4096
+            );
+            {
+                let handle = encoder
+                    .extract::<PyRef<'_, PyEncoder>>()
+                    .expect("the Python name is this Rust class");
+                handle.dead.store(true, Ordering::SeqCst);
+            }
+            let pyerr = encoder
+                .call_method1("encode_pcm", (44_100i64, rows))
+                .expect_err("a dead handle must refuse");
+            assert_eq!(code_attribute(py, &pyerr), CODE_STATE_ERROR);
+            assert!(
+                pyerr.to_string().contains("unusable"),
+                "the rejection must say the handle is unusable, got {pyerr}"
+            );
+
+            // The same rule for the streaming session.
+            let session = m
+                .getattr("StreamSession")
+                .unwrap()
+                .call_method1("for_selection", (selection,))
+                .unwrap();
+            {
+                let mut handle = session
+                    .extract::<PyRefMut<'_, PyStreamSession>>()
+                    .expect("the Python name is this Rust class");
+                handle.dead = true;
+            }
+            let pyerr = session
+                .call_method1("push", (PyBytes::new(py, &[0u8; 12]),))
+                .expect_err("a dead session must refuse a push");
+            assert_eq!(code_attribute(py, &pyerr), CODE_STATE_ERROR);
+            let pyerr = session
+                .call_method0("finish")
+                .expect_err("a dead session must refuse to finish");
+            assert_eq!(code_attribute(py, &pyerr), CODE_STATE_ERROR);
+        });
+    }
+
+    /// Adversarial input that only exists in Python: a quality factor, a
+    /// float64 PCM buffer, samples outside the signed-16 range. Each must
+    /// arrive as a typed kernel error — never as a `PanicException` (which
+    /// `except Exception` would not even see), and never with a code that says
+    /// "defect" about the caller's own input.
+    #[test]
+    fn adversarial_python_inputs_are_typed_errors_not_panics() {
+        Python::with_gil(|py| {
+            let m = import_module(py).unwrap();
+            let globals = PyDict::new(py);
+            globals.set_item("m", m.clone()).unwrap();
+            globals.set_item("selection", selection_object(&m)).unwrap();
+            py.run(
+                c_str!(
+                    r#"
+import array
+
+
+def code_of(call, case):
+    """The kernel code one rejected input produces; anything else is the
+    failure, and it names the case."""
+    try:
+        call()
+    except m.WemEncoderError as error:
+        return error.code
+    except BaseException as error:  # PanicException included, deliberately
+        raise AssertionError(
+            case + ": raised " + type(error).__name__ +
+            " instead of a typed kernel error: " + str(error)
+        )
+    raise AssertionError(case + ": the kernel accepted input it must reject")
+
+
+# A quality factor is caller input: non-finite values are a malformed
+# argument, so they carry STATE_ERROR — not INTERNAL, which means the library
+# broke an invariant, and not a PanicException.
+for quality in (float("nan"), float("inf"), float("-inf")):
+    case = "quality " + repr(quality)
+    code = code_of(lambda q=quality: m.Encoder(selection, q), case)
+    assert code == "STATE_ERROR", (case, code)
+
+enc = m.Encoder(selection)
+
+# Non-finite PCM in a float64 memoryview: the buffer format is refused before
+# a single sample is read, and no NaN reaches the kernel.
+nan = array.array("d", [float("nan")] * (6 * 4096))
+# Two steps: a cast between two non-byte formats is not allowed, so the bytes
+# go through the byte view first.
+view = memoryview(nan).cast("B").cast("d", [6, 4096])
+code = code_of(lambda: enc.encode_pcm(44100, view), "float64 memoryview of NaN")
+assert code == "STATE_ERROR", ("float64 memoryview", code)
+
+# Out-of-range samples: rejected by the signed-16 conversion, never wrapped.
+for value in (70000, -70000, 2 ** 40, -(2 ** 40), 2 ** 63 - 1):
+    case = "sample " + str(value)
+    code = code_of(lambda v=value: enc.encode_pcm(44100, [[v] * 4096] * 6), case)
+    assert code == "STATE_ERROR", (case, code)
+
+# None of those was a defect: the handle is still the live handle it was, and
+# the encode that follows is a normal one.
+result = enc.encode_pcm(44100, [[0] * 4096] * 6)
+assert result.pcm_frames == 4096, result.pcm_frames
+assert result.channels == 6, result.channels
+"#
+                ),
+                Some(&globals),
+                None,
+            )
+            .expect("adversarial Python inputs must stay typed errors");
+        });
+    }
+
+    /// The `.code` attribute one raised error carries.
+    fn code_attribute(py: Python<'_>, error: &PyErr) -> String {
+        error
+            .value(py)
+            .getattr("code")
+            .expect("every WemEncoderError carries .code")
+            .extract()
+            .expect(".code is a string")
     }
 }
