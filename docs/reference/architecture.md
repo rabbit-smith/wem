@@ -93,10 +93,11 @@ crates/wem-profiles/src/
 
 Each generated module is the profile's identity (`ProfileKeyParts`: generation,
 channels, sample rate, channel layout, setup identity), its container geometry,
-its setup packet bytes and SHA-256, and every typed table — MDCT banks, codebook
-rows, frozen twiddles, transient mechanism, quality curves, short/long
-psychoacoustic surfaces. Floats are stored as their IEEE bit patterns, never as
-decimal literals, so the carrier cannot move a value.
+its setup packet bytes — whose digest the identity names, so the bytes are the
+only copy carried — and every typed table: MDCT banks, codebook rows, frozen
+twiddles, transient mechanism, quality curves, short/long psychoacoustic
+surfaces. Floats are stored as their IEEE bit patterns, never as decimal
+literals, so the carrier cannot move a value.
 
 There is no index, no manifest, no resource path and no digest chain: the
 identity is the addressing, and the only way to reach a profile is a
@@ -105,9 +106,9 @@ development material under `corpus/profiles/`; `scripts/generate_profile_code.py
 is the only path from it into the repository, and the generated source is what
 ships.
 
-`EncoderProfile` is the internal identity value (key, setup digest, container
-defaults). The human label is derived from the key, never stored. Another
-language reads the same tables through the kernel's data hand-off
+`EncoderProfile` is the internal identity value (key, setup packet bytes,
+container defaults). The human label is derived from the key, never stored.
+Another language reads the same tables through the kernel's data hand-off
 (`wem_profiles::blob::profile_tables_blob`, exposed as
 `wwise_wem._core.profile_tables()`), which is a transfer of the carrier's words,
 not a second source.

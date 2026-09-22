@@ -12,8 +12,6 @@ use crate::tables::{
     ProfileKeyParts, ProfileTables, QualityCurvesTable, RecordFamilyTable, RecordTable,
     ResourceTables, ShortProfileTable, ShortSeedTable, TransientTable,
 };
-pub const SETUP_SHA256: &str = "894a545ca48993bb0e5b768b1a367fd4475f806658b51bbcc88c8a6243849afc";
-
 #[rustfmt::skip]
 pub static KEY: ProfileKeyParts = ProfileKeyParts {
     channels: 2,
@@ -13881,7 +13879,6 @@ pub static LONG_VARIANTS: [LongVariantTable; 2] = [
 pub static TABLES: ProfileTables = ProfileTables {
     key: KEY,
     setup_packet: &SETUP_PACKET,
-    setup_sha256: SETUP_SHA256,
     container_metadata: ContainerMetadata {
         w_format_tag: 65535,
         n_channels: 2,

@@ -193,7 +193,12 @@ fn the_carrier_intake_resolves_what_the_registry_resolves() {
         let compiled = compiled_profile_for_selection(selection).expect("compiled profile");
         assert_eq!(compiled.key(), resolved.key());
         assert_eq!(compiled.label(), resolved.label());
-        assert_eq!(compiled.setup_sha256(), resolved.setup_sha256());
+        // The setup packet the carrier hands back is the value model's own,
+        // compared as bytes.
+        assert_eq!(
+            compiled.setup_packet().expect("setup packet"),
+            resolved.setup_bytes().expect("setup packet")
+        );
         assert_eq!(compiled.container_metadata(), resolved.container_metadata());
         // The setup packet the carrier hands back is the recorded one: 201
         // bytes for 6ch/44100, 215 for 2ch/48000.
@@ -269,7 +274,6 @@ fn an_ambiguous_selection_is_rejected_rather_than_picked() {
     let twin = EncoderProfile::new(
         twin_key,
         base.setup_bytes().map(<[u8]>::to_vec),
-        base.setup_sha256().to_string(),
         None,
         base.block_sizes(),
         *base.container_metadata(),

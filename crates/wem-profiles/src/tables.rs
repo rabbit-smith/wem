@@ -243,7 +243,6 @@ pub struct ResourceTables {
 pub struct ProfileTables {
     pub key: ProfileKeyParts,
     pub setup_packet: &'static [u8],
-    pub setup_sha256: &'static str,
     pub container_metadata: ContainerMetadata,
     pub block_sizes: [i64; 2],
     pub resources: ResourceTables,

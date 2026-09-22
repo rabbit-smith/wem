@@ -38,8 +38,10 @@ from wwise_wem.model import ContainerMetadata
 from wwise_wem.profiles.key import ProfileKey, profile_label
 
 MAGIC = b"WEMPROF\0"
-#: Version 2 dropped the stored profile name (the label is derived now).
-VERSION = 2
+#: Version 2 dropped the stored profile name (the label is derived now);
+#: version 3 dropped the stored setup digest (the key's identity names the
+#: packet and the packet's own bytes travel in the stream).
+VERSION = 3
 
 KIND_U32 = 0
 KIND_I64 = 1
@@ -143,7 +145,6 @@ class CompiledProfile:
     channels: int
     sample_rate: int
     block_sizes: tuple[int, int]
-    setup_sha256: str
     setup_packet: bytes
     container_fields: tuple[int, ...]
     #: The decoded table blocks, keyed by their names in the stream.
@@ -170,7 +171,6 @@ class CompiledProfile:
             self.channels,
             self.sample_rate,
             self.block_sizes,
-            self.setup_sha256,
             self.setup_packet,
             self.container_fields,
             tuple(
@@ -271,7 +271,6 @@ def _read_profile(reader: _Reader) -> CompiledProfile:
     sample_rate = reader.i64()
     block0 = reader.i64()
     block1 = reader.i64()
-    setup_sha256 = reader.text()
     setup_packet = reader.raw()
 
     tables: dict[str, Any] = {}
@@ -293,7 +292,6 @@ def _read_profile(reader: _Reader) -> CompiledProfile:
         channels=channels,
         sample_rate=sample_rate,
         block_sizes=(block0, block1),
-        setup_sha256=setup_sha256,
         setup_packet=setup_packet,
         container_fields=tuple(tables["container.fields"]),
         tables=tables,

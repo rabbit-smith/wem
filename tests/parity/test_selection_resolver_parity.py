@@ -6,7 +6,7 @@ denotes. The oracle reads the same carrier *through* that authority — the
 extension's own ``profile_tables()`` stream — so this suite pins that the two
 agree rather than that two independent registries do:
 
-* the resolved identity and the recorded setup digest are the kernel's own
+* the resolved identity and the carried setup packet are the kernel's own
   seq-0 packet for the same selection;
 * every installed profile is distinct, so the comparison has teeth;
 * an unsatisfiable selection is rejected on both sides.
@@ -17,7 +17,6 @@ deliberately here rather than in the package's public surface.
 
 from __future__ import annotations
 
-import hashlib
 import unittest
 
 from wwise_wem import WwiseProfile, WwiseVersion
@@ -44,21 +43,21 @@ def _installed() -> list[tuple[str, WwiseProfile]]:
     return selections
 
 
-def _kernel_setup_digest(selection: WwiseProfile) -> str:
+def _kernel_setup_packet(selection: WwiseProfile) -> bytes:
     """The setup packet the kernel emits for this selection (stream seq 0)."""
     session = _core.StreamSession.for_selection(selection)
     chunk = bytes(MIN_FRAMES * int(selection.channels) * 2)
     packets = session.push(chunk)
     if not packets:
         raise AssertionError(f"no seq-0 packet for {selection}")
-    return hashlib.sha256(bytes(packets[0].data)).hexdigest()
+    return bytes(packets[0].data)
 
 
 class SelectionResolverParityTests(unittest.TestCase):
     def test_every_installed_selection_resolves_identically_on_both_sides(self):
         installed = _installed()
         self.assertGreaterEqual(len(installed), 1, "no installed profile")
-        digests = {}
+        packets = {}
         for key, selection in installed:
             with self.subTest(profile=key):
                 resolved = resolve_selection(selection)
@@ -75,18 +74,18 @@ class SelectionResolverParityTests(unittest.TestCase):
                     ),
                     "the carrier resolved a different identity than the selection",
                 )
-                kernel = _kernel_setup_digest(selection)
+                kernel = _kernel_setup_packet(selection)
                 self.assertEqual(
-                    resolved.setup_sha256,
+                    bytes(resolved.setup_packet),
                     kernel,
-                    "the carrier's setup digest differs from the kernel's "
+                    "the carrier's setup packet differs from the kernel's "
                     "seq-0 packet for the same selection",
                 )
-                digests[key] = kernel
+                packets[key] = kernel
         self.assertEqual(
-            len(set(digests.values())),
-            len(digests),
-            f"installed profiles share a setup digest: {digests}",
+            len(set(packets.values())),
+            len(packets),
+            f"installed profiles share a setup packet: {sorted(packets)}",
         )
 
     def test_unsatisfiable_selection_is_rejected_on_both_sides(self):

@@ -32,7 +32,8 @@ fn profile() -> CompiledProfile {
 fn the_carrier_agrees_with_the_registry_resolution() {
     let compiled = profile();
     // The identity is cross-checked between the two resolution paths, never
-    // re-typed as a profile name literal.
+    // re-typed as a profile name literal; the setup packet both paths hand
+    // back is compared as bytes.
     let installed = resolve_wem_profile_selection(six_selection()).expect("6ch/44100 resolves");
     assert_eq!(compiled.label(), installed.label());
     assert_eq!(compiled.key(), installed.key());
@@ -42,10 +43,8 @@ fn the_carrier_agrees_with_the_registry_resolution() {
     );
     assert_eq!(compiled.block_sizes(), [256, 2048]);
     assert_eq!(
-        compiled.setup_sha256(),
-        wem_profiles::WWISE2013_6CH_44100_SETUP_IDENTITY
-            .strip_prefix("sha256:")
-            .expect("the installed setup identity is recorded as a sha256 digest")
+        compiled.setup_packet().expect("setup packet"),
+        installed.setup_packet().expect("setup packet")
     );
     // The carrier never produces a draft profile: every compiled profile
     // carries its setup packet.
@@ -443,20 +442,14 @@ fn container_metadata_matches_profile() {
 
 #[test]
 fn profile_key_requires_complete_identity() {
-    let key = ProfileKey::new(
-        6,
-        44100,
-        "2013.2".into(),
-        "5.1".into(),
-        wem_profiles::WWISE2013_6CH_44100_SETUP_IDENTITY.into(),
-    )
-    .expect("complete identity");
+    // The recorded setup identity is read off the installed carrier's own key,
+    // never re-typed as a literal.
+    let identity = profile().key().quality_setup_identity().to_string();
+    let key = ProfileKey::new(6, 44100, "2013.2".into(), "5.1".into(), identity.clone())
+        .expect("complete identity");
     assert_eq!(key.generation(), "2013.2");
     assert_eq!(key.channel_layout(), "5.1");
-    assert_eq!(
-        key.quality_setup_identity(),
-        wem_profiles::WWISE2013_6CH_44100_SETUP_IDENTITY
-    );
+    assert_eq!(key.quality_setup_identity(), identity);
     // The human label is derived from the identity, never stored.
     assert_eq!(key.label(), "6ch/44100Hz/2013.2");
     // Non-positive geometry rejected.

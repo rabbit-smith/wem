@@ -51,7 +51,7 @@ re-runs of the same work, not disjoint stages, and are labelled as such.
 | Stage | Line of code | median ms | share | frames |
 | --- | --- | ---: | ---: | ---: |
 | CLI: `wav_load` + `profile_assembly` + `output_write` | `crates/wem-core/src/bin/wwise-wem.rs:69-103` | 1.94 | 1.6% | — |
-| PCM decode to float rows | `crates/wem-core/src/encoder.rs:644` (`to_float_rows`) | 0.59 | 0.5% | — |
+| PCM decode to float rows | `crates/wem-core/src/encoder.rs:635` (`to_float_rows`) | 0.59 | 0.5% | — |
 | Input conditioner | `crates/wem-analysis/src/session.rs:214-225` | 0.12 | 0.1% | — |
 | Scheduling + window materialization | `crates/wem-analysis/src/session.rs:504-519` | 17.04 | 14.8% | 205 planned |
 | ↳ transient detection (of the above) | `crates/wem-analysis/src/transient/detector.rs` | 3.38 | 2.9% | 2289 quanta |
@@ -60,7 +60,7 @@ re-runs of the same work, not disjoint stages, and are labelled as such.
 | Vorbis packing | `crates/wem-core/src/pack.rs:137-155` | 43.36 | 37.7% | 205 |
 | Container assembly | `crates/wem-container/src/wem.rs` | 0.05 | 0.04% | 206 packets |
 | **staged total** | | **115.00** | | |
-| **`encode_pcm` end to end** | `crates/wem-core/src/encoder.rs:622` | **114.91** | | |
+| **`encode_pcm` end to end** | `crates/wem-core/src/encoder.rs:613` | **114.91** | | |
 
 `encode` reported by the CLI over 11 runs: min 119.88, **median 122.38**,
 p95 126.37, max 129.46, spread 9.58 ms. The CLI's `encode` is the staged total
@@ -186,7 +186,7 @@ with the least certain remedy.
 
 **Where.** `crates/wem-analysis/src/preprocessing/windowing.rs:43-173`:
 `iter_planned_pcm_windows` returns `Vec<WindowedFrame>`, every frame of the
-stream, each holding `Vec<Vec<f64>>`; `crates/wem-core/src/encoder.rs:645`
+stream, each holding `Vec<Vec<f64>>`; `crates/wem-core/src/encoder.rs:636`
 consumes it afterwards. The streaming path does the opposite one frame at a
 time over a bounded ring (`crates/wem-core/src/stream.rs:262-300`).
 

@@ -52,7 +52,7 @@ pub use book_ids::{BookTable, BookTables, T219_COUNT, T282_COUNT, T97_COUNT};
 pub use carrier::{compiled_profile_for_selection, compiled_profiles, CompiledProfile};
 pub use codebooks::{load_codebook, load_setup_codebooks, resolve_book_id, ResolvedBook};
 pub use error::ProfileError;
-pub use key::{ProfileKey, WWISE2013_6CH_44100_SETUP_IDENTITY, WWISE_GENERATION};
+pub use key::{ProfileKey, WWISE_GENERATION};
 pub use model::{ContainerMetadata, EncoderProfile};
 pub use quality::{
     linear_frac, normalize_quality_factor, QualityCurves, QUALITY_CURVES_INTERPOLATION,

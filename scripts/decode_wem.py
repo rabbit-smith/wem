@@ -92,8 +92,8 @@ T97_END = T97_COUNT
 T219_END = T97_END + T219_COUNT
 T282_END = T219_END + T282_COUNT
 
-DEFAULT_CORPUS = _REPO_ROOT / "corpus" / "paired-build-probe" / "the long paired input"
-DEFAULT_OUT_DIR = _REPO_ROOT / "corpus" / "paired-build-probe" / "out"
+DEFAULT_CORPUS = _REPO_ROOT / "corpus" / "paired-build" / "the long paired input"
+DEFAULT_OUT_DIR = _REPO_ROOT / "corpus" / "paired-build" / "out"
 SAMPLE_RATE = 48000
 
 # Set from `--libvorbis-exact` in `main()`. Module-level so the decode helpers
