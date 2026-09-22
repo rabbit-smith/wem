@@ -1,6 +1,6 @@
 # Decode surface — design proposal
 
-Status: **proposal**, written 2026-09-22 against `main` at `b4bc9c6`. Nothing here
+Status: **proposal**, written 2026-09-22 against that day's `main`. Nothing here
 describes behaviour the repository has today; there is no decoder. This document
 exists to be the interface contract the implementation lanes write against, so
 that two lanes working on disjoint files do not have to invent matching shapes.
