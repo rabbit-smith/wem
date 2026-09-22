@@ -44,6 +44,15 @@
 //!   terminal container bytes and the statistics observed while assembling
 //!   them — a JS `Uint8Array` carries its own length, so no length and no
 //!   digest of it are handed back beside it.
+//! * **Decoding** (`wem_decoder_*`, include/wem.h section 5):
+//!   [`WemDecoder`] — Init -> push* -> Finish -> free, the mirror of the
+//!   encode session with the data direction reversed. There is no profile
+//!   selection: a WEM is self-describing, and the geometry arrives on the step
+//!   that parses the container's setup packet. Each step's output is returned
+//!   (`header` / `pcm`), the way the encode session returns its packets, and a
+//!   refusal travels on the step beside the samples that step produced —
+//!   exactly the order in which the C ABI delivers them (`pcm_cb`, then the
+//!   return code).
 //! * **Error codes**: every fallible export throws a JS `Error` whose
 //!   `code` property (and message prefix) is the stable `WEM_ERR_*` string
 //!   of the C ABI error table — append-only, never renumbered.
@@ -72,8 +81,9 @@
 
 use wasm_bindgen::prelude::*;
 
+use wem_core::decoder::{DecodeSession, DecodeStep};
 use wem_core::encoder::{Encoder, Pcm16};
-use wem_core::error::EncoderError;
+use wem_core::error::{DecoderError, EncoderError};
 use wem_core::stream::StreamSession;
 use wem_core::usecases::wav::parse_pcm16;
 use wem_core::{WwiseProfile, WwiseVersion};
@@ -88,6 +98,9 @@ const WEM_ERR_GEOMETRY_MISMATCH: &str = "WEM_ERR_GEOMETRY_MISMATCH";
 const WEM_ERR_INPUT_TOO_SHORT: &str = "WEM_ERR_INPUT_TOO_SHORT";
 const WEM_ERR_FORMAT_UNSUPPORTED: &str = "WEM_ERR_FORMAT_UNSUPPORTED";
 const WEM_ERR_INTERNAL: &str = "WEM_ERR_INTERNAL";
+/// The decode surface's malformed-input class (include/wem.h section 2): never
+/// returned by an encode entry.
+const WEM_ERR_INPUT_MALFORMED: &str = "WEM_ERR_INPUT_MALFORMED";
 
 /// The stable error code of one kernel failure (the WemError discriminants).
 fn error_code(error: &EncoderError) -> &'static str {
@@ -98,6 +111,29 @@ fn error_code(error: &EncoderError) -> &'static str {
         EncoderError::InputTooShort { .. } => WEM_ERR_INPUT_TOO_SHORT,
         EncoderError::FormatUnsupported { .. } => WEM_ERR_FORMAT_UNSUPPORTED,
         EncoderError::Internal(_) => WEM_ERR_INTERNAL,
+    }
+}
+
+/// The stable error code of one kernel *decode* failure (include/wem.h
+/// section 5), the same four classes `crates/wem-capi` maps `DecoderError`
+/// onto. The match has no `_` arm on purpose: a variant added to
+/// `DecoderError` fails this build until its class is written.
+fn decoder_error_code(error: &DecoderError) -> &'static str {
+    match error {
+        DecoderError::Container(_)
+        | DecoderError::Setup { .. }
+        | DecoderError::SetupPadding { .. }
+        | DecoderError::Truncated { .. }
+        | DecoderError::MissingSetup { .. }
+        | DecoderError::BlockSizeMismatch { .. }
+        | DecoderError::Packet { .. }
+        | DecoderError::ResidueBitstreamDefect { .. }
+        | DecoderError::FrameCountMismatch { .. } => WEM_ERR_INPUT_MALFORMED,
+        DecoderError::NotWwiseVorbis { .. }
+        | DecoderError::ConfigurationUnsupported { .. }
+        | DecoderError::SetupNotCarried { .. } => WEM_ERR_FORMAT_UNSUPPORTED,
+        DecoderError::StateError { .. } => WEM_ERR_STATE_ERROR,
+        DecoderError::Floor1 { .. } | DecoderError::Internal(_) => WEM_ERR_INTERNAL,
     }
 }
 
@@ -605,6 +641,197 @@ impl WemSession {
     pub fn free(self) {}
 }
 
+// ---------------------------------------------------------------------------
+// Streaming decode session (Init -> push* -> Finish -> free)
+// ---------------------------------------------------------------------------
+
+/// One decode step as a JS object
+/// (`{ header, channels, frames, pcm, error }`).
+///
+/// * `header` — the one-time announcement this step resolved
+///   (`{ channels, sampleRate, setup }`), `null` on every other step. It is the
+///   mirror of the C ABI's `header_cb`, which fires exactly once before any
+///   PCM, and it is the only place the geometry appears.
+/// * `channels` / `frames` — the interleave width (`0` before the header is
+///   known) and the frame count of `pcm`.
+/// * `pcm` — this step's samples as one `Float32Array`, interleaved f32 at ±1.0
+///   full scale. Bounded by the bytes this push carried, never by the stream.
+///   (The C ABI hands the same samples over in fixed-size `pcm_cb` blocks
+///   because a bare pointer has no length; a typed array carries its own, so
+///   the shell returns the step's samples as one value.)
+/// * `error` — `null` when the step consumed everything it was given, and
+///   otherwise `{ code, message }`: the class include/wem.h section 5 documents
+///   for that refusal plus the kernel's own diagnostic. The refusal travels on
+///   the step because the C ABI delivers the samples the earlier packets
+///   completed *and then* returns the code; throwing first would drop the
+///   prefix the kernel delivered.
+fn decode_step_object(step: DecodeStep) -> JsValue {
+    let obj = js_sys::Object::new();
+    match step.header.as_ref() {
+        Some(header) => {
+            let announced = js_sys::Object::new();
+            set(
+                &announced,
+                "channels",
+                JsValue::from_f64(f64::from(header.channels)),
+            );
+            set(
+                &announced,
+                "sampleRate",
+                JsValue::from_f64(f64::from(header.sample_rate)),
+            );
+            set(
+                &announced,
+                "setup",
+                JsValue::from(header.setup_packet.clone()),
+            );
+            set(&obj, "header", JsValue::from(announced));
+        }
+        None => set(&obj, "header", JsValue::NULL),
+    }
+    set(
+        &obj,
+        "channels",
+        JsValue::from_f64(f64::from(step.channels)),
+    );
+    set(&obj, "frames", JsValue::from_f64(step.frames() as f64));
+    set(
+        &obj,
+        "pcm",
+        JsValue::from(js_sys::Float32Array::from(step.pcm.as_slice())),
+    );
+    match step.outcome {
+        Ok(()) => set(&obj, "error", JsValue::NULL),
+        Err(error) => {
+            let refusal = js_sys::Object::new();
+            set(
+                &refusal,
+                "code",
+                JsValue::from_str(decoder_error_code(&error)),
+            );
+            set(&refusal, "message", JsValue::from_str(&error.to_string()));
+            set(&obj, "error", JsValue::from(refusal));
+        }
+    }
+    JsValue::from(obj)
+}
+
+/// One streaming decode session (the wasm mirror of `wem_decoder_new` /
+/// `wem_decoder_push` / `wem_decoder_finish`; single-threaded ownership,
+/// matching the C ABI surface).
+///
+/// There is no profile selection: a WEM is self-describing, the configuration
+/// is resolved from the container's own geometry, and a container whose setup
+/// packet is not the one this build carries is refused with
+/// `WEM_ERR_FORMAT_UNSUPPORTED`.
+#[wasm_bindgen]
+pub struct WemDecoder {
+    session: DecodeSession,
+    /// `Finish` has run: the session is released, not reused, whatever the call
+    /// returned (include/wem.h section 5).
+    finished: bool,
+    /// A defect killed this handle: every later call throws
+    /// `WEM_ERR_STATE_ERROR` without touching the kernel again.
+    failed: bool,
+}
+
+impl Default for WemDecoder {
+    /// The same Init a caller writes as `new WemDecoder()`; the kernel's own
+    /// `DecodeSession` carries the same impl.
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[wasm_bindgen]
+impl WemDecoder {
+    /// Init a decode session (`wem_decoder_new`). There is no selection
+    /// argument: the geometry arrives on the step that parses the container's
+    /// setup packet.
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            session: DecodeSession::new(),
+            finished: false,
+            failed: false,
+        }
+    }
+
+    /// Push one chunk of WEM bytes (`wem_decoder_push`) and return what it
+    /// completed.
+    ///
+    /// Chunk boundaries never affect the emitted samples; an empty chunk is a
+    /// no-op. Throws `WEM_ERR_STATE_ERROR` on a call outside the lifecycle.
+    pub fn push(&mut self, data: &[u8]) -> Result<JsValue, JsValue> {
+        if self.finished {
+            return Err(js_error(
+                WEM_ERR_STATE_ERROR,
+                "chunks are not allowed after Finish",
+            ));
+        }
+        if self.failed {
+            return Err(js_error(
+                WEM_ERR_STATE_ERROR,
+                "the decoder is unusable: a kernel defect already killed it",
+            ));
+        }
+        let step = self.session.push_bytes(data);
+        self.deliver(step)
+    }
+
+    /// Mark the end of the WEM bytes and complete the decode
+    /// (`wem_decoder_finish`), returning the last frames.
+    ///
+    /// Terminal whatever it returns: after this call the session is released,
+    /// not reused. On success the session has delivered exactly the frame count
+    /// the container declares.
+    pub fn finish(&mut self) -> Result<JsValue, JsValue> {
+        if self.finished {
+            return Err(js_error(
+                WEM_ERR_STATE_ERROR,
+                "Finish completes exactly once",
+            ));
+        }
+        if self.failed {
+            return Err(js_error(
+                WEM_ERR_STATE_ERROR,
+                "the decoder is unusable: a kernel defect already killed it",
+            ));
+        }
+        let step = self.session.finish();
+        // Terminal whatever it returned, like the C ABI's `wem_decoder_finish`.
+        self.finished = true;
+        self.deliver(step)
+    }
+
+    /// Release the session (safe before or after `finish`).
+    pub fn free(self) {}
+
+    /// Report one step, applying the C ABI's rule for a defect: its output is
+    /// not delivered, it throws `WEM_ERR_INTERNAL`, and the handle is terminal.
+    /// Every other outcome is returned on the step, which is what lets the
+    /// samples a refused step completed still reach the caller.
+    fn deliver(&mut self, step: DecodeStep) -> Result<JsValue, JsValue> {
+        if let Err(error) = step.outcome.as_ref() {
+            if decoder_error_code(error) == WEM_ERR_INTERNAL {
+                self.failed = true;
+                return Err(js_error(WEM_ERR_INTERNAL, &error.to_string()));
+            }
+        }
+        if !step.pcm.is_empty() && step.channels == 0 {
+            // PCM without a geometry cannot be interpreted, and handing it over
+            // under a guessed interleave would be worse than the invariant
+            // (the C ABI's `deliver_decode_step` refuses it too).
+            self.failed = true;
+            return Err(js_error(
+                WEM_ERR_INTERNAL,
+                "kernel defect: a decode step delivered PCM without a geometry",
+            ));
+        }
+        Ok(decode_step_object(step))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! The error table is part of the cross-language interface; pin it here
@@ -650,6 +877,66 @@ mod tests {
             )),
             WEM_ERR_INTERNAL
         );
+    }
+
+    #[test]
+    fn decoder_error_codes_follow_the_wem_h_table() {
+        // One representative per row of include/wem.h section 5, the same
+        // mapping `crates/wem-capi` applies; the exhaustive match in
+        // `decoder_error_code` is what makes a new variant a build failure
+        // until its class is written.
+        for (error, code) in [
+            (
+                DecoderError::SetupPadding {
+                    end_bit: 0,
+                    total_bits: 8,
+                    pad_bits: 8,
+                    pad_value: 1,
+                },
+                WEM_ERR_INPUT_MALFORMED,
+            ),
+            (
+                DecoderError::Truncated {
+                    stream_offset: 0,
+                    need: "a packet payload",
+                },
+                WEM_ERR_INPUT_MALFORMED,
+            ),
+            (
+                DecoderError::BlockSizeMismatch {
+                    container: [256, 2048],
+                    profile: [128, 1024],
+                },
+                WEM_ERR_INPUT_MALFORMED,
+            ),
+            (
+                DecoderError::MissingSetup { data_size: 0 },
+                WEM_ERR_INPUT_MALFORMED,
+            ),
+            (
+                DecoderError::FrameCountMismatch {
+                    declared: 2,
+                    synthesized: 1,
+                },
+                WEM_ERR_INPUT_MALFORMED,
+            ),
+            (
+                DecoderError::NotWwiseVorbis { format_tag: 0 },
+                WEM_ERR_FORMAT_UNSUPPORTED,
+            ),
+            (
+                DecoderError::StateError {
+                    message: "x".into(),
+                },
+                WEM_ERR_STATE_ERROR,
+            ),
+            (
+                DecoderError::Internal(wem_core::InternalError::Invariant { message: "x" }),
+                WEM_ERR_INTERNAL,
+            ),
+        ] {
+            assert_eq!(decoder_error_code(&error), code, "{error}");
+        }
     }
 
     #[test]

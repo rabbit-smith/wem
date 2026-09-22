@@ -68,6 +68,13 @@ MATURIN ?= $(firstword $(wildcard $(VENV_BIN)maturin) maturin)
 # that build an artifact (the wheel, the wasm packages) before comparing bytes.
 # Every line is a check -- each must pass, and the first failure stops the run.
 #
+# The Rust suites run in both configurations, because the kernel ships one and
+# is verified in the other. A default build is scalar -- the `parallel` feature
+# is opt-in -- and the second leg of each pair is the configuration our CLI
+# requires, which a single default run would neither build nor test. The second
+# clippy leg is there for the same reason from the other side: `--workspace
+# --all-targets` does not lint the bin that feature gates.
+#
 # The measurement instruments are deliberately not in this list and have no
 # target: they report numbers and never fail on one. Their commands are in
 # docs/guides/development.md, under "Watching performance".
@@ -77,12 +84,14 @@ test: native
 	$(MYPY) --no-site-packages src reference
 	cd crates && cargo fmt --all --check
 	cd crates && cargo clippy --workspace --all-targets -- -D warnings
+	cd crates && cargo clippy -p wem-analysis -p wem-core --all-targets --features parallel -- -D warnings
 	cd crates && RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 	$(MAKE) test-fast
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) scripts/native_smoke.py
 	$(MAKE) wem-bytes
 	$(MAKE) 2ch-long
-	cd crates && cargo test --workspace
+	cd crates && cargo test --workspace --all-targets
+	cd crates && cargo test -p wem-analysis -p wem-core --all-targets --features parallel
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) scripts/fuzz_diff_parity.py --pr
 	PYTHONPATH= $(PY) scripts/wheel_smoke.py
 	$(MAKE) wasm-build

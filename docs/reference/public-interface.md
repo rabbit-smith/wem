@@ -1,7 +1,7 @@
 # Public interface
 
-The Python package has one encoding function, six public value types, and one
-public error type:
+The Python package has one encoding function, one decoding function, six
+exported value types, and one public error type:
 
 ```python
 from wwise_wem import (
@@ -12,12 +12,16 @@ from wwise_wem import (
     WwiseProfile,
     WwiseVersion,
     WwiseWemError,
+    decode,
     encode,
 )
 ```
 
-Internal module paths, profile loaders, registry objects, adapters, and the
-native binding are implementation details.
+`decode` also returns a value — the decode result documented under
+[`decode`](#decode) — and that value's type is not itself a root export: the
+caller never sees a session object, only the function and what it returns.
+Internal module paths, profile loaders, registry objects, adapters, the decode
+result's class, and the native binding are implementation details.
 
 ## `encode`
 
@@ -47,6 +51,56 @@ All inputs require at least 4096 frames. Unsupported source or field types raise
 configuration errors raise `ValueError`. File access errors retain their standard
 `OSError` subclasses, such as `FileNotFoundError`.
 
+## `decode`
+
+```python
+result = decode(source)
+```
+
+`source` accepts four forms: `bytes`, `bytearray` and `memoryview` hold the WEM
+itself, and `str` or `os.PathLike[str]` names a file, read whole at call time —
+a file-access error surfaces there with its standard `OSError` subclass, such as
+`FileNotFoundError`. Any other type raises `TypeError`.
+
+```python
+from wwise_wem import decode
+
+result = decode(wem_bytes)   # a rejection of the container header is raised HERE
+result.channels              # geometry is readable before iteration
+result.sample_rate
+result.total_frames          # the container's dw_total_pcm_frames
+for block in result:         # interleaved f32, ±1.0 full scale
+    ...
+```
+
+`decode` is a plain function returning an iterable result object, **not a
+generator function**: a generator function's body does not run until the first
+`next()`, which would defer every rejection to iteration time, against the
+call-time error behaviour this facade documents. The call opens the native
+decode session and consumes the container's header region, so the geometry is
+resolved before the first block.
+
+- `channels` and `sample_rate` are the kernel's one-time header announcement for
+  the container; `total_frames` is the container's own `dwTotalPCMFrames`.
+- Each iteration step yields one block — a list of interleaved f32 samples at
+  ±1.0 full scale, at most 1024 frames long. A decoded sample outside ±1.0 is
+  passed through rather than clipped: the library owns no clipping policy.
+- A successful iteration delivers exactly `total_frames` frames.
+- The result is a one-shot iterator, like a generator, and owns one native
+  decode session. `result.close()` releases it deterministically, so
+  `contextlib.closing(result)` works; otherwise collection releases it. The
+  geometry already announced stays readable after `close()`.
+- A **rejection** of the container framing, of the setup packet, or of the
+  geometry it names is raised by `decode` itself, because nothing has been
+  decoded yet. A rejection only the audio packets can produce is raised from the
+  iteration step that reaches it, *after* the blocks the earlier packets
+  completed have been handed over — the kernel delivers the prefix a refusal
+  completed and then reports its code — and the result is exhausted afterwards.
+- `decode` takes no `profile` and no `quality`: a WEM is self-describing and the
+  decoder reads whatever the bitstream says.
+- `decode` is deliberately **not on the CLI**: the command writes a container,
+  and a decode there would have to choose a PCM output format first.
+
 ## Errors
 
 A rejection made by the kernel reaches the caller as `WwiseWemError`, a
@@ -61,11 +115,16 @@ kernel error as `__cause__`:
 | `INPUT_TOO_SHORT` | fewer PCM frames than the kernel's 4096-frame minimum |
 | `FORMAT_UNSUPPORTED` | the selection names a generation this revision does not support |
 | `STATE_ERROR` | a request outside the lifecycle, or input outside the accepted domain |
+| `INPUT_MALFORMED` | the input's own bytes do not parse: the container framing, the setup packet, or an audio packet (decode only) |
 | `INTERNAL` | a kernel configuration or assembly fault |
 
 These are the same classes every cross-language shell maps from the kernel, and
-the codes are stable. Because `WwiseWemError` subclasses `ValueError`, a caller
-that only tests `except ValueError` keeps working unchanged. The facade's own
+the codes are stable. `INPUT_MALFORMED` is the decode surface's malformed-input
+class and is never reported by an encode call (`decode`'s counterpart,
+`FORMAT_UNSUPPORTED`, is the class a container that parses but names a
+configuration this build does not carry is refused with). Because
+`WwiseWemError` subclasses `ValueError`, a caller that only tests
+`except ValueError` keeps working unchanged. The facade's own
 input checks (a source of the wrong type, a buffer the selection does not
 describe, fewer than 4096 frames) raise their own `ValueError` before the kernel
 is reached.
@@ -173,6 +232,17 @@ source = RawPcm(raw_bytes, 48000, 2, "s16le")
 result = encode(source)
 ```
 
+Decoding:
+
+```python
+from contextlib import closing
+from wwise_wem import decode
+
+with closing(decode("output.wem")) as result:
+    print(result.channels, result.sample_rate, result.total_frames)
+    pcm = [sample for block in result for sample in block]
+```
+
 ## CLI
 
 ```text
@@ -188,6 +258,12 @@ geometry, which the CLI reads from the input. An unrecognized value is rejected
 as an argument error, without reading the WAV. The CLI parses the WAV once,
 applies optional geometry assertions to that `PcmBuffer`, and passes the same
 buffer and the selection to `encode`.
+
+Decoding is not a CLI subcommand: the command's contract is a WAV in and a
+container out, and exposing the decode direction there would have to choose a
+PCM output container and sample format — a new surface rather than a mirror of
+an existing one. `wwise_wem.decode` is the whole caller-facing decode surface
+today.
 
 ## Execution path
 

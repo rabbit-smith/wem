@@ -121,7 +121,7 @@ item by item.
 | Inputs | `scripts/generate_duration_curve_inputs.py`: integer fixed-point, no platform math, byte-stable; it **cross-checks itself against `scripts/generate_2ch_long_program.render_pcm16le`** at 2 ch/48000/20 s and refuses to emit if the general renderer stops reducing to it (it did not: `89b916a151ad1d42d313efdc2ae970a2671fee9b5c5b979aeb9982f7b1f85554`) |
 | Durations | 10, 30, 60, 120, 300, 600 s, both installed geometries (6 ch/44100 via `fixture`, 2 ch/48000 via `two_channel`) |
 | Rounds | `batch` and `stream` measured next to each other inside one round with the order flipped every round; 3 rounds for <= 120 s and 2 for >= 300 s; a point whose slowest wall sample exceeded 1.5x its median was re-run |
-| Build | `cargo build --release`, default features (`parallel` on) |
+| Build | `cargo build --release --features parallel` (the feature is opt-in; it was a default when these numbers were taken) |
 | Machine | Apple M3 Max, 16 logical cores, 64 GB, macOS 27.0, rustc 1.96.0 (ac68faa20), LLVM 22.1.2 |
 
 The paths, all reading the *same* generated WAV for their point, so the only
@@ -483,8 +483,8 @@ the `finish` addition:
 
 | # | site | what it holds |
 | --- | --- | --- |
-| 1 | `crates/wem-core/src/stream.rs:142` — `audio_packets: Vec<Vec<u8>>`, filled at `stream.rs:349` and `stream.rs:446` | every emitted packet, retained by the session from the push side (counted in `push`, **not** in `finish`'s addition) |
-| 2 | `crates/wem-core/src/stream.rs:616-618` — `packets.extend(pipeline.audio_packets.iter().cloned())` | a second full copy of every audio packet, made at `finish` |
+| 1 | `crates/wem-core/src/stream.rs:143` — `audio_packets: Vec<Vec<u8>>`, filled at `stream.rs:351` and `stream.rs:448` | every emitted packet, retained by the session from the push side (counted in `push`, **not** in `finish`'s addition) |
+| 2 | `crates/wem-core/src/stream.rs:643` — `packets.extend(pipeline.audio_packets.iter().cloned())` | a second full copy of every audio packet, made at `finish` |
 | 3 | `crates/wem-container/src/packets.rs:114-129` — `build_packet_stream` | the concatenated data payload, a third copy, grown by doubling from a small capacity |
 | 4 | `crates/wem-container/src/wem.rs:74-78` — `chunks` holds `data_payload.clone()` (and `fmt_payload.clone()`) | a fourth copy |
 | 5 | `crates/wem-container/src/wem.rs:79` — `build_riff(&chunks, …)` | the final `wem_bytes`, allocated in full: a fifth copy |
@@ -545,7 +545,7 @@ already retains every packet, so `dw_data_payload_size` and
 fmt chunk can be written with final values before the data chunk streams out.
 The C ABI already declares that delivery — `include/wem.h`, "MEMORY OWNERSHIP":
 *"All output flows through the write callback in bounded blocks"*, and
-`wem_session_finish` already calls it (`crates/wem-capi/src/lib.rs:799`,
+`wem_session_finish` already calls it (`crates/wem-capi/src/lib.rs:784`,
 `emit_bytes(&result.data, …)`).
 
 **So the decision is not "sink or no sink" — the sink exists and is documented.
@@ -597,13 +597,19 @@ are measurement tools. `git status` on the lane's tree shows exactly the five
 deliverables plus `scripts/AGENTS.md`, and `corpus/` is untouched. Byte
 exactness was re-established on the final tree (tails in the lane report):
 
+Every command below was re-pointed on 2026-09-22 at the target and module names
+the test consolidation gave them, and each one still selects what its result
+column records. The workspace row is the exception: the consolidation merged 40
+targets into 27, so a selection preserving its counts no longer exists and its
+numbers are re-taken on today's tree (283 passed / 18 ignored were that tree's).
+
 | check | result |
 | --- | --- |
 | `make wem-bytes` | ok, 1 test, 0.13 s |
 | `cargo test -p wem-core --test encoder reference_bytes` | 9 passed, 0 failed |
 | `cargo test -p wem-core --test frame_pipeline_parity` (with `PYTHON` set to the shared venv's interpreter) | 1 passed, 0 failed, 35.29 s |
 | `cargo test -p wem-vorbis --test vorbis_codec oracle_values` | 9 passed, 0 failed |
-| `cargo test --workspace --all-targets --no-fail-fast` | exit 0: 40 targets, 283 passed, 0 failed, 18 ignored |
+| `cargo test --workspace --all-targets --no-fail-fast` | exit 0: 27 targets, 315 passed, 0 failed, 19 ignored (re-taken; 40/283/18 on the tree this lane measured) |
 | `make test-fast` | 104 tests, OK |
 | `python3 scripts/fuzz_diff_parity.py --pr` | exit 0 |
 | `python3 -m unittest tests.parity.test_2ch_corpus.TwoChannelStressCorpusTests -v` | 1 test, OK |
@@ -612,10 +618,12 @@ exactness was re-established on the final tree (tails in the lane report):
 | `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 |
 | `ruff check src reference tests scripts`, `mypy --no-site-packages src reference` | exit 0: "All checks passed!", 77 source files |
 
-The 18 ignored are the two `#[ignore]`d harnesses themselves plus the
-pre-existing ones: 12 in `duration_curves.rs`, 2 in `stage_timings.rs`, 4 in
-`stream_session.rs`. No target failed and no test was filtered out to get
-there.
+The 18 ignored in the lane's run were the two `#[ignore]`d harnesses themselves
+plus the pre-existing ones: 12 in `duration_curves.rs`, 2 in `stage_timings.rs`,
+4 in `streaming.rs`. No target failed and no test was filtered out to get there.
+The count is 19 on today's tree, the extra one being
+`crates/wem-core/tests/concurrency_worker.rs`, the instrument the parallelism
+change added.
 
 Two things about the harness itself are worth recording, because both were
 needed to make the taken instrument land:

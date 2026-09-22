@@ -155,6 +155,14 @@ pub struct DecodedHeader {
     pub channels: u32,
     /// PCM sample rate the container declares.
     pub sample_rate: u32,
+    /// `dw_total_pcm_frames`: the frame count the container declares, and so
+    /// the exact number this session will deliver if it finishes with
+    /// `WEM_OK`. It is announced here because the session has already read it
+    /// to reach this point, and because the alternative is that every shell
+    /// locates the container's `fmt` chunk and reads one field itself —
+    /// container layout knowledge duplicated per shell, which the integration
+    /// topology puts in the kernel.
+    pub total_frames: u64,
     /// The setup packet this revision parsed, exactly as the container
     /// carried it.
     pub setup_packet: Vec<u8>,
@@ -597,6 +605,7 @@ impl DecodeSession {
                 step.header = Some(DecodedHeader {
                     channels: codec.channels as u32,
                     sample_rate: codec.sample_rate,
+                    total_frames: codec.total_frames,
                     setup_packet: packet.payload.clone(),
                 });
                 step.channels = codec.channels as u32;

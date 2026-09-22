@@ -1,7 +1,7 @@
 # src/wwise_wem/ — distribution facade
 
 This package is the thin distribution facade: root API shell, CLI, WAV
-adapters, DTOs, and the profile identity type. The bit-exact
+adapters, DTOs, the decode driver, and the profile identity type. The bit-exact
 implementation domains live in the development-tree reference package
 (`reference/wwise_wem_reference`, see `reference/AGENTS.md`); the kernel is
 checked against that tree's byte-for-byte output, never the reverse.
@@ -18,6 +18,13 @@ boundaries, and what "fail loudly" means — are in
   asserted by `tests/parity/test_public_surface.py` and the distribution tests.
   Internal module paths are not part of that surface, and the extension's module
   name is owned by the packaging surface, not restated here.
+- `decode` is the one decoding entry point: a plain function (never a generator
+  function — its body must run at call time) returning the decode result
+  documented in
+  [`../../docs/reference/public-interface.md`](../../docs/reference/public-interface.md#decode).
+  No session type enters the package root. The design behind it, including what
+  the call resolves eagerly and why, is in
+  [`../../docs/reference/decoding.md`](../../docs/reference/decoding.md).
 - DTO immutability and the `_f32` rounding sites follow
   [`../../docs/reference/standards.md`](../../docs/reference/standards.md)
   ([Source rules](../../docs/reference/standards.md#source-rules),

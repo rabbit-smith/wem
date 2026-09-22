@@ -35,13 +35,15 @@ authors = ["wem"]
 [workspace.dependencies]
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-# Rayon is optional and used ONLY by wem-analysis behind its default-on
-# `parallel` feature: per-channel partitioning inside a single long-frame
-# analysis call, never across frames (cross-frame state updates stay strictly
-# sequential, and each channel reads only its own slice + immutable looks).
-# Bit-exact parity is backed by the encoder / frame_pipeline_parity /
-# vorbis_codec tests. It is feature-gated so threadless targets (e.g. wasm32-unknown-
-# unknown) can build a pure-scalar path via `default-features = false`.
+# Rayon is optional and used ONLY by wem-analysis behind its opt-in `parallel`
+# feature: per-channel partitioning inside a single long-frame analysis call,
+# never across frames (cross-frame state updates stay strictly sequential, and
+# each channel reads only its own slice + immutable looks). Bit-exact parity is
+# backed by the encoder / frame_pipeline_parity / vorbis_codec tests. The
+# feature is off by default, so a library build and a wheel carry no threads; a
+# consumer that wants them opts in
+# (docs/findings/internal-parallelism-practice.md, N1/N2), and threadless
+# targets (e.g. wasm32-unknown-unknown) build the pure-scalar path.
 rayon = "1.10.0"
 # Browser shell only (wem-wasm): wasm-bindgen on the 0.2.x stable line
 # (caret keeps it inside 0.2.x; Cargo.lock pins the exact revision).

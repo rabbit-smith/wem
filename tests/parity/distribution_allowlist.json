@@ -8,6 +8,7 @@
     "WwiseProfile",
     "WwiseVersion",
     "WwiseWemError",
+    "decode",
     "encode"
   ],
   "modules": [
@@ -19,6 +20,7 @@
     "wwise_wem/adapters/wav.py",
     "wwise_wem/api.py",
     "wwise_wem/application/__init__.py",
+    "wwise_wem/application/decode.py",
     "wwise_wem/application/encoder.py",
     "wwise_wem/application/models.py",
     "wwise_wem/cli.py",

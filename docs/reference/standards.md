@@ -1,7 +1,10 @@
 # Standards
 
-The product norms for the encoder: what the system must be, and the test that
-establishes each one. How to work in this repository — git and commit
+The product norms for the encoder and the decoder: what the system must be, and
+the test that establishes each one. The encode direction's norms are claims
+about bytes; the decode direction's are claims about determinism and round trip
+([Decoding](#decoding)), because the decode direction has no paired artifact to
+be byte-identical to. How to work in this repository — git and commit
 discipline, lanes and the shared checkout, the verification ladder, what to read
 first — is in the layered [`AGENTS.md`](../../AGENTS.md) set, because an agent
 reads those automatically. Task instructions are in [`../guides/`](../guides/),
@@ -46,10 +49,46 @@ words; a stage is not done until it comes back zero.
 | Geometry-materializer parity: the ported builder == the carrier's registered words == the kernel's `psy_geom*` surfaces | `tests/parity/test_geometry_materializer_parity.py`; `cargo test -p wem-analysis` |
 | The compiled profile carrier: the kernel's tables equal the recorded material, table by table | `crates/wem-profiles/src/carrier_tests.rs` (stage 1, retired with the recorded tree), `tests/parity/test_geometry_materializer_parity.py`, `cargo test -p wem-profiles` |
 | The 2ch/48 kHz result, its corpora, and the limits of that evidence | `tests/parity/test_2ch_corpus.py`, [`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md) |
+| The decode of the committed paired-build container: the geometry and frame count it declares, and a reconstruction of the WAV it was produced from | `crates/wem-core/tests/decode_reference_wem.rs`, `tests/parity/test_decode_surface.py` |
+| The decode round trip: `decode(encode(x))` reconstructs `x` over both registered profiles and the tracked 2ch corpus, and decoding our own encode of the fixture equals decoding the paired build's container, sample for sample | `crates/wem-core/tests/decode_reference_wem.rs`, `crates/wem-core/tests/encoder.rs` |
+| The C ABI decode surface: its lifecycle, its error classes, its callback delivery order and its terminal handles | `crates/wem-capi/tests/decode_capi.rs`, `crates/wem-capi/tests/capi_surface.rs` |
+| The decode shells' error table and step framing, mirrored 1:1 from the C ABI | `crates/wem-python/src/lib.rs`, `crates/wem-wasm/src/lib.rs` (their unit tests) |
+| The shipped wheel decodes through its embedded kernel, announcing the source's geometry and delivering exactly its frame count, in a clean environment | `python3 scripts/wheel_smoke.py` |
 
 Running those suites is what establishes each claim. The local targets that run
 them are listed in
 [`../guides/development.md`](../guides/development.md#what-each-target-runs).
+
+## Decoding
+
+Correctness in the decode direction is defined by determinism and round trip,
+not by byte identity with an external decoder: there is no paired artifact for
+the decode direction to be byte-identical to. The decoder must be deterministic
+(the same WEM decodes to the same samples, every run), exact in its geometry
+(exactly the container's declared frame count, output sample *i* being the
+encoder's input sample *i*), and a reconstruction of its source — established by
+round trip against this repository's own encoder, whose output is byte-exact
+against the paired build, so `decode(encode(x))` against `x` measures the
+decoder over every input this repository can encode.
+
+No external decoder is an oracle here. The one route that would make a
+bit-exactness claim checkable binds the host's libvorbis through `ctypes` and
+compiles a C helper with `cc` on first use (`scripts/decode_wem.py
+--libvorbis-exact`), and is documented as not byte-stable across environments —
+a comparison against it would be a comparison against the machine's libraries,
+not against a specification. The design, the surface and the refusal classes are
+in [`decoding.md`](decoding.md).
+
+Everywhere else the decode direction carries the same norms as the encode
+direction. Failures are the same stable classes, with `WEM_ERR_INPUT_MALFORMED`
+appended for input whose own bytes do not parse, and nothing is swallowed: a
+decoded sample outside ±1.0 is passed through rather than silently clipped,
+because the library owns no clipping policy. Input-derived paths are panic-free.
+A rejection never advances the stream and delivers the prefix it completed. A
+result carries observations rather than recompositions — the geometry and the
+declared frame count are the container's own, available nowhere else in the
+decoder's output. And the shells mirror the C ABI 1:1 without owning numerics or
+profile logic.
 
 ## Determinism
 
@@ -189,7 +228,9 @@ terminates the instance instead of unwinding. A handle that carries state across
 calls is terminal after a failure: `push` and `finish` on a finished or failed
 session are rejected, never silently resumed, while a one-shot call may be
 retried (`crates/wem-capi/tests/capi_surface.rs` covers the finished-session
-rejection and two encodes through one shared handle).
+rejection and two encodes through one shared handle; the decode session's
+`push` and `finish` follow the same rule, covered by
+`crates/wem-capi/tests/decode_capi.rs`).
 
 ## Caller streams and ambient state
 
@@ -202,6 +243,18 @@ selection, never by a variable or a path, and the native runtime carries its
 profile data compiled into the library rather than locating any at run time.
 The caller-facing consequences are in [`public-interface.md`](public-interface.md)
 (execution path) and [`profiles.md`](profiles.md) (access boundary).
+
+That sentence is about **what** is encoded, and it is worth saying what it does
+not decide on its own. How much of the machine one encode takes is a resource
+choice, not an encoding one: the worker pool's size provably cannot change a
+byte, at any size ([`../findings/pool-sizing.md`](../findings/pool-sizing.md)).
+Excluding the environment from **sizing** as well is this repository's own
+position rather than the scope of the sentence above, and it reads as one where
+the size is decided: the `parallel` feature is opt-in, the cap is an argument
+the caller passes at construction, and no environment variable is read for it —
+see [Portability floor](#portability-floor) and
+[`../findings/internal-parallelism-practice.md`](../findings/internal-parallelism-practice.md)
+(N1, N2, and the deviation recorded below).
 
 ## Profile data ownership
 
@@ -259,7 +312,11 @@ The Rust kernel is the sole integration point. Its cross-language surface is the
 C ABI declared in [`include/wem.h`](../../include/wem.h) and implemented 1:1 by
 `crates/wem-capi`: the lifecycle (`Init` → `push*` → `Finish`), the reply framing
 (seq 0 carries the setup packet, then the audio packets), memory ownership, and
-the error codes. Every language binding is a parallel shell over the kernel —
+the error codes. The decode surface is the same topology with the data direction
+reversed — section 5 of the same header, the same crate, and the same shells
+mirroring it (`Decoder` in PyO3, `WemDecoder` in wasm) — so there is one
+integration surface, not one per direction. Every language binding is a parallel
+shell over the kernel —
 PyO3 (`wwise_wem._core`), wasm for the browser and Node (`crates/wem-wasm`,
 `js/`), Go via cgo (`examples/go-cgo`), C — never a parallel implementation.
 Shells mirror that interface 1:1, map errors 1:1 without inventing variants, and
@@ -291,10 +348,51 @@ by the test suites, and never imported by runtime code.
 The kernel stays compilable for `wasm32-unknown-unknown` in a scalar
 configuration. `wem-core`'s `parallel` feature — per-channel rayon partitioning
 inside `wem-analysis`, run in a worker pool the analysis session owns and sizes
-to its channel count rather than in rayon's process-global pool — is default-on
-for native builds and can be dropped by a threadless consumer, which is how
-`crates/wem-wasm` builds it; the scalar path is the one the parity comparisons
-read.
+to its channel count rather than in rayon's process-global pool — is **opt-in**,
+not a default: a default build is the scalar path, and a consumer that wants the
+threads asks for them (`features = ["parallel"]`). The default is off because a
+library imposes no threads on a caller that did not ask — a prebuilt wheel's user
+cannot change a compile-time feature, while the cost of not opting in is wall
+clock on one encode — and the only switch for the internal parallelism is that
+feature. `crates/wem-wasm` builds `wem-core` with `default-features = false`,
+which is now the default restated rather than a difference; our own CLI
+(`crates/wem-core/src/bin/wwise-wem.rs`) is the binary that enables the feature
+explicitly, because it encodes one file at a time, where the threads pay, and the
+nightly encode measurement reads that binary. The scalar path is the one a default
+build runs; the parity comparisons read both configurations.
+
+Where the cap lives, and what it does without the feature:
+
+- it is an explicit construction option on the encoder surface —
+  `encoder::EncoderOptions::max_channel_pool_workers`, a bound on the workers one
+  encode's long-frame channel waves may use, `Some(1)` being the off switch — and
+  `StreamSession::for_selection_with_options` carries it for a streaming encode.
+  An argument, not a setter on a live session and not an environment variable.
+- with `parallel` off there is no pool and no thread, so the cap is accepted and
+  inert, and the reading below reports one worker, the calling thread.
+- what a caller reads back is `StreamSession::channel_pool_workers()`, or the
+  analysis session's `channel_pool_workers()` for a caller driving that domain
+  directly. The pool is built with the session, so nothing can be resized
+  afterwards.
+
+**Deviation: our lever is an argument, and the ecosystem's is an environment
+variable.** A library that owns threads is expected to expose a cap or an off
+switch the caller can set without recompiling, and the near-universal shape is an
+environment variable — `RAYON_NUM_THREADS` for rayon's pools, `OMP_NUM_THREADS`,
+`OPENBLAS_NUM_THREADS` and `MKL_NUM_THREADS` for OpenMP and BLAS, and the whole
+reason `threadpoolctl` exists. Ours is
+`EncoderOptions::max_channel_pool_workers` at construction, with
+`StreamSession::channel_pool_workers()` reporting what it got. This is a
+deviation from that practice, not an instance of it, and it has a consequence a
+caller must know: an application that caps rayon through `RAYON_NUM_THREADS` or
+`build_global` sizes rayon's pools, and this encode's pool is deliberately not one
+of them — rayon consults that variable only for a pool built without an explicit
+count, and this pool is built with one — so the application's own lever does not
+reach these workers and the option is the way to ask for fewer. No environment
+variable is read for sizing in either configuration
+([`../findings/internal-parallelism-practice.md`](../findings/internal-parallelism-practice.md),
+N1 and N2; the measurement behind the size is
+[`../findings/pool-sizing.md`](../findings/pool-sizing.md)).
 
 Profile bytes are consumable without filesystem I/O: the tables are compiled
 into the library and resolved by selection

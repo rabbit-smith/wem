@@ -12,6 +12,7 @@
 //!   -> build_vorbis_wem container assembly
 //! ```
 
+use std::num::NonZeroUsize;
 use std::path::Path;
 
 use wem_analysis::config::AnalysisProfileResources;
@@ -466,6 +467,52 @@ pub struct Encoder {
     profile: EncoderProfile,
     container: ContainerPlan,
     resources: EncoderProfileResources,
+    /// The caller's cap on the worker pool each encode builds, or `None` for
+    /// the encode's own size. Carried, not acted on here: the cap reaches the
+    /// analysis session's pool when the session is built. Inert without the
+    /// `parallel` feature, where there is no pool.
+    max_channel_pool_workers: Option<NonZeroUsize>,
+}
+
+/// The construction-time choices a caller makes on an [`Encoder`], both
+/// optional and both inert at their defaults.
+///
+/// A cap lives here rather than on a live session because the pool is built with
+/// the analysis session, one per encode: the caller states what its encode may
+/// use before the encode starts, which is the shape every comparable library
+/// documents (`docs/findings/internal-parallelism-practice.md`, N2).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct EncoderOptions {
+    /// Quality factor; `None` reproduces the historical bytes exactly.
+    pub quality: Option<f64>,
+    /// Upper bound on the workers one encode's internal channel parallelism may
+    /// use — the caller's cap on the threads this library would otherwise take.
+    ///
+    /// `None`, the default, leaves the encode's own size in place: one worker
+    /// per channel, which is the number of jobs each long-frame channel wave
+    /// has. `Some(n)` asks for at most `n`, and `Some(1)` is the off switch, at
+    /// which the waves run one after another on a single worker. It is a bound
+    /// and not a target, so a cap above the channel count changes nothing; and
+    /// it is a bound on workers, never on what is encoded — the pool's size
+    /// cannot change a byte at any size (`docs/findings/pool-sizing.md`).
+    ///
+    /// A caller reads back what it got from the session that ran the encode
+    /// ([`crate::StreamSession::channel_pool_workers`], or the analysis
+    /// session's own reading); there is no setter, because the pool is built
+    /// once with the session.
+    ///
+    /// The ecosystem's lever does not reach these workers. An application that
+    /// caps rayon through `RAYON_NUM_THREADS` or `build_global` sizes rayon's
+    /// pools, and this encode's pool is deliberately not one of them — rayon
+    /// reads that variable only for pools built without an explicit count, and
+    /// our own pool is built with one — so this option is the way to ask for
+    /// fewer workers here. Nothing is read from the environment
+    /// (`docs/findings/internal-parallelism-practice.md`, N1 and N2).
+    ///
+    /// With the `parallel` feature off — the library's default — an encode runs
+    /// scalar on the calling thread: there is no pool to size and no thread to
+    /// bound, so the cap is accepted and has no effect.
+    pub max_channel_pool_workers: Option<NonZeroUsize>,
 }
 
 /// A summary, deliberately: the encoder's identity and the sizes of the
@@ -484,6 +531,7 @@ impl std::fmt::Debug for Encoder {
             .field("sample_rate", &self.profile.sample_rate())
             .field("block_sizes", &self.profile.block_sizes())
             .field("quality", &self.profile.quality())
+            .field("max_channel_pool_workers", &self.max_channel_pool_workers)
             .field("setup_packet_len", &self.resources.setup_packet.len())
             .field("codebooks", &self.resources.codebooks.len())
             .finish()
@@ -498,7 +546,7 @@ impl Encoder {
     /// this library; a selection no installed profile satisfies fails with
     /// [`EncoderError::ProfileNotFound`], never with a substituted default.
     pub fn new(selection: WwiseProfile) -> Result<Self, EncoderError> {
-        Self::new_with_quality(selection, None)
+        Self::new_with_options(selection, EncoderOptions::default())
     }
 
     /// Construct the encoder from a structured selection, optionally bound to
@@ -512,6 +560,33 @@ impl Encoder {
         selection: WwiseProfile,
         quality: Option<f64>,
     ) -> Result<Self, EncoderError> {
+        Self::new_with_options(
+            selection,
+            EncoderOptions {
+                quality,
+                ..EncoderOptions::default()
+            },
+        )
+    }
+
+    /// The complete construction surface: a structured selection plus the
+    /// caller's [`EncoderOptions`] — the quality factor and the cap on this
+    /// encoder's internal channel parallelism.
+    ///
+    /// The cap is carried, not acted on here: it is handed to the analysis
+    /// session's pool when a session is built, so every encode this encoder runs
+    /// — one-shot ([`Encoder::encode_pcm`]) or streaming
+    /// ([`crate::StreamSession`]) — is bounded by it. A caller that sets none
+    /// gets the encode's own size, one worker per channel, and none at all
+    /// without the `parallel` feature.
+    pub fn new_with_options(
+        selection: WwiseProfile,
+        options: EncoderOptions,
+    ) -> Result<Self, EncoderError> {
+        let EncoderOptions {
+            quality,
+            max_channel_pool_workers,
+        } = options;
         let compiled = compiled_profile_for_selection(selection)
             .map_err(|error| selection_error(&error, selection))?;
         let profile = compiled
@@ -525,7 +600,7 @@ impl Encoder {
                 .map_err(|error| selection_error(&error, selection))?,
             None => profile,
         };
-        Self::from_profile_and_carrier(&profile, None, &compiled)
+        Self::from_profile_and_carrier(&profile, None, &compiled, max_channel_pool_workers)
     }
 
     /// Shared construction from one profile identity + the compiled carrier
@@ -535,6 +610,7 @@ impl Encoder {
         profile: &EncoderProfile,
         container: Option<ContainerPlan>,
         compiled: &CompiledProfile,
+        max_channel_pool_workers: Option<NonZeroUsize>,
     ) -> Result<Self, EncoderError> {
         if profile.block_sizes() != [256, 2048] {
             return Err(EncoderError::StateError {
@@ -582,12 +658,25 @@ impl Encoder {
             profile: profile.clone(),
             container: plan,
             resources,
+            max_channel_pool_workers,
         })
     }
 
     /// The selected encoder profile (Python `profile`).
     pub fn profile(&self) -> &EncoderProfile {
         &self.profile
+    }
+
+    /// The caller's cap on this encoder's internal channel parallelism, as
+    /// stated at construction: `None` is the encode's own size, one worker per
+    /// channel (`EncoderOptions::max_channel_pool_workers`).
+    ///
+    /// The option the caller passed, not a reading — what a session actually
+    /// built is [`crate::StreamSession::channel_pool_workers`], or the analysis
+    /// session's own `channel_pool_workers` for a caller driving that domain
+    /// directly.
+    pub fn max_channel_pool_workers(&self) -> Option<NonZeroUsize> {
+        self.max_channel_pool_workers
     }
 
     /// The analysis resources for this profile
@@ -634,11 +723,12 @@ impl Encoder {
             });
         }
 
-        let mut session = AnalysisSession::new(
+        let mut session = AnalysisSession::new_with_channel_pool_cap(
             self.profile.channels(),
             self.profile.sample_rate(),
             self.profile.block_sizes(),
             self.resources.analysis.clone(),
+            self.max_channel_pool_workers,
         )?;
 
         let pcm_rows = pcm.to_float_rows();

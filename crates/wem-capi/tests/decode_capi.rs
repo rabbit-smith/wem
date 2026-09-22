@@ -32,7 +32,7 @@ use common::reference_wem;
 
 /// What a decode client collects: the header announcement and every PCM block.
 struct DecodeSink {
-    headers: Vec<(u32, u32, Vec<u8>)>,
+    headers: Vec<(u32, u32, u64, Vec<u8>)>,
     pcm: Vec<f32>,
     blocks: Vec<usize>,
     /// Inserted between the callbacks so ordering is observable: the index of
@@ -68,6 +68,7 @@ impl DecodeSink {
 unsafe extern "C" fn sink_header(
     channels: u32,
     sample_rate: u32,
+    total_frames: u64,
     setup: *const u8,
     setup_len: usize,
     user_data: *mut c_void,
@@ -81,7 +82,8 @@ unsafe extern "C" fn sink_header(
         return code;
     }
     let bytes = unsafe { std::slice::from_raw_parts(setup, setup_len) };
-    sink.headers.push((channels, sample_rate, bytes.to_vec()));
+    sink.headers
+        .push((channels, sample_rate, total_frames, bytes.to_vec()));
     WemError::Ok
 }
 
@@ -152,9 +154,13 @@ fn the_real_wem_decodes_through_the_abi() {
         1,
         "the header is announced exactly once"
     );
-    let (channels, sample_rate, setup) = &sink.headers[0];
+    let (channels, sample_rate, total_frames, setup) = &sink.headers[0];
     assert_eq!(*channels, 6);
     assert_eq!(*sample_rate, 44_100);
+    assert_eq!(
+        *total_frames, 139_398,
+        "the header announces the frame count the container declares, before any PCM"
+    );
     assert_eq!(setup.len(), 201);
     assert_eq!(
         sink.calls.first(),

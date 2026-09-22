@@ -1,6 +1,7 @@
 # Architecture
 
-This document defines the package boundaries for the encoder. The distribution
+This document defines the package boundaries for the encoder and its decoder.
+The distribution
 facade (package root `wwise_wem`) is a stable API shell; the bit-exact
 implementation domains live in the development-tree reference package
 (`wwise_wem_reference`, under `reference/`), which the test suites use as the
@@ -75,6 +76,23 @@ Mandatory rules:
 5. Compose the packet stream into a RIFF/WEM container.
 
 Mutable cross-frame state is owned by one analysis session. A `FramePlan` is the sole scheduling truth and every `WindowedFrame` delegates its scheduling fields to that plan.
+
+## Decoding flow
+
+`application.decode` owns the reverse conversion, one deterministic decode per
+WEM, and assembles nothing of its own: the chain runs in the kernel, step by
+step through the in-package extension.
+
+1. Consume the container's header region and announce the geometry the `fmt `
+   chunk declares, checked against the compiled carrier.
+2. Parse each audio packet's mode, mapping, floors and residue.
+3. Apply the coupling inverse and the floor envelope.
+4. Run the inverse transform, the synthesis window and the overlap-add.
+5. Deliver interleaved f32 PCM, exactly the container's declared frame count.
+
+The design — lifecycle, refusal classes, output alignment, the streaming
+property, and the shells that mirror the C ABI — is in
+[`decoding.md`](decoding.md).
 
 ## Profile ownership
 

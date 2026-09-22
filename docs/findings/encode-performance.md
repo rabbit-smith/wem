@@ -29,9 +29,14 @@ and a closed item stays on it (see
 Reproduce with:
 
 ```sh
-cargo build --release -p wem-core
+cargo build --release -p wem-core --features parallel   # the CLI is parallel-only
 python3 scripts/measure_encode_perf.py            # numbers + machine identity
 ```
+
+The `--features parallel` was a default when these numbers were taken and is
+explicit now (`crates/wem-core/Cargo.toml`): a default build is scalar, and the
+CLI — the binary this page measures — is a bin with `required-features`, so a
+bare `cargo build --release -p wem-core` builds no CLI at all.
 
 The per-stage split comes from `crates/wem-core/tests/stage_timings.rs`, an
 `#[ignore]`d test-only harness (driven with `--ignored --nocapture`). It replays
@@ -57,7 +62,7 @@ re-runs of the same work, not disjoint stages, and are labelled as such.
 | Memory | 64 GB |
 | OS | macOS 27.0 (26A5378j), Darwin 27.0.0, arm64 |
 | Toolchain | rustc 1.96.0 (ac68faa20), host aarch64-apple-darwin, LLVM 22.1.2 |
-| Build | `cargo build --release -p wem-core`, default features (`parallel` on) |
+| Build | `cargo build --release -p wem-core --features parallel` (the feature is opt-in; it was a default when these numbers were taken) |
 
 ## The measured split (fixture, release, median of 11 / 7)
 
@@ -186,8 +191,14 @@ channels of ~350 µs of work. The short-frame path is already sequential
 (`pipeline.rs:344-347`).
 
 **Cost.** Same fixture, same machine, same release profile, the two builds
-`cargo build --release -p wem-core` and `... --no-default-features`, 11 runs
-each:
+`cargo build --release -p wem-core --features parallel` and the same kernel built
+`--no-default-features`, 11 runs each — the CLI in both configurations, which is
+what existed when this was measured. Both configurations are still reachable
+today, though no longer from one source: `cargo build --release -p wem-core
+--features parallel` builds the CLI, and the scalar side is
+`crates/wem-core/tests/concurrency_worker.rs` — the instrument
+`scripts/measure_concurrency.py` builds in both configurations — because a bin
+with `required-features` has no scalar build.
 
 | Build | min | median | max |
 | --- | ---: | ---: | ---: |

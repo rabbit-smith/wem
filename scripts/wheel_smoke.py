@@ -154,12 +154,16 @@ def _facade_metadata_smoke(allowlist: dict[str, object]) -> str:
 
 
 def _clean_venv_core_smoke() -> str:
-    """Installed facade must encode byte-exactly through the embedded kernel."""
+    """Installed facade must encode byte-exactly through the embedded kernel,
+    and decode what it encoded."""
     return (
         "import sys\n"
-        "from wwise_wem import RawPcm, WwiseWemError, encode\n"
+        "import contextlib\n"
+        "import wave\n"
+        "from wwise_wem import RawPcm, WwiseWemError, decode, encode\n"
         "import wwise_wem._core as core\n"
         "assert hasattr(core, 'Encoder'), core\n"
+        "assert hasattr(core, 'Decoder'), core\n"
         "result = encode(sys.argv[1])\n"
         # The comparison is the committed container's own bytes: the installed
         # wheel must reproduce them exactly, not merely agree on a digest.
@@ -174,10 +178,25 @@ def _clean_venv_core_smoke() -> str:
         "    assert error.code == 'PROFILE_NOT_FOUND', error.code\n"
         "else:\n"
         "    raise SystemExit('uninstalled 2ch/44100 selection was accepted')\n"
+        # The decode surface ships in the same wheel and runs on the same
+        # kernel: decoding the container the wheel just produced must announce
+        # the source's own geometry and deliver exactly its frame count. The
+        # comparison is against the input WAV read here, not a recorded value.
+        "with wave.open(sys.argv[1], 'rb') as handle:\n"
+        "    frames = handle.getnframes()\n"
+        "    channels = handle.getnchannels()\n"
+        "    rate = handle.getframerate()\n"
+        "decoded = decode(result.data)\n"
+        "with contextlib.closing(decoded):\n"
+        "    assert (decoded.channels, decoded.sample_rate) == (channels, rate), (\n"
+        "        decoded.channels, decoded.sample_rate)\n"
+        "    assert decoded.total_frames == frames, (decoded.total_frames, frames)\n"
+        "    delivered = sum(len(block) for block in decoded)\n"
+        "assert delivered == frames * channels, (delivered, frames * channels)\n"
         "try:\n"
         "    import wwise_wem_reference\n"
         "except ImportError:\n"
-        "    print('native-encode-ok')\n"
+        "    print('native-encode-ok native-decode-ok')\n"
         "else:\n"
         "    raise SystemExit('reference tree importable from clean install')\n"
     )
@@ -313,12 +332,17 @@ def main() -> None:
                 f"clean-venv native encode smoke failed "
                 f"(rc={result.returncode}):\n{result.stdout}{result.stderr}"
             )
+        if "native-decode-ok" not in result.stdout:
+            raise RuntimeError(
+                f"clean-venv native decode smoke failed "
+                f"(rc={result.returncode}):\n{result.stdout}{result.stderr}"
+            )
         print(
             "wheel smoke OK",
             f"wheel={wheel.name}",
             "zip=metadata-ok",
             "installed=metadata:ok",
-            "clean-venv=native-encode-ok",
+            "clean-venv=native-encode-ok,native-decode-ok",
         )
 
 

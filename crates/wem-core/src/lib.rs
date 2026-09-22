@@ -8,7 +8,10 @@
 //! Public surface:
 //! * [`encoder::Encoder`] — one-shot PCM-to-WEM encode
 //!   (Python `application/encoder.py`); the caller-facing entry is
-//!   [`encoder::Encoder::new`] over a structured [`WwiseProfile`]
+//!   [`encoder::Encoder::new`] over a structured [`WwiseProfile`], and
+//!   [`encoder::EncoderOptions`] carries the two construction choices a
+//!   caller can state (quality, and the cap on the encode's internal channel
+//!   parallelism)
 //! * [`decoder::DecodeSession`] — the streaming decode lifecycle
 //!   (Init -> chunk* -> Finish) with the data direction reversed: WEM bytes
 //!   in, interleaved f32 PCM out, exactly `dw_total_pcm_frames` frames
@@ -38,7 +41,9 @@ pub mod usecases {
 }
 
 pub use decoder::{DecodeSession, DecodeStep, DecodedHeader};
-pub use encoder::{ContainerPlan, EncodeResult, EncodeStats, Encoder, Pcm16, MIN_PCM_FRAMES};
+pub use encoder::{
+    ContainerPlan, EncodeResult, EncodeStats, Encoder, EncoderOptions, Pcm16, MIN_PCM_FRAMES,
+};
 pub use error::{DecoderError, EncoderError, InternalError};
 pub use pack::{pack_analysis_frame, EncodedPacket};
 pub use stream::{StreamPacket, StreamSession};

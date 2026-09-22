@@ -387,12 +387,16 @@ void wem_session_free(WemSession *session);
  *     those, which is what "Wwise 2013.2" means on this surface. There is no
  *     version field in the container to test.
  *   - header_cb fires exactly once per session, before any pcm_cb call, and
- *     carries the geometry (channels, sample rate) plus the setup packet this
- *     revision parsed. Both callbacks are required: the PCM cannot be
- *     interpreted without the geometry, and the geometry is available nowhere
- *     else in the output, so a NULL header callback could only ever hide the
- *     caller's mistake — unlike the encoder's `packet_cb`, which may be NULL
- *     because the container `write_cb` delivers is a superset of it.
+ *     carries the geometry (channels, sample rate), the frame count the
+ *     container declares, and the setup packet this revision parsed. Both
+ *     callbacks are required: the PCM cannot be interpreted without the
+ *     geometry, and the geometry is available nowhere else in the output, so
+ *     a NULL header callback could only ever hide the caller's mistake —
+ *     unlike the encoder's `packet_cb`, which may be NULL because the
+ *     container `write_cb` delivers is a superset of it. The declared frame
+ *     count travels here for the same reason the geometry does: it is a fact
+ *     the container states and the session has already read, and leaving it
+ *     out would make every shell read the container itself.
  *   - pcm_cb receives interleaved f32 samples at +-1.0 full scale, in bounded
  *     blocks. Output sample i is the encoder's input sample i, and a session
  *     that finishes with WEM_OK has delivered exactly `dw_total_pcm_frames`
@@ -433,12 +437,20 @@ void wem_session_free(WemSession *session);
  *  section 3 exactly (the handle on WEM_OK, NULL on every failure).
  */
 
-/* One-time header announcement: the geometry, plus the setup packet this
- * revision parsed (the mirror of encode's seq-0 setup delivery). Required:
- * without it the caller cannot interpret the PCM. */
+/* One-time header announcement: the geometry, the frame count the container
+ * declares, plus the setup packet this revision parsed (the mirror of encode's
+ * seq-0 setup delivery). Required: without it the caller cannot interpret the
+ * PCM.
+ *
+ * `total_frames` is announced here rather than left to the caller to find.
+ * The session has already read it to reach this point, and the alternative is
+ * that every shell locates the container's `fmt` chunk and reads one field
+ * itself — container layout knowledge in a layer the integration topology
+ * keeps free of it. It is the number of frames the session will deliver if it
+ * finishes with WEM_OK. */
 typedef WemError (*WemHeaderCb)(uint32_t channels, uint32_t sample_rate,
-                                const uint8_t *setup, size_t setup_len,
-                                void *user_data);
+                                uint64_t total_frames, const uint8_t *setup,
+                                size_t setup_len, void *user_data);
 
 /* PCM delivery: interleaved f32, +-1.0 full scale, in bounded blocks. The
  * pointer is valid only during the call; returning non-WEM_OK aborts the

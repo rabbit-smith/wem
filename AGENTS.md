@@ -1,6 +1,10 @@
 # AGENTS.md — wwise-wem
 
-Standalone bit-exact implementation of Wwise 2013.2 Vorbis WAV→WEM encoding.
+Standalone bit-exact implementation of Wwise 2013.2 Vorbis WAV→WEM encoding,
+with a deterministic decoder for the same containers. The encode side is held to
+the paired build's exact bytes; the decode side claims determinism and a round
+trip against this repository's own encoder, never byte-identity with another
+decoder (`docs/reference/decoding.md`).
 Read this file first; subtree rules live in the child `AGENTS.md` files listed
 below.
 
@@ -110,8 +114,10 @@ Adding any file under `src/wwise_wem/` or packaged data requires:
 and the test that establishes each), `docs/reference/architecture.md` (layers),
 `docs/reference/domain-model.md` (vocabulary — use these terms in code and
 messages), `docs/reference/profiles.md` (profile & frozen-table ownership),
-`docs/reference/public-interface.md` (package exports, the `encode` API, result
-types, and the CLI), `docs/guides/development.md` (how work is done here: the
+`docs/reference/public-interface.md` (package exports, the `encode` and `decode`
+APIs, result types, and the CLI), `docs/reference/decoding.md` (the decode design:
+lifecycle, refusal classes, output alignment, the streaming property),
+`docs/guides/development.md` (how work is done here: the
 verification ladder, the shared checkout, commit discipline and the code-writing
 standards). The domain model's terms are the ones to use; do not invent parallel
 names for defined concepts.

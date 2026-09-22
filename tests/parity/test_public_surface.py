@@ -159,6 +159,8 @@ import sys
 import wwise_wem
 names = [
     'wwise_wem.application.encoder',
+    'wwise_wem.application.decode',
+    'wwise_wem._core',
     'wwise_wem_reference.python_engine',
     'wwise_wem_reference.analysis.dsp.transform',
     'wwise_wem_reference.analysis.psychoacoustics.pipeline',
@@ -290,6 +292,7 @@ class TypedApiTests(unittest.TestCase):
                 "WwiseProfile",
                 "WwiseVersion",
                 "WwiseWemError",
+                "decode",
                 "encode",
             ],
         )
@@ -301,8 +304,10 @@ import sys
 import wwise_wem
 names = [
     'wwise_wem.application.encoder',
+    'wwise_wem.application.decode',
     'wwise_wem.adapters.wav',
     'wwise_wem.adapters.raw',
+    'wwise_wem._core',
     'wwise_wem_reference.python_engine',
 ]
 print(json.dumps([name for name in names if name in sys.modules]))

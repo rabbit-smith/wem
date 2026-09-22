@@ -98,12 +98,14 @@ itself.
 | `ruff check src reference tests scripts`, `mypy --no-site-packages src reference` | Python lint and the typed baseline |
 | `cd crates && cargo fmt --all --check` | Rust formatting |
 | `cd crates && cargo clippy --workspace --all-targets -- -D warnings` | The Rust workspace lints with warnings denied |
+| `cd crates && cargo clippy -p wem-analysis -p wem-core --all-targets --features parallel -- -D warnings` | The same lints over the opt-in configuration: `--workspace --all-targets` does not lint the bin the `parallel` feature gates |
 | `cd crates && RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` | Rustdoc over the workspace with warnings denied. It resolves every intra-doc link, which clippy does not read: a public item whose documentation links to a private one compiles, lints and tests clean, and only this step reports it |
 | `make test-fast` | The Python suites by discovery: `tests/unit`, `tests/integration`, `tests/parity` (module behavior, CLI/API/adapter end paths, pipeline invariants and cross-implementation parity) |
 | `python3 scripts/native_smoke.py` | The facade's streaming path (five uneven chunks), its one-shot path, and the error-code mapping, each byte-exact against `tests/fixtures/reference.wem` |
 | `make wem-bytes` | Whole-file reference WEM parity: the encoder's bytes equal the committed `tests/fixtures/reference.wem`, byte for byte (205 audio packets) |
 | `make 2ch-long` | The long-run cross-implementation comparison, one 2ch/48 kHz case across the native, reference and streaming paths |
-| `cd crates && cargo test --workspace` | The Rust kernel, C ABI and shell suites, including `frame_pipeline_parity` (per-frame values against the oracle, all 205 frames) and the geometry-materializer parity suites |
+| `cd crates && cargo test --workspace --all-targets` | The Rust kernel, C ABI and shell suites in the default configuration — scalar, the `parallel` feature being opt-in — including `frame_pipeline_parity` (per-frame values against the oracle, all 205 frames), `container_codec` (the native container builder against the oracle's, byte for byte, plus the degenerate payloads it must refuse) and the geometry-materializer parity suites |
+| `cd crates && cargo test -p wem-analysis -p wem-core --all-targets --features parallel` | The same suites in the opt-in configuration our CLI requires, so that the parallel path is built and tested and not only the scalar one |
 | `python3 scripts/fuzz_diff_parity.py --pr` | Native vs oracle parity under randomized chunking and quality, on the fixed seed set |
 | `python3 scripts/wheel_smoke.py` | Installed-wheel inventory (facade + native engine, no profile data), the zip-import metadata path, and one real encode in a clean venv. Run with an empty `PYTHONPATH`, so the reference tree cannot be imported inside the "installed wheel" venv |
 | `make wasm-build`, `node js/test-node.mjs` | wasm-pack builds both shell packages, then the shell's bytes against `tests/fixtures/reference.wem` (one-shot, three chunkings) plus the selection and error-code mapping |
@@ -173,7 +175,7 @@ reporters in `crates/wem-core/tests/streaming.rs`. The measurement reads a
 release build, which is not the build the suites use:
 
 ```bash
-cd crates && cargo build --release -p wem-core
+cd crates && cargo build --release -p wem-core --features parallel   # the CLI needs the feature
 cd crates && target/release/wwise-wem ../tests/fixtures/input.wav --output /dev/null --time
 python3 scripts/measure_encode_perf.py
 ```
@@ -192,8 +194,9 @@ measurement that accompanies it is a paired before/after with the run order
 alternated and **the machine's load stated** — a naive pair on a busy machine
 once reported a 152 ms "after" against a 116 ms "before" for a stage nobody had
 touched. No optimization that could move a byte lands until the crate's targets
-are green under both feature configurations, `--all-targets` with default
-features and with `--no-default-features`.
+are green under both feature configurations: `--all-targets` as it builds by
+default — scalar, the `parallel` feature being opt-in — and `--all-targets
+--features parallel`.
 
 The finding is the ledger, and it is append-only in spirit: a closed item stays
 there, marked closed with the number that closed it, because an entry deleted
