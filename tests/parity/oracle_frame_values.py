@@ -15,8 +15,8 @@ the mode/window plan, then per frame analyze and pack.
 Stream shape — one JSON document per line, header first, then one document per
 audio frame in encoder order:
 
-* header: source path and digest, profile, geometry, frame count, and which
-  stages/frames the frame documents carry;
+* header: source path and digest, profile label, the resolved setup packet,
+  geometry, frame count, and which stages/frames the frame documents carry;
 * frame: the scheduling fields (``mode``, ``transition``, ``window_center``),
   the float stage rows, the floor posts, the quantized residue rows, and the
   packed audio packet.
@@ -124,7 +124,9 @@ def frame_records(
     conditioned = session.condition_pcm(pcm.channels)
     modes, windows = session.selected_windows(conditioned)
 
-    stage_frames = list(range(len(modes))) if frames is None else sorted(set(frames))
+    frames_with_stages = (
+        list(range(len(modes))) if frames is None else sorted(set(frames))
+    )
     yield {
         "kind": "header",
         "schema": SCHEMA,
@@ -136,7 +138,11 @@ def frame_records(
         "pcm_frames": pcm.frame_count,
         "audio_packets": len(modes),
         "stages": list(stages),
-        "stage_frames": stage_frames,
+        "stage_frames": frames_with_stages,
+        # The Wwise setup packet the resolved profile carries: the container's
+        # first packet, and the half of the profile identity a value consumer
+        # cannot derive from the per-frame rows.
+        "setup_packet": bytes(resources.setup_packet).hex(),
     }
 
     emitted = 0
@@ -157,7 +163,7 @@ def frame_records(
                     for name, rows in _stage_rows(analysis, window).items()
                     if name in stages
                 }
-                if stages and (frames is None or index in stage_frames)
+                if stages and (frames is None or index in frames_with_stages)
                 else None
             ),
             "posts": [

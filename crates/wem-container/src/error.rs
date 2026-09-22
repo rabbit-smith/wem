@@ -24,8 +24,21 @@ pub enum ContainerError {
     TruncatedPacketStream { at: usize },
     /// Missing required chunk.
     MissingChunk { id: &'static str },
-    /// Packet walk failed (Python `extract_packets` `ok=False`).
-    PacketWalkFailed { position: usize, size: u16 },
+    /// The packet walk could not consume the whole data payload (Python
+    /// `extract_packets` `ok=False`).
+    PacketWalkFailed {
+        /// Byte offset in the data payload where the walk stopped.
+        position: usize,
+        /// The size declared by the prefix at `position`, when the walk
+        /// stopped on a size prefix that overruns the payload. `None` when it
+        /// stopped on trailing bytes that are too few to be a size prefix:
+        /// the walk observed no size there, and a number here would be an
+        /// invention rather than an observation.
+        declared_size: Option<u16>,
+        /// Bytes present from `position` to the end of the payload — what the
+        /// walk actually had left. One byte for the trailing-bytes case.
+        remaining: usize,
+    },
     /// Unknown endianness marker.
     BadEndian { marker: [u8; 4] },
     /// Terminal overlap excess exceeds the u16 the fmt field stores.
@@ -55,9 +68,22 @@ impl std::fmt::Display for ContainerError {
                 write!(f, "packet stream truncated at {at}")
             }
             ContainerError::MissingChunk { id } => write!(f, "missing {id}"),
-            ContainerError::PacketWalkFailed { position, size } => {
-                write!(f, "packet walk failed at {position} (size {size})")
-            }
+            ContainerError::PacketWalkFailed {
+                position,
+                declared_size,
+                remaining,
+            } => match declared_size {
+                Some(size) => write!(
+                    f,
+                    "packet walk failed at {position}: size {size} declared, \
+                     but only {remaining} byte(s) remain from the prefix"
+                ),
+                None => write!(
+                    f,
+                    "packet walk failed at {position}: {remaining} trailing \
+                     byte(s) are too few for a size prefix"
+                ),
+            },
             ContainerError::BadEndian { marker } => {
                 write!(f, "unknown endianness marker {marker:?}")
             }

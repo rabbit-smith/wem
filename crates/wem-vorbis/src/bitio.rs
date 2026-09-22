@@ -77,7 +77,9 @@ impl<'a> BitReader<'a> {
 #[derive(Debug)]
 pub struct OggPack {
     buffer: Vec<u8>,
-    /// Pending bits, LSB-first.
+    /// Pending bits, LSB-first. Invariant: every bit at or above `accbits`
+    /// is zero, so the bytes [`OggPack::get_buffer`] reads back are exactly
+    /// the bits written and nothing else.
     acc: u64,
     /// Valid bit count in `acc` (always < 8 after a flush).
     accbits: u32,
@@ -94,6 +96,20 @@ impl OggPack {
     }
 
     /// Write the low `bits` (0..=32) of `value` LSB-first.
+    ///
+    /// Only the low `bits` of `value` reach the stream: a value with anything
+    /// set above them is truncated to those bits, not rejected. That is the
+    /// primitive's defined behaviour rather than a convenience — libogg's
+    /// `oggpack_write` is `value &= mask[bits]` (`mask[32] == 0xffffffff`),
+    /// and the reference port this crate mirrors does the same
+    /// (`v = value & MASKS[bits]`, "C byte store truncates"). Callers own the
+    /// domain of what they write: an encoder path checks its own ranges
+    /// before writing (a width outside `0..=32` is
+    /// [`BitError::BitsOutOfRange`], an unrepresentable codeword length is a
+    /// codebook error), so the mask is a no-op for valid input. It is applied
+    /// at every width including 32: an unmasked value there would sit above
+    /// the accumulator's valid-bit count and come back out in the bytes
+    /// written *after* it.
     pub fn write(&mut self, value: u64, bits: u32) -> Result<(), BitError> {
         if bits > 32 {
             return Err(BitError::BitsOutOfRange { bits });
@@ -101,11 +117,8 @@ impl OggPack {
         if bits == 0 {
             return Ok(());
         }
-        let v = if bits == 32 {
-            value
-        } else {
-            value & ((1u64 << bits) - 1)
-        };
+        // `1u64 << 32` is representable in u64, so one mask covers 0..=32.
+        let v = value & ((1u64 << bits) - 1);
         self.acc |= v << self.accbits;
         self.accbits += bits;
         while self.accbits >= 8 {
@@ -173,5 +186,44 @@ mod tests {
         assert_eq!(reader.read(5).unwrap(), 0b11100); // bits 0..4
         assert_eq!(reader.read(3).unwrap(), 0b001); // bits 5..7 (1,0,0)
         assert_eq!(reader.read(1).unwrap_err(), BitError::OutOfBits);
+    }
+
+    #[test]
+    fn write_truncates_to_the_requested_width() {
+        // Masking, not rejection, is the primitive's behaviour: libogg's
+        // `oggpack_write` is `value &= mask[bits]` and the reference port
+        // mirrors it. Values here are the ones the reference `OggPack`
+        // produces for the same calls.
+        let mut pack = OggPack::new(8);
+        pack.write(0x1FF, 8).unwrap();
+        assert_eq!(pack.get_buffer(), vec![0xFF]);
+
+        let mut wide = OggPack::new(8);
+        wide.write(0xFFFF_FFFF, 32).unwrap();
+        wide.write(0xAB, 8).unwrap();
+        assert_eq!(wide.get_buffer(), vec![0xFF, 0xFF, 0xFF, 0xFF, 0xAB]);
+    }
+
+    #[test]
+    fn write_masks_at_width_32_so_nothing_leaks_into_later_bytes() {
+        // A value with bits above 32 set must not survive the write: unmasked
+        // it would stay in the accumulator above the valid-bit count and come
+        // back out of the bytes written after it. Reference output for the
+        // same three writes is six zero bytes.
+        let mut pack = OggPack::new(16);
+        pack.write(1u64 << 40, 32).unwrap();
+        pack.write(0, 8).unwrap();
+        pack.write(0, 8).unwrap();
+        assert_eq!(pack.get_buffer(), vec![0u8; 6]);
+    }
+
+    #[test]
+    fn write_rejects_a_width_the_type_cannot_carry() {
+        let mut pack = OggPack::new(8);
+        assert_eq!(
+            pack.write(0, 33).unwrap_err(),
+            BitError::BitsOutOfRange { bits: 33 }
+        );
+        assert!(pack.get_buffer().is_empty());
     }
 }

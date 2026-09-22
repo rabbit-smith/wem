@@ -89,8 +89,9 @@ def verify_or_write_inputs(
 ) -> None:
     """Check or write the generated inputs against the manifest's file names.
 
-    The comparison is the committed input's own bytes: in check mode the file
-    the manifest names must equal what the generator produces, byte for byte.
+    The comparison is the committed input's own bytes: a rendered input that
+    differs from the file the manifest names is reported before anything is
+    written, and ``check`` additionally reports a file that is missing.
     """
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     entries = {Path(entry["input"]).stem: entry for entry in manifest["cases"]}
@@ -100,8 +101,11 @@ def verify_or_write_inputs(
         if entry is None:
             raise ValueError(f"manifest has no input entry for {case}")
         path = destination / entry["input"]
-        if check and (not path.is_file() or path.read_bytes() != data):
-            raise ValueError(f"committed input differs from generator: {path}")
+        if path.is_file():
+            if path.read_bytes() != data:
+                raise ValueError(f"committed input differs from generator: {path}")
+        elif check:
+            raise ValueError(f"committed input is missing: {path}")
         if not check:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)

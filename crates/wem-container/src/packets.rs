@@ -5,16 +5,21 @@ use crate::error::ContainerError;
 use crate::fmt::VorbisFmtFields;
 use crate::riff::Endian;
 
-/// Result of splitting a RIFF data payload into seek table and sized
-/// packets (Python `extract_packets` result dict).
+/// A *complete* walk of a RIFF data payload: every byte is accounted for by
+/// a size prefix and its payload, so `packets` and `sizes` are the whole
+/// stream (Python `extract_packets` result dict, `ok=True`).
+///
+/// A walk that could not consume the payload is not one of these and cannot
+/// be mistaken for one: `extract_packets` reports it as
+/// [`ContainerError::PacketWalkFailed`], and this type has no success flag to
+/// read — the presence of a value is the success.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PacketWalk {
-    pub ok: bool,
     pub seek_table: Vec<u8>,
     pub packets: Vec<Vec<u8>>,
     pub sizes: Vec<u16>,
-    pub error_at: Option<usize>,
-    pub error_size: Option<u16>,
+    /// Byte offset the walk stopped at; equal to `data_size` for a complete
+    /// walk.
     pub end: usize,
     pub data_size: usize,
     /// Size of the (first) setup packet, if any.
@@ -44,6 +49,14 @@ fn read_u16(data: &[u8], pos: usize, endian: Endian) -> Result<u16, ContainerErr
 
 /// Split a data payload into its seek table and sized packets
 /// (Python `extract_packets`).
+///
+/// The Python function reports a payload it could not walk as
+/// `{"ok": False, ...}` alongside the packets read so far. Here that outcome
+/// is [`ContainerError::PacketWalkFailed`] instead: a caller that reads only
+/// the `Result` cannot take a partial walk for a complete one, and the error
+/// distinguishes the two ways the walk stops — a size prefix that overruns
+/// the payload (`declared_size: Some(_)`) and trailing bytes too few to be a
+/// size prefix at all (`declared_size: None`).
 pub fn extract_packets(
     data: &[u8],
     seek_table_size: usize,
@@ -62,17 +75,10 @@ pub fn extract_packets(
     while position + 2 <= data.len() {
         let size = read_u16(data, position, endian)?;
         if position + 2 + size as usize > data.len() {
-            return Ok(PacketWalk {
-                ok: false,
-                seek_table: seek,
-                packets,
-                sizes,
-                error_at: Some(position),
-                error_size: Some(size),
-                end: position,
-                data_size: data.len(),
-                setup_packet_size: None,
-                first_audio_offset: None,
+            return Err(ContainerError::PacketWalkFailed {
+                position,
+                declared_size: Some(size),
+                remaining: data.len() - position,
             });
         }
         let payload = data[position + 2..position + 2 + size as usize].to_vec();
@@ -80,14 +86,22 @@ pub fn extract_packets(
         packets.push(payload);
         position += 2 + size as usize;
     }
+    if position != data.len() {
+        // Fewer than two bytes are left, so there is no size prefix here: the
+        // walk observed trailing bytes, not a packet of any size. Reporting
+        // `declared_size: None` says exactly that, where a zero would invent a
+        // packet the payload does not carry.
+        return Err(ContainerError::PacketWalkFailed {
+            position,
+            declared_size: None,
+            remaining: data.len() - position,
+        });
+    }
     let setup = sizes.first().copied();
     Ok(PacketWalk {
-        ok: position == data.len(),
         seek_table: seek,
         packets,
         sizes,
-        error_at: None,
-        error_size: None,
         end: position,
         data_size: data.len(),
         setup_packet_size: setup,
@@ -195,11 +209,14 @@ mod tests {
         let p2 = b"audio";
         let bytes = build_packet_stream(&[p1, p2], seek, Endian::Little).unwrap();
         let walk = extract_packets(&bytes, seek.len(), Endian::Little).unwrap();
-        assert!(walk.ok);
         assert_eq!(walk.setup_packet_size, Some(p1.len() as u16));
         assert_eq!(walk.first_audio_offset, Some(seek.len() + 2 + p1.len()));
         assert_eq!(walk.packets, vec![p1.to_vec(), p2.to_vec()]);
         assert_eq!(walk.sizes, vec![p1.len() as u16, p2.len() as u16]);
+        // A walk value only exists when it consumed the payload, so its end is
+        // the payload end by construction.
+        assert_eq!(walk.end, bytes.len());
+        assert_eq!(walk.data_size, bytes.len());
     }
 
     #[test]
@@ -209,15 +226,64 @@ mod tests {
     }
 
     #[test]
-    fn extract_truncated_payload_reports_error() {
-        // size claims 10 bytes (LE: 0x0A 0x00), only 3 present -> the walk
-        // stops with error info instead of erroring.
+    fn extract_truncated_payload_reports_the_declared_size() {
+        // size claims 10 bytes (LE: 0x0A 0x00), only 3 present.
         let data = [10u8, 0u8, 1, 2, 3];
-        let walk = extract_packets(&data, 0, Endian::Little).unwrap();
-        assert!(!walk.ok);
-        assert_eq!(walk.error_at, Some(0));
-        assert_eq!(walk.error_size, Some(10));
-        assert_eq!(walk.packets.len(), 0);
+        let error = extract_packets(&data, 0, Endian::Little)
+            .expect_err("a walk that cannot consume the payload is an error");
+        assert_eq!(
+            error,
+            ContainerError::PacketWalkFailed {
+                position: 0,
+                declared_size: Some(10),
+                remaining: 5,
+            }
+        );
+    }
+
+    #[test]
+    fn extract_trailing_byte_reports_no_size_rather_than_zero() {
+        // One packet of one byte, then a byte that is too few for a size
+        // prefix: the walk never read a size there, so the error must not
+        // carry the zero a `size` field would have been filled with.
+        let framed =
+            build_packet_stream(&[b"a"], &[], Endian::Little).expect("packet stream builds");
+        let mut data = framed.clone();
+        data.push(0xFF);
+        let error = extract_packets(&data, 0, Endian::Little)
+            .expect_err("trailing bytes are an incomplete walk");
+        assert_eq!(
+            error,
+            ContainerError::PacketWalkFailed {
+                position: framed.len(),
+                declared_size: None,
+                remaining: 1,
+            }
+        );
+        assert!(error.to_string().contains("too few for a size prefix"));
+    }
+
+    #[test]
+    fn packet_walk_failure_names_what_it_observed() {
+        let truncated = extract_packets(&[10u8, 0u8, 1, 2, 3], 0, Endian::Little)
+            .expect_err("truncated packet");
+        assert_eq!(
+            truncated.to_string(),
+            "packet walk failed at 0: size 10 declared, but only 5 byte(s) remain from the prefix"
+        );
+    }
+
+    #[test]
+    fn walk_value_only_exists_for_a_complete_payload() {
+        // The two failure shapes the Python dict expressed as `ok=False` are
+        // both `Err` here, so a caller cannot read a partial walk as a
+        // complete one by checking the wrong thing.
+        for data in [vec![10u8, 0u8, 1, 2, 3], vec![0u8, 0u8, 0xFF]] {
+            assert!(
+                extract_packets(&data, 0, Endian::Little).is_err(),
+                "{data:?} is not a complete packet stream"
+            );
+        }
     }
 
     #[test]

@@ -1,5 +1,5 @@
 # This repository compares produced containers and fixtures byte for byte
-# across machines (the committed reference WEM, the stage-records dumps). Text
+# across machines (the committed reference WEM, the fixture assets). Text
 # files must therefore check out with identical bytes on every platform:
 # checkout line endings are pinned to LF regardless of a machine's
 # core.autocrlf (Windows runners otherwise rewrite JSON to CRLF and every byte

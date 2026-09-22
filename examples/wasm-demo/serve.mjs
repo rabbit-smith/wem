@@ -74,4 +74,11 @@ const server = createServer((req, res) => {
 server.listen(port, () => {
   console.log(`WEM demo server: http://localhost:${port}/examples/wasm-demo/`);
   console.log(`serving repo root: ${repoRoot}`);
+  // The demo's module is wasm-pack output, not part of the checkout: say so
+  // here rather than let the page 404 on it.
+  if (!existsSync(join(repoRoot, "js", "pkg", "wem_wasm.js"))) {
+    console.log(
+      "js/pkg is not built: run `make wasm-build` (or `cd js && npm run build:web`) before opening the page.",
+    );
+  }
 });

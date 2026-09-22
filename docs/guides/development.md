@@ -33,10 +33,15 @@ and [`../reference/architecture.md`](../reference/architecture.md).
 make native          # maturin develop: build the in-package kernel extension
 make build           # wheel into dist/
 make wheel-smoke     # install the wheel in a clean venv and encode once
+make wasm-build      # wasm-pack: both shell packages (js/pkg, js/pkg-node)
 ```
 
 `pip install -e .` is equivalent to `make native`. Python-only tooling:
 `make lint` (ruff + mypy), `make rust-lint` (clippy, warnings denied).
+
+The wasm packages are build output and are not committed, so `make wasm-build`
+runs before the Node test and before the browser demo
+([`../../examples/wasm-demo/`](../../examples/wasm-demo/)).
 
 ## Verification ladder
 
@@ -67,12 +72,14 @@ to fix the code or the test rather than to re-record the expectation.
 | --- | --- |
 | `make wem-bytes` | Whole-file reference WEM identity: `SHA-256 17851d26…d35247`, 205 audio packets |
 | `tests/parity/test_frame_pipeline_parity.py`, `cargo test -p wem-core --test frame_pipeline_parity` | Per-frame values (scheduling fields, eight analysis stages, floor posts, residue rows, audio packet) against the pure-Python oracle, all 205 frames |
-| `tests/parity/test_stage_pipeline.py` | Per-frame × per-stage pipeline hashes and raw dumps |
+| `cargo test -p wem-container --test container_parity` | The native container builder against the oracle's, byte for byte, from one live packet stream |
 | `make 2ch-stress`, `make 2ch-long` | The 2ch stress corpus and the long-run cross-implementation comparison |
 | `make fuzz-parity` | Native vs oracle parity under randomized chunking and quality; Python unit, integration and cross-implementation suites run in `make test-fast` |
 | `cargo test --workspace` | Rust kernel, C ABI and shell suites, including the geometry-materializer parity suites |
 | `make wheel-smoke` | Installed-wheel inventory (facade + native engine, no profile data) and one real encode |
-| `make check` | All of the above plus `ruff`, `mypy` and `clippy` |
+| `make wasm-build` | wasm-pack builds both shell packages: `js/pkg` (web) and `js/pkg-node` (nodejs) |
+| `make wasm-test` | Builds both packages, then runs `js/test-node.mjs`: the shell's bytes against `tests/fixtures/reference.wem` (one-shot, three chunkings) plus the selection and error-code mapping; with no package built it fails and prints the build command |
+| `make check` | `lint`, `rust-fmt`, `rust-lint`, the full Python ladder and the wheel smoke |
 
 The same targets from the test tree's point of view — layer, command and run
 order — are in [`../../tests/AGENTS.md`](../../tests/AGENTS.md).

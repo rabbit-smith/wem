@@ -236,7 +236,7 @@ pub struct ResourceTables {
 /// The complete compiled profile: identity, container geometry, setup packet
 /// bytes and every typed table.
 ///
-/// There is no stored profile name: the human label is derived from [`key`]
+/// There is no stored profile name: the human label is derived from `key`
 /// (`ProfileKey::label`), so the carrier holds identity and values only.
 #[derive(Debug, Clone, Copy)]
 pub struct ProfileTables {

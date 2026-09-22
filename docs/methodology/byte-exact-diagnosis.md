@@ -63,8 +63,7 @@ independent observable.**
   meaningless ratios.
 - **Per-frame comparisons from the current tree.** The live per-frame and
   per-stage suites (`cargo test -p wem-core --test frame_pipeline_parity`,
-  `tests/parity/test_frame_pipeline_parity.py`,
-  `tests/parity/test_stage_pipeline.py`) exist
+  `tests/parity/test_frame_pipeline_parity.py`) exist
   to tell you *where* the first difference is instead of *that* there is one.
 - **Boundary inputs.** Deliberate samples — silence, opposed DC, low and high
   tones, isolated impulses, independent-channel noise, alternating-channel

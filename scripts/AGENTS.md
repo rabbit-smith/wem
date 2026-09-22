@@ -10,21 +10,22 @@ idempotent, and offline. What their outputs must satisfy is in
 
 ## Rules
 
-- **Byte-stable outputs by construction**: every emit/record script here must be
+- **Byte-stable outputs by construction**: every generator script here must be
   safe to run twice with an empty diff.
 - **No network, no ambient state**: operate on repo paths resolved from
   `Path(__file__)`; env overrides must be declared in `--help`.
-- **Write only to declared destinations**: e.g. `record_tmath.py` →
-  `tests/data/stage-records/transcendental/`, `generate_frozen_tables.py` →
+- **Write only to declared destinations**: e.g. `generate_frozen_tables.py` →
   `corpus/profiles/*/analysis/frozen-tables.json` (the untracked recorded
   material), `generate_profile_code.py` →
-  `crates/wem-profiles/src/generated/`, `emit_stage_records.py` →
-  `tests/data/stage-records/stages/`. Never write outside these trees as a
-  side effect.
-- **Cross-check before emit**: generators assert their output against the
-  existing versioned assets (frozen table generation proves domain agreement with
-  the recorded site pairs; the reference container is compared byte for byte
-  after, not assumed).
+  `crates/wem-profiles/src/generated/`, `generate_2ch_{reference,stress}_inputs.py`
+  → `tests/data/2ch-{reference,stress}/*.wav`. Never write outside these trees
+  as a side effect.
+- **Cross-check before emit**: generators assert their output against what is
+  already committed where a fixture is involved (the 2ch corpus generators
+  compare their rendered input against the committed WAV byte for byte before
+  writing, and with `--check` also report a missing file); the reference
+  container is compared byte for byte after, not assumed. Nothing writes a
+  value for a later run to compare against — that comparison belongs in a test.
 - Scripts must pass `make lint` (ruff covers `scripts/`), use `#!/usr/bin/env
   python3`, type hints, and `SystemExit` codes; failures print the offending
   artifact path, never a stack-trace shrug.
@@ -45,7 +46,7 @@ idempotent, and offline. What their outputs must satisfy is in
   the encode-stage median must stay under the 150ms cap and within 25% of
   the recorded baseline (`tests/data/perf-baseline.json`); re-recording the
   baseline is a deliberate decision, not an incident response.
-- Naming: verb-first (`record_`, `generate_`, `emit_`, `verify_`); one script,
+- Naming: verb-first (`generate_`, `verify_`, `fuzz_`); one script,
   one artifact family; shared helpers belong in `tests/*_support.py` when the
   consumer is a test suite.
 

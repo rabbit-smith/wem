@@ -23,10 +23,14 @@
  *   4. ERROR MAPPING: kernel failures surface as JS Errors whose `code` is
  *      the stable WEM_ERR_* string.
  *
- * Run: node js/test-node.mjs   (requires js/pkg-node built: npm run build:node)
+ * Run: make wasm-test   (builds js/pkg-node first, then runs this file)
+ *      node js/test-node.mjs   — needs a built package: make wasm-build.
+ * The package is wasm-pack output and is not part of the checkout; with no
+ * package built there is nothing to compare, so this test fails and names the
+ * build command rather than skipping.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -49,6 +53,28 @@ const repoRoot = join(here, "..");
 const RECORDING = join(repoRoot, "tests/fixtures/input.wav");
 const REFERENCE = join(repoRoot, "tests/fixtures/reference.wem");
 const RECORDING_FRAMES = 139398;
+
+// wasm-pack writes js/pkg-node (and js/pkg) -- neither is in the checkout, so
+// the test builds nothing silently and skips nothing: it stops here and prints
+// the command that produces the package.
+const PACKAGE_FILES = ["wem_wasm.js", "wem_wasm_bg.wasm"].map((name) =>
+  join(here, "pkg-node", name),
+);
+const missingPackageFiles = PACKAGE_FILES.filter((path) => !existsSync(path));
+if (missingPackageFiles.length > 0) {
+  console.error(
+    [
+      "FAIL: the Node wasm package (js/pkg-node) is not built, so the byte",
+      "comparison against tests/fixtures/reference.wem cannot run.",
+      ...missingPackageFiles.map((path) => `  missing: ${path}`),
+      "",
+      "Build it first:",
+      "  make wasm-build               # both packages (js/pkg, js/pkg-node)",
+      "  cd js && npm run build:node   # the Node package only",
+    ].join("\n"),
+  );
+  process.exit(1);
+}
 
 let failures = 0;
 
@@ -183,7 +209,11 @@ async function streamEncode(chunks, source) {
     for (const chunk of chunks) {
       session.push(chunk);
     }
-    return { result: session.finish(), resolved };
+    // Streaming observability: the count reflects exactly the frames pushed
+    // so far, and crosses the boundary as a JS number (the shell returns it
+    // as f64, so no count a session can reach is truncated).
+    const frames = session.pcmFrames();
+    return { result: session.finish(), resolved, frames };
   } finally {
     session.destroy();
   }
@@ -218,7 +248,7 @@ for (const [label, chunks] of Object.entries(plans)) {
   // first plan: explicit geometry, generation auto-selected; the rest: the
   // parsed WAV as the geometry source
   const source = label === "single-chunk" ? { channels: 6, sampleRate: 44100 } : parsed;
-  const { result, resolved } = await streamEncode(chunks, source);
+  const { result, resolved, frames } = await streamEncode(chunks, source);
   results.push(result);
   check(
     `streaming (${label}) bytes == reference.wem`,
@@ -229,6 +259,11 @@ for (const [label, chunks] of Object.entries(plans)) {
     `streaming (${label}) session selection`,
     sameSelection(resolved, SIX_CHANNEL),
     describe(resolved),
+  );
+  check(
+    `streaming (${label}) pcmFrames() reports the pushed frames exactly`,
+    Number.isSafeInteger(frames) && frames === framesPer,
+    `pcmFrames=${frames}, pushed=${framesPer}, type=${typeof frames}`,
   );
 }
 

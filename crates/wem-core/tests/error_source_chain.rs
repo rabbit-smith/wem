@@ -34,8 +34,7 @@ fn a_real_selection_fault_reaches_the_profile_error() {
     // A quality request on the 6ch/44100 configuration: that profile ships no
     // quality-curves resource, so profile assembly is where the kernel fails.
     let error = Encoder::new_with_quality(fixture_selection(), Some(0.5))
-        .err()
-        .expect("the 6ch/44100 profile has no quality-curves resource");
+        .expect_err("the 6ch/44100 profile has no quality-curves resource");
 
     let internal = error
         .source()

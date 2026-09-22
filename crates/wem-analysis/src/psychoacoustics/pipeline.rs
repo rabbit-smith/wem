@@ -15,12 +15,10 @@ use crate::psychoacoustics::remap::{
     build_coupling_peak, build_long_psy_remap_variant, build_psy_remap,
 };
 use crate::psychoacoustics::seed::{
-    build_long_floor_seed, compute_spectrum_peak, update_frame_spectrum_peak,
-    wwise_seed_floor_from_look, SpectrumPeakState,
+    compute_spectrum_peak, update_frame_spectrum_peak, wwise_seed_floor_from_look,
+    MaterializedLongSeedLook, SpectrumPeakState,
 };
 use crate::psychoacoustics::short::{ShortPsyAnalyzer, ShortPsyFrameResult};
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
 
 /// Pure local surface for one fresh long-mode analysis group
 /// (Python `LongPsyFrame`).
@@ -59,11 +57,18 @@ pub struct ShortPsyStreamFrame {
 
 /// Execute the local fresh long-block floor-analysis chain
 /// (Python `analyze_long_frame`).
+///
+/// `seed_look` is the materialized, frame- and channel-invariant long seed
+/// look (`MaterializedLongSeedLook`); it must have been materialized from
+/// `resources.long_base`, which is what the session does once per encode. The
+/// frame-invariant derivation it carries is otherwise rebuilt identically once
+/// per channel per frame (see `build_long_floor_seed_from_look`).
 #[allow(clippy::too_many_arguments)]
 pub fn analyze_long_frame(
     windowed_frames: &[Vec<f64>],
     carried_global_specmax: f64,
     resources: &AnalysisProfileResources,
+    seed_look: &MaterializedLongSeedLook,
     scratch: Option<&mut Vec<FloorEnvelopeScratch>>,
     stream: Option<&mut ShortPsyAnalyzer>,
     long_variant: i64,
@@ -128,13 +133,18 @@ pub fn analyze_long_frame(
         return Err(LongMdctLookGeometry { want: table.n * 2 });
     }
     let frozen = resources.frozen_twiddles()?;
-    // SAFETY (per-channel partition, `parallel` feature): each iteration
-    // reads only its own input slice plus immutable shared resources
-    // (mdct_look, frozen twiddles, resource tables). There is no
-    // cross-channel shared mutable state, `f32_of` is a pure, order-free
-    // rounding, and rayon preserves channel order in collect, so the
-    // results are bit-identical to the sequential loop. Guarded end-to-end
-    // by the complete_wem_bytes / stage_frames / vorbis_oracle_values byte-parity tests.
+    // SAFETY (per-channel partition, `parallel` feature): each spawned job
+    // owns exactly one channel index. It reads only that channel's input
+    // slice plus immutable shared resources (mdct_look, frozen twiddles,
+    // resource tables) and writes only its own slot of the result vector,
+    // which `iter_mut` handed it as a distinct `&mut` — so there is no
+    // cross-channel shared mutable state, no interior mutability and no
+    // lock, `f32_of` is a pure, order-free rounding, and slots are collected
+    // in index order, so the results are bit-identical to the sequential
+    // loop. `scope` joins every job it spawned before returning, so a slot
+    // is always published by the time it is read, at any pool size.
+    // Guarded end-to-end by the complete_wem_bytes / frame_pipeline_parity /
+    // vorbis_oracle_values byte-parity tests.
     //
     // Without `parallel` (threadless targets such as wasm32), run the same
     // work sequentially.
@@ -203,8 +213,13 @@ pub fn analyze_long_frame(
         })? as usize;
 
     // SAFETY (per-channel partition, `parallel` feature): same argument as
-    // the transform region above; specmax values are read-only inputs
-    // computed before this region, and scratch copies are per-channel owned.
+    // the transform region above — one spawned job per channel, each reading
+    // only its own channel's rows (plus the specmax values computed before
+    // this region, which are immutable inputs here) and writing only the
+    // slot it was handed. Scratch copies are per-channel owned. The
+    // materialized seed look is shared read-only across the jobs: a plain
+    // `&` with no lock and no interior mutability, since `build_seed` only
+    // reads it.
     type PsychChannel = (
         Vec<f64>,
         Vec<f64>,
@@ -230,7 +245,7 @@ pub fn analyze_long_frame(
             coupling_tone_end,
             windowed_frames.len() == 2,
         )?;
-        let local_seed = build_long_floor_seed(table, logfft, specmax, global_specmax)?;
+        let local_seed = seed_look.build_seed(logfft, specmax, global_specmax)?;
 
         let mut local_scratch = local_scratches[channel_index].clone();
         let local_post_side = shape_first_long_floor_envelope(
@@ -440,6 +455,16 @@ type LongChannelTransform = (Vec<f64>, Vec<f64>, Vec<f64>);
 /// its own slice plus immutable shared looks, so the `parallel` feature may
 /// run channels concurrently without changing any bit of output; without it
 /// the same work runs sequentially (threadless targets).
+///
+/// `parallel` runs one explicitly spawned job per channel inside a single
+/// scope rather than an adaptive `par_iter` range. The difference is
+/// scheduling only — the same jobs, the same order of results, the same
+/// arithmetic — but a range over one job per channel is handed out by
+/// recursive halving on demand, so a region whose whole point is six jobs of
+/// ~60us reaches six workers only through a chain of steals. Spawning the six
+/// jobs up front makes every one of them visible to the pool at once; the
+/// scope then joins them all before returning, so the collected vector is
+/// complete regardless of how many threads the pool has.
 fn transform_channel_rows(
     windowed_frames: &[Vec<f64>],
     mdct_look: &MdctLook,
@@ -447,9 +472,17 @@ fn transform_channel_rows(
 ) -> Result<Vec<LongChannelTransform>, AnalysisError> {
     #[cfg(feature = "parallel")]
     {
-        (0..windowed_frames.len())
-            .into_par_iter()
-            .map(|ci| transform_one_channel(&windowed_frames[ci], mdct_look, frozen))
+        let mut rows: Vec<Option<Result<LongChannelTransform, AnalysisError>>> =
+            windowed_frames.iter().map(|_| None).collect();
+        rayon::scope(|scope| {
+            for (frame, row) in windowed_frames.iter().zip(rows.iter_mut()) {
+                scope.spawn(move |_| {
+                    *row = Some(transform_one_channel(frame, mdct_look, frozen));
+                });
+            }
+        });
+        rows.into_iter()
+            .map(|row| row.expect("every spawned channel job publishes before the scope returns"))
             .collect()
     }
     #[cfg(not(feature = "parallel"))]
@@ -477,6 +510,12 @@ fn transform_one_channel(
 /// Map a per-channel psych closure over `count` channels, using rayon when
 /// the `parallel` feature is on and a sequential loop otherwise. Output
 /// order is preserved either way.
+///
+/// The `parallel` branch spawns one job per channel into one scope and
+/// collects by slot index, exactly as `transform_channel_rows` does — see
+/// there for why an explicit job per channel beats an adaptive range here.
+/// The closure is shared, not cloned: it captures the frame's already
+/// computed rows by reference, and `F: Sync` is what makes that sound.
 fn channel_psych_map<T, F>(count: usize, f: F) -> Result<Vec<T>, AnalysisError>
 where
     F: Fn(usize) -> Result<T, AnalysisError> + Send + Sync,
@@ -484,10 +523,22 @@ where
 {
     #[cfg(feature = "parallel")]
     {
-        (0..count)
-            .into_par_iter()
-            .map(f)
-            .collect::<Result<Vec<_>, _>>()
+        let f = &f;
+        let mut channels: Vec<Option<Result<T, AnalysisError>>> =
+            (0..count).map(|_| None).collect();
+        rayon::scope(|scope| {
+            for (channel_index, channel) in channels.iter_mut().enumerate() {
+                scope.spawn(move |_| {
+                    *channel = Some(f(channel_index));
+                });
+            }
+        });
+        channels
+            .into_iter()
+            .map(|channel| {
+                channel.expect("every spawned channel job publishes before the scope returns")
+            })
+            .collect()
     }
     #[cfg(not(feature = "parallel"))]
     {
