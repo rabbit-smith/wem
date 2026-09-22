@@ -327,10 +327,85 @@ pub fn update_frame_spectrum_peak(
     Ok((local, global_max))
 }
 
+/// The frame- and channel-invariant half of a long floor-seed build,
+/// materialized once from one long base table.
+///
+/// `build_long_floor_seed_from_look` derives both halves of its input on every
+/// call: the seed look itself (`make_wwise_long_seed_look` clones the base
+/// curve, the group labels and the tone banks out of the table) and the
+/// tone-bank copy into the f64 working domain. Both are pure functions of a
+/// single `WwisePsyLongTables`, yet the pipeline calls them once per channel
+/// per long frame — 768 times for the reference fixture, with identical
+/// results every time, since `f32 -> f64` is exact.
+///
+/// Only `logfft`, `channel_specmax` and `global_specmax` are per channel and
+/// per frame; everything else is materialized here, once, at the session
+/// boundary and borrowed read-only by the per-channel jobs. Deriving it from
+/// the same table the frame analysis reads its geometry from is the caller's
+/// contract (`AnalysisSession` owns both).
+#[derive(Debug, PartialEq)]
+pub struct MaterializedLongSeedLook {
+    look: WwisePsyLongSeedLook,
+    tone_banks: Vec<Vec<Vec<f64>>>,
+}
+
+impl MaterializedLongSeedLook {
+    /// Materialize the invariant half from one long base table.
+    pub fn from_tables(table: &WwisePsyLongTables) -> Result<Self, AnalysisError> {
+        let look = crate::config::make_wwise_long_seed_look(table)?;
+        let tone_banks = tone_banks_as_f64(&look.tone_banks);
+        Ok(Self { look, tone_banks })
+    }
+
+    /// Build one channel's floor seed from the materialized look: the
+    /// per-channel half of `build_long_floor_seed`.
+    pub fn build_seed(
+        &self,
+        logfft: &[f64],
+        channel_specmax: f64,
+        global_specmax: f64,
+    ) -> Result<Vec<f64>, AnalysisError> {
+        seed_from_parts(
+            &self.look,
+            &self.tone_banks,
+            logfft,
+            channel_specmax,
+            global_specmax,
+        )
+    }
+}
+
+/// The tone banks in the f64 working domain. `f32 -> f64` is exact, so this is
+/// the same value `wwise_seed_floor` reads from the copy it used to build.
+fn tone_banks_as_f64(banks: &[Vec<Vec<f32>>]) -> Vec<Vec<Vec<f64>>> {
+    banks
+        .iter()
+        .map(|bank| {
+            bank.iter()
+                .map(|curve| curve.iter().map(|v| *v as f64).collect())
+                .collect()
+        })
+        .collect()
+}
+
 /// Build the floor seed from a long seed look
 /// (Python `build_long_floor_seed_from_look`).
 pub fn build_long_floor_seed_from_look(
     look: &WwisePsyLongSeedLook,
+    logfft: &[f64],
+    channel_specmax: f64,
+    global_specmax: f64,
+) -> Result<Vec<f64>, AnalysisError> {
+    let tone_banks = tone_banks_as_f64(&look.tone_banks);
+    seed_from_parts(look, &tone_banks, logfft, channel_specmax, global_specmax)
+}
+
+/// The half of a long floor-seed build that genuinely depends on this
+/// channel's spectrum and this frame's peaks, given an already-derived look
+/// and its f64 tone banks.
+fn seed_from_parts(
+    look: &WwisePsyLongSeedLook,
+    tone_banks: &[Vec<Vec<f64>>],
     logfft: &[f64],
     channel_specmax: f64,
     global_specmax: f64,
@@ -347,19 +422,10 @@ pub fn build_long_floor_seed_from_look(
         .iter()
         .map(|value| f32_of(*value as f64 + ath_shift))
         .collect();
-    let tone_banks: Vec<Vec<Vec<f64>>> = look
-        .tone_banks
-        .iter()
-        .map(|bank| {
-            bank.iter()
-                .map(|curve| curve.iter().map(|v| *v as f64).collect())
-                .collect()
-        })
-        .collect();
     wwise_seed_floor(
         logfft,
         &initial,
-        &tone_banks,
+        tone_banks,
         &look.group_labels,
         look.first_octave,
         look.shift_octave,

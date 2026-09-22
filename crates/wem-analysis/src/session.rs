@@ -11,7 +11,7 @@ use crate::preprocessing::conditioner::InputConditioner;
 use crate::preprocessing::detector_input::detector_pcm_streams;
 use crate::preprocessing::windowing::{iter_pcm_windows, PlannedWindowSource, WindowedFrame};
 use crate::psychoacoustics::pipeline::{analyze_long_frame, analyze_short_frame};
-use crate::psychoacoustics::seed::SpectrumPeakState;
+use crate::psychoacoustics::seed::{MaterializedLongSeedLook, SpectrumPeakState};
 use crate::psychoacoustics::short::ShortPsyAnalyzer;
 use crate::transient::detector::TransientDetector;
 use std::borrow::Cow;
@@ -72,6 +72,9 @@ pub struct AnalysisSession {
     pub sample_rate: i64,
     pub blocksizes: [i64; 2],
     pub resources: AnalysisProfileResources,
+    /// Frame- and channel-invariant long seed look, materialized once here and
+    /// shared read-only with the per-channel long-frame jobs.
+    long_seed_look: MaterializedLongSeedLook,
     transient_detector: TransientDetector,
     mode_selector: ModeSelector,
     mode_scan: ModeScanState,
@@ -151,11 +154,17 @@ impl AnalysisSession {
             .as_ref()
             .map(|config| InputConditioner::new(channels, config))
             .transpose()?;
+        // The long seed look is a pure function of `resources.long_base` and
+        // every long frame's every channel would otherwise rebuild it
+        // identically. It belongs to this session: one instance, borrowed
+        // read-only by the per-channel jobs (see `MaterializedLongSeedLook`).
+        let long_seed_look = MaterializedLongSeedLook::from_tables(&resources.long_base)?;
         let mut session = Self {
             channels,
             sample_rate,
             blocksizes,
             resources,
+            long_seed_look,
             // Placeholders replaced by reset().
             transient_detector,
             mode_selector,
@@ -669,6 +678,7 @@ impl AnalysisSession {
             &window.samples,
             crate::config::NEGATIVE_INFINITY_DB as f64,
             &self.resources,
+            &self.long_seed_look,
             None,
             Some(&mut self.short_psy_analyzer),
             long_variant,

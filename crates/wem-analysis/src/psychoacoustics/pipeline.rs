@@ -15,8 +15,8 @@ use crate::psychoacoustics::remap::{
     build_coupling_peak, build_long_psy_remap_variant, build_psy_remap,
 };
 use crate::psychoacoustics::seed::{
-    build_long_floor_seed, compute_spectrum_peak, update_frame_spectrum_peak,
-    wwise_seed_floor_from_look, SpectrumPeakState,
+    compute_spectrum_peak, update_frame_spectrum_peak, wwise_seed_floor_from_look,
+    MaterializedLongSeedLook, SpectrumPeakState,
 };
 use crate::psychoacoustics::short::{ShortPsyAnalyzer, ShortPsyFrameResult};
 
@@ -57,11 +57,18 @@ pub struct ShortPsyStreamFrame {
 
 /// Execute the local fresh long-block floor-analysis chain
 /// (Python `analyze_long_frame`).
+///
+/// `seed_look` is the materialized, frame- and channel-invariant long seed
+/// look (`MaterializedLongSeedLook`); it must have been materialized from
+/// `resources.long_base`, which is what the session does once per encode. The
+/// frame-invariant derivation it carries is otherwise rebuilt identically once
+/// per channel per frame (see `build_long_floor_seed_from_look`).
 #[allow(clippy::too_many_arguments)]
 pub fn analyze_long_frame(
     windowed_frames: &[Vec<f64>],
     carried_global_specmax: f64,
     resources: &AnalysisProfileResources,
+    seed_look: &MaterializedLongSeedLook,
     scratch: Option<&mut Vec<FloorEnvelopeScratch>>,
     stream: Option<&mut ShortPsyAnalyzer>,
     long_variant: i64,
@@ -209,7 +216,10 @@ pub fn analyze_long_frame(
     // the transform region above — one spawned job per channel, each reading
     // only its own channel's rows (plus the specmax values computed before
     // this region, which are immutable inputs here) and writing only the
-    // slot it was handed. Scratch copies are per-channel owned.
+    // slot it was handed. Scratch copies are per-channel owned. The
+    // materialized seed look is shared read-only across the jobs: a plain
+    // `&` with no lock and no interior mutability, since `build_seed` only
+    // reads it.
     type PsychChannel = (
         Vec<f64>,
         Vec<f64>,
@@ -235,7 +245,7 @@ pub fn analyze_long_frame(
             coupling_tone_end,
             windowed_frames.len() == 2,
         )?;
-        let local_seed = build_long_floor_seed(table, logfft, specmax, global_specmax)?;
+        let local_seed = seed_look.build_seed(logfft, specmax, global_specmax)?;
 
         let mut local_scratch = local_scratches[channel_index].clone();
         let local_post_side = shape_first_long_floor_envelope(
