@@ -532,7 +532,6 @@ fn encoder_profile_model_checks() {
     assert_eq!(profile.channels(), 6);
     assert_eq!(profile.sample_rate(), 44100);
     assert_eq!(profile.setup_packet().expect("packet").len(), 201);
-    let view = profile.runtime_manifest().expect("manifest view");
-    assert_eq!(view.resources.len(), 10);
-    assert!(view.files.contains_key("vorbis/setup.bin"));
+    assert_eq!(b.runtime_manifest().resources().len(), 10);
+    assert!(b.runtime_manifest().resource("vorbis.setup").is_ok());
 }

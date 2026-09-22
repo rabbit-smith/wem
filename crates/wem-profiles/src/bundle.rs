@@ -282,22 +282,22 @@ impl ProfileBundle {
     /// Convert to the public identity model
     /// (Python registry construction of `EncoderProfile`).
     pub fn to_encoder_profile(&self) -> Result<crate::model::EncoderProfile, ProfileError> {
-        let setup_ref = match self.setup() {
-            Ok(ref_) => Some(ref_.clone()),
+        let setup_packet = match self.setup() {
+            Ok(ref_) => Some(ref_.read_bytes()?),
             Err(_) => None, // draft profile: setup pending
         };
-        let setup_sha = setup_ref
-            .as_ref()
-            .map(|ref_| ref_.sha256().to_string())
-            .unwrap_or_default();
+        let setup_sha = match self.setup() {
+            Ok(ref_) => ref_.sha256().to_string(),
+            Err(_) => String::new(),
+        };
         crate::model::EncoderProfile::new(
             self.name.clone(),
             self.key.clone(),
-            setup_ref,
+            setup_packet,
             setup_sha,
             None,
             self.block_sizes,
-            self.container_metadata.clone(),
+            self.container_metadata,
             self.setup_available,
             self.pending_reason.clone(),
         )

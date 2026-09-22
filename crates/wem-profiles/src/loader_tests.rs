@@ -448,16 +448,18 @@ fn resource_keys_are_canonical_slash_form() {
             "resource key of {name} is profiles-dir-relative"
         );
     }
-    // The manifest view's keys are the same canonical keys, parent-relative.
-    let view = bundle
-        .to_encoder_profile()
-        .expect("encoder profile")
-        .runtime_manifest()
-        .expect("manifest view");
-    for key in view.files.keys() {
-        assert!(!key.contains('\\'), "manifest view key {key:?}");
+    // The logical keys stay canonical slash form: the encoder profile built
+    // from this bundle carries the verified setup packet and every resource
+    // key is profiles-dir-relative with '/' separators.
+    let profile = bundle.to_encoder_profile().expect("encoder profile");
+    assert_eq!(profile.setup_packet().expect("setup packet").len(), 201);
+    for (name, ref_) in bundle.runtime_manifest().resources() {
+        assert!(
+            ref_.path()
+                .starts_with(&format!("{INSTALLED_SIX_CHANNEL_KEY}/")),
+            "resource key of {name} is profiles-dir-relative"
+        );
     }
-    assert!(view.files.contains_key("vorbis/setup.bin"));
 }
 
 #[test]

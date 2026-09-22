@@ -28,8 +28,10 @@
 //! index/manifest bytes, or an environment variable.
 
 pub mod assembly;
+pub mod blob;
 pub mod book_ids;
 pub mod bundle;
+pub mod carrier;
 pub mod codebooks;
 pub(crate) mod data;
 pub(crate) mod embedded;
@@ -42,11 +44,19 @@ pub mod quality;
 pub mod registry;
 pub mod resources;
 pub mod selection;
+pub mod source;
+pub mod tables;
 pub mod transform;
 pub mod transient;
 
+/// The compiled profile carrier: Rust source, generated from the recorded
+/// profile tree by `scripts/generate_profile_code.py`.
+pub mod generated;
+
 #[cfg(test)]
 mod bytes_loader_tests;
+#[cfg(test)]
+mod carrier_tests;
 #[cfg(test)]
 mod loader_tests;
 
@@ -59,7 +69,7 @@ pub use codebooks::{load_codebook, load_setup_codebooks, resolve_book_id, Resolv
 pub use error::ProfileError;
 pub use frozen::load_frozen_tables;
 pub use key::{ProfileKey, WWISE2013_6CH_44100_SETUP_IDENTITY, WWISE_GENERATION};
-pub use model::{ContainerMetadata, EncoderProfile, ProfileManifestView};
+pub use model::{ContainerMetadata, EncoderProfile};
 pub use quality::{
     linear_frac, load_quality_curves, normalize_quality_factor, QualityCurves,
     QUALITY_CURVES_INTERPOLATION, QUALITY_CURVES_RESOURCE, QUALITY_CURVES_SCHEMA,

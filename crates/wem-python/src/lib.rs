@@ -580,6 +580,28 @@ struct PyWemComplete {
 }
 
 // ---------------------------------------------------------------------------
+// Compiled profile tables
+// ---------------------------------------------------------------------------
+
+/// The compiled profile tables as one canonical little-endian byte stream
+/// (`wem_core::profile_tables_blob`, defined by `wem_profiles::blob`).
+///
+/// This is the data hand-off, not a second execution path: the kernel owns
+/// the profile facts (they are Rust constants in this artifact) and every
+/// other language reads them from here instead of carrying a copy. The pure
+/// Python reference implementation is the intended consumer — it needs the
+/// recorded values to reproduce bytes, and its own code still decides what
+/// they mean.
+///
+/// Floats travel as their IEEE bit patterns; integer tables keep the width the
+/// codec reads them at.
+#[pyfunction]
+fn profile_tables(py: Python<'_>) -> PyResult<Py<PyBytes>> {
+    let blob = py.allow_threads(wem_core::profile_tables_blob);
+    Ok(PyBytes::new(py, &blob).unbind())
+}
+
+// ---------------------------------------------------------------------------
 // Module
 // ---------------------------------------------------------------------------
 
@@ -587,6 +609,7 @@ struct PyWemComplete {
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
     m.add("WemEncoderError", WemEncoderError::type_object(py))?;
+    m.add_function(wrap_pyfunction!(profile_tables, m)?)?;
     m.add_class::<PyWwiseVersion>()?;
     m.add_class::<PyWwiseProfile>()?;
     m.add_class::<PyEncoder>()?;

@@ -35,4 +35,5 @@ pub use encoder::{ContainerPlan, EncodeResult, EncodeStats, Encoder, Pcm16, MIN_
 pub use error::{EncoderError, InternalError};
 pub use pack::{pack_analysis_frame, EncodedPacket};
 pub use stream::{StreamPacket, StreamSession};
+pub use wem_profiles::blob::{profile_tables_blob, BLOB_MAGIC, BLOB_VERSION};
 pub use wem_profiles::selection::{WwiseProfile, WwiseVersion};

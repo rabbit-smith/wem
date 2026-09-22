@@ -5,25 +5,15 @@ use std::collections::BTreeMap;
 
 use wem_analysis::config::{
     make_long_floor_envelope_look, make_wwise_psy_look, AnalysisProfileResources,
-    InputConditionerConfig, LongFloorEnvelopeLook, WwisePsySeedSurface,
+    LongFloorEnvelopeLook, WwisePsySeedSurface,
 };
 use wem_vorbis::codebook::Codebook;
 use wem_vorbis::setup::{parse_setup, SetupInfo};
 
-use crate::book_ids::BookTable;
-use crate::bundle::ProfileBundle;
 use crate::codebooks::load_setup_codebooks;
 use crate::error::ProfileError;
-use crate::frozen::load_frozen_tables;
-use crate::psychoacoustics::config::load_short_seed_surface;
-use crate::psychoacoustics::long_tables::load_long_psy_tables;
-use crate::psychoacoustics::long_variants::load_long_variant;
-use crate::psychoacoustics::short_tables::load_short_psy_profiles;
-use crate::quality::{
-    load_quality_curves, normalize_quality_factor, QualityCurves, QUALITY_SEMANTIC_SHORT_PREFIX,
-};
-use crate::transform::load_mdct_looks;
-use crate::transient::load_transient;
+use crate::quality::{normalize_quality_factor, QualityCurves, QUALITY_SEMANTIC_SHORT_PREFIX};
+use crate::source::ProfileSource;
 
 /// Complete immutable codec inputs assembled from one profile manifest
 /// (Python `EncoderProfileResources`).
@@ -87,24 +77,17 @@ impl ResolvedQuality {
 /// configuration error, not a silent fallback. The quality is normalized
 /// onto the breakpoint axis before evaluation (spec profile-select entry).
 fn resolve_quality_curves(
-    bundle: &ProfileBundle,
+    source: &impl ProfileSource,
     quality: Option<f64>,
 ) -> Result<ResolvedQuality, ProfileError> {
     let Some(quality) = quality else {
         return Ok(ResolvedQuality::none());
     };
-    let curves_ref = bundle
-        .runtime_manifest()
-        .resources()
-        .iter()
-        .find(|(name, _)| name == "analysis.quality-curves")
-        .map(|(_, ref_)| ref_.clone());
-    let Some(curves_ref) = curves_ref else {
+    let Some(curves) = source.quality_curves()? else {
         return Err(ProfileError::QualityCurvesResourceMissing {
-            profile: bundle.name().to_string(),
+            profile: source.name().to_string(),
         });
     };
-    let curves = load_quality_curves(&curves_ref)?;
     let normalized = normalize_quality_factor(quality);
     let (values, extrapolated) = curves.evaluate_result(normalized)?;
     Ok(ResolvedQuality {
@@ -191,37 +174,29 @@ fn apply_short_quality_overrides(
     })
 }
 
-/// Resolve MDCT/transient/psy inputs through stable manifest logical names
+/// Resolve every analysis input from one profile source
 /// (Python `assemble_analysis_resources`).
 ///
 /// `quality` is the optional quality factor (0-10 Wwise convention).
 /// `None` reproduces the historical assembly byte for byte.
 pub fn assemble_analysis_resources(
-    bundle: &ProfileBundle,
+    source: &impl ProfileSource,
     quality: Option<f64>,
 ) -> Result<AnalysisProfileResources, ProfileError> {
-    let manifest = bundle.runtime_manifest();
-
-    let short_surface = load_short_seed_surface(manifest.resource("psychoacoustics.short-seed")?)?;
-    let long_base = load_long_psy_tables(manifest.resource("psychoacoustics.long-base")?)?;
-    let long_modes_ref = manifest.resource("psychoacoustics.long-modes")?.clone();
+    let short_surface = source.short_seed()?;
+    let long_base = source.long_base()?;
     let mut long_variants = BTreeMap::new();
     for mode in [2, 3] {
-        long_variants.insert(mode, load_long_variant(mode, &long_modes_ref, &long_base)?);
+        long_variants.insert(mode, source.long_variant(mode)?);
     }
 
-    // The frozen tables are optional in the manifest; when present they are
-    // loaded and injected into the short look.
-    let frozen = manifest
-        .resources()
-        .iter()
-        .find(|(name, _)| name == "analysis.frozen-tables")
-        .map(|(_, ref_)| load_frozen_tables(ref_))
-        .transpose()?;
+    // The frozen tables are optional; when present they are injected into the
+    // short look.
+    let frozen = source.frozen_tables()?;
 
-    // Quality interpolation is optional in the same sense: absent resource
-    // or absent quality -> the historical path is taken untouched.
-    let resolved_quality = resolve_quality_curves(bundle, quality)?;
+    // Quality interpolation is optional in the same sense: absent curves or
+    // absent quality -> the historical path is taken untouched.
+    let resolved_quality = resolve_quality_curves(source, quality)?;
     let quality_values = resolved_quality.overrides;
 
     let mut short_surface = short_surface;
@@ -233,42 +208,10 @@ pub fn assemble_analysis_resources(
         short_surface = apply_short_quality_overrides(short_surface, values, semantics)?;
     }
 
-    let mdct_looks = load_mdct_looks(manifest.resource("transform.mdct")?)?;
-    // The transient resource may be a pre-materialized static table (v1, the
-    // 6ch shape) or the record family (v2-era 2ch shape): the dispatch
-    // materializes per quality only where the family is registered.
-    let transient = load_transient(manifest.resource("analysis.transient")?, quality)?;
-    let short_profiles =
-        load_short_psy_profiles(manifest.resource("psychoacoustics.short-profiles")?)?;
-    let input_conditioner = manifest
-        .resources()
-        .iter()
-        .find(|(name, _)| name == "analysis.input-conditioner")
-        .map(|(_, ref_)| {
-            let payload = ref_.read_json()?;
-            let object =
-                payload
-                    .as_object()
-                    .ok_or_else(|| ProfileError::ManifestFieldMalformed {
-                        reason: "input conditioner resource must be an object".to_string(),
-                    })?;
-            if object.get("schema").and_then(|value| value.as_str())
-                != Some("wem.input-conditioner.v1")
-            {
-                return Err(ProfileError::ManifestFieldMalformed {
-                    reason: "unsupported input conditioner schema".to_string(),
-                });
-            }
-            let bits = object
-                .get("dc_filter_coefficient_f32_bits")
-                .and_then(|value| value.as_u64())
-                .filter(|value| *value <= u32::MAX as u64)
-                .ok_or_else(|| ProfileError::ManifestFieldMalformed {
-                    reason: "input conditioner coefficient bits must be a u32".to_string(),
-                })? as u32;
-            InputConditionerConfig::new(f32::from_bits(bits)).map_err(ProfileError::Analysis)
-        })
-        .transpose()?;
+    let mdct_looks = source.mdct_looks()?;
+    let transient = source.transient_tables(quality)?;
+    let short_profiles = source.short_profiles()?;
+    let input_conditioner = source.input_conditioner()?;
 
     let short_look = make_wwise_psy_look(
         &short_surface,
@@ -307,33 +250,22 @@ pub fn assemble_analysis_resources(
 /// `quality` is forwarded to the analysis-resource assembly; `None` keeps
 /// the historical behavior exactly.
 pub fn assemble_encoder_profile_resources(
-    bundle: &ProfileBundle,
+    source: &impl ProfileSource,
     setup_packet: Option<&[u8]>,
     quality: Option<f64>,
 ) -> Result<EncoderProfileResources, ProfileError> {
     // Argument evaluation order mirrors the Python implementation.
     let packet = match setup_packet {
         Some(bytes) => bytes.to_vec(),
-        None => bundle.setup_packet()?,
+        None => source.setup_packet()?,
     };
-    let setup = parse_setup(&packet, bundle.key().channels()).map_err(ProfileError::Bit)?;
+    let setup = parse_setup(&packet, source.key().channels()).map_err(ProfileError::Bit)?;
 
-    let manifest = bundle.runtime_manifest();
-    let t97 = BookTable::load("t97", manifest.resource("vorbis.codebooks.t97")?)?;
     // A profile carries only the residue tables its setup references: t219
-    // (6ch) and/or t282 (2ch/48k). Load whichever are installed rather than
-    // assuming the historical t97+t219 pair.
-    let t219 = match manifest.resource("vorbis.codebooks.t219") {
-        Ok(ref_) => Some(BookTable::load("t219", ref_)?),
-        Err(_) => None,
-    };
-    let t282 = match manifest.resource("vorbis.codebooks.t282") {
-        Ok(ref_) => Some(BookTable::load("t282", ref_)?),
-        Err(_) => None,
-    };
-    let tables = crate::book_ids::BookTables::new(t97, t219, t282);
+    // (6ch) and/or t282 (2ch/48k), rather than a fixed t97+t219 pair.
+    let tables = source.book_tables()?;
 
-    let analysis = assemble_analysis_resources(bundle, quality)?;
+    let analysis = assemble_analysis_resources(source, quality)?;
     let codebooks = load_setup_codebooks(&setup.book_ids, &tables)?;
 
     Ok(EncoderProfileResources {

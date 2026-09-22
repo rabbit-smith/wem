@@ -22,12 +22,12 @@ use wem_container::riff::Endian;
 use wem_container::wem::build_vorbis_wem;
 use wem_profiles::assembly::assemble_encoder_profile_resources;
 use wem_profiles::assembly::EncoderProfileResources;
-use wem_profiles::bundle::ProfileBundle;
+use wem_profiles::carrier::{compiled_profile_for_selection, CompiledProfile};
 use wem_profiles::error::ProfileError;
 use wem_profiles::model::ContainerMetadata;
 use wem_profiles::model::EncoderProfile;
-use wem_profiles::registry::{bundle_for_selection, resolve_wem_profile_selection_quality};
 use wem_profiles::selection::{WwiseProfile, WwiseVersion};
+use wem_profiles::source::ProfileSource;
 use wem_vorbis::codebook::Codebook;
 use wem_vorbis::setup::SetupInfo;
 
@@ -504,23 +504,27 @@ impl Encoder {
         selection: WwiseProfile,
         quality: Option<f64>,
     ) -> Result<Self, EncoderError> {
-        let profile = resolve_wem_profile_selection_quality(selection, quality)
+        let compiled = compiled_profile_for_selection(selection)
             .map_err(|error| selection_error(&error, selection))?;
-        // The verified bundle for the same selection: both halves come from
-        // one resolution against the compiled-in registry, so nothing here
-        // addresses a profile by name, path or index bytes.
-        let bundle =
-            bundle_for_selection(selection).map_err(|error| selection_error(&error, selection))?;
-        Self::from_profile_and_bundle(&profile, None, &bundle)
+        let profile = compiled
+            .encoder_profile()
+            .map_err(|error| selection_error(&error, selection))?;
+        let profile = match quality {
+            Some(quality) => profile
+                .with_quality(quality)
+                .map_err(|error| EncoderError::Internal(InternalError::Profile(error)))?,
+            None => profile,
+        };
+        Self::from_profile_and_carrier(&profile, None, &compiled)
     }
 
-    /// Shared construction from one profile identity + one verified bundle;
-    /// every entry funnels through here so the cross-checks cannot drift
-    /// between callers.
-    pub(crate) fn from_profile_and_bundle(
+    /// Shared construction from one profile identity + the compiled carrier
+    /// it came from; every entry funnels through here so the cross-checks
+    /// cannot drift between callers.
+    pub(crate) fn from_profile_and_carrier(
         profile: &EncoderProfile,
         container: Option<ContainerPlan>,
-        bundle: &ProfileBundle,
+        compiled: &CompiledProfile,
     ) -> Result<Self, EncoderError> {
         if profile.block_sizes() != [256, 2048] {
             return Err(EncoderError::StateError {
@@ -543,7 +547,7 @@ impl Encoder {
             });
         }
 
-        if bundle.key() != profile.key() {
+        if compiled.key() != profile.key() {
             return Err(EncoderError::StateError {
                 message: "selected profile differs from installed profile bundle".into(),
             });
@@ -556,7 +560,7 @@ impl Encoder {
                 message: draft_pending_message(profile),
             });
         }
-        let setup_sha = bundle.setup()?.sha256().to_string();
+        let setup_sha = compiled.tables().setup_sha256;
         if profile.setup_sha256() != setup_sha {
             return Err(EncoderError::StateError {
                 message: format!(
@@ -565,21 +569,13 @@ impl Encoder {
                 ),
             });
         }
-        // A profile whose setup is registered but whose analysis resources
-        // (psychoacoustic tables, frozen tables) are still pending may be
-        // resolved and inspected, but it must not encode: refuse with a
-        // clear pending error instead of a mid-assembly fault.
-        if analysis_resources_pending(bundle) {
-            return Err(EncoderError::StateError {
-                message: format!(
-                    "profile '{}': analysis (psychoacoustic) resources pending; encoding unavailable",
-                    profile.name()
-                ),
-            });
-        }
+        // A compiled profile carries its analysis resources by construction
+        // (they are Rust constants in the same artifact), so the pending
+        // analysis-resources state the resource-backed loader could reach
+        // does not exist here.
         let setup_packet = profile.setup_packet()?;
         let resources =
-            assemble_encoder_profile_resources(bundle, Some(&setup_packet), profile.quality())?;
+            assemble_encoder_profile_resources(compiled, Some(&setup_packet), profile.quality())?;
 
         Ok(Self {
             profile: profile.clone(),
@@ -712,21 +708,6 @@ pub fn draft_pending_message(profile: &EncoderProfile) -> String {
             profile.name()
         ),
     }
-}
-
-/// Whether the profile's analysis (psychoacoustic) resources are still
-/// pending: the profile carries its setup and codebooks but not the
-/// psychoacoustic tables the analysis pipeline assembles.
-fn analysis_resources_pending(bundle: &ProfileBundle) -> bool {
-    const REQUIRED: &[&str] = &[
-        "psychoacoustics.short-seed",
-        "psychoacoustics.short-profiles",
-        "psychoacoustics.long-base",
-        "psychoacoustics.long-modes",
-    ];
-    REQUIRED
-        .iter()
-        .any(|key| bundle.runtime_manifest().resource(key).is_err())
 }
 
 /// Map a profile-resolution failure onto the caller-facing error class.

@@ -263,11 +263,11 @@ fn an_ambiguous_selection_is_rejected_rather_than_picked() {
     let twin = EncoderProfile::new(
         twin_name.clone(),
         twin_key,
-        base.setup_path().cloned(),
+        base.setup_bytes().map(<[u8]>::to_vec),
         base.setup_sha256().to_string(),
         None,
         base.block_sizes(),
-        base.container_metadata().clone(),
+        *base.container_metadata(),
         true,
         None,
     )

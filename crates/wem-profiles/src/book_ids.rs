@@ -35,6 +35,27 @@ pub struct BookTable {
 }
 
 impl BookTable {
+    /// Build one table from the compiled carrier ([`crate::generated`]).
+    ///
+    /// The rows were checked when the carrier was generated, so this only
+    /// converts them into the codec's row type.
+    pub fn from_generated(
+        name: &'static str,
+        rows: &'static [crate::tables::CodebookRowTable],
+    ) -> Result<Self, ProfileError> {
+        let (static_name, _expected_count) = BOOK_COUNTS
+            .iter()
+            .find(|(candidate, _)| *candidate == name)
+            .ok_or_else(|| ProfileError::UnknownBookTable {
+                table: name.to_string(),
+            })?;
+        let rows = rows.iter().map(crate::carrier::codebook_row).collect();
+        Ok(Self {
+            name: static_name,
+            rows,
+        })
+    }
+
     /// Load one checked installed table (Python `load_book_table`).
     pub fn load(name: &str, ref_: &ResourceRef) -> Result<Self, ProfileError> {
         let (static_name, expected_count) = BOOK_COUNTS

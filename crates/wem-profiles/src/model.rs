@@ -3,14 +3,16 @@
 
 use serde_json::{Map, Value};
 
-use crate::bundle::{load_profile_bundle, RuntimeResourceManifest};
 use crate::error::ProfileError;
 use crate::key::ProfileKey;
-use crate::resources::{logical_parent, logical_relative, ResourceBackend, ResourceRef};
+use crate::resources::hex;
 
 /// Typed representation of the fixed 66-byte Wwise Vorbis fmt fields
 /// (Python `ContainerMetadata`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Copy` so one recorded geometry can sit inside the compiled profile
+/// carrier (`crate::tables`) as a plain constant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ContainerMetadata {
     pub w_format_tag: i64,
     pub n_channels: i64,
@@ -159,31 +161,24 @@ impl ContainerMetadata {
     }
 }
 
-/// Read-only view of the installed manifest for one profile identity
-/// (Python `EncoderProfile.runtime_manifest()` return value).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProfileManifestView {
-    pub schema: String,
-    /// logical name -> (manifest-dir-relative path, sha256)
-    pub resources: std::collections::BTreeMap<String, (String, String)>,
-    /// manifest-dir-relative path -> sha256
-    pub files: std::collections::BTreeMap<String, String>,
-}
-
 /// Complete immutable identity, setup and container defaults for encoding
 /// (Python `EncoderProfile`).
 ///
 /// Two construction shapes coexist, both additive:
-/// * complete profiles: setup resource + setup SHA-256 identity;
-/// * draft profiles (setup pending corpus): no setup resource; the profile
+/// * complete profiles: the setup packet bytes plus their SHA-256 identity;
+/// * draft profiles (setup pending corpus): no setup packet; the profile
 ///   is listed by the registry with `setup_available == false` and a
 ///   `pending_reason`, and every encode attempt on it fails with a clear
 ///   pending error instead of silently forging a setup.
+///
+/// The setup packet is carried as bytes, not as a resource reference: the
+/// packet is a compiled profile fact, and a reference would make the value
+/// model depend on where a tree happens to live.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EncoderProfile {
     name: String,
     key: ProfileKey,
-    setup_path: Option<ResourceRef>,
+    setup_packet: Option<Vec<u8>>,
     setup_sha256: String,
     block_sizes: [i64; 2],
     container_metadata: ContainerMetadata,
@@ -202,14 +197,14 @@ pub struct EncoderProfile {
 impl EncoderProfile {
     /// Validate and construct (Python `__post_init__` checks).
     ///
-    /// `setup` is `Some` for complete profiles (its SHA-256 must match
+    /// `setup_packet` is `Some` for complete profiles (its SHA-256 must match
     /// `setup_sha256` and the key quality/setup identity) and `None` for
     /// draft profiles, whose `setup_sha256` must be empty.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: String,
         key: ProfileKey,
-        setup: Option<ResourceRef>,
+        setup_packet: Option<Vec<u8>>,
         setup_sha256: String,
         quality: Option<f64>,
         block_sizes: [i64; 2],
@@ -225,11 +220,14 @@ impl EncoderProfile {
                 return Err(ProfileError::QualityValueNonFinite);
             }
         }
-        if setup_available != setup.is_some() {
+        if setup_available != setup_packet.is_some() {
             return Err(ProfileError::BundleMissingVorbisSetup);
         }
-        match setup.as_ref() {
-            Some(_) => {
+        match setup_packet.as_ref() {
+            Some(packet) => {
+                if hex(sha256_hex(packet)) != setup_sha256 {
+                    return Err(ProfileError::ProfileSetupIdentityMismatch);
+                }
                 if key.quality_setup_identity() != format!("sha256:{setup_sha256}") {
                     return Err(ProfileError::ProfileSetupIdentityMismatch);
                 }
@@ -261,7 +259,7 @@ impl EncoderProfile {
         Ok(Self {
             name,
             key,
-            setup_path: setup,
+            setup_packet,
             setup_sha256,
             block_sizes,
             container_metadata,
@@ -308,8 +306,9 @@ impl EncoderProfile {
         self.pending_reason.as_deref()
     }
 
-    pub fn setup_path(&self) -> Option<&ResourceRef> {
-        self.setup_path.as_ref()
+    /// The compiled setup packet, when this profile carries one.
+    pub fn setup_bytes(&self) -> Option<&[u8]> {
+        self.setup_packet.as_deref()
     }
 
     pub fn setup_sha256(&self) -> &str {
@@ -347,89 +346,12 @@ impl EncoderProfile {
         &self.extra_chunks
     }
 
-    /// Verified setup packet bytes (Python `setup_packet()`).
+    /// The compiled setup packet bytes (Python `setup_packet()`).
     pub fn setup_packet(&self) -> Result<Vec<u8>, ProfileError> {
-        let setup_path = self
-            .setup_path
-            .as_ref()
-            .ok_or(ProfileError::BundleMissingVorbisSetup)?;
-        let payload = setup_path.read_bytes()?;
-        let digest = crate::resources::hex(sha256_hex(&payload));
-        if digest != self.setup_sha256 {
-            return Err(ProfileError::ShaMismatch {
-                path: setup_path.path().to_string(),
-                expected: self.setup_sha256.clone(),
-                actual: digest,
-            });
-        }
-        Ok(payload)
+        self.setup_packet
+            .clone()
+            .ok_or(ProfileError::BundleMissingVorbisSetup)
     }
-
-    /// The installed profile manifest for this profile identity
-    /// (Python `runtime_manifest()`).
-    ///
-    /// Defined for filesystem-backed profiles only; a profile assembled
-    /// from an in-memory bytes bundle has no installed tree to view.
-    pub fn runtime_manifest(&self) -> Result<ProfileManifestView, ProfileError> {
-        let setup_path =
-            self.setup_path
-                .as_ref()
-                .ok_or_else(|| ProfileError::InstalledBundleMismatch {
-                    profile: self.name.clone(),
-                })?;
-        let bundle = match setup_path.backend() {
-            ResourceBackend::Fs(data) => load_profile_bundle(data, Some(&self.name), false),
-            ResourceBackend::Static { .. } => {
-                crate::embedded::load_embedded_profile_bundle(Some(&self.name))
-            }
-            ResourceBackend::Bytes { .. } => {
-                return Err(ProfileError::InstalledBundleMismatch {
-                    profile: self.name.clone(),
-                })
-            }
-        }?;
-        if bundle.key() != &self.key {
-            return Err(ProfileError::InstalledBundleMismatch {
-                profile: self.name.clone(),
-            });
-        }
-        let setup_sha = bundle
-            .setup()
-            .map_err(|_| ProfileError::InstalledBundleMismatch {
-                profile: self.name.clone(),
-            })?
-            .sha256()
-            .to_string();
-        if self.setup_sha256 != setup_sha {
-            return Err(ProfileError::InstalledBundleMismatch {
-                profile: self.name.clone(),
-            });
-        }
-        Ok(manifest_view(bundle.runtime_manifest()))
-    }
-}
-
-/// Shared helper for manifest views (Python `runtime_manifest()` body).
-pub(crate) fn manifest_view(manifest: &RuntimeResourceManifest) -> ProfileManifestView {
-    let parent = logical_parent(manifest.ref_path());
-    let mut resources = std::collections::BTreeMap::new();
-    let mut files = std::collections::BTreeMap::new();
-    for (name, ref_) in manifest.resources() {
-        let rel = relative_to_profile_dir(ref_.path(), parent);
-        resources.insert(name.clone(), (rel.clone(), ref_.sha256().to_string()));
-        files.insert(rel, ref_.sha256().to_string());
-    }
-    ProfileManifestView {
-        schema: manifest.schema().to_string(),
-        resources,
-        files,
-    }
-}
-
-/// Convert a profiles-dir-relative logical key to a manifest-dir-relative
-/// key (canonical slash form on every platform).
-pub(crate) fn relative_to_profile_dir(path: &str, parent: &str) -> String {
-    logical_relative(path, parent).to_string()
 }
 
 fn sha256_hex(payload: &[u8]) -> [u8; 32] {
