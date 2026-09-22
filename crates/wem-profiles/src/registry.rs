@@ -36,19 +36,6 @@ impl ProfileRegistry {
         Ok(Self { by_key })
     }
 
-    /// Lookup by exact key (Python `__getitem__`).
-    pub fn get_by_key(&self, key: &ProfileKey) -> Option<&EncoderProfile> {
-        self.by_key.iter().find(|(k, _)| k == key).map(|(_, p)| p)
-    }
-
-    /// Resolve a complete profile identity (Python `resolve` with a key).
-    pub fn resolve_key(&self, key: &ProfileKey) -> Result<&EncoderProfile, ProfileError> {
-        self.get_by_key(key)
-            .ok_or_else(|| ProfileError::UnknownProfileKey {
-                key: key.describe(),
-            })
-    }
-
     /// Resolve from a structured selection: generation + channels + sample
     /// rate, all three participating (the caller-facing selector).
     ///

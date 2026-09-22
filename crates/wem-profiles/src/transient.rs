@@ -32,16 +32,8 @@ use crate::quality::{linear_frac, normalize_quality_factor};
 
 /// Record-family schema (Python `TRANSIENT_RECORD_FAMILY_SCHEMA`).
 pub const TRANSIENT_RECORD_FAMILY_SCHEMA: &str = "wem.transient-record-family.v1";
-/// Record count in the paired build.
-pub const TRANSIENT_RECORD_COUNT: usize = 6;
 /// Words per record (marker + upper 12 + lower 12 + carry).
 pub const TRANSIENT_RECORD_WORDS: usize = 26;
-/// Points on the shared quality axis (breakpoints / index curve).
-pub const TRANSIENT_RECORD_INDEX_POINTS: usize = 13;
-/// Detector table window length (n = 128).
-pub const TRANSIENT_WINDOW_WORDS: u64 = 128;
-/// Band count in the descriptor table.
-pub const TRANSIENT_BAND_COUNT: usize = 12;
 
 /// One stored bias/threshold record (u32 bit patterns, byte-exact)
 /// (Python `TransientRecord`).

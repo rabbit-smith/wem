@@ -129,11 +129,6 @@ impl OggPack {
         Ok(())
     }
 
-    /// Bytes consumed so far (rounded up).
-    pub fn bytes_used(&self) -> usize {
-        self.buffer.len() + (self.accbits + 7) as usize / 8
-    }
-
     /// Return the packed bytes.
     ///
     /// Pending bits (the final partial byte) live in the accumulator, not the

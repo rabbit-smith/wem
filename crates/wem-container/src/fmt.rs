@@ -4,8 +4,6 @@
 use crate::error::ContainerError;
 
 pub const WWISE_VORBIS_FORMAT_TAG: u16 = 0xFFFF;
-pub const WWISE_PCM_EXT_FORMAT_TAG: u16 = 0xFFFE;
-pub const WWISE_PCM_FORMAT_TAG: u16 = 0x0001;
 pub const WWISE_VORBIS_FMT_SIZE: usize = 66;
 
 /// Typed 66-byte Wwise Vorbis fmt fields.

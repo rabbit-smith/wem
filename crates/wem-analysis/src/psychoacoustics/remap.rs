@@ -504,15 +504,6 @@ pub fn build_long_psy_remap_variant(
     })
 }
 
-/// Run the local 1024-bin long mode-2 remap front end
-/// (Python `build_long_psy_remap_mode2`).
-pub fn build_long_psy_remap_mode2(
-    original: &[f64],
-    tables: &WwisePsyLongTables,
-) -> Result<LongRemapResult, AnalysisError> {
-    build_long_psy_remap_variant(original, 2, tables)
-}
-
 const STEREO_NOISE_COMPAND: [i64; 40] = [
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 15, 16, 16, 16,
     17, 17, 18, 18, 18, 19, 19, 19, 20, 21, 22, 23, 24, 25,
@@ -607,55 +598,6 @@ pub fn wwise_psy_residual_core(
         .collect();
     base = wwise_psy_peak_suppress(original, &base, look, cap_curve)?;
     Ok((first, selector, base))
-}
-
-/// Apply the remap q-row extension
-/// (Python `wwise_psy_apply_q_extension`).
-#[allow(clippy::too_many_arguments)]
-pub fn wwise_psy_apply_q_extension(
-    base_curve: &[f64],
-    selector_curve: &[f64],
-    q: f64,
-    low_extension: Option<&[f64]>,
-    high_extension: Option<&[f64]>,
-) -> Result<Vec<f64>, AnalysisError> {
-    if base_curve.len() != selector_curve.len() {
-        return Err(AnalysisError::PsyBaseSelectorLengthMismatch {
-            want: base_curve.len() as i64,
-            got: selector_curve.len() as i64,
-        });
-    }
-    let low_scalar = 0.0;
-    let high_scalar = 0.0;
-    if let Some(low) = low_extension {
-        if (low.len() as i64) < 40 {
-            return Err(AnalysisError::PsyBaseSelectorLengthMismatch {
-                want: 40,
-                got: low.len() as i64,
-            });
-        }
-    }
-    if let Some(high) = high_extension {
-        if (high.len() as i64) < 40 {
-            return Err(AnalysisError::PsyBaseSelectorLengthMismatch {
-                want: 40,
-                got: high.len() as i64,
-            });
-        }
-    }
-    let mut output = Vec::with_capacity(base_curve.len());
-    let q_limit = base_curve.len() / 3;
-    for (i, (base, selector)) in base_curve.iter().zip(selector_curve.iter()).enumerate() {
-        let index = ((*selector + 0.5) as i64).clamp(0, 39) as usize;
-        let low = low_extension.map_or(low_scalar, |t| t[index]);
-        let high = high_extension.map_or(high_scalar, |t| t[index]);
-        if q > 0.0 && i < q_limit {
-            output.push(f32_of(low + *base - (low - high) * q));
-        } else {
-            output.push(f32_of(low + *base));
-        }
-    }
-    Ok(output)
 }
 
 /// Run the confirmed remap front half for one short curve

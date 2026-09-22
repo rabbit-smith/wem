@@ -62,13 +62,6 @@ pub struct ParsedChunk {
     pub payload: Vec<u8>,
 }
 
-impl ParsedChunk {
-    /// ASCII fourcc view (Python `cid.decode("ascii", "replace")` on 4 bytes).
-    pub fn fourcc(&self) -> String {
-        String::from_utf8_lossy(&self.id).into_owned()
-    }
-}
-
 /// Parse RIFF/RIFX chunks while preserving the legacy permissive walk
 /// (Python `parse_chunks`).
 ///

@@ -4,9 +4,7 @@
 //! storage boundaries are `f32_of`; the flattened no-peak branch preserves
 //! the reference encoder's arithmetic order.
 
-use crate::config::{
-    f32_of, AnalysisError, LongFloorEnvelopeLook, WwisePsyLongTables, WwisePsyLook,
-};
+use crate::config::{f32_of, AnalysisError, LongFloorEnvelopeLook, WwisePsyLongTables};
 
 /// Per-channel floor-envelope scratch (Python `FloorEnvelopeScratch`).
 #[derive(Debug, Clone, PartialEq)]
@@ -16,18 +14,6 @@ pub struct FloorEnvelopeScratch {
 }
 
 impl FloorEnvelopeScratch {
-    /// Allocate the observed cleared first-call scratches (Python
-    /// `make_floor_envelope_scratch`).
-    pub fn new_same_size(n: i64) -> Result<Self, AnalysisError> {
-        if n <= 0 {
-            return Err(AnalysisError::EnvelopeScratchLengthNonPositive { n });
-        }
-        Ok(Self {
-            current_curve: vec![0.0; n as usize],
-            history_curve: vec![0.0; n as usize],
-        })
-    }
-
     /// Allocate one cross-block floor-envelope state pair (Python
     /// `make_channel_floor_envelope_scratch`).
     pub fn new_channel() -> Self {
@@ -164,25 +150,6 @@ pub fn shape_floor_envelope(
     Ok((output, side_output, break_index))
 }
 
-/// Expand a 128-bin short floor-envelope state curve to 1024 bins
-/// (Python `prepare_short_to_long_history`).
-pub fn prepare_short_to_long_history(raw_short: &[f64]) -> Result<Vec<f64>, AnalysisError> {
-    if raw_short.len() != 128 {
-        return Err(AnalysisError::FloorTransitionBins {
-            want: 128,
-            got: raw_short.len() as i64,
-        });
-    }
-    let mut out = Vec::with_capacity(1024);
-    for value in raw_short {
-        let value = f32_of(*value);
-        for _ in 0..8 {
-            out.push(value);
-        }
-    }
-    Ok(out)
-}
-
 /// Apply a long→short transition's 8:1 minimum state reduction
 /// (Python `prepare_long_to_short_history`).
 pub fn prepare_long_to_short_history(
@@ -202,61 +169,6 @@ pub fn prepare_long_to_short_history(
         out[index] = f32_of(minimum);
     }
     Ok(out)
-}
-
-/// Run the profile-bound first regular floor-envelope stage call
-/// (Python `shape_first_floor_envelope`).
-pub fn shape_first_floor_envelope(
-    seed: &[f64],
-    remap: &[f64],
-    raw: &[f64],
-    look: &WwisePsyLook,
-    scratch: &mut FloorEnvelopeScratch,
-    q: f64,
-    side: Option<&[f64]>,
-) -> Result<(Vec<f64>, Vec<f64>), AnalysisError> {
-    let n = raw.len();
-    if seed.len() != n
-        || remap.len() != n
-        || look.mask_curves.1.len() != n
-        || scratch.current_curve.len() != n
-        || scratch.history_curve.len() != n
-    {
-        return Err(AnalysisError::FirstEnvelopeBuffersMismatch { want: n as i64 });
-    }
-    let side = match side {
-        Some(side) => side.to_vec(),
-        None => vec![0.0; n],
-    };
-    let mask_curve = f64_curve(&look.mask_curves.1);
-    let (post, side_out, break_index) = shape_floor_envelope(
-        seed,
-        &scratch.current_curve,
-        &scratch.history_curve,
-        remap,
-        &side,
-        &mask_curve,
-        look.regular_curve_bias as f64,
-        q,
-        look.regular_curve_cap as f64,
-        0,
-        0,
-        false,
-        0.0,
-        1.0,
-        1,
-        Some(raw),
-    )?;
-    if break_index.is_some() {
-        return Err(AnalysisError::FirstEnvelopeEnteredPeakBranch);
-    }
-    for (slot, value) in scratch.current_curve.iter_mut().zip(raw.iter()) {
-        *slot = f32_of(*value);
-    }
-    for slot in scratch.history_curve.iter_mut() {
-        *slot = -5.0;
-    }
-    Ok((post, side_out))
 }
 
 /// Run a fresh long profile's inactive regular floor-envelope call
@@ -336,15 +248,6 @@ pub fn shape_first_long_floor_envelope(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn prepare_short_to_long_history_basic() {
-        let raw: Vec<f64> = (0..128).map(|i| i as f64).collect();
-        let out = prepare_short_to_long_history(&raw).unwrap();
-        assert_eq!(out.len(), 1024);
-        assert_eq!(out[0], 0.0);
-        assert_eq!(out[8], 1.0);
-    }
 
     #[test]
     fn prepare_long_to_short_history_basic() {

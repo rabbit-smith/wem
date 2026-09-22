@@ -322,18 +322,6 @@ impl AnalysisSession {
         Ok(flags)
     }
 
-    /// Ingest an ordered sequence of raw PCM transient quanta
-    /// (Python `ingest_transient_quanta`).
-    pub fn ingest_transient_quanta(
-        &mut self,
-        quanta: &[Vec<Vec<f64>>],
-    ) -> Result<Vec<i64>, AnalysisError> {
-        quanta
-            .iter()
-            .map(|quantum| self.ingest_transient_quantum(quantum))
-            .collect()
-    }
-
     /// Return the mode queue's native -1/0/1 look-ahead decision
     /// (Python `mode_selection_status`).
     pub fn mode_selection_status(
@@ -586,30 +574,6 @@ impl AnalysisSession {
         self.resources.frozen.as_ref().map(|f| &f.window_halves)
     }
 
-    /// Run the exact state-owning short analysis path for one frame
-    /// (Python `analyze_short`).
-    pub fn analyze_short(
-        &mut self,
-        window: WindowedFrame,
-        short_variant: Option<i64>,
-        q: f64,
-        hold_update: i64,
-        groups: Option<&[Vec<f64>]>,
-    ) -> Result<PsyFrame, AnalysisError> {
-        if window.current() != 0
-            || window
-                .samples
-                .iter()
-                .any(|row| row.len() as i64 != self.blocksizes[0])
-        {
-            return Err(AnalysisError::ShortAnalysisWindowGeometry {
-                want: self.blocksizes[0],
-            });
-        }
-        self.consume_analysis_window(&window)?;
-        self.analyze_short_inner(window, short_variant, q, hold_update, groups)
-    }
-
     fn analyze_short_inner(
         &mut self,
         window: WindowedFrame,
@@ -650,23 +614,6 @@ impl AnalysisSession {
             side: result.side,
             coupling_peak: result.coupling_peak,
         })
-    }
-
-    /// Run the local long static profile and commit a possible 1024->128 edge
-    /// (Python `analyze_long`).
-    pub fn analyze_long(&mut self, window: WindowedFrame) -> Result<PsyFrame, AnalysisError> {
-        if window.current() != 1
-            || window
-                .samples
-                .iter()
-                .any(|row| row.len() as i64 != self.blocksizes[1])
-        {
-            return Err(AnalysisError::LongAnalysisWindowGeometry {
-                want: self.blocksizes[1],
-            });
-        }
-        self.consume_analysis_window(&window)?;
-        self.analyze_long_inner(window)
     }
 
     fn analyze_long_inner(&mut self, window: WindowedFrame) -> Result<PsyFrame, AnalysisError> {

@@ -770,12 +770,6 @@ impl PyStreamSession {
         let result = guarded.outcome?;
         Ok(PyWemComplete { bytes: result.data })
     }
-
-    /// PCM frames accumulated so far (streaming observability).
-    #[getter]
-    fn pcm_frames(&self) -> i64 {
-        self.inner.pcm_frames()
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1159,7 +1153,6 @@ for i in range(len(cuts) - 1):
 complete = session.finish()
 assert bytes(complete.bytes) == expected_bytes, "not the reference container"
 assert [p.seq for p in packets] == list(range(len(packets))), "seq must be 0..n-1"
-assert session.pcm_frames == frames, session.pcm_frames
 "#
                 ),
                 Some(&globals),

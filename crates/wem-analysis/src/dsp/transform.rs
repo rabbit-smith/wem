@@ -398,35 +398,6 @@ pub fn mdct_forward(look: &MdctLook, samples: &[f64]) -> Result<Vec<f64>, Analys
 // Windows
 // ---------------------------------------------------------------------------
 
-/// Symmetric same-size Vorbis window from the converter's f32 table
-/// (Python `vorbis_window`). The exact-profile channel always supplies
-/// `frozen_half`; a missing half is a domain error, not an analytic fallback.
-///
-/// The encoder-side hybrid window reads `frozen_half` directly instead
-/// (see [`apply_vorbis_window_in_place`]): every index it touches lies in
-/// each window's first half, which is that table verbatim, so building the
-/// full `half ++ reverse(half)` per frame would compute a half no caller
-/// reads.
-pub fn vorbis_window(n: i64, frozen_half: Option<&[f64]>) -> Result<Vec<f64>, AnalysisError> {
-    if n < 2 || n & 1 != 0 {
-        return Err(AnalysisError::WindowSizeInvalid { n });
-    }
-    let half = n / 2;
-    let frozen = frozen_half.ok_or(AnalysisError::FrozenWindowDomainMiss { size: n })?;
-    if frozen.len() as i64 != half {
-        return Err(AnalysisError::FrozenWindowHalfMismatch {
-            size: n,
-            want: half,
-            got: frozen.len() as i64,
-        });
-    }
-    let left: Vec<f64> = frozen.to_vec();
-    let right: Vec<f64> = left.iter().rev().copied().collect();
-    let mut out = left;
-    out.extend(right);
-    Ok(out)
-}
-
 /// Return the psychoacoustic analysis window (Python `wwise_psy_window`).
 /// The transient detector is locked to n=128 and reads the stored float
 /// words at look+36; other sizes have no runtime analytic path.
@@ -568,7 +539,7 @@ fn frame_window_spans(
 ///
 /// Both spans read only the frozen half of their window: the left span
 /// walks offsets `0..left_n / 2` forwards, the right span walks
-/// `right_n / 2 - 1` down to `0`. In [`vorbis_window`]'s
+/// `right_n / 2 - 1` down to `0`. In the window's
 /// `half ++ reverse(half)` layout those indices are all in the first half,
 /// where the value is the frozen entry itself, so materializing the full
 /// window per frame would build a second half no index here reaches.
@@ -622,24 +593,6 @@ fn frozen_window_half(
     Ok(half)
 }
 
-/// Return the block view exposed by the reference routine
-/// (Python `extract_analysis_block`).
-pub fn extract_analysis_block(
-    buffered: &[f64],
-    cursor: i64,
-    current_size: i64,
-) -> Result<Vec<f64>, AnalysisError> {
-    if current_size < 2 || current_size & 1 != 0 {
-        return Err(AnalysisError::BlockSizeInvalid { n: current_size });
-    }
-    let start = cursor - current_size / 2;
-    let end = start + current_size;
-    if start < 0 || end > buffered.len() as i64 {
-        return Err(AnalysisError::BufferBlockOutOfRange);
-    }
-    Ok(buffered[start as usize..end as usize].to_vec())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -663,10 +616,14 @@ mod tests {
     }
 
     #[test]
-    fn vorbis_window_rejects_missing_frozen() {
+    fn hybrid_window_rejects_missing_frozen() {
+        // The claim the deleted `vorbis_window` test made, moved to the path
+        // actually used: a missing frozen half is a domain error, not an
+        // analytic fallback.
+        let mut row = vec![0.0f64; 2048];
         assert!(matches!(
-            vorbis_window(256, None),
-            Err(AnalysisError::FrozenWindowDomainMiss { .. })
+            apply_vorbis_window_in_place(&mut row, &[256, 2048], 0, 1, 1, None),
+            Err(AnalysisError::FrozenWindowDomainMiss { size: 2048 })
         ));
     }
 

@@ -1,7 +1,7 @@
 //! Encoder-side floor1 curve fitting and post quantization
 //! (Python: `wwise_wem/vorbis/floor_fit.py`).
 //!
-//! The live fit path (`floor1_fit_wwise`) is transcendental-free: curves are
+//! The live fit path (`floor1_fit_wwise_carriers`) is transcendental-free: curves are
 //! already on the Wwise dB scale, and bin quantization uses the profile's
 //! dB→quant rule (Python `_wwise_db_quant`).
 
@@ -312,27 +312,6 @@ fn propagate_high_neighbor(local_hi: &mut [usize], sortpos: usize, high: usize, 
         local_hi[cursor as usize] = post_index;
         cursor -= 1;
     }
-}
-
-/// Fit absolute floor1 posts from psychoacoustic and raw-MDCT curves
-/// (Python `floor1_fit_wwise`).
-///
-/// `fitted_floor_curve` is quantized and fitted. `raw_mdct_curve` determines
-/// whether each bin is within `twofitatten` of that curve. The result
-/// contains absolute post Y values (10-bit domain), with 0x8000 marking
-/// posts represented by prediction; pass it through
-/// [`crate::floor::floor1_wrap`] (after [`floor1_quantize_posts`]) before
-/// packet packing.
-///
-/// Returns `Ok(None)` when the floor's nonzero-signal test fails
-/// (all-primary-buckets empty), matching Python's `None`.
-pub fn floor1_fit_wwise(
-    fitted_floor_curve: &[f32],
-    raw_mdct_curve: &[f32],
-    floor: &Floor1Setup,
-    n: Option<usize>,
-) -> Result<Option<Vec<i64>>, FloorFitError> {
-    floor1_fit_wwise_impl(fitted_floor_curve, raw_mdct_curve, floor, n)
 }
 
 /// Fit analysis curves stored as f32-valued f64 carriers without allocating

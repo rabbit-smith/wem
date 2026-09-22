@@ -153,11 +153,6 @@ impl StreamingPcmFeeder {
         self.total
     }
 
-    /// Whether the first-frame primes have been computed.
-    pub fn prime_ready(&self) -> bool {
-        self.detector_prime.is_some()
-    }
-
     /// Whether the end-of-stream tail has been computed.
     pub fn eos(&self) -> bool {
         self.tails.is_some()
@@ -528,7 +523,6 @@ mod tests {
         }
         assert_eq!(feeder.total_samples(), 50_000);
         // The prefix head is consumed once the primes are cached.
-        assert!(feeder.prime_ready());
         for prefix in &feeder.prefix {
             assert!(prefix.is_empty());
         }

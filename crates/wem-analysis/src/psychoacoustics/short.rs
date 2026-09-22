@@ -4,7 +4,7 @@
 //! storage boundaries are `f32_of`; tuning literals retain their exact double
 //! values so a single-ULP loss is not introduced at final stores.
 
-use crate::config::{f32_of, u32_to_f32, AnalysisError, ShortPsyProfile};
+use crate::config::{f32_of, AnalysisError, ShortPsyProfile};
 use crate::psychoacoustics::temporal::{
     compute_temporal_kernel, relax_short_history, TemporalKernelInputs,
 };
@@ -26,25 +26,6 @@ pub struct ShortPsyKernel {
     pub upper_weight: f64,
     pub state_bias: f64,
     pub chase_seed: f64,
-}
-
-impl ShortPsyKernel {
-    /// Build from six stored words (Python `from_words`).
-    pub fn from_words(words: &[u32]) -> Result<Self, AnalysisError> {
-        if words.len() != 6 {
-            return Err(AnalysisError::ShortKernelWords {
-                got: words.len() as i64,
-            });
-        }
-        Ok(Self {
-            active: words[0] as i64,
-            update_history: words[1] as i64,
-            lower_weight: u32_to_f32(words[2]) as f64,
-            upper_weight: u32_to_f32(words[3]) as f64,
-            state_bias: u32_to_f32(words[4]) as f64,
-            chase_seed: u32_to_f32(words[5]) as f64,
-        })
-    }
 }
 
 /// All mutable output surfaces of one 128-bin channel analysis
@@ -614,16 +595,4 @@ pub fn shape_short_floor_envelope(
         groups: groups_out,
         peak_bins,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn kernel_from_words() {
-        let kernel = ShortPsyKernel::from_words(&[1, 0, 0, 0, 0, 0]).unwrap();
-        assert_eq!(kernel.active, 1);
-        assert_eq!(kernel.update_history, 0);
-    }
 }
