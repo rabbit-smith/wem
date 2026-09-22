@@ -18,7 +18,10 @@ idempotent, and offline. What their outputs must satisfy is in
   `corpus/profiles/*/analysis/frozen-tables.json` (the untracked recorded
   material), `generate_profile_code.py` →
   `crates/wem-profiles/src/generated/`, `generate_2ch_{reference,stress}_inputs.py`
-  → `tests/data/2ch-{reference,stress}/*.wav`. Never write outside these trees
+  → `tests/data/2ch-{reference,stress}/*.wav`, `measure_concurrency.py` →
+  `docs/figures/concurrency-samples.json` and, for a comparison run, a second
+  `docs/figures/concurrency-samples-*.json`, `plot_concurrency_curves.py` →
+  `docs/figures/concurrency-curves.png`. Never write outside these trees
   as a side effect.
 - **Cross-check before emit**: generators assert their output against what is
   already committed where a fixture is involved (the 2ch corpus generators
@@ -46,6 +49,17 @@ idempotent, and offline. What their outputs must satisfy is in
   the encode-stage median must stay under the 150ms cap and within 25% of
   the recorded baseline (`tests/data/perf-baseline.json`); re-recording the
   baseline is a deliberate decision, not an incident response.
+- `measure_concurrency.py` records how N concurrent encodes behave, over
+  `N x {parallel on, off} x {installed geometry}`, by starting child processes
+  together and reading each one's own `wait4` rusage. It has no cap and no
+  baseline — a loaded machine changes the numbers, never the exit status — and
+  the load average is recorded with every cell because that is part of the
+  result. `plot_concurrency_curves.py` renders the committed figure from that
+  JSON and must stay byte-stable: it is the one script here whose output is a
+  committed image, so it pins figure size and DPI, sorts every series and
+  writes with `metadata={}`. Matplotlib is a documentation tool for that one
+  script and is deliberately absent from `pyproject.toml` and from every crate;
+  run it from a venv of your own, as its docstring says.
 - Naming: verb-first (`generate_`, `verify_`, `fuzz_`); one script,
   one artifact family; shared helpers belong in `tests/*_support.py` when the
   consumer is a test suite.
