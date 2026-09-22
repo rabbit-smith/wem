@@ -129,11 +129,15 @@ pub fn build_packet_stream(
 /// operator to truncation (rounding would give 18601). Deriving it also keeps
 /// the 6ch container byte-identical, since that registration already equals the
 /// computed value.
+///
+/// The terminal overlap excess is reported as
+/// [`ContainerError::TerminalExcessTooLarge`] when it does not fit the u16 the
+/// fmt fields store, rather than leaving both derived fields stale.
 pub fn recompute_vorbis_fmt_sizes(
     fields: &mut VorbisFmtFields,
     packets: &[&[u8]],
     seek_table: &[u8],
-) {
+) -> Result<(), ContainerError> {
     let data_size = seek_table.len() + packets.iter().map(|p| 2 + p.len()).sum::<usize>();
     let first = packets.first().map(|p| 2 + p.len()).unwrap_or(0);
     let first_in_data = seek_table.len() + first;
@@ -164,17 +168,20 @@ pub fn recompute_vorbis_fmt_sizes(
             total + (blocksizes[previous] + blocksizes[current]) / 4
         });
         let terminal_excess = rendered_frames.saturating_sub(fields.dw_total_pcm_frames as u64);
-        if let Ok(excess) = u16::try_from(terminal_excess) {
-            // Wwise writes the final overlap excess twice: directly at 0x32
-            // and in the high word of the 0x24 field.
-            fields.u_unknown_0x32 = excess;
-            fields.dw_unknown_0x24 = u32::from(excess) << 16;
-        }
+        let excess =
+            u16::try_from(terminal_excess).map_err(|_| ContainerError::TerminalExcessTooLarge {
+                excess: terminal_excess,
+            })?;
+        // Wwise writes the final overlap excess twice: directly at 0x32
+        // and in the high word of the 0x24 field.
+        fields.u_unknown_0x32 = excess;
+        fields.dw_unknown_0x24 = u32::from(excess) << 16;
     }
     if fields.dw_total_pcm_frames != 0 && fields.n_samples_per_sec != 0 {
         fields.n_avg_bytes_per_sec = ((data_size as u64 * fields.n_samples_per_sec as u64)
             / fields.dw_total_pcm_frames as u64) as u32;
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -219,7 +226,8 @@ mod tests {
         let setup = b"setup";
         let audio = b"packet";
         let seek = b"seekseek";
-        recompute_vorbis_fmt_sizes(&mut fields, &[setup.as_ref(), audio.as_ref()], seek);
+        recompute_vorbis_fmt_sizes(&mut fields, &[setup.as_ref(), audio.as_ref()], seek)
+            .expect("sizes recompute");
         // data = 8 + (2+5) + (2+6) = 23
         assert_eq!(fields.dw_seek_table_size, 8);
         assert_eq!(fields.dw_data_payload_size, 23);
@@ -235,7 +243,8 @@ mod tests {
         let mut fields = VorbisFmtFields::DEFAULTS;
         let setup = b"setup-packet";
         let audio = b"a";
-        recompute_vorbis_fmt_sizes(&mut fields, &[setup.as_ref(), audio.as_ref()], b"");
+        recompute_vorbis_fmt_sizes(&mut fields, &[setup.as_ref(), audio.as_ref()], b"")
+            .expect("sizes recompute");
         assert_eq!(fields.u_max_packet_size, 1);
     }
 
@@ -261,7 +270,8 @@ mod tests {
                 long.as_ref(),
             ],
             b"",
-        );
+        )
+        .expect("sizes recompute");
         assert_eq!(fields.u_unknown_0x32, 768);
         assert_eq!(fields.dw_unknown_0x24, 768 << 16);
     }

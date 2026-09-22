@@ -77,7 +77,7 @@ fn setup_parse_and_roundtrip() {
     assert_eq!(&info.book_ids[..3], [38, 39, 40]);
     assert_eq!(*info.book_ids.last().unwrap(), 213);
     // Repack -> identical bytes (Python round-trip oracle).
-    assert_eq!(pack_setup(&info), packet);
+    assert_eq!(pack_setup(&info).expect("setup repacks"), packet);
 }
 
 #[test]

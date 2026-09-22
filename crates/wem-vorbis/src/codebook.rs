@@ -22,6 +22,9 @@ pub enum CodebookError {
     DimTooSmall { dim: i64 },
     /// overpopulated Huffman tree (Python `_make_words`).
     OverpopulatedTree { entry: i64, length: i64 },
+    /// A codeword length outside the `0..=32` the marker table and the wire
+    /// format express (Python `IndexError` / the 5-bit first-length field).
+    LengthOutOfRange { entry: i64, length: i64 },
     /// code prefix collision (Python `_build_decode_tree`).
     CodePrefixCollision { entry: i64 },
     /// code embeds an earlier leaf (Python `_build_decode_tree`).
@@ -50,6 +53,9 @@ pub enum CodebookError {
     TargetTooShort { got: usize, dim: i64 },
     /// no usable VQ entries.
     NoUsableVqEntries,
+    /// A packer write width outside `0..=32` (Python `ValueError` from
+    /// `OggPack.write`; the lengthlist or `q_quant` carries the width).
+    PackBitsOutOfRange { bits: u32 },
 }
 
 impl std::fmt::Display for CodebookError {
@@ -66,6 +72,12 @@ impl std::fmt::Display for CodebookError {
                 write!(
                     f,
                     "overpopulated Huffman tree at entry {entry} length {length}"
+                )
+            }
+            CodebookError::LengthOutOfRange { entry, length } => {
+                write!(
+                    f,
+                    "codeword length {length} at entry {entry} is outside 0..=32"
                 )
             }
             CodebookError::CodePrefixCollision { entry } => {
@@ -104,6 +116,9 @@ impl std::fmt::Display for CodebookError {
                 write!(f, "target len {got} < dim {dim}")
             }
             CodebookError::NoUsableVqEntries => write!(f, "no usable VQ entries"),
+            CodebookError::PackBitsOutOfRange { bits } => {
+                write!(f, "pack bits must be 0..32, got {bits}")
+            }
         }
     }
 }
@@ -134,16 +149,25 @@ pub struct StaticCodebook {
 
 impl StaticCodebook {
     /// True when the lengthlist is non-decreasing and starts non-zero.
+    ///
+    /// A lengthlist shorter than `entries` (Python `IndexError`) reports
+    /// `false` rather than reading past it.
     pub fn is_ordered(&self) -> bool {
-        let n = self.entries as usize;
+        let n = self.entries;
         let lengths = &self.lengthlist;
         if n <= 1 {
             return true;
         }
-        if lengths[0] == 0 {
+        let Some(&first) = lengths.first() else {
+            return false;
+        };
+        if first == 0 {
             return false;
         }
-        for i in 1..n {
+        if n < 0 || n as usize > lengths.len() {
+            return false;
+        }
+        for i in 1..n as usize {
             if lengths[i] < lengths[i - 1] {
                 return false;
             }
@@ -152,84 +176,112 @@ impl StaticCodebook {
     }
 
     /// Pack the Wwise static-codebook representation (Python `pack`).
-    pub fn pack(&self) -> Vec<u8> {
+    ///
+    /// Every write propagates: a write width outside `0..=32` (a lengthlist
+    /// or `q_quant` the wire format cannot carry) is reported instead of
+    /// truncating the packet, and a lengthlist that does not cover `entries`
+    /// is reported instead of reading past it.
+    pub fn pack(&self) -> Result<Vec<u8>, CodebookError> {
         let mut op = OggPack::new(256);
-        let mut write = |value: u64, bits: u32| {
+        let mut write = |value: u64, bits: u32| -> Result<(), CodebookError> {
             op.write(value, bits)
-                .expect("pack writes never exceed 32 bits")
+                .map_err(|_| CodebookError::PackBitsOutOfRange { bits })
         };
-        write(self.dim as u64, 4);
-        write(self.entries as u64, 14);
         let lengths = &self.lengthlist;
-        let n = self.entries as usize;
+        let n = self.entries;
+        if n < 0 || n as usize > lengths.len() {
+            return Err(CodebookError::LengthlistMismatch {
+                got: lengths.len(),
+                want: n,
+            });
+        }
+        let n = n as usize;
+        // Codeword lengths live in the `0..=32` domain the wire format and the
+        // word builder's marker table express (the first length is written as
+        // `length - 1` into five bits); a longer value cannot be serialized,
+        // and in the ordered branch it would run one length step per unit of
+        // the delta.
+        for (entry, &length) in lengths.iter().enumerate() {
+            if length > 32 {
+                return Err(CodebookError::LengthOutOfRange {
+                    entry: entry as i64,
+                    length,
+                });
+            }
+        }
+        write(self.dim as u64, 4)?;
+        write(self.entries as u64, 14)?;
         let max_len = lengths.iter().copied().max().unwrap_or(0) as u64;
         let nob = ilog_bits(max_len);
 
         if self.is_ordered() {
-            write(1, 1);
-            write(lengths[0] as u64 - 1, 5);
+            write(1, 1)?;
+            // The oracle masks each `value - 1` write, so a zero or negative
+            // first length wraps instead of underflowing.
+            let first = *lengths.first().ok_or(CodebookError::EmptyCodebook)?;
+            write((first as u64).wrapping_sub(1), 5)?;
             let mut this = 0i64;
             let mut i = 1i64;
             while i < n as i64 {
                 if lengths[i as usize] > lengths[(i - 1) as usize] {
                     let mut num = lengths[i as usize] - lengths[(i - 1) as usize];
                     while num > 0 {
-                        write((i - this) as u64, ilog_bits((n - this as usize) as u64));
+                        write((i - this) as u64, ilog_bits((n - this as usize) as u64))?;
                         this = i;
                         num -= 1;
                     }
                 }
                 i += 1;
             }
-            write((i - this) as u64, ilog_bits((n - this as usize) as u64));
+            write((i - this) as u64, ilog_bits((n - this as usize) as u64))?;
         } else {
-            write(0, 1);
-            write(nob as u64, 3);
+            write(0, 1)?;
+            write(nob as u64, 3)?;
             let mut first_unused = 0usize;
             while first_unused < n && lengths[first_unused] != 0 {
                 first_unused += 1;
             }
             if first_unused == n {
-                write(0, 1);
+                write(0, 1)?;
                 for &l in lengths {
-                    write(l as u64 - 1, nob);
+                    write((l as u64).wrapping_sub(1), nob)?;
                 }
             } else {
-                write(1, 1);
+                write(1, 1)?;
                 for &l in lengths {
                     if l != 0 {
-                        write(1, 1);
-                        write(l as u64 - 1, nob);
+                        write(1, 1)?;
+                        write((l as u64).wrapping_sub(1), nob)?;
                     } else {
-                        write(0, 1);
+                        write(0, 1)?;
                     }
                 }
             }
         }
 
         // Wwise stores maptype as one bit: zero or non-zero.
-        write(if self.maptype != 0 { 1 } else { 0 }, 1);
+        write(if self.maptype != 0 { 1 } else { 0 }, 1)?;
         if self.maptype == 0 {
-            return op.into_buffer();
+            return Ok(op.into_buffer());
         }
 
-        write((self.q_min as u64) & 0xFFFF_FFFF, 32);
-        write((self.q_delta as u64) & 0xFFFF_FFFF, 32);
-        write((self.q_quant as u64 - 1) & 0xF, 4);
-        write(self.q_sequencep as u64 & 1, 1);
+        write((self.q_min as u64) & 0xFFFF_FFFF, 32)?;
+        write((self.q_delta as u64) & 0xFFFF_FFFF, 32)?;
+        write((self.q_quant as u64).wrapping_sub(1) & 0xF, 4)?;
+        write(self.q_sequencep as u64 & 1, 1)?;
         if let Some(quantlist) = &self.quantlist {
             for &v in quantlist {
-                let av = if v < 0 { (-v) as u64 } else { v as u64 };
+                let av = v.unsigned_abs();
                 let bits = self.q_quant as u32;
                 let mask = if bits < 32 {
                     (1u64 << bits) - 1
                 } else {
                     0xFFFF_FFFF
                 };
-                write(av & mask, bits);
+                write(av & mask, bits)?;
             }
         }
-        op.into_buffer()
+        Ok(op.into_buffer())
     }
 }
 
@@ -286,6 +338,12 @@ pub fn make_codewords(lengthlist: &[i64]) -> Result<Vec<i64>, CodebookError> {
     let mut count = 0usize;
     for (i, &length) in lengthlist.iter().enumerate() {
         if length > 0 {
+            if length > 32 {
+                return Err(CodebookError::LengthOutOfRange {
+                    entry: i as i64,
+                    length,
+                });
+            }
             let mut entry = marker[length as usize];
             if length < 32 && (entry >> length) != 0 {
                 return Err(CodebookError::OverpopulatedTree {
@@ -428,8 +486,12 @@ fn book_unquantize_maptype1(
     let mindel = float32_unpack(q_min);
     let delta = float32_unpack(q_delta);
     let mut out = vec![None; entries as usize];
-    for j in 0..entries as usize {
-        if lengthlist[j] <= 0 {
+    for (j, slot) in out.iter_mut().enumerate() {
+        let length = *lengthlist.get(j).ok_or(CodebookError::LengthlistMismatch {
+            got: lengthlist.len(),
+            want: entries,
+        })?;
+        if length <= 0 {
             continue;
         }
         let mut last = 0.0f64;
@@ -445,7 +507,7 @@ fn book_unquantize_maptype1(
             vals.push(val);
             indexdiv *= quantvals;
         }
-        out[j] = Some(vals);
+        *slot = Some(vals);
     }
     Ok(out)
 }
@@ -509,7 +571,7 @@ impl Codebook {
             )?);
         }
         let valuallist = valuallist.clone();
-        let vq_cache = build_vq_cache(&valuallist, &sc.lengthlist);
+        let vq_cache = build_vq_cache(&valuallist, &sc.lengthlist)?;
         let vq_dim = sc.dim as usize;
         let mut vq_flat_entries = Vec::with_capacity(vq_cache.len());
         let mut vq_flat = Vec::with_capacity(vq_cache.len() * vq_dim);
@@ -603,16 +665,21 @@ impl Codebook {
 
     /// Borrowed VQ vector for a used maptype1 entry (no allocation).
     fn vq_slice(&self, entry: i64) -> Option<&[f64]> {
-        self.valuallist.as_ref()?[entry as usize].as_deref()
+        self.valuallist
+            .as_ref()?
+            .get(usize::try_from(entry).ok()?)?
+            .as_deref()
     }
 
     /// Write the Huffman code for entry index (maptype 0 or 1 index).
     pub fn encode(&self, op: &mut OggPack, entry: i64) -> Result<(), CodebookError> {
-        if entry < 0 || entry >= self.entries() {
-            return Err(CodebookError::EntryOutOfRange {
-                entry,
-                entries: self.entries(),
-            });
+        // The codeword and length arrays are `lengthlist.len()` long, so an
+        // entry is only in range when it is inside both `entries` and them
+        // (a hand-built book whose `entries` exceeds the arrays is reported
+        // rather than read past).
+        let entries = self.entries().min(self.lengthlist().len() as i64);
+        if entry < 0 || entry >= entries {
+            return Err(CodebookError::EntryOutOfRange { entry, entries });
         }
         let length = self.lengthlist()[entry as usize];
         if length <= 0 {
@@ -677,10 +744,10 @@ impl Codebook {
                 reason: "vq_values requires maptype 1 with valuallist",
             });
         }
-        let vec = self.valuallist.as_ref().unwrap()[entry as usize]
-            .clone()
+        let vec = self
+            .vq_slice(entry)
             .ok_or(CodebookError::NoVqVector { entry })?;
-        Ok(vec)
+        Ok(vec.to_vec())
     }
 
     /// Nearest used maptype1 entry (squared Euclidean distance; first entry
@@ -727,22 +794,29 @@ impl Codebook {
 }
 
 /// Build the (entry, vector) cache for used maptype1 entries.
+///
+/// A used entry past the end of `valuallist` (a lengthlist longer than
+/// `entries`) is reported rather than indexed.
 fn build_vq_cache(
     valuallist: &Option<Vec<Option<Vec<f64>>>>,
     lengthlist: &[i64],
-) -> Vec<(i64, Vec<f64>)> {
+) -> Result<Vec<(i64, Vec<f64>)>, CodebookError> {
     let mut cache = Vec::new();
     if let Some(valuallist) = valuallist {
         for (e, &l) in lengthlist.iter().enumerate() {
             if l <= 0 {
                 continue;
             }
-            if let Some(vec) = &valuallist[e] {
+            let entry = valuallist.get(e).ok_or(CodebookError::LengthlistMismatch {
+                got: lengthlist.len(),
+                want: valuallist.len() as i64,
+            })?;
+            if let Some(vec) = entry {
                 cache.push((e as i64, vec.clone()));
             }
         }
     }
-    cache
+    Ok(cache)
 }
 
 /// One decoded book descriptor from the profile tables (Python raw row dict).
