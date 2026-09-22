@@ -14,10 +14,11 @@
 //! unfalsifiable.
 //!
 //! A second, clearly separated block *attributes* the coarse stages: it
-//! re-runs `mdct_forward`, the `f32` rounding copy, the frozen-window
-//! rebuild, and the transient detector on the material the first block
-//! produced. Those are re-measurements of the same work, not disjoint
-//! stages, and are labelled `attribution_*` accordingly.
+//! re-runs `mdct_forward`, the `f32` rounding copy, the hybrid window
+//! (`apply_vorbis_window_in_place`, once per channel-frame), and the
+//! transient detector on the material the first block produced. Those are
+//! re-measurements of the same work, not disjoint stages, and are labelled
+//! `attribution_*` accordingly.
 //!
 //! It is `#[ignore]`d: `cargo test --workspace --all-targets` reports it
 //! without executing it, and `scripts/measure_encode_perf.py` runs it with
@@ -31,7 +32,7 @@ use std::time::{Duration, Instant};
 
 use wem_analysis::config::f32_of;
 use wem_analysis::dsp::spectrum::wwise_log_curve;
-use wem_analysis::dsp::transform::mdct_forward;
+use wem_analysis::dsp::transform::{apply_vorbis_window_in_place, mdct_forward};
 use wem_analysis::preprocessing::detector_input::detector_pcm_streams;
 use wem_analysis::session::AnalysisSession;
 use wem_analysis::transient::detector::TransientDetector;
@@ -359,47 +360,54 @@ fn attribution(
     std::hint::black_box(twiddle_sink);
     std::hint::black_box(twiddle_steps);
 
-    // --- Frozen-window rebuild inside apply_vorbis_window ------------------
-    // `apply_vorbis_window` calls its `get_window(size)` closure once per
-    // neighbouring size, per channel, per frame; each call rebuilds the whole
-    // symmetric window from the frozen half. Same geometry, same table, same
-    // conversion — timed here at the exact call count the encode pays.
-    let frozen = resources
-        .frozen
-        .as_ref()
-        .expect("profile carries frozen window halves");
+    // --- Frozen-window application inside the frame path -------------------
+    // `PlannedWindowSource::materialize` hands each channel's raw row to
+    // `apply_vorbis_window_in_place`, once per channel per frame; that call
+    // is the live frozen-window step, and the report keeps the
+    // `window_rebuild_*` names it has always printed. It reads the frozen
+    // half directly — the `half ++ reverse(half)` rebuild is not on this
+    // path — so what is timed is the whole call the encode pays: the span
+    // validation, the two frozen-half lookups, the zero fills and the
+    // per-sample multiplies.
+    //
+    // The row's values do not enter the cost (each span is a fixed-length
+    // multiply or a zero fill); the scratch row is refilled from the
+    // materialized frame, outside the bracket, so the call sees a row of the
+    // frame's own length.
+    let frozen_windows = Some(&resources.frozen_twiddles()?.window_halves);
+    let widest = BLOCKSIZES
+        .iter()
+        .copied()
+        .max()
+        .expect("block sizes are non-empty");
+    let mut scratch = vec![0.0f64; widest as usize];
     let mut window_rebuild = Duration::ZERO;
     let mut window_rebuild_calls = 0usize;
-    // `apply_vorbis_window` is called once per channel per frame, and each
-    // call rebuilds both neighbouring windows — so the count is
-    // frames * channels * 2, not frames * 2.
     for window in &run.windows_materialized {
         let current = window.current();
-        let (left, right) = if current == 0 {
+        // Short frames always use the short window: `materialize` fixes
+        // their modes at (0, 0, 0) whatever the plan's neighbours say.
+        let (previous, following) = if current == 0 {
             (0, 0)
         } else {
             (window.previous(), window.following())
         };
-        for _channel in &window.samples {
-            for size in [BLOCKSIZES[left as usize], BLOCKSIZES[right as usize]] {
-                let half = frozen
-                    .window_halves
-                    .get(&size)
-                    .expect("profile carries the window half");
-                let start = Instant::now();
-                let widened: Vec<f64> = half.iter().map(|value| *value as f64).collect();
-                // The rebuild `apply_vorbis_window` used to pay, inlined: it is
-                // `half ++ reverse(half)`. The public `vorbis_window` that did
-                // this was deleted as unreachable on the encode path, and this
-                // harness is a cost model for work the in-place window avoids,
-                // not a caller of production code — so the rebuild lives here
-                // rather than keeping a dead public item alive for a timing.
-                let mut rebuilt = widened.clone();
-                rebuilt.extend(widened.iter().rev().copied());
-                window_rebuild += start.elapsed();
-                window_rebuild_calls += 1;
-                sink += rebuilt[0];
-            }
+        let n = BLOCKSIZES[current as usize] as usize;
+        for row in &window.samples {
+            assert_eq!(row.len(), n, "one channel row per frame, one block long");
+            scratch[..n].copy_from_slice(row);
+            let start = Instant::now();
+            apply_vorbis_window_in_place(
+                &mut scratch[..n],
+                &BLOCKSIZES,
+                previous,
+                current,
+                following,
+                frozen_windows,
+            )?;
+            window_rebuild += start.elapsed();
+            window_rebuild_calls += 1;
+            sink += scratch[0];
         }
     }
     std::hint::black_box(sink);

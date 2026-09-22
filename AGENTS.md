@@ -65,7 +65,10 @@ registration duties.
   code.
 - **Capture exit codes explicitly.** A piped verdict belongs to the last command
   in the pipe — `cargo test … | tail` reports `tail`'s status — so a real failure
-  passes unnoticed.
+  passes unnoticed. Wrapping has the same trap: `( cargo test …; echo "EXIT=$?" )`
+  reports the subshell's last command, so an `&&` chain walks past a failing
+  check. A wrapped verification must end with the verified command's status —
+  `exit "$EXIT"`, or the check as the last statement.
 - **Concurrency has a supervision cost.** Keep in flight only as many lanes as
   can be verified one at a time; more than that and things land unverified.
 
