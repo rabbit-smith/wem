@@ -1,4 +1,4 @@
-//! The source contract the assembly layer reads a profile through.
+//! The source interface the assembly layer reads a profile through.
 //!
 //! Assembly needs typed codec inputs, never resource bytes: what a profile
 //! carries is fixed by the compiled carrier
@@ -63,7 +63,7 @@ pub trait ProfileSource {
     /// The optional DC-filter configuration.
     fn input_conditioner(&self) -> Result<Option<InputConditionerConfig>, ProfileError>;
 }
-/// Development seam: the same contract served from the recorded resource tree.
+/// Development seam: the same source served from the recorded resource tree.
 ///
 /// This implementation exists so the in-crate loader suite and the
 /// `compiled_carrier` equivalence test can hold the compiled carrier against

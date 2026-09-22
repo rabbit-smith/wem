@@ -509,10 +509,12 @@ impl Encoder {
         let profile = compiled
             .encoder_profile()
             .map_err(|error| selection_error(&error, selection))?;
+        // A bad quality value is caller input, not an internal fault: it goes
+        // through the same classification as every other selection failure.
         let profile = match quality {
             Some(quality) => profile
                 .with_quality(quality)
-                .map_err(|error| EncoderError::Internal(InternalError::Profile(error)))?,
+                .map_err(|error| selection_error(&error, selection))?,
             None => profile,
         };
         Self::from_profile_and_carrier(&profile, None, &compiled)

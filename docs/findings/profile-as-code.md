@@ -59,10 +59,9 @@ that the package shipped under `src/wwise_wem/data/profiles/`; its content diges
 (`f5f97ba673b4b045a1b741b94bbeb8801cf3b357c086221de9bea764b137672f`, over the
 sorted `path\0sha256` pairs) is recorded in the header of every generated module.
 
-It was taken from revision 9c73bd4 on `main` ("chore: purge the
-gate/contract/golden vocabulary"). `scripts/generate_profile_code.py --help`
-names the location, and `--profiles-dir` overrides it; the generator is offline
-and resolves its paths from `Path(__file__)`.
+It was taken from revision 9c73bd4 on `main`. `scripts/generate_profile_code.py
+--help` names the location, and `--profiles-dir` overrides it; the generator is
+offline and resolves its paths from `Path(__file__)`.
 
 ## How the reference oracle reads the values
 
