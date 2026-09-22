@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import unittest
-from dataclasses import replace
 
 from wwise_wem_reference.profiles.book_ids import resolve_book_id
 from wwise_wem_reference.vorbis.setup import ilog, pack_setup, parse_setup
@@ -76,22 +75,20 @@ class SetupRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "mode must be 2 or 3"):
             load_long_variant(1, profile, base)
 
-    def test_profile_resolution_and_recorded_digest(self):
+    def test_profile_resolution_and_setup_identity(self):
         self.assertEqual(
             resolve_selection(SIX_CHANNEL_SELECTION), SIX_CHANNEL_PROFILE
         )
         with self.assertRaisesRegex(ValueError, "no installed Wwise 2013 profile"):
             resolve_selection(WwiseProfile(WwiseVersion.WWISE2013, 2, 44100))
 
-        # The recorded setup digest describes exactly the carried bytes; a
-        # payload that no longer matches it cannot be produced by the carrier,
-        # so the value model's own check is what rejects one.
+        # The key's setup identity names exactly the carried bytes: the digest
+        # is computed from the packet rather than carried beside it, so there
+        # is no second copy to disagree with.
         self.assertEqual(
-            hashlib.sha256(SIX_CHANNEL_PROFILE.setup_packet).hexdigest(),
-            SIX_CHANNEL_PROFILE.setup_sha256,
+            SIX_CHANNEL_PROFILE.key.quality_setup_identity,
+            "sha256:" + hashlib.sha256(SIX_CHANNEL_PROFILE.setup_packet).hexdigest(),
         )
-        changed = replace(SIX_CHANNEL_PROFILE, setup_sha256="0" * 64)
-        self.assertEqual(changed.setup_packet, SIX_CHANNEL_PROFILE.setup_packet)
 
 
 if __name__ == "__main__":

@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from ..config import WwisePsyLongTables, WwisePsyLook
-from ..dsp.transform import _f32, _u32_f32
+from ..._f32 import _f32
+from ..dsp.transform import _u32_f32
 
 LONG_PSY_N = 1024
 

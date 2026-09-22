@@ -7,7 +7,8 @@ from typing import Sequence
 
 from ..config import MdctLook, TransientDetectorTables
 from ..dsp.spectrum import wwise_float_log
-from ..dsp.transform import _f32, wwise_psy_mdct
+from ..._f32 import _f32
+from ..dsp.transform import wwise_psy_mdct
 
 
 @dataclass

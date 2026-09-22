@@ -84,10 +84,26 @@ pub fn build_vorbis_wem(
     })
 }
 
+/// Patch a u32 into `buf` at `off`, **always little-endian**.
+///
+/// Pinned little-endian on purpose — it is not a duplicate of
+/// [`Endian::push_u32`], which follows the container's byte order, and the two
+/// must never be merged. These fields are patched in place after the fmt
+/// payload already exists, and the oracle patches them with
+/// `struct.pack_into("<I", …)` unconditionally (`container/fmt.py`), even for
+/// a big-endian (`RIFX`) container. Merging them would make a big-endian WEM
+/// diverge from the oracle's bytes, and **no test would catch it**: no
+/// installed profile is big-endian, so the parity suites only ever exercise
+/// the little-endian path where the two spellings agree.
 fn write_le_u32(buf: &mut [u8], off: usize, value: u32) {
     buf[off..off + 4].copy_from_slice(&value.to_le_bytes());
 }
 
+/// Patch a u16 into `buf` at `off`, **always little-endian**; same pinning as
+/// [`write_le_u32`] and for the same reason, against
+/// [`Endian::push_u16`]. The oracle's `struct.pack_into("<H", …)` is
+/// unconditional, even for a big-endian container, and no test would catch a
+/// merge.
 fn write_le_u16(buf: &mut [u8], off: usize, value: u16) {
     buf[off..off + 2].copy_from_slice(&value.to_le_bytes());
 }

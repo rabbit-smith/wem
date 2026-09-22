@@ -78,12 +78,13 @@ No profile value is fitted to an output; the provenance rule is in
 ## Exact setup identity
 
 A profile selection resolves to exactly one compiled profile. The setup packet
-is a Rust constant in the same artifact as its recorded SHA-256, and the value
-model re-checks the pair when it builds an identity from the carrier; an
-unsatisfiable or ambiguous selection is an error, and so is a setup digest that
-does not describe the packet. The built-in path is self-contained: it reads the
-compiled carrier and never reads a reference WEM. Expected outputs are test
-assets, not runtime inputs.
+is a Rust constant and the identity the key carries is the SHA-256 of exactly
+those bytes: the value model recomputes the digest from the packet when it
+builds an identity from the carrier, so no stored copy can drift from them. An
+unsatisfiable or ambiguous selection is an error, and so is a key whose setup
+identity does not describe the packet it carries. The built-in path is
+self-contained: it reads the compiled carrier and never reads a reference WEM.
+Expected outputs are test assets, not runtime inputs.
 
 ## Access boundary
 

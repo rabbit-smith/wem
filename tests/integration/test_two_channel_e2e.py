@@ -58,7 +58,7 @@ STEADY_OFFSET = 1024
 CORRELATION_FLOOR = 0.98
 
 _SPEC = importlib.util.spec_from_file_location(
-    "decode_cdlc_wem", ROOT / "scripts" / "decode_wem.py"
+    "decode_wem", ROOT / "scripts" / "decode_wem.py"
 )
 if _SPEC is None or _SPEC.loader is None:
     raise ImportError("scripts/decode_wem.py is required for this suite")
@@ -147,9 +147,12 @@ class TwoChannelResolutionTests(unittest.TestCase):
         profile = PROFILE
         setup = profile.setup_packet
         self.assertEqual(len(setup), 215)
-        digest = hashlib.sha256(setup).hexdigest()
-        self.assertEqual(profile.setup_sha256, digest)
-        self.assertIn(digest, profile.key.quality_setup_identity)
+        # The key's identity names exactly the carried bytes: the digest is a
+        # function of the packet, computed here rather than stored beside it.
+        self.assertEqual(
+            profile.key.quality_setup_identity,
+            f"sha256:{hashlib.sha256(setup).hexdigest()}",
+        )
 
     def test_unsupported_geometry_still_rejected(self) -> None:
         # 2ch/44100 remains outside the supported surface: only the exact

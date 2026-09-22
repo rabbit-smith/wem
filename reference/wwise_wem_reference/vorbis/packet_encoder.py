@@ -9,10 +9,10 @@ Floor1 body matches Vorbis I.
 from __future__ import annotations
 
 import math
-import struct
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
+from .._f32 import _f32
 from ..analysis.model import PsyFrame
 from .bitio import OggPack
 from .codebook import Codebook
@@ -34,10 +34,6 @@ from .residue import (
     quantize_residue_value,
 )
 from .setup import ilog
-
-
-def _f32(value: float) -> float:
-    return struct.unpack("<f", struct.pack("<f", float(value)))[0]
 
 
 def _lossless_couple_pair(magnitude: int | float, angle: int | float) -> tuple:

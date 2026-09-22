@@ -177,7 +177,7 @@ rewiring, in four groups:
   `ResourceRef`, which move onto `profiles/artifact.py`;
 * `reference/wwise_wem_reference/container/model.py`, which imports
   `EncoderProfile` and the generation label;
-* tooling — `scripts/{decode_cdlc_wem,fuzz_diff_parity,generate_frozen_tables,native_smoke,wheel_smoke}.py`;
+* tooling — `scripts/{decode_wem,fuzz_diff_parity,generate_frozen_tables,native_smoke,wheel_smoke}.py`;
 * test support and suites — `tests/{analysis_resource_support,codebook_resource_support,two_channel_corpus_support}.py`,
   `tests/parity/{oracle_frame_values,stage_records_support}.py` (`stage_records_support.py`
   was later deleted with the recorded stage-records assets it wrote), and about

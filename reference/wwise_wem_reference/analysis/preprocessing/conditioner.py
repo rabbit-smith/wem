@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import struct
 from typing import Sequence
 
+from ..._f32 import _f32
 from ..config import InputConditionerConfig
-
-
-def _f32(value: float) -> float:
-    return struct.unpack("<f", struct.pack("<f", float(value)))[0]
 
 
 class InputConditioner:

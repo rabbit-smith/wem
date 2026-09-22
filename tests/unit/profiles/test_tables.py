@@ -1,7 +1,9 @@
 """The compiled carrier's tables: identity, geometry and loader agreement."""
 
-import hashlib
 import unittest
+
+import wwise_wem._core as _core
+from wwise_wem import WwiseProfile, WwiseVersion
 
 from tests.analysis_resource_support import installed_profile
 from wwise_wem_reference.profiles.psychoacoustics.long_tables import load_long_psy_tables
@@ -10,21 +12,29 @@ from wwise_wem_reference.profiles.psychoacoustics.short_tables import load_short
 from wwise_wem_reference.profiles.transform import load_mdct_looks
 from wwise_wem_reference.profiles.transient import load_transient_tables
 
+#: Enough frames for the kernel's stream session to emit its seq-0 packet.
+MIN_FRAMES = 4096
+
 
 class CarrierTableTests(unittest.TestCase):
     profile = installed_profile(6, 44100)
 
-    def test_recorded_setup_digest_matches_the_carried_packet(self):
-        # The one digest the carrier records is the setup identity: it is the
-        # payload half of the chain the manifest used to walk, and it still
-        # has to describe the bytes the carrier hands out.
-        self.assertEqual(
-            hashlib.sha256(self.profile.setup_packet).hexdigest(),
-            self.profile.setup_sha256,
+    def test_carried_setup_packet_is_the_kernel_packet(self):
+        # The carrier used to record the packet's digest beside it and the
+        # suite compared digests; the packet is compiled into the kernel, so
+        # the comparison is made against the bytes themselves — the seq-0
+        # packet the kernel emits for this profile's own selection.
+        profile = self.profile
+        selection = WwiseProfile(
+            WwiseVersion.from_generation(profile.generation),
+            profile.channels,
+            profile.sample_rate,
         )
-        self.assertEqual(
-            self.profile.key.quality_setup_identity, f"sha256:{self.profile.setup_sha256}"
+        packets = _core.StreamSession.for_selection(selection).push(
+            bytes(MIN_FRAMES * profile.channels * 2)
         )
+        self.assertTrue(packets, "the kernel emitted no seq-0 packet")
+        self.assertEqual(bytes(profile.setup_packet), bytes(packets[0].data))
 
     def test_analysis_tables_load_and_validate(self):
         self.assertEqual(load_transient_tables(self.profile).n, 128)

@@ -541,10 +541,9 @@ def profile_module(
     lines: list[str] = []
 
     key = manifest["key"]
-    # No stored profile name: the human label is derived from the key
-    # (`ProfileKey::label`), so the carrier holds identity and values only.
-    lines.append(f'pub const SETUP_SHA256: &str = "{key["quality_setup_identity"].removeprefix("sha256:")}";')
-    lines.append("")
+    # No stored profile name and no stored setup digest: the human label is
+    # derived from the key (`ProfileKey::label`), the setup identity the key
+    # carries names the packet, and the packet bytes are the carrier's own.
     lines.append("#[rustfmt::skip]")
     lines.append("pub static KEY: ProfileKeyParts = ProfileKeyParts {")
     lines.append(f'    channels: {key["channels"]},')
@@ -908,7 +907,6 @@ def profile_module(
     lines.append("pub static TABLES: ProfileTables = ProfileTables {")
     lines.append("    key: KEY,")
     lines.append("    setup_packet: &SETUP_PACKET,")
-    lines.append("    setup_sha256: SETUP_SHA256,")
     lines.append("    container_metadata: ContainerMetadata {")
     for json_field, rust_field in CONTAINER_FIELDS:
         lines.append(f"        {rust_field}: {manifest['container_metadata'][json_field]},")

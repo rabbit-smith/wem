@@ -58,6 +58,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT / "reference"))
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
+from wwise_wem_reference._f32 import _f32  # type: ignore  # noqa: E402
 from wwise_wem_reference.vorbis.bitio import BitReader  # type: ignore  # noqa: E402
 from wwise_wem_reference.vorbis.codebook import (  # type: ignore  # noqa: E402
     Codebook,
@@ -77,7 +78,6 @@ from wwise_wem_reference.vorbis.packet_decoder import (  # type: ignore  # noqa:
 )
 from wwise_wem_reference.vorbis.setup import parse_setup  # type: ignore  # noqa: E402
 from wwise_wem_reference.analysis.dsp.transform import (  # type: ignore  # noqa: E402
-    _f32,
     make_mdct_look,
     mdct_forward,
     vorbis_window,
@@ -92,8 +92,8 @@ T97_END = T97_COUNT
 T219_END = T97_END + T219_COUNT
 T282_END = T219_END + T282_COUNT
 
-DEFAULT_CORPUS = _REPO_ROOT / "corpus" / "paired-build-probe" / "the long paired input"
-DEFAULT_OUT_DIR = _REPO_ROOT / "corpus" / "paired-build-probe" / "out"
+DEFAULT_CORPUS = _REPO_ROOT / "corpus" / "paired-build" / "the long paired input"
+DEFAULT_OUT_DIR = _REPO_ROOT / "corpus" / "paired-build" / "out"
 SAMPLE_RATE = 48000
 
 # Set from `--libvorbis-exact` in `main()`. Module-level so the decode helpers
@@ -1658,14 +1658,14 @@ def rms_envelope(
     return env
 
 
-def write_wav(path: Path, pcm: list[np.ndarray], sample_rate: int) -> None:
-    """Write an interleaved 16-bit PCM WAV."""
-    channels = len(pcm)
-    frames = len(pcm[0])
-    pcm16 = np.empty((channels, frames), dtype=np.int16)
-    for ch in range(channels):
-        scaled = np.clip(pcm[ch] * 32768.0, -32768, 32767)
-        pcm16[ch] = scaled
+def _write_wav_pcm16(
+    path: Path, pcm16: np.ndarray, sample_rate: int
+) -> None:
+    """Write a (channels, frames) int16 block as an interleaved 16-bit PCM WAV.
+
+    The single owner of the file layout: both writers below differ only in how
+    they prepare ``pcm16``.
+    """
     interleaved = pcm16.T.reshape(-1)
     data_bytes = interleaved.tobytes()
     with open(path, "wb") as handle:
@@ -1675,14 +1675,25 @@ def write_wav(path: Path, pcm: list[np.ndarray], sample_rate: int) -> None:
         handle.write(b"fmt ")
         handle.write(struct.pack("<I", 16))
         handle.write(struct.pack("<H", 1))
-        handle.write(struct.pack("<H", channels))
+        handle.write(struct.pack("<H", pcm16.shape[0]))
         handle.write(struct.pack("<I", sample_rate))
-        handle.write(struct.pack("<I", sample_rate * channels * 2))
-        handle.write(struct.pack("<H", channels * 2))
+        handle.write(struct.pack("<I", sample_rate * pcm16.shape[0] * 2))
+        handle.write(struct.pack("<H", pcm16.shape[0] * 2))
         handle.write(struct.pack("<H", 16))
         handle.write(b"data")
         handle.write(struct.pack("<I", len(data_bytes)))
         handle.write(data_bytes)
+
+
+def write_wav(path: Path, pcm: list[np.ndarray], sample_rate: int) -> None:
+    """Write an interleaved 16-bit PCM WAV."""
+    channels = len(pcm)
+    frames = len(pcm[0])
+    pcm16 = np.empty((channels, frames), dtype=np.int16)
+    for ch in range(channels):
+        scaled = np.clip(pcm[ch] * 32768.0, -32768, 32767)
+        pcm16[ch] = scaled
+    _write_wav_pcm16(path, pcm16, sample_rate)
 
 
 def write_wav_i16(
@@ -1694,23 +1705,7 @@ def write_wav_i16(
     pcm16 = np.empty((channels, frames), dtype=np.int16)
     for ch in range(channels):
         pcm16[ch] = pcm[ch]
-    interleaved = pcm16.T.reshape(-1)
-    data_bytes = interleaved.astype(np.int16).tobytes()
-    with open(path, "wb") as handle:
-        handle.write(b"RIFF")
-        handle.write(struct.pack("<I", 36 + len(data_bytes)))
-        handle.write(b"WAVE")
-        handle.write(b"fmt ")
-        handle.write(struct.pack("<I", 16))
-        handle.write(struct.pack("<H", 1))
-        handle.write(struct.pack("<H", channels))
-        handle.write(struct.pack("<I", sample_rate))
-        handle.write(struct.pack("<I", sample_rate * channels * 2))
-        handle.write(struct.pack("<H", channels * 2))
-        handle.write(struct.pack("<H", 16))
-        handle.write(b"data")
-        handle.write(struct.pack("<I", len(data_bytes)))
-        handle.write(data_bytes)
+    _write_wav_pcm16(path, pcm16, sample_rate)
 
 
 def run_decode(ctx: DecodeContext, audio_packets: list[bytes]) -> dict[str, Any]:

@@ -34,3 +34,7 @@ corpus/
 # the round paired-corpus tooling outputs (scratch templates; not versioned assets).
 rs_corpus_*.xml
 .claude/settings.local.json
+
+.claude
+.pi
+.pi-lens.json
