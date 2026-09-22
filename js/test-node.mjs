@@ -499,6 +499,15 @@ check(
   `channels=${oneShot.channels}, sampleRate=${oneShot.sampleRate}, frames=${declaredFrames}, ` +
     `samples=${oneShot.pcm.length}, setup=${oneShot.setup.byteLength} bytes`,
 );
+// The same fact the C ABI announces and the facade exposes. It is checked
+// separately from `frames` above because they are different claims: this one
+// comes from the header, before any block, and the other is counted from the
+// steps that delivered it.
+check(
+  "decode(reference.wem): the header announces the declared frame count",
+  oneShot.totalFrames === RECORDING_FRAMES,
+  `totalFrames=${oneShot.totalFrames}, expected=${RECORDING_FRAMES}`,
+);
 
 const oneShotError = reconstructionError(oneShot.pcm);
 check(

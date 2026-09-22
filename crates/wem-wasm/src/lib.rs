@@ -680,6 +680,16 @@ fn decode_step_object(step: DecodeStep) -> JsValue {
                 "sampleRate",
                 JsValue::from_f64(f64::from(header.sample_rate)),
             );
+            // The declared frame count, beside the geometry. The C ABI's
+            // WemHeaderCb announces it and the PyO3 shell exposes it; this
+            // shell omitted it, which made the same session report a different
+            // header depending on the language that opened it. A frame count is
+            // far below 2^53, so the f64 JS number is exact.
+            set(
+                &announced,
+                "totalFrames",
+                JsValue::from_f64(header.total_frames as f64),
+            );
             set(
                 &announced,
                 "setup",

@@ -236,6 +236,7 @@ async function decodeFile(file) {
     `input      ${file.name}: ${bytes.byteLength} bytes`,
     `output     ${output.byteLength} bytes — raw interleaved little-endian f32, +-1.0 full scale, no header`,
     `geometry   ${channels}ch @ ${decoded.header.sampleRate}Hz, setup packet ${decoded.header.setup.byteLength} bytes`,
+    `declared   ${decoded.header.totalFrames} frames (the container's own count)`,
     `samples    ${decoded.samples} (${frames} frames)`,
     `time       ${(performance.now() - t0) / 1000} s (main thread)`,
   ].join("\n");

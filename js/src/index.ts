@@ -178,6 +178,7 @@ interface DecodeStepRaw {
 interface DecodedHeaderRaw {
   channels: number;
   sampleRate: number;
+  totalFrames: number;
   setup: Uint8Array;
 }
 
@@ -344,6 +345,13 @@ export interface DecodedHeader {
   channels: number;
   /** PCM sample rate the container declares. */
   sampleRate: number;
+  /**
+   * `dw_total_pcm_frames`: the frame count the container declares, and so the
+   * number a session delivers if it finishes successfully. The same fact the
+   * C ABI announces through `WemHeaderCb` and the Python facade exposes as
+   * `total_frames`.
+   */
+  totalFrames: number;
   /** The setup packet this build parsed, exactly as the container carried it. */
   setup: Uint8Array;
 }
@@ -423,6 +431,12 @@ export interface DecodeResult {
    * finished with `WEM_OK` is exactly the container's declared count.
    */
   frames: number;
+  /**
+   * The frame count the container declared, from the header announcement. It
+   * is what {@link frames} equals when the session finished successfully, and
+   * the number a caller can size a buffer with before the first block arrives.
+   */
+  totalFrames: number;
   /** Interleaved f32 samples at ±1.0 full scale. */
   pcm: Float32Array;
 }
@@ -680,6 +694,7 @@ function toStep(raw: DecodeStepRaw): DecodeStep {
         : {
             channels: raw.header.channels,
             sampleRate: raw.header.sampleRate,
+            totalFrames: raw.header.totalFrames,
             setup: raw.header.setup,
           },
     channels: raw.channels,
@@ -764,6 +779,7 @@ export async function decodeWem(wemBytes: Uint8Array | ArrayBuffer): Promise<Dec
     sampleRate: header.sampleRate,
     setup: header.setup,
     frames,
+    totalFrames: header.totalFrames,
     pcm,
   };
 }
