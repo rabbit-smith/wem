@@ -1,0 +1,163 @@
+#!/bin/sh
+# Local pre-commit checks: fast, kernel-free, and not the verdict.
+#
+# Why the hook lives in .githooks/ and is armed with `core.hooksPath`: a hook in
+# .git/hooks/ is not version controlled, so it exists on one machine and vanishes
+# on the next clone or worktree. `core.hooksPath` points at a tracked directory:
+#
+#     git config core.hooksPath .githooks        # once per clone; `make hooks` does it
+#
+# The setting is per clone and is not carried by cloning, which is why it is one
+# documented command rather than an assumption (docs/guides/hooks.md).
+#
+# Why this is not the verdict: CI is (AGENTS.md, "Verification ladder"). This
+# repository was put through a full history rewrite to remove reverse-engineering
+# coordinates, a machine home directory, a vendor module name and third-party
+# content references; every one of those commits would have been refused here in
+# about a second. That is the entire job of this layer - cheap early feedback, so
+# the expensive late repair does not have to happen twice. `--no-verify` stays
+# available and legitimate: a hook on a developer machine must never be the only
+# enforcement.
+#
+# What it runs, in order:
+#   1. scripts/check_staged_assets.py         staged assets, development trees, root entries
+#   2. scripts/provenance_check.py --staged   the pattern scan, when that file is present
+#   3. ruff check, on the staged Python files only, when ruff is installed
+#
+# What it must never run here: mypy, cargo, `make test`, the suites, the wheel
+# and wasm checks - anything needing the compiled extension, a toolchain, the
+# network, or the untracked development trees. Those are the ladder's steps, in
+# `make test` (docs/guides/development.md, "What make test runs").
+#
+# Discipline: per AGENTS.md, a piped verdict belongs to the last command in the
+# pipe, and an `&&` chain walks past a failing check. So no check below is joined
+# to another by `|` or `&&`: every status is captured into a variable of its own
+# and the script exits with an explicit status. `set -e` is deliberately not used
+# for the same reason - a status that is about to be captured must not abort the
+# run - and nothing below relies on it.
+
+set -u
+
+failed=0
+skipped=0
+
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+if [ -z "$repo_root" ]; then
+    printf 'pre-commit: not inside a git working tree - local checks not run.\n' >&2
+    exit 0
+fi
+cd "$repo_root" || exit 0
+
+python_bin=''
+if [ -x .venv/bin/python3 ]; then
+    python_bin=.venv/bin/python3
+elif command -v python3 >/dev/null 2>&1; then
+    python_bin=python3
+fi
+
+printf 'pre-commit: local checks (no build, no network, no development trees)\n'
+
+# ---------------------------------------------------------------------------
+# 1/3 - staged assets, development trees, repository-root entries.
+# ---------------------------------------------------------------------------
+assets_script=scripts/check_staged_assets.py
+if [ ! -f "$assets_script" ]; then
+    skipped=$((skipped + 1))
+    printf 'pre-commit: SKIP [1/3] staged assets - %s is not in this checkout; CI still runs it.\n' \
+        "$assets_script" >&2
+elif [ -z "$python_bin" ]; then
+    skipped=$((skipped + 1))
+    printf 'pre-commit: SKIP [1/3] staged assets - no python3 found (.venv/bin/python3 or PATH); CI still runs it.\n' >&2
+else
+    printf 'pre-commit: [1/3] staged assets, development trees, root entries\n'
+    "$python_bin" "$assets_script"
+    assets_status=$?
+    if [ "$assets_status" -ne 0 ]; then
+        failed=$((failed + 1))
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# 2/3 - the provenance pattern scan. Owned by scripts/provenance_check.py; this
+# hook only calls it, so a checkout where that file does not exist yet is a
+# skip with a reason, never a failure.
+# ---------------------------------------------------------------------------
+provenance_script=scripts/provenance_check.py
+if [ ! -f "$provenance_script" ]; then
+    skipped=$((skipped + 1))
+    printf 'pre-commit: SKIP [2/3] provenance scan - %s is not in this checkout; that file owns the pattern scan, so nothing was scanned here.\n' \
+        "$provenance_script" >&2
+elif [ -z "$python_bin" ]; then
+    skipped=$((skipped + 1))
+    printf 'pre-commit: SKIP [2/3] provenance scan - no python3 found (.venv/bin/python3 or PATH).\n' >&2
+else
+    printf 'pre-commit: [2/3] provenance scan of the staged content\n'
+    "$python_bin" "$provenance_script" --staged
+    provenance_status=$?
+    if [ "$provenance_status" -ne 0 ]; then
+        failed=$((failed + 1))
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# 3/3 - ruff, on the staged Python files only. The full-tree lint is a step of
+# `make test`; this is the same tool over the files this commit touches.
+# ---------------------------------------------------------------------------
+ruff_bin=''
+if [ -x .venv/bin/ruff ]; then
+    ruff_bin=.venv/bin/ruff
+elif command -v ruff >/dev/null 2>&1; then
+    ruff_bin=ruff
+fi
+
+staged_python=$(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR -- '*.py')
+list_status=$?
+
+if [ "$list_status" -ne 0 ]; then
+    skipped=$((skipped + 1))
+    printf 'pre-commit: SKIP [3/3] ruff - could not read the staged file list (git diff exited %s).\n' \
+        "$list_status" >&2
+elif [ -z "$ruff_bin" ]; then
+    skipped=$((skipped + 1))
+    printf 'pre-commit: SKIP [3/3] ruff - not in .venv/bin/ruff and not on PATH; `make test` lints the whole tree (ruff check src reference tests scripts).\n' >&2
+elif [ -z "$staged_python" ]; then
+    printf 'pre-commit: [3/3] ruff - no staged Python files, nothing to lint\n'
+else
+    # One path per argument, split on newlines only, so a path with a space in
+    # it survives; `set -f` keeps a bracketed name from being read as a pattern.
+    old_ifs=$IFS
+    IFS='
+'
+    set -f
+    # shellcheck disable=SC2086  # the word splitting above is the point
+    set -- $staged_python
+    set +f
+    IFS=$old_ifs
+
+    printf 'pre-commit: [3/3] ruff check on %s staged Python file(s)\n' "$#"
+    "$ruff_bin" check "$@"
+    ruff_status=$?
+    if [ "$ruff_status" -ne 0 ]; then
+        failed=$((failed + 1))
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Verdict. Every failure above is reported by the check that found it; this only
+# says how many, and how to bypass on purpose.
+# ---------------------------------------------------------------------------
+if [ "$failed" -ne 0 ]; then
+    printf '\n' >&2
+    printf 'pre-commit: FAILED - %s local check(s) did not pass.\n' "$failed" >&2
+    printf 'pre-commit: this layer is early feedback; CI is the verdict (AGENTS.md, "Verification ladder").\n' >&2
+    printf 'pre-commit: fix the findings above, or bypass deliberately with\n' >&2
+    printf '\n    git commit --no-verify\n\n' >&2
+    exit 1
+fi
+
+if [ "$skipped" -ne 0 ]; then
+    printf 'pre-commit: ok - local checks passed (%s skipped; the notices above say why).\n' "$skipped"
+else
+    printf 'pre-commit: ok - local checks passed.\n'
+fi
+exit 0

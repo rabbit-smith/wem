@@ -40,6 +40,7 @@ at these documents instead of restating them.
 | [`reference/decoding.md`](reference/decoding.md) | Touching the decoder: its lifecycle, what it refuses and with which class, its output length and alignment, the streaming property, or what establishes the decode claims |
 | [`guides/usage.md`](guides/usage.md) | Installing the package, encoding a file, decoding one, calling it from each language |
 | [`guides/development.md`](guides/development.md) | Building, running the tests, and the rules the work is held to |
+| [`guides/hooks.md`](guides/hooks.md) | Arming the local pre-commit layer, what it checks and why, and what deliberately stays in CI instead |
 | [`findings/2ch-byte-exactness.md`](findings/2ch-byte-exactness.md) | Needing the 2ch evidence, its root causes, its retractions, or its trust boundary |
 | [`findings/concurrency-curves.md`](findings/concurrency-curves.md) | Asking how many encodes this machine runs at once, whether the kernel's internal parallelism pays for itself, or how to size a worker pool (that page's later change: the feature is opt-in now, and the instrument is `crates/wem-core/tests/concurrency_worker.rs`) |
 | [`findings/duration-curves.md`](findings/duration-curves.md) | Asking how peak memory and encode time behave as the input grows from seconds to ten minutes, in both installed geometries and on both the one-shot and streaming paths |
