@@ -40,7 +40,7 @@ use pyo3::exceptions::{PyException, PyValueError};
 use pyo3::ffi::c_str;
 use pyo3::prelude::*;
 use pyo3::type_object::PyTypeInfo;
-use pyo3::types::{PyBytes, PyDict, PyType};
+use pyo3::types::{PyBytes, PyDict, PyList, PyTuple, PyType};
 
 use wem_core::encoder::{EncodeResult as WemEncodeResult, Encoder as WemEncoder, Pcm16};
 use wem_core::error::EncoderError;
@@ -225,11 +225,27 @@ fn guard<T>(
 /// Content validation (rate/geometry/length) is left entirely to the
 /// kernel (`Pcm16::new` + `Encoder::encode_pcm`) so rejection conditions
 /// cannot drift.
+///
+/// The two forms are tried in that order, and when neither can be read the
+/// error the caller gets is the one for the form its argument was written in.
+/// A list or tuple *is* the row form — no buffer-protocol object is one — so
+/// its own extraction error, which names the element that cannot be a sample,
+/// is reported; the buffer error would describe a form the caller never used
+/// and send it looking in the wrong place.
 fn pcm_from_argument(sample_rate: i64, arg: &Bound<'_, PyAny>) -> PyResult<Pcm16> {
-    if let Ok(rows) = arg.extract::<Vec<Vec<i64>>>() {
-        return pcm_from_rows(sample_rate, rows);
+    match arg.extract::<Vec<Vec<i64>>>() {
+        Ok(rows) => pcm_from_rows(sample_rate, rows),
+        Err(row_error) => match pcm_from_memoryview(sample_rate, arg) {
+            Ok(pcm) => Ok(pcm),
+            Err(buffer_error) => {
+                if arg.is_instance_of::<PyList>() || arg.is_instance_of::<PyTuple>() {
+                    Err(row_error)
+                } else {
+                    Err(buffer_error)
+                }
+            }
+        },
     }
-    pcm_from_memoryview(sample_rate, arg)
 }
 
 fn pcm_from_rows(sample_rate: i64, rows: Vec<Vec<i64>>) -> PyResult<Pcm16> {
@@ -1294,6 +1310,89 @@ assert res.bytes_out == len(bytes(res.data))
                 None,
             )
             .expect("memoryview encode must be bit-exact");
+        });
+    }
+
+    /// The dispatch between the two documented PCM forms reports the error of
+    /// the form the argument was written in (`pcm_from_argument`).
+    ///
+    /// A list of per-channel rows with a bad element is a row-form mistake,
+    /// and the extraction error names the element. Reporting the buffer error
+    /// instead would tell the caller its argument is not a buffer — a form it
+    /// never used — and send it to fix the wrong thing.
+    #[test]
+    fn pcm_argument_failures_report_the_error_of_the_form_that_was_used() {
+        Python::with_gil(|py| {
+            // The sources vary per case, so the C strings are built here
+            // rather than through `c_str!` (which takes literals).
+            let eval = |source: &str| -> Bound<'_, PyAny> {
+                let code = std::ffi::CString::new(source).expect("source has no NUL");
+                py.eval(code.as_c_str(), None, None)
+                    .unwrap_or_else(|error| panic!("{source} evaluates: {error}"))
+            };
+
+            // Row form, bad element: the row error, naming the element.
+            for (source, element) in [
+                ("[[1, 2, 3], [4, 5, 'x']]", "'str'"),
+                ("[[1.5, 2.0, 3.0]]", "'float'"),
+                ("[[1, 2], [3, None]]", "'NoneType'"),
+            ] {
+                let argument = eval(source);
+                let error = pcm_from_argument(44_100, &argument)
+                    .expect_err("a bad element is not a sample");
+                let message = error.to_string();
+                assert!(
+                    !message.contains("memoryview") && !message.contains("bytes-like"),
+                    "{source}: the row error must reach the caller, not the buffer \
+                     error for a form it never used: {message}"
+                );
+                assert!(
+                    message.contains(element),
+                    "{source}: the error must name the offending element {element}: {message}"
+                );
+            }
+
+            // Buffer form: neither of these is a list, so the buffer
+            // diagnostics are the ones that belong to the argument.
+            let one_dimensional = eval("b'\\x00\\x00'");
+            let error = pcm_from_argument(44_100, &one_dimensional)
+                .expect_err("one-dimensional bytes is not a 2-D buffer");
+            assert!(
+                error.to_string().contains("must be 2-D"),
+                "the buffer form keeps its own diagnostic: {error}"
+            );
+
+            let not_a_buffer = eval("object()");
+            let error = pcm_from_argument(44_100, &not_a_buffer)
+                .expect_err("a plain object is neither form");
+            assert!(
+                !error.to_string().contains("must be 2-D"),
+                "a non-sequence must not be reported as a malformed buffer: {error}"
+            );
+
+            // Both accepted forms still reach the kernel: the valid row list
+            // builds, and so does the valid 2-D signed-16 buffer.
+            let rows = pcm_from_argument(44_100, &eval("[[0] * 4096] * 6"))
+                .expect("the documented row form still builds");
+            assert_eq!(rows.channel_count(), 6);
+            assert_eq!(rows.frame_count(), 4096);
+
+            let bytes = vec![0u8; 6 * 4096 * 2];
+            let globals = PyDict::new(py);
+            globals
+                .set_item("arg", pyo3::types::PyBytes::new(py, &bytes))
+                .unwrap();
+            let view = py
+                .eval(
+                    c_str!("memoryview(arg).cast('h', [6, 4096])"),
+                    None,
+                    Some(&globals),
+                )
+                .expect("the buffer form builds through memoryview");
+            let buffered =
+                pcm_from_argument(44_100, &view).expect("the documented buffer form still builds");
+            assert_eq!(buffered.channel_count(), 6);
+            assert_eq!(buffered.frame_count(), 4096);
         });
     }
 
