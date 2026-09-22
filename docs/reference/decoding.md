@@ -241,10 +241,24 @@ Recorded with their reasons so none is reopened without one.
   encoder's `Finish` follows.
 - **`decode` takes no `quality`.** Quality is an encoder input; the decoder
   reads whatever the bitstream says.
-- **Decode is not a CLI subcommand.** The CLI writes a WEM; exposing decode
-  there would have to choose a PCM output container and sample format, which is
-  a new surface rather than a mirror of an existing one. The package entry point
-  is the whole caller-facing decode surface today.
+- **Decode is a mode flag, not a CLI subcommand.** `wwise-wem INPUT.wem
+  --decode --output OUTPUT.wav`, the same flag with the same meaning in the Rust
+  binary and the Python console script. A `decode` subcommand would take the
+  argv slot a file named `decode` already occupies, which is the command line's
+  existing shape rather than a preference, and `tests/parity/test_cli_decode.py`
+  pins that such a file still encodes.
+- **The command line writes signed-16 PCM WAV.** This entry used to record that
+  decode was not on the command line at all, on the ground that exposing it
+  "would have to choose a PCM output container and sample format, which is a new
+  surface rather than a mirror of an existing one". That choice has been made:
+  uncompressed signed-16 PCM WAV, because the kernel's own WAV reader accepts
+  only that format, so a decode output feeds straight back into either CLI's
+  encode. The mapping is the repository's existing normative rule
+  (`sample_conversion.float_to_int16`), which is why the two front ends emit
+  identical bytes rather than merely similar ones. A refused decode writes
+  nothing at all — no file, no directory — and says how much of the declared
+  stream it left behind. The shape and the format are normative in
+  [`public-interface.md`](public-interface.md).
 
 ## What is established
 

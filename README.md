@@ -24,16 +24,19 @@ each, with the limits of it, is in
 There are two front ends over the same kernel, and neither needs the other.
 
 **The Rust binary** is standalone — no Python anywhere in the path — and is what
-the encode and decode examples link or drive:
+the encode and decode examples link or drive. It requires the `parallel` feature,
+which cargo names when it is missing: a scalar build does not carry a slower CLI,
+it carries no CLI at all (`crates/wem-core/Cargo.toml`, `required-features`).
 
 ```bash
-cargo build --release --manifest-path crates/Cargo.toml -p wem-core
+cargo build --release --manifest-path crates/Cargo.toml -p wem-core --features parallel
 ./crates/target/release/wwise-wem tests/fixtures/input.wav --output output.wem
 ```
 
-Add `--features parallel` to build the variant that uses the internal thread
-pool; the default is scalar, because a wheel's user cannot change a compile-time
-feature (see [Performance](#performance)).
+The wheel and the package build the same kernel with the feature **off**, because
+a wheel's user cannot change a compile-time feature: the library is scalar by
+default and the binary asks for the pool explicitly. What that costs and what it
+buys is measured in [Performance](#performance).
 
 **The Python package** carries the same kernel compiled in, plus the typed API
 and the decoder. A wheel needs nothing but Python 3.10+, and it is a
@@ -79,10 +82,13 @@ environment-variable lever are in
 ## Decode a file
 
 The decoder is in the C ABI ([`include/wem.h`](include/wem.h) section 5:
-`wem_decoder_new` → `push*` → `finish`), so every shell has it — the Rust crate,
-the PyO3 extension, and the wasm module. It opens on no selection at all,
-because the container describes itself, and hands back f32 samples at ±1.0 full
-scale, in bounded blocks:
+`wem_decoder_new` → `push*` → `finish`), so every surface has it — both command
+lines, the Rust crate, the PyO3 extension, the wasm module. It opens on no
+selection at all, because the container describes itself:
+
+```bash
+wwise-wem input.wem --decode --output output.wav      # signed-16 PCM WAV
+```
 
 ```python
 import wwise_wem
@@ -93,15 +99,18 @@ for block in result:                      # interleaved f32, up to 1024 frames e
     ...                                   # consume incrementally, or let it go
 ```
 
-The geometry is readable before the first block, so a decode that expands to
-gigabytes streams through bounded memory rather than buffering. What the surface
-refuses and with which class, and the streaming property itself, are in
-[`docs/reference/decoding.md`](docs/reference/decoding.md).
+The command line writes a WAV — the format the kernel's own reader accepts, so
+its output feeds back into either CLI's encode, and the two front ends emit
+identical bytes. The Python call hands back f32 samples at ±1.0 full scale in
+bounded blocks, and the geometry is readable before the first block, so a decode
+that expands to gigabytes streams through bounded memory rather than buffering.
+What the surface refuses and with which class, and the streaming property
+itself, are in [`docs/reference/decoding.md`](docs/reference/decoding.md).
 
-Three surfaces are still encode-only, and the decoder reaches none of them yet:
-the `wwise-wem` CLI, the runnable examples under [`examples/`](examples/README.md),
-and the hand-written JavaScript wrapper [`js/src/index.ts`](js/src/index.ts) —
-the wasm module itself exports the decoder, the wrapper does not re-export it.
+Every example under [`examples/`](examples/README.md) decodes too — one per
+language, all of them emitting the same raw f32 — and the JavaScript wrapper
+[`js/src/index.ts`](js/src/index.ts) carries the typed decode surface over the
+wasm module.
 
 ## Every other language
 
