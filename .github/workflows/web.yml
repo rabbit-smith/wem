@@ -23,7 +23,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - uses: wasm-pack/wasm-pack-action@v0.4.0
+      # `wasm-pack/wasm-pack-action` no longer exists (404), which failed this
+      # job at "Set up job" on every push while the other two workflows ran.
+      # This is the same action at the same version, under its current owner.
+      - uses: jetli/wasm-pack-action@v0.4.0
       - name: wasm32 check (threadless kernel + wasm shell)
         run: cd crates && cargo check -p wem-wasm --target wasm32-unknown-unknown
       - name: clippy (wasm target)
