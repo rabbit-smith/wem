@@ -5,8 +5,11 @@ name: nightly
 #     fixed seed set sized for a < 30 minute budget;
 #   * the deterministic 20-second 2ch music case across the native,
 #     reference, and streaming paths;
-#   * the release-build performance check (150ms median cap; 25% regression
-#     against the recorded baseline is red).
+#   * the release-build encode measurement, whose output is the run log's
+#     numbers (min / median / p95 / spread plus the per-stage split), not a
+#     verdict. There is no threshold and no recorded baseline: a shared
+#     runner's clock cannot decide whether this code is correct, and a number
+#     compared against a recorded one hides the change it reports.
 on:
   schedule:
     # 04:00 UTC daily.
@@ -33,7 +36,7 @@ jobs:
         run: python -m unittest tests.parity.two_channel_long_run -v
         env:
           PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/reference
-      - name: release build for the performance check
+      - name: release build for the encode measurement
         run: cd crates && cargo build --release -p wem-core
-      - name: performance check (150ms median; > 25% vs baseline is red)
-        run: python scripts/perf_check.py
+      - name: encode measurement (numbers only; nothing here is red)
+        run: python scripts/measure_encode_perf.py

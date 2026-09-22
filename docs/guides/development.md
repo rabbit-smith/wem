@@ -74,6 +74,15 @@ to fix the code or the test rather than to re-record the expectation.
 | `make wheel-smoke` | Installed-wheel inventory (facade + native engine, no profile data) and one real encode |
 | `make check` | All of the above plus `ruff`, `mypy` and `clippy` |
 
+One target is **not** a check: `python3 scripts/measure_encode_perf.py` measures
+the release build — the CLI stage timers and the kernel's per-stage split, each
+as min / median / p95 / spread with the machine identity — and never goes red.
+It has no threshold and no recorded baseline, because a number compared against
+a recorded one hides the change behind a re-record step
+([standards](../reference/standards.md#bit-exactness)). What it reported, and
+what the numbers show, is in
+[`../findings/encode-performance.md`](../findings/encode-performance.md).
+
 The same targets from the test tree's point of view — layer, command and run
 order — are in [`../../tests/AGENTS.md`](../../tests/AGENTS.md).
 

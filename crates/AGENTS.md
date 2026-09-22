@@ -29,9 +29,18 @@ and the shell-mapping rules. `crates/wem-capi` implements the header 1:1.
 ## Verification workflow per crate
 
 - `cargo test -p <crate>` scoped first; `--workspace` only at integration points.
-- Benchmarks: `wem-core` keeps a fixture-encode timer; the regression threshold
-  is documented next to the bench. Meeting it never means changing math order
+- **Measurements, not benchmarks with thresholds.** `wem-core` keeps the
+  fixture-encode measurement in `crates/wem-core/tests/stage_timings.rs`
+  (`#[ignore]`d; driven by `scripts/measure_encode_perf.py` with
+  `--ignored --nocapture`). It reports the per-stage split and asserts no
+  elapsed time. A threshold on a shared machine reports the machine, and a
+  recorded median compared against a run hides the change behind a re-record
+  step, so neither lives in a test here
   ([`../docs/reference/standards.md`](../docs/reference/standards.md#determinism)).
+  Meeting a number never means changing math order.
+- The harness may only read the public kernel API; instrumentation inside
+  shipping code is not how a stage gets timed (`std::time::Instant` around
+  calls that already exist, or a `#[cfg(test)]` seam).
 
 ## Git
 

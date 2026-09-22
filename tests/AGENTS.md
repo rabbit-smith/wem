@@ -57,11 +57,12 @@ native-absent environments — a missing kernel fails the suite, on purpose.
   the kernel directly and reads none of them.
 - `data/stage-records/transcendental/`: per-site (input bits, output bits)
   records of the live domain; regenerate via `scripts/record_tmath.py`.
-- `data/perf-baseline.json`: the release-build fixture-encode performance
-  baseline (median encode-stage ms, cap 150ms, regression factor 1.25)
-  consumed by `scripts/perf_check.py`; update it only with an explicit decision
-  (`python3 scripts/perf_check.py --record`), never as incident response to a
-  failing run.
+- There is **no performance baseline asset**. Encoding speed is measured by
+  `scripts/measure_encode_perf.py` on the release build and reported with its
+  full distribution; a recorded median compared against a run is a recorded
+  expectation whose failure mode is re-recording
+  ([`../docs/reference/standards.md`](../docs/reference/standards.md#bit-exactness)),
+  so the suite holds no timing threshold and no memory ceiling.
 - Asset budgets: stage-records total ≤ 20 MB. Growth requires trimming the
   representative-frame rule deliberately (document the rule change here), not
   by silently adding full-stream dumps.

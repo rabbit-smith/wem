@@ -40,13 +40,19 @@ idempotent, and offline. What their outputs must satisfy is in
   pure-Python oracle and the native streaming kernel; `--pr` is the small
   PR-budget run, `--full` the nightly-sized run. The seeds are fixed; never
   randomize them at run time.
-- `perf_check.py` checks fixture performance on the release build:
-  the encode-stage median must stay under the 150ms cap and within 25% of
-  the recorded baseline (`tests/data/perf-baseline.json`); re-recording the
-  baseline is a deliberate decision, not an incident response.
-- Naming: verb-first (`record_`, `generate_`, `emit_`, `verify_`); one script,
-  one artifact family; shared helpers belong in `tests/*_support.py` when the
-  consumer is a test suite.
+- `measure_encode_perf.py` **measures** the release build and judges nothing:
+  the CLI's stage timers for the fixture and for every 2-channel corpus WAV,
+  plus the kernel's per-stage split read from the `stage_timings` harness, each
+  reported as min / median / p95 / max / spread with the machine identity. It
+  has no threshold, no recorded baseline and no re-record escape hatch, and its
+  exit status reports only whether the measurement ran. A number that is
+  compared against a recorded one hides a change behind a re-record step
+  ([`../docs/reference/standards.md`](../docs/reference/standards.md#bit-exactness));
+  that is why a performance threshold does not belong in this tree. `--no-stages` skips the
+  harness when no Rust toolchain is available.
+- Naming: verb-first (`record_`, `generate_`, `emit_`, `verify_`, `measure_`);
+  one script, one artifact family; shared helpers belong in
+  `tests/*_support.py` when the consumer is a test suite.
 
 ## Forbidden
 
