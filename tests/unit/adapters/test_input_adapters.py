@@ -343,19 +343,16 @@ class RawPcmFormatTests(unittest.TestCase):
 
 # Boundary tests for the extended WAV reader (16/24-bit, float32).
 
-def _write_riff(path: Path, *, fmt_tag: int, channels: int, rate: int,
-                bits: int, data: bytes) -> None:
-    # One fixed layout: a 16-byte canonical PCM fmt chunk, then the data
-    # chunk.  Cases that need a different shape (a truncated fmt, no data
-    # chunk) write their bytes inline instead, so the RIFF size below is
-    # exactly this file's length by construction.
-    fmt_bytes = struct.pack(
-        "<HHIIHH", fmt_tag, channels, rate, rate * channels * bits // 8,
-        channels * bits // 8, bits,
-    )
+def _write_riff_fmt(path: Path, fmt_bytes: bytes, data: bytes) -> None:
+    # One fixed layout: the caller's fmt chunk payload, then the data chunk.
+    # Cases that need a different shape (a truncated fmt, no data chunk) write
+    # their bytes inline instead, so the RIFF size below is exactly this file's
+    # length by construction.  ``_write_riff`` is this with the canonical
+    # 16-byte PCM payload; the input contract's cases need the 40-byte
+    # extensible payload too.
     with open(path, "wb") as handle:
         handle.write(b"RIFF")
-        handle.write(struct.pack("<I", 36 + len(data)))
+        handle.write(struct.pack("<I", 20 + len(fmt_bytes) + len(data)))
         handle.write(b"WAVE")
         handle.write(b"fmt ")
         handle.write(struct.pack("<I", len(fmt_bytes)))
@@ -363,6 +360,20 @@ def _write_riff(path: Path, *, fmt_tag: int, channels: int, rate: int,
         handle.write(b"data")
         handle.write(struct.pack("<I", len(data)))
         handle.write(data)
+
+
+def _write_riff(path: Path, *, fmt_tag: int, channels: int, rate: int,
+                bits: int, data: bytes) -> None:
+    # The canonical 16-byte PCM fmt chunk: the shape every 16/24-bit and
+    # float32 file written by a tool with no extension to declare has.
+    _write_riff_fmt(
+        path,
+        struct.pack(
+            "<HHIIHH", fmt_tag, channels, rate, rate * channels * bits // 8,
+            channels * bits // 8, bits,
+        ),
+        data,
+    )
 
 
 class ReadPcmWavFormatTests(unittest.TestCase):
@@ -545,6 +556,228 @@ class ReadPcmWavRejectionTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "finite"):
             read_pcm_wav(path)
+
+
+# --------------------------------------------------------------------------
+# the WAV input contract: the accepted set, and every refusal
+# --------------------------------------------------------------------------
+
+# What a file may be is a table, and this is it.  The reader's gate is the
+# pair (format tag, sample width): tag 1 (PCM) at 16 or 24 bits, and tag 3
+# (IEEE float) at 32 bits.  The width must be a whole byte count, so the
+# accepted pairs are exactly (1, 2), (1, 3) and (3, 4) -- the three rows of
+# ``_ACCEPTED_WAV_FORMATS`` -- and ``_REFUSED_WAV_FORMATS`` holds the
+# neighbouring widths of each accepted tag plus one row per other tag family
+# that WAV defines.  The same three forms are what ``docs/guides/usage.md``
+# ("Preparing input") tells a caller to produce, so that list and this gate
+# cannot drift apart unnoticed: a row added, removed or reworded on either
+# side fails here.
+#
+# Each accepted row also names the rule its samples convert by, and those
+# rules are the repository's own -- no specification states a conversion
+# between PCM representations (see ``docs/findings/input-format-practice.md``,
+# N8).  All three live in ``adapters/sample_conversion.py``:
+#
+#   * 16-bit: the word is already the signed-16 value; the domain float is
+#     ``int16_to_domain_value`` (``value / 32768.0``), the expression the
+#     signed-16 path has always used;
+#   * 24-bit: ``sample24_to_int16`` -- round to nearest, ties away from zero
+#     (``(s + 128) >> 8`` for ``s >= 0``, ``-((-s + 128) >> 8)`` below), then
+#     saturate to ``[-32768, 32767]``;
+#   * float32: ``float_to_int16`` -- reject non-finite values, scale by
+#     ``32768.0``, round to nearest with ties away from zero, then saturate.
+#
+# A refused format leaves the reader as a bare ``ValueError``: it is raised at
+# the adapter boundary, before the kernel is reached, so it carries none of the
+# ``WwiseWemError`` codes (``FORMAT_UNSUPPORTED`` among them), and its message
+# names the three forms the reader accepts without naming the one it was
+# handed.  That is why each refused row carries its own (tag, width) rather
+# than a substring read back out of the error.
+
+_KSDATAFORMAT_SUBTYPE_PCM = bytes.fromhex("0100000000001000800000aa00389b71")
+_KSDATAFORMAT_SUBTYPE_IEEE_FLOAT = bytes.fromhex("0300000000001000800000aa00389b71")
+
+_WAV_FORMAT_REFUSAL = (
+    "encoder input WAV must be 16-bit PCM, 24-bit PCM, or 32-bit IEEE-float PCM"
+)
+_WAV_BITS_REFUSAL = "WAV bits per sample is not a whole byte count"
+
+
+def _wav_fmt_bytes(
+    format_tag: int,
+    bits: int,
+    *,
+    channels: int = 1,
+    rate: int = 44100,
+    extensible: bool = False,
+) -> bytes:
+    """One ``fmt `` chunk payload: canonical, or the extensible 40-byte form.
+
+    The extensible form is the same six fields under tag 0xFFFE plus a 22-byte
+    extension (valid bits, channel mask) and the 16-byte sub-format GUID the
+    tag's own meaning moved into.
+    """
+    block = channels * bits // 8
+    if not extensible:
+        return struct.pack(
+            "<HHIIHH", format_tag, channels, rate, rate * block, block, bits
+        )
+    sub_format = {
+        1: _KSDATAFORMAT_SUBTYPE_PCM,
+        3: _KSDATAFORMAT_SUBTYPE_IEEE_FLOAT,
+    }[format_tag]
+    return (
+        struct.pack("<HHIIHH", 0xFFFE, channels, rate, rate * block, block, bits)
+        + struct.pack("<HHI", 22, bits, 0)
+        + sub_format
+    )
+
+
+def _signed16_word(word: int) -> int:
+    """The 16-bit path's rule: the stored word is the signed-16 value."""
+    return word
+
+
+_SAMPLE_BYTES_BY_WIDTH = {
+    16: int16_le_bytes,
+    24: int24_le_bytes,
+    32: float32_le_bytes,
+}
+
+# (label, fmt chunk, sample width, the file's words, their signed-16 words,
+#  the conversion rule the two word lists are a case of)
+_ACCEPTED_WAV_FORMATS = (
+    (
+        "tag 1, 16-bit signed PCM",
+        _wav_fmt_bytes(1, 16),
+        16,
+        (0, 1, -1, 32767, -32768),
+        (0, 1, -1, 32767, -32768),
+        _signed16_word,
+    ),
+    (
+        "tag 1, 24-bit signed PCM",
+        _wav_fmt_bytes(1, 24),
+        24,
+        (0, 128, -128, 8388607, -8388608),
+        (0, 1, -1, 32767, -32768),
+        sample24_to_int16,
+    ),
+    (
+        "tag 3, 32-bit IEEE-float PCM",
+        _wav_fmt_bytes(3, 32),
+        32,
+        (0.0, 0.5, -0.5, 1.0, -1.0),
+        (0, 16384, -16384, 32767, -32768),
+        float_to_int16,
+    ),
+)
+
+# (label, fmt chunk, the message the reader refuses it with)
+_REFUSED_WAV_FORMATS = (
+    ("tag 1, 8-bit unsigned PCM", _wav_fmt_bytes(1, 8), _WAV_FORMAT_REFUSAL),
+    ("tag 1, 32-bit signed PCM", _wav_fmt_bytes(1, 32), _WAV_FORMAT_REFUSAL),
+    ("tag 3, 16-bit (a width IEEE float does not use)",
+     _wav_fmt_bytes(3, 16), _WAV_FORMAT_REFUSAL),
+    ("tag 3, 64-bit float", _wav_fmt_bytes(3, 64), _WAV_FORMAT_REFUSAL),
+    ("tag 2, ADPCM (4-bit samples)", _wav_fmt_bytes(2, 4), _WAV_BITS_REFUSAL),
+    ("tag 6, A-law", _wav_fmt_bytes(6, 8), _WAV_FORMAT_REFUSAL),
+    ("tag 7, mu-law", _wav_fmt_bytes(7, 8), _WAV_FORMAT_REFUSAL),
+    ("tag 0x0055, MPEG Layer-3", _wav_fmt_bytes(0x0055, 0), _WAV_FORMAT_REFUSAL),
+    ("tag 0xF1AC, FLAC", _wav_fmt_bytes(0xF1AC, 0), _WAV_FORMAT_REFUSAL),
+    (
+        "tag 0xFFFE, extensible, 16-bit PCM sub-format",
+        _wav_fmt_bytes(1, 16, extensible=True),
+        _WAV_FORMAT_REFUSAL,
+    ),
+    (
+        "tag 0xFFFE, extensible, 32-bit IEEE-float sub-format",
+        _wav_fmt_bytes(3, 32, extensible=True),
+        _WAV_FORMAT_REFUSAL,
+    ),
+    ("tag 1, 12-bit (not a whole byte count)", _wav_fmt_bytes(1, 12),
+     _WAV_BITS_REFUSAL),
+)
+
+
+class WavInputContractTests(unittest.TestCase):
+    """Which sample formats a WAV may hold, and what a refusal says."""
+
+    def _tmp(self, name: str) -> Path:
+        return Path(tempfile.mkdtemp()) / name
+
+    def test_accepted_formats_convert_by_their_named_rule(self):
+        for label, fmt_bytes, width, words, expected, rule in _ACCEPTED_WAV_FORMATS:
+            with self.subTest(format=label):
+                # The row's two word lists are a case of the rule it names: if
+                # the rule's arithmetic moves, the row moves with it and says
+                # so, rather than agreeing with whatever the reader does.
+                self.assertEqual(
+                    tuple(rule(word) for word in words),
+                    expected,
+                    f"{label}: the rule this row names must still produce these "
+                    "signed-16 words",
+                )
+                path = self._tmp("accepted.wav")
+                _write_riff_fmt(
+                    path, fmt_bytes, _SAMPLE_BYTES_BY_WIDTH[width](*words)
+                )
+                pcm = read_pcm_wav(path)
+                self.assertEqual(pcm.sample_rate, 44100, label)
+                self.assertEqual(pcm.channel_count, 1, label)
+                self.assertEqual(pcm.frame_count, len(words), label)
+                self.assertEqual(
+                    pcm.channels[0],
+                    tuple(int16_to_domain_value(word) for word in expected),
+                    f"{label}: the reader must convert by that rule and no other",
+                )
+
+    def test_refused_formats_are_refused_with_the_documented_message(self):
+        for label, fmt_bytes, message in _REFUSED_WAV_FORMATS:
+            with self.subTest(format=label):
+                path = self._tmp("refused.wav")
+                # The header alone decides, so the payload only has to exist.
+                _write_riff_fmt(path, fmt_bytes, b"\x00" * 16)
+                with self.assertRaises(ValueError) as raised:
+                    read_pcm_wav(path)
+                error = raised.exception
+                self.assertIs(
+                    type(error),
+                    ValueError,
+                    f"{label}: the refusal is the reader's own ValueError, "
+                    "raised before the kernel and carrying no error code",
+                )
+                self.assertEqual(str(error), message, label)
+
+    def test_wrappers_that_are_not_riff_wave_are_refused(self):
+        # The magic decides before anything inside it is read, so each case is
+        # only a four-byte wrapper name carrying a payload in its own byte
+        # order; the chunk layout behind an RF64 or RIFX file is never reached.
+        payload = _wav_fmt_bytes(1, 16)
+        for label, magic, order in (
+            ("RF64, the 64-bit broadcast wrapper", b"RF64", "<"),
+            ("RIFX, big-endian RIFF", b"RIFX", ">"),
+        ):
+            with self.subTest(wrapper=label):
+                path = self._tmp("wrapper.wav")
+                path.write_bytes(
+                    magic
+                    + struct.pack(f"{order}I", 36)
+                    + b"WAVEfmt "
+                    + struct.pack(f"{order}I", 16)
+                    + payload
+                    + b"data"
+                    + struct.pack(f"{order}I", 4)
+                    + b"\x00" * 4
+                )
+                with self.assertRaises(ValueError) as raised:
+                    read_pcm_wav(path)
+                self.assertIs(type(raised.exception), ValueError, label)
+                self.assertEqual(
+                    str(raised.exception),
+                    "encoder input must be a RIFF/WAVE file",
+                    label,
+                )
 
 
 if __name__ == "__main__":

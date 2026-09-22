@@ -72,6 +72,98 @@ deterministic and matches the reference implementation after conversion.
 Plain `bytes` are rejected: raw PCM geometry cannot be inferred safely. Every
 input needs at least 4096 frames.
 
+## Preparing input
+
+The byte-exact claim is stated for a RIFF/WAVE container holding one interleaved
+signed-16 stream at the geometry you are encoding for; the reader also converts
+signed 24-bit and float samples itself, by the rules in [Inputs](#inputs).
+Anything else — another wrapper, another sample representation, a compressed
+source, a source at another geometry — is converted before the library sees it,
+and that conversion is the caller's step: this library reads a file, it does not
+decode one.
+
+### What the reader accepts
+
+The sample representation is read from the `fmt ` chunk, never from the filename
+extension:
+
+| `fmt ` chunk | Read as |
+| --- | --- |
+| format tag 1, 16 bits per sample | signed 16-bit PCM, the form the byte-exact claim is stated for |
+| format tag 1, 24 bits per sample | signed 24-bit PCM, rounded to nearest with ties away from zero, then saturated (`adapters/sample_conversion.sample24_to_int16`) |
+| format tag 3, 32 bits per sample | 32-bit IEEE float PCM, scaled by 32768, rounded the same way, then saturated (`adapters/sample_conversion.float_to_int16`) |
+
+Those three and nothing else. 8-bit PCM, 32-bit integer PCM, 64-bit float,
+A-law, µ-law, ADPCM, and MPEG or Vorbis audio inside a WAV are each refused
+with a `ValueError` whose message names the three forms above. The `fmt ` chunk
+must also be the canonical 16-byte one: a `WAVE_FORMAT_EXTENSIBLE` header
+(format tag 0xFFFE) is refused even when its sub-format is signed 16-bit PCM,
+and that is the header `ffmpeg` writes for a source with more than two channels
+or integer samples wider than 16 bits — which is why the conversion below takes
+a different route for the six-channel profile.
+
+### Converting a source
+
+The two numbers in every command below are the selection's own channel count
+and sample rate: the pair a `WwiseProfile(version, channels, sample_rate)`
+carries, and the pair the [profile table](#profile-selection) lists (6 and
+44100, or 2 and 48000). A file whose geometry matches no installed
+configuration is refused, so take the numbers from the selection you are
+encoding for.
+
+`ffmpeg`, for a target it can write directly (run and verified with `ffmpeg`
+9.0.1 against the 2-channel 48 kHz profile):
+
+```bash
+ffmpeg -i input.mp3 -ac 2 -ar 48000 -c:a pcm_s16le output.wav
+```
+
+For the six-channel target `ffmpeg` writes the extensible header, so take the
+samples as raw signed-16 and wrap them — one conversion in two steps, the
+second being the standard library (run and verified for the 6-channel 44.1 kHz
+profile):
+
+```bash
+channels=6 rate=44100
+ffmpeg -i input.mp3 -f s16le -ac "$channels" -ar "$rate" - > output.pcm
+python3 - "$channels" "$rate" <<'PY'
+import sys, wave
+channels, rate = int(sys.argv[1]), int(sys.argv[2])
+with wave.open("output.wav", "wb") as target:
+    target.setnchannels(channels)
+    target.setsampwidth(2)
+    target.setframerate(rate)
+    target.writeframes(open("output.pcm", "rb").read())
+PY
+```
+
+On macOS, `afconvert` writes the canonical header itself for either geometry
+(run and verified with `afconvert` 2.0 against both profiles):
+
+```bash
+afconvert -f WAVE -d LEI16@44100 -c 6 input.mp3 output.wav
+```
+
+`-d LEI16@<rate>` is signed-16 little-endian at the selection's rate, `-c
+<channels>` is its channel count, and swapping the pair encodes the other
+profile. `afconvert` reproduces an extensible header when its own input carries
+one, so hand it the original source rather than a file `ffmpeg` wrote for the
+six-channel target.
+
+The `sox` form, `sox input.mp3 -c 6 -r 44100 -b 16 output.wav`, is
+**unverified**: `sox` was not installed on the machine these commands were run
+on, and nothing here is a tested statement about it.
+
+### The conversion is outside the claim
+
+**The conversion is the caller's step and is not part of what this repository
+claims; the claim begins at the signed-16 PCM.** A sample-rate conversion is
+implementation-defined rather than fixed — the one specification surveyed that
+owns a resampler declares it non-normative and allows any method
+([`../findings/input-format-practice.md`](../findings/input-format-practice.md),
+N5) — so a library that decoded or resampled on the caller's behalf would be
+handing over a claim it cannot keep.
+
 ## Profile selection
 
 | Selection | Wwise | PCM | Channels | Rate | Blocks |
