@@ -137,14 +137,11 @@ pub fn load_wem_parts_bytes(raw: &[u8]) -> Result<WemParts, ContainerError> {
 
     if tag == WWISE_VORBIS_FORMAT_TAG {
         let fmt = VorbisFmtFields::parse(fmt_payload)?;
+        // A payload the walk cannot consume is an error, not a walk with a
+        // flag on it: `?` is the whole handling, and the error already carries
+        // where the walk stopped and what it saw there.
         let walk: PacketWalk =
             extract_packets(&data_chunk.payload, fmt.dw_seek_table_size as usize, endian)?;
-        if !walk.ok {
-            return Err(ContainerError::PacketWalkFailed {
-                position: walk.error_at.unwrap_or(walk.end),
-                size: walk.error_size.unwrap_or(0),
-            });
-        }
         is_wwise_vorbis = true;
         setup_packet = walk.setup_packet().map(|p| p.to_vec());
         seek_table = walk.seek_table;
