@@ -1,6 +1,13 @@
 /*
  * wem.h — WEM encoder kernel: C ABI core surface.
  *
+ * SPDX-License-Identifier: MIT OR Apache-2.0
+ *
+ * This file is part of the Wwise WEM encoder and decoder, and is offered
+ * under the terms of the MIT licence or the Apache License, Version 2.0, at
+ * your option. The texts are LICENSE-MIT and LICENSE-APACHE at the
+ * repository root.
+ *
  * This header is the interface the language shells mirror: the C ABI of
  * the WEM encoder kernel. The Rust kernel (crates/) implements it; every
  * language binding (the PyO3 extension, Go cgo, a future wasm build, ...)

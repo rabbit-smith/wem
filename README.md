@@ -192,6 +192,25 @@ were repaired, and its own trust boundary. The longer encode memory study is in
 | [`docs/roadmap.md`](docs/roadmap.md) | What is still open |
 | [`docs/README.md`](docs/README.md) | The map of the whole set, findings and method included |
 
+## Licence, provenance and notices
+
+The project is offered under `MIT OR Apache-2.0`: the two texts are
+[`LICENSE-MIT`](LICENSE-MIT) and [`LICENSE-APACHE`](LICENSE-APACHE), and
+[`LICENSE`](LICENSE) points at both for tooling that looks for a singular file.
+Dual licensing is the Rust convention, and Apache-2.0 carries an express patent
+grant that MIT does not.
+
+- [`PROVENANCE.md`](PROVENANCE.md) — how the implementation was derived, what it
+  claims and what it does not.
+- [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) — the upstream sources the
+  codec behaviour and the static tables come from, and the licence each carries.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — the rules a contribution must satisfy,
+  including what must never enter the tree.
+
+Not affiliated with, authorised by, or endorsed by Audiokinetic Inc. "Wwise" is
+a trademark of Audiokinetic Inc., used here only to describe the formats this
+project interoperates with.
+
 ## Repository layout
 
 - **C ABI.** [`include/wem.h`](include/wem.h), implemented by `crates/wem-capi` —

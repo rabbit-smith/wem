@@ -54,6 +54,9 @@ at these documents instead of restating them.
 | [`findings/decode-concurrency-curves.md`](findings/decode-concurrency-curves.md) | Asking how many decodes this machine runs at once, where decode scaling stops, or what one concurrent decode costs in CPU and resident memory |
 | [`methodology/byte-exact-diagnosis.md`](methodology/byte-exact-diagnosis.md) | Chasing any byte difference against an external build |
 | [`roadmap.md`](roadmap.md) | Asking what is still open |
+| [`../PROVENANCE.md`](../PROVENANCE.md) | Asking how the implementation was derived, what it claims and what it does not, which artifact came from where, or what its relationship to Audiokinetic is |
+| [`../THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) | Asking which upstream source a part of the codec behaviour or a static table came from, under which licence, or what those notices do not cover |
+| [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | Making a contribution: the rules it must satisfy, including what must never enter the tree |
 
 ## How this tree is organized
 
