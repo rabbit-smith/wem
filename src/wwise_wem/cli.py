@@ -31,6 +31,7 @@ import sys
 from collections.abc import Iterable, Iterator
 from contextlib import closing
 from pathlib import Path
+from typing import NoReturn
 
 from . import WwiseProfile, WwiseVersion
 from .adapters.wav import read_pcm_wav
@@ -73,6 +74,19 @@ def _refuse_encoder_options(
         )
 
 
+def _refuse(error: ValueError, note: str) -> NoReturn:
+    """Report a refusal as one diagnostic line and a non-zero status.
+
+    Both directions refuse the same way: the reader's own ``ValueError``, a
+    source whose geometry no installed profile satisfies, and the kernel's —
+    ``WwiseWemError`` is a ``ValueError`` — become one line naming the problem
+    and exit ``1``, without a traceback, which is the shape the Rust command
+    line reports. ``note`` says what was left behind.
+    """
+    print(f"wwise-wem: {error}; nothing written: {note}", file=sys.stderr)
+    raise SystemExit(1)
+
+
 def _decode_to_wav(args: argparse.Namespace) -> None:
     """Decode ``args.wav`` (a WEM) into the signed-16 PCM WAV at ``args.output``.
 
@@ -105,9 +119,7 @@ def _decode_to_wav(args: argparse.Namespace) -> None:
             wav = pcm16_wav_bytes(channels, sample_rate, counted(result))
     except ValueError as error:
         # The kernel's refusal — ``WwiseWemError`` is a ``ValueError`` — and
-        # the sample mapping's own rejection arrive the same way: one
-        # diagnostic line and a non-zero status, without a traceback, which is
-        # the shape the Rust command line reports.
+        # the sample mapping's own rejection arrive the same way.
         if delivered:
             note = (
                 f"the session was refused after {delivered} of {declared} "
@@ -115,8 +127,7 @@ def _decode_to_wav(args: argparse.Namespace) -> None:
             )
         else:
             note = "the refusal came before any frame"
-        print(f"wwise-wem: {error}; nothing written: {note}", file=sys.stderr)
-        raise SystemExit(1)
+        _refuse(error, note)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(wav)
@@ -192,18 +203,27 @@ def main() -> None:
     channel_assertion = getattr(args, "channels", None)
     sample_rate_assertion = getattr(args, "sample_rate", None)
 
-    pcm = read_pcm_wav(args.wav)
-    if channel_assertion is not None and channel_assertion != pcm.channel_count:
-        parser.error(
-            f"--channels={channel_assertion} differs from WAV ({pcm.channel_count})"
-        )
-    if sample_rate_assertion is not None and sample_rate_assertion != pcm.sample_rate:
-        parser.error(
-            f"--sample-rate={sample_rate_assertion} differs from WAV ({pcm.sample_rate})"
-        )
+    try:
+        pcm = read_pcm_wav(args.wav)
+        if channel_assertion is not None and channel_assertion != pcm.channel_count:
+            parser.error(
+                f"--channels={channel_assertion} differs from WAV ({pcm.channel_count})"
+            )
+        if sample_rate_assertion is not None and sample_rate_assertion != pcm.sample_rate:
+            parser.error(
+                f"--sample-rate={sample_rate_assertion} differs from WAV ({pcm.sample_rate})"
+            )
 
-    selection = WwiseProfile(version, pcm.channel_count, pcm.sample_rate)
-    result = encode(pcm, profile=selection, quality=quality)
+        selection = WwiseProfile(version, pcm.channel_count, pcm.sample_rate)
+        result = encode(pcm, profile=selection, quality=quality)
+    except ValueError as error:
+        # The reader's refusal of a WAV it does not take — the common one, and
+        # the reason a caller needs the message rather than a traceback — is
+        # the same class as a source no installed profile satisfies and as the
+        # kernel's own refusals. All three leave as one diagnostic line, the
+        # way the decode path reports its own.
+        _refuse(error, str(args.output))
+
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(result.data)
     print(

@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import wave
 from pathlib import Path
 from unittest.mock import patch
 
@@ -53,6 +54,48 @@ class CliTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("differs from WAV", result.stderr)
         self.assertFalse(Path("unused.wem").exists())
+
+    def test_a_refused_wav_is_one_diagnostic_line_and_no_traceback(self) -> None:
+        # The encode path reads the WAV itself, so a file the reader does not
+        # take used to reach the interpreter as an uncaught exception. It is
+        # reported the way the decode path reports its own refusals: one line
+        # naming the problem, a non-zero status, no traceback, no output. An
+        # 8-bit PCM file is refused by the reader itself, with no patching, so
+        # this case exercises the real path end to end.
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "eight-bit.wav"
+            with wave.open(str(source), "wb") as target:
+                target.setnchannels(1)
+                target.setsampwidth(1)
+                target.setframerate(44100)
+                target.writeframes(b"\x80" * 8)
+            output = Path(directory) / "nested" / "output.wem"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "wwise_wem",
+                    str(source),
+                    "--output",
+                    str(output),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertNotIn("Traceback", result.stderr, "a refusal is not a crash")
+            lines = result.stderr.splitlines()
+            self.assertEqual(len(lines), 1, result.stderr)
+            self.assertIn(
+                "encoder input WAV must be 16-bit PCM, 24-bit PCM, or "
+                "32-bit IEEE-float PCM",
+                lines[0],
+            )
+            self.assertIn("got format tag 1 at 8 bits per sample", lines[0])
+            self.assertFalse(output.exists(), "a refused encode wrote a file")
+            self.assertFalse(
+                output.parent.exists(), "a refused encode made a directory"
+            )
 
     def test_cli_calls_typed_api_and_writes_result(self) -> None:
         result = _result()

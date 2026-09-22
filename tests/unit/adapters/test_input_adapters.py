@@ -565,13 +565,32 @@ class ReadPcmWavRejectionTests(unittest.TestCase):
 # What a file may be is a table, and this is it.  The reader's gate is the
 # pair (format tag, sample width): tag 1 (PCM) at 16 or 24 bits, and tag 3
 # (IEEE float) at 32 bits.  The width must be a whole byte count, so the
-# accepted pairs are exactly (1, 2), (1, 3) and (3, 4) -- the three rows of
-# ``_ACCEPTED_WAV_FORMATS`` -- and ``_REFUSED_WAV_FORMATS`` holds the
-# neighbouring widths of each accepted tag plus one row per other tag family
-# that WAV defines.  The same three forms are what ``docs/guides/usage.md``
+# accepted pairs are exactly (1, 2), (1, 3) and (3, 4) -- the three
+# representations of ``_ACCEPTED_WAV_FORMATS`` -- and ``_REFUSED_WAV_FORMATS``
+# holds the neighbouring widths of each accepted tag plus one row per other tag
+# family that WAV defines.  The same three forms are what ``docs/guides/usage.md``
 # ("Preparing input") tells a caller to produce, so that list and this gate
 # cannot drift apart unnoticed: a row added, removed or reworded on either
 # side fails here.
+#
+# A header may spell those representations two ways, and both are accepted
+# rows: the canonical 16-byte ``fmt `` chunk, which carries the tag directly,
+# and the 40-byte ``WAVE_FORMAT_EXTENSIBLE`` chunk, which carries it in the
+# sub-format GUID.  The extensible header is a wider *header*, not a wider set
+# of audio formats -- it is what a writer emits when the original header could
+# not name the representation, and ``ffmpeg`` emits it for more than two
+# channels or for integer samples wider than 16 bits.  Both spellings of a
+# representation must convert to the same signed-16 words, and a sub-format
+# this reader does not resolve is refused exactly as its tag would be, which
+# is what the extensible rows of ``_REFUSED_WAV_FORMATS`` pin.
+#
+# ``wValidBitsPerSample`` is refused unless it equals the container's width:
+# the samples would be left-aligned with the unused low bits zero-padded, and
+# the reader takes only full-width containers, so a padded one is reported with
+# its count instead of being read as if it were full-width.  ``dwChannelMask``
+# is read and ignored -- the reader's contract is interleaved samples in the
+# file's own order -- and the channel-mask case below pins that a mask changes
+# nothing about the words.
 #
 # Each accepted row also names the rule its samples convert by, and those
 # rules are the repository's own -- no specification states a conversion
@@ -589,18 +608,33 @@ class ReadPcmWavRejectionTests(unittest.TestCase):
 #
 # A refused format leaves the reader as a bare ``ValueError``: it is raised at
 # the adapter boundary, before the kernel is reached, so it carries none of the
-# ``WwiseWemError`` codes (``FORMAT_UNSUPPORTED`` among them), and its message
-# names the three forms the reader accepts without naming the one it was
-# handed.  That is why each refused row carries its own (tag, width) rather
-# than a substring read back out of the error.
+# ``WwiseWemError`` codes (``FORMAT_UNSUPPORTED`` among them).  Its message
+# names the three forms the reader accepts and then what it was handed -- the
+# tag and width it read, or the extensible sub-format, or the valid-bits count
+# -- so a caller can see which of the two the file actually is.  Every refused
+# row therefore spells its own ``got`` clause out and compares the whole
+# message, rather than matching a substring read back out of the error.
 
-_KSDATAFORMAT_SUBTYPE_PCM = bytes.fromhex("0100000000001000800000aa00389b71")
-_KSDATAFORMAT_SUBTYPE_IEEE_FLOAT = bytes.fromhex("0300000000001000800000aa00389b71")
+_KSDATAFORMAT_SUFFIX = bytes.fromhex("00001000800000aa00389b71")
+
+
+def _ksdataformat(format_tag: int) -> bytes:
+    """The KSDATAFORMAT sub-format GUID whose format tag is ``format_tag``."""
+    return struct.pack("<I", format_tag) + _KSDATAFORMAT_SUFFIX
+
+
+_VENDOR_SUB_FORMAT = bytes.fromhex("deadbeefcafe1000800000aa00389b71")
 
 _WAV_FORMAT_REFUSAL = (
     "encoder input WAV must be 16-bit PCM, 24-bit PCM, or 32-bit IEEE-float PCM"
 )
 _WAV_BITS_REFUSAL = "WAV bits per sample is not a whole byte count"
+_WAV_EXTENSIBLE_FMT_REFUSAL = "WAV extensible fmt chunk is malformed or truncated"
+
+
+def _refused_at(seen: str) -> str:
+    """The whole refusal message for a header the reader saw as ``seen``."""
+    return f"{_WAV_FORMAT_REFUSAL}; got {seen}"
 
 
 def _wav_fmt_bytes(
@@ -610,25 +644,31 @@ def _wav_fmt_bytes(
     channels: int = 1,
     rate: int = 44100,
     extensible: bool = False,
+    sub_format: bytes | None = None,
+    valid_bits: int | None = None,
+    channel_mask: int = 0,
 ) -> bytes:
     """One ``fmt `` chunk payload: canonical, or the extensible 40-byte form.
 
     The extensible form is the same six fields under tag 0xFFFE plus a 22-byte
     extension (valid bits, channel mask) and the 16-byte sub-format GUID the
-    tag's own meaning moved into.
+    tag's own meaning moved into.  ``format_tag`` is the tag the canonical
+    header would carry and selects the matching KSDATAFORMAT sub-format unless
+    ``sub_format`` names another one; ``valid_bits`` defaults to the container
+    width, the full-width case every accepted row is.
     """
     block = channels * bits // 8
     if not extensible:
         return struct.pack(
             "<HHIIHH", format_tag, channels, rate, rate * block, block, bits
         )
-    sub_format = {
-        1: _KSDATAFORMAT_SUBTYPE_PCM,
-        3: _KSDATAFORMAT_SUBTYPE_IEEE_FLOAT,
-    }[format_tag]
+    if sub_format is None:
+        sub_format = _ksdataformat(format_tag)
     return (
         struct.pack("<HHIIHH", 0xFFFE, channels, rate, rate * block, block, bits)
-        + struct.pack("<HHI", 22, bits, 0)
+        + struct.pack(
+            "<HHI", 22, bits if valid_bits is None else valid_bits, channel_mask
+        )
         + sub_format
     )
 
@@ -671,32 +711,116 @@ _ACCEPTED_WAV_FORMATS = (
         (0, 16384, -16384, 32767, -32768),
         float_to_int16,
     ),
-)
-
-# (label, fmt chunk, the message the reader refuses it with)
-_REFUSED_WAV_FORMATS = (
-    ("tag 1, 8-bit unsigned PCM", _wav_fmt_bytes(1, 8), _WAV_FORMAT_REFUSAL),
-    ("tag 1, 32-bit signed PCM", _wav_fmt_bytes(1, 32), _WAV_FORMAT_REFUSAL),
-    ("tag 3, 16-bit (a width IEEE float does not use)",
-     _wav_fmt_bytes(3, 16), _WAV_FORMAT_REFUSAL),
-    ("tag 3, 64-bit float", _wav_fmt_bytes(3, 64), _WAV_FORMAT_REFUSAL),
-    ("tag 2, ADPCM (4-bit samples)", _wav_fmt_bytes(2, 4), _WAV_BITS_REFUSAL),
-    ("tag 6, A-law", _wav_fmt_bytes(6, 8), _WAV_FORMAT_REFUSAL),
-    ("tag 7, mu-law", _wav_fmt_bytes(7, 8), _WAV_FORMAT_REFUSAL),
-    ("tag 0x0055, MPEG Layer-3", _wav_fmt_bytes(0x0055, 0), _WAV_FORMAT_REFUSAL),
-    ("tag 0xF1AC, FLAC", _wav_fmt_bytes(0xF1AC, 0), _WAV_FORMAT_REFUSAL),
     (
-        "tag 0xFFFE, extensible, 16-bit PCM sub-format",
+        "tag 0xFFFE, extensible, 16-bit signed PCM sub-format",
         _wav_fmt_bytes(1, 16, extensible=True),
-        _WAV_FORMAT_REFUSAL,
+        16,
+        (0, 1, -1, 32767, -32768),
+        (0, 1, -1, 32767, -32768),
+        _signed16_word,
+    ),
+    (
+        "tag 0xFFFE, extensible, 24-bit signed PCM sub-format",
+        _wav_fmt_bytes(1, 24, extensible=True),
+        24,
+        (0, 128, -128, 8388607, -8388608),
+        (0, 1, -1, 32767, -32768),
+        sample24_to_int16,
     ),
     (
         "tag 0xFFFE, extensible, 32-bit IEEE-float sub-format",
         _wav_fmt_bytes(3, 32, extensible=True),
-        _WAV_FORMAT_REFUSAL,
+        32,
+        (0.0, 0.5, -0.5, 1.0, -1.0),
+        (0, 16384, -16384, 32767, -32768),
+        float_to_int16,
     ),
+)
+
+# (label, fmt chunk, the message the reader refuses it with)
+_REFUSED_WAV_FORMATS = (
+    ("tag 1, 8-bit unsigned PCM", _wav_fmt_bytes(1, 8),
+     _refused_at("format tag 1 at 8 bits per sample")),
+    ("tag 1, 32-bit signed PCM", _wav_fmt_bytes(1, 32),
+     _refused_at("format tag 1 at 32 bits per sample")),
+    ("tag 3, 16-bit (a width IEEE float does not use)",
+     _wav_fmt_bytes(3, 16),
+     _refused_at("format tag 3 at 16 bits per sample")),
+    ("tag 3, 64-bit float", _wav_fmt_bytes(3, 64),
+     _refused_at("format tag 3 at 64 bits per sample")),
+    ("tag 2, ADPCM (4-bit samples)", _wav_fmt_bytes(2, 4), _WAV_BITS_REFUSAL),
+    ("tag 6, A-law", _wav_fmt_bytes(6, 8),
+     _refused_at("format tag 6 at 8 bits per sample")),
+    ("tag 7, mu-law", _wav_fmt_bytes(7, 8),
+     _refused_at("format tag 7 at 8 bits per sample")),
+    ("tag 0x0055, MPEG Layer-3", _wav_fmt_bytes(0x0055, 0),
+     _refused_at("format tag 85 at 0 bits per sample")),
+    ("tag 0xF1AC, FLAC", _wav_fmt_bytes(0xF1AC, 0),
+     _refused_at("format tag 61868 at 0 bits per sample")),
     ("tag 1, 12-bit (not a whole byte count)", _wav_fmt_bytes(1, 12),
      _WAV_BITS_REFUSAL),
+    # The same refusals under the extensible header: a sub-format this reader
+    # does not resolve is not a representation it takes, and which of the two
+    # header spellings named it changes only the message's ``got`` clause.
+    (
+        "tag 0xFFFE, extensible, 8-bit A-law sub-format",
+        _wav_fmt_bytes(6, 8, extensible=True),
+        _refused_at("WAVE_FORMAT_EXTENSIBLE sub-format tag 6 at 8 bits per sample"),
+    ),
+    (
+        "tag 0xFFFE, extensible, 8-bit mu-law sub-format",
+        _wav_fmt_bytes(7, 8, extensible=True),
+        _refused_at("WAVE_FORMAT_EXTENSIBLE sub-format tag 7 at 8 bits per sample"),
+    ),
+    (
+        "tag 0xFFFE, extensible, 4-bit ADPCM sub-format",
+        _wav_fmt_bytes(2, 4, extensible=True),
+        _WAV_BITS_REFUSAL,
+    ),
+    (
+        "tag 0xFFFE, extensible, 8-bit signed PCM sub-format",
+        _wav_fmt_bytes(1, 8, extensible=True),
+        _refused_at(
+            "WAVE_FORMAT_EXTENSIBLE sub-format tag 1 at 8 bits per sample"
+        ),
+    ),
+    (
+        "tag 0xFFFE, extensible, 32-bit signed PCM sub-format",
+        _wav_fmt_bytes(1, 32, extensible=True),
+        _refused_at(
+            "WAVE_FORMAT_EXTENSIBLE sub-format tag 1 at 32 bits per sample"
+        ),
+    ),
+    (
+        "tag 0xFFFE, extensible, 64-bit float sub-format",
+        _wav_fmt_bytes(3, 64, extensible=True),
+        _refused_at(
+            "WAVE_FORMAT_EXTENSIBLE sub-format tag 3 at 64 bits per sample"
+        ),
+    ),
+    (
+        "tag 0xFFFE, extensible, a vendor sub-format GUID",
+        _wav_fmt_bytes(1, 16, extensible=True, sub_format=_VENDOR_SUB_FORMAT),
+        _refused_at(
+            "WAVE_FORMAT_EXTENSIBLE sub-format "
+            "efbeadde-feca-0010-8000-00aa00389b71 at 16 bits per sample"
+        ),
+    ),
+    # The padded container: 20 valid bits left-aligned in 24, with the low four
+    # bits zero. Reading it as a full-width 24-bit container would be a fourth
+    # conversion rule, so it is refused with the count it saw.
+    (
+        "tag 0xFFFE, extensible, 20 valid bits in a 24-bit container",
+        _wav_fmt_bytes(1, 24, extensible=True, valid_bits=20),
+        _refused_at(
+            "WAVE_FORMAT_EXTENSIBLE wValidBitsPerSample=20 in a 24-bit container"
+        ),
+    ),
+    (
+        "tag 0xFFFE, extensible, fmt chunk shorter than the 40-byte layout",
+        _wav_fmt_bytes(1, 16, extensible=True)[:30],
+        _WAV_EXTENSIBLE_FMT_REFUSAL,
+    ),
 )
 
 
@@ -731,6 +855,43 @@ class WavInputContractTests(unittest.TestCase):
                     tuple(int16_to_domain_value(word) for word in expected),
                     f"{label}: the reader must convert by that rule and no other",
                 )
+
+    def test_extensible_channel_mask_changes_nothing_about_the_words(self):
+        # Six channels is the geometry this header exists for, and the mask is
+        # the one place it states a speaker order. The reader's contract is
+        # interleaved samples in the file's own order, so the words come back
+        # as written for any mask -- including one that names a different
+        # order, and including none.
+        channels = 6
+        words = tuple(
+            channel - 3 for _ in range(2) for channel in range(channels)
+        )
+        read = []
+        for channel_mask in (0x0000, 0x003F):
+            with self.subTest(channel_mask=channel_mask):
+                path = self._tmp("extensible6.wav")
+                _write_riff_fmt(
+                    path,
+                    _wav_fmt_bytes(
+                        1, 16, channels=channels, extensible=True,
+                        channel_mask=channel_mask,
+                    ),
+                    int16_le_bytes(*words),
+                )
+                pcm = read_pcm_wav(path)
+                self.assertEqual(pcm.channel_count, channels)
+                self.assertEqual(pcm.frame_count, 2)
+                self.assertEqual(
+                    pcm.channels,
+                    tuple(
+                        (int16_to_domain_value(channel - 3),) * 2
+                        for channel in range(channels)
+                    ),
+                    "the words keep their file order and are not regrouped by "
+                    "the mask",
+                )
+                read.append(pcm)
+        self.assertEqual(read[0], read[1], "a mask is read and not acted on")
 
     def test_refused_formats_are_refused_with_the_documented_message(self):
         for label, fmt_bytes, message in _REFUSED_WAV_FORMATS:

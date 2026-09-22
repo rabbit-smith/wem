@@ -85,22 +85,36 @@ decode one.
 ### What the reader accepts
 
 The sample representation is read from the `fmt ` chunk, never from the filename
-extension:
+extension. Two header shapes spell the same three representations: the canonical
+16-byte `fmt ` chunk carries the format tag directly, and the 40-byte
+`WAVE_FORMAT_EXTENSIBLE` one carries it in its sub-format GUID:
 
 | `fmt ` chunk | Read as |
 | --- | --- |
 | format tag 1, 16 bits per sample | signed 16-bit PCM, the form the byte-exact claim is stated for |
 | format tag 1, 24 bits per sample | signed 24-bit PCM, rounded to nearest with ties away from zero, then saturated (`adapters/sample_conversion.sample24_to_int16`) |
 | format tag 3, 32 bits per sample | 32-bit IEEE float PCM, scaled by 32768, rounded the same way, then saturated (`adapters/sample_conversion.float_to_int16`) |
+| format tag 0xFFFE, `KSDATAFORMAT_SUBTYPE_PCM` sub-format, 16 or 24 bits per sample | the first or the second row, by the width the header declares |
+| format tag 0xFFFE, `KSDATAFORMAT_SUBTYPE_IEEE_FLOAT` sub-format, 32 bits per sample | 32-bit IEEE float PCM, as the third row |
 
-Those three and nothing else. 8-bit PCM, 32-bit integer PCM, 64-bit float,
-A-law, µ-law, ADPCM, and MPEG or Vorbis audio inside a WAV are each refused
-with a `ValueError` whose message names the three forms above. The `fmt ` chunk
-must also be the canonical 16-byte one: a `WAVE_FORMAT_EXTENSIBLE` header
-(format tag 0xFFFE) is refused even when its sub-format is signed 16-bit PCM,
-and that is the header `ffmpeg` writes for a source with more than two channels
-or integer samples wider than 16 bits — which is why the conversion below takes
-a different route for the six-channel profile.
+Those three representations and nothing else, under either header. 8-bit PCM,
+32-bit integer PCM, 64-bit float, A-law, µ-law, ADPCM, and MPEG or Vorbis audio
+inside a WAV are each refused with a `ValueError` whose message names the three
+forms above and then what it read — the format tag and width, or the extensible
+sub-format. The extensible header is a wider *header*, not a wider set of audio
+formats: a sub-format GUID other than the two above is refused exactly as its
+tag would be, and so is one of the two above at a width this reader does not
+take.
+
+Two extension fields are handled explicitly. `wValidBitsPerSample` is refused
+unless it equals the container's width, which is the case that occurs in
+practice: fewer valid bits means the samples sit left-aligned with the unused
+low bits zero-padded, and the reader takes only full-width containers, so a
+padded one is reported with its count
+(`wValidBitsPerSample=20 in a 24-bit container`) rather than read as a
+full-width 24-bit one. `dwChannelMask` is read and not acted on: samples are
+read in the file's interleaved order, and nothing here checks that order against
+the mask.
 
 ### Converting a source
 
@@ -111,31 +125,23 @@ carries, and the pair the [profile table](#profile-selection) lists (6 and
 configuration is refused, so take the numbers from the selection you are
 encoding for.
 
-`ffmpeg`, for a target it can write directly (run and verified with `ffmpeg`
-9.0.1 against the 2-channel 48 kHz profile):
+`ffmpeg`, one command for either target (run and verified with `ffmpeg` 9.0.1
+against both profiles):
 
 ```bash
+ffmpeg -i input.mp3 -ac 6 -ar 44100 -c:a pcm_s16le output.wav
 ffmpeg -i input.mp3 -ac 2 -ar 48000 -c:a pcm_s16le output.wav
 ```
 
-For the six-channel target `ffmpeg` writes the extensible header, so take the
-samples as raw signed-16 and wrap them — one conversion in two steps, the
-second being the standard library (run and verified for the 6-channel 44.1 kHz
-profile):
-
-```bash
-channels=6 rate=44100
-ffmpeg -i input.mp3 -f s16le -ac "$channels" -ar "$rate" - > output.pcm
-python3 - "$channels" "$rate" <<'PY'
-import sys, wave
-channels, rate = int(sys.argv[1]), int(sys.argv[2])
-with wave.open("output.wav", "wb") as target:
-    target.setnchannels(channels)
-    target.setsampwidth(2)
-    target.setframerate(rate)
-    target.writeframes(open("output.pcm", "rb").read())
-PY
-```
+For more than two channels, or for integer samples wider than 16 bits, `ffmpeg`
+writes the extensible header: the six-channel command above produced a 40-byte
+`fmt ` chunk under format tag 0xFFFE, with `wValidBitsPerSample=16` and a
+`KSDATAFORMAT_SUBTYPE_PCM` sub-format, and `-c:a pcm_s24le` produced the same
+header at 24 bits per sample — which the reader converts by the 24-bit rule
+above. The reader takes that header, and the samples behind it convert by the
+same rule as before — the six-channel file encoded to the same 4032 bytes as
+the same samples rewrapped in a canonical 16-byte header, so this one command
+is the whole procedure for either profile.
 
 On macOS, `afconvert` writes the canonical header itself for either geometry
 (run and verified with `afconvert` 2.0 against both profiles):
@@ -147,8 +153,8 @@ afconvert -f WAVE -d LEI16@44100 -c 6 input.mp3 output.wav
 `-d LEI16@<rate>` is signed-16 little-endian at the selection's rate, `-c
 <channels>` is its channel count, and swapping the pair encodes the other
 profile. `afconvert` reproduces an extensible header when its own input carries
-one, so hand it the original source rather than a file `ffmpeg` wrote for the
-six-channel target.
+one, which the reader takes like any other extensible file, so the source it is
+handed no longer decides whether its output can be read.
 
 The `sox` form, `sox input.mp3 -c 6 -r 44100 -b 16 output.wav`, is
 **unverified**: `sox` was not installed on the machine these commands were run
