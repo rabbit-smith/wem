@@ -726,6 +726,12 @@ fn decode_step_object(step: DecodeStep) -> JsValue {
     JsValue::from(obj)
 }
 
+/// Whether the step's PCM can be split into complete interleaved frames.
+fn decode_step_pcm_is_valid(step: &DecodeStep) -> bool {
+    step.pcm.is_empty()
+        || (step.channels != 0 && step.pcm.len().is_multiple_of(step.channels as usize))
+}
+
 /// One streaming decode session (the wasm mirror of `wem_decoder_new` /
 /// `wem_decoder_push` / `wem_decoder_finish`; single-threaded ownership,
 /// matching the C ABI surface).
@@ -828,14 +834,15 @@ impl WemDecoder {
                 return Err(js_error(WEM_ERR_INTERNAL, &error.to_string()));
             }
         }
-        if !step.pcm.is_empty() && step.channels == 0 {
-            // PCM without a geometry cannot be interpreted, and handing it over
-            // under a guessed interleave would be worse than the invariant
-            // (the C ABI's `deliver_decode_step` refuses it too).
+        if !decode_step_pcm_is_valid(&step) {
+            // PCM without whole-frame geometry cannot be interpreted, and
+            // handing it over under a guessed interleave would be worse than
+            // reporting the invariant (the C ABI's `deliver_decode_step`
+            // refuses it too).
             self.failed = true;
             return Err(js_error(
                 WEM_ERR_INTERNAL,
-                "kernel defect: a decode step delivered PCM without a geometry",
+                "kernel defect: a decode step delivered PCM without whole-frame geometry",
             ));
         }
         Ok(decode_step_object(step))
@@ -946,6 +953,22 @@ mod tests {
             ),
         ] {
             assert_eq!(decoder_error_code(&error), code, "{error}");
+        }
+    }
+
+    #[test]
+    fn incomplete_injected_decode_pcm_is_rejected() {
+        for (pcm, channels) in [(vec![0.0], 0), (vec![0.0, 1.0, 2.0], 2)] {
+            let step = DecodeStep {
+                header: None,
+                pcm,
+                channels,
+                outcome: Ok(()),
+            };
+            assert!(
+                !decode_step_pcm_is_valid(&step),
+                "PCM must have nonzero geometry and a whole number of frames"
+            );
         }
     }
 

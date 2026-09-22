@@ -942,6 +942,10 @@ pub struct WemDecoder {
 /// it left behind is not something a caller may build on, so its output is
 /// not delivered and the handle is terminal.
 fn deliver_decode_step(state: &mut WemDecoder, step: DecodeStep) -> WemError {
+    if !decode_step_pcm_is_valid(&step) {
+        state.failed = true;
+        return WemError::Internal;
+    }
     let defect = matches!(&step.outcome, Err(DecoderError::Internal(_)));
     if !defect {
         if let Some(header) = step.header.as_ref() {
@@ -961,12 +965,6 @@ fn deliver_decode_step(state: &mut WemDecoder, step: DecodeStep) -> WemError {
             }
         }
         if !step.pcm.is_empty() {
-            if step.channels == 0 {
-                // PCM without a geometry cannot be delivered, and delivering
-                // it wrongly would be worse than reporting the invariant.
-                state.failed = true;
-                return WemError::Internal;
-            }
             let channels = step.channels as usize;
             let frames = step.pcm.len() / channels;
             let mut offset = 0usize;
@@ -997,6 +995,12 @@ fn deliver_decode_step(state: &mut WemDecoder, step: DecodeStep) -> WemError {
             code
         }
     }
+}
+
+/// Whether the step's PCM can be split into complete interleaved frames.
+fn decode_step_pcm_is_valid(step: &DecodeStep) -> bool {
+    step.pcm.is_empty()
+        || (step.channels != 0 && step.pcm.len().is_multiple_of(step.channels as usize))
 }
 
 /// Open a streaming decode session (include/wem.h `wem_decoder_new`).
@@ -1170,6 +1174,42 @@ pub unsafe extern "C" fn wem_decoder_free(decoder: *mut WemDecoder) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
+
+    #[derive(Default)]
+    struct DecodeCallbackCounts {
+        header: AtomicUsize,
+        pcm: AtomicUsize,
+    }
+
+    unsafe extern "C" fn count_header(
+        _channels: u32,
+        _sample_rate: u32,
+        _total_frames: u64,
+        _setup: *const u8,
+        _setup_len: usize,
+        user_data: *mut c_void,
+    ) -> WemError {
+        unsafe {
+            (*user_data.cast::<DecodeCallbackCounts>())
+                .header
+                .fetch_add(1, Ordering::SeqCst);
+        }
+        WemError::Ok
+    }
+
+    unsafe extern "C" fn count_pcm(
+        _interleaved: *const f32,
+        _frames: usize,
+        user_data: *mut c_void,
+    ) -> WemError {
+        unsafe {
+            (*user_data.cast::<DecodeCallbackCounts>())
+                .pcm
+                .fetch_add(1, Ordering::SeqCst);
+        }
+        WemError::Ok
+    }
 
     #[test]
     fn error_codes_follow_the_wem_h_table() {
@@ -1181,6 +1221,37 @@ mod tests {
         assert_eq!(WemError::FormatUnsupported as u32, 5);
         assert_eq!(WemError::Internal as u32, 6);
         assert_eq!(WemError::InputMalformed as u32, 7);
+    }
+
+    #[test]
+    fn decode_delivery_rejects_incomplete_injected_pcm_without_callbacks() {
+        for (pcm, channels) in [(vec![0.0], 0), (vec![0.0, 1.0, 2.0], 2)] {
+            let counts = DecodeCallbackCounts::default();
+            let mut decoder = WemDecoder {
+                session: DecodeSession::new(),
+                header_cb: count_header,
+                pcm_cb: count_pcm,
+                user_data: (&counts as *const DecodeCallbackCounts).cast_mut().cast(),
+                failed: false,
+            };
+            let step = DecodeStep {
+                header: Some(wem_core::decoder::DecodedHeader {
+                    channels: 2,
+                    sample_rate: 48_000,
+                    total_frames: 1,
+                    setup_packet: vec![1],
+                }),
+                pcm,
+                channels,
+                outcome: Ok(()),
+            };
+
+            assert!(!decode_step_pcm_is_valid(&step));
+            assert_eq!(deliver_decode_step(&mut decoder, step), WemError::Internal);
+            assert!(decoder.failed, "the defect kills the decoder handle");
+            assert_eq!(counts.header.load(Ordering::SeqCst), 0);
+            assert_eq!(counts.pcm.load(Ordering::SeqCst), 0);
+        }
     }
 
     /// Every `DecoderError` class maps to the code include/wem.h section 5

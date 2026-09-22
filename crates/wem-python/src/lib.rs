@@ -995,11 +995,13 @@ impl PyDecoder {
             self.dead = true;
         }
         let step = guarded.outcome?;
-        if let Some(header) = step.header.as_ref() {
-            self.total_frames = Some(header.total_frames);
-        }
         match decode_step(py, step) {
-            Ok(py_step) => Ok(py_step),
+            Ok(py_step) => {
+                if let Some(header) = py_step.header.as_ref() {
+                    self.total_frames = Some(header.total_frames);
+                }
+                Ok(py_step)
+            }
             Err(error) => {
                 // The step's own output was undeliverable, or it carried a
                 // defect: the C ABI reports the same situations as
@@ -1101,18 +1103,15 @@ impl PyDecoder {
 /// build on.
 fn decode_step(py: Python<'_>, step: WemDecodeStep) -> PyResult<PyDecodeStep> {
     let channels = step.channels as usize;
+    if !decode_step_pcm_is_valid(&step) {
+        return Err(error_with_code(
+            CODE_INTERNAL,
+            "kernel defect: a decode step delivered PCM without whole-frame geometry".to_string(),
+        ));
+    }
     let frames = step.frames();
     let mut blocks: Vec<Vec<f32>> = Vec::new();
     if !step.pcm.is_empty() {
-        if channels == 0 {
-            // PCM without a geometry cannot be interpreted, and delivering it
-            // under a guessed interleave would be worse than reporting the
-            // invariant (the C ABI's `deliver_decode_step` refuses it too).
-            return Err(error_with_code(
-                CODE_INTERNAL,
-                "kernel defect: a decode step delivered PCM without a geometry".to_string(),
-            ));
-        }
         let mut offset = 0usize;
         while offset < frames {
             let block = (frames - offset).min(PCM_BLOCK_FRAMES);
@@ -1140,6 +1139,12 @@ fn decode_step(py: Python<'_>, step: WemDecodeStep) -> PyResult<PyDecodeStep> {
         frames,
         error,
     })
+}
+
+/// Whether the step's PCM can be split into complete interleaved frames.
+fn decode_step_pcm_is_valid(step: &WemDecodeStep) -> bool {
+    step.pcm.is_empty()
+        || (step.channels != 0 && step.pcm.len().is_multiple_of(step.channels as usize))
 }
 
 // ---------------------------------------------------------------------------
@@ -2665,6 +2670,47 @@ assert result.channels == 6, result.channels
             let (_, blocks, producing_steps) = decode_through_shell(py, &m, &wem, 8192);
             assert!(producing_steps > 1, "the stream is delivered in steps");
             assert!(!blocks.is_empty(), "the decode produced PCM");
+        });
+    }
+
+    #[test]
+    fn decoder_rejects_incomplete_injected_pcm_as_terminal_internal() {
+        Python::with_gil(|py| {
+            for (pcm, channels) in [(vec![0.0], 0), (vec![0.0, 1.0, 2.0], 2)] {
+                let step = WemDecodeStep {
+                    header: Some(DecodedHeader {
+                        channels: 2,
+                        sample_rate: 48_000,
+                        total_frames: 1,
+                        setup_packet: vec![1],
+                    }),
+                    pcm,
+                    channels,
+                    outcome: Ok(()),
+                };
+                assert!(!decode_step_pcm_is_valid(&step));
+
+                let mut decoder = PyDecoder::new();
+                let error = match decoder.settle(
+                    py,
+                    Guarded {
+                        outcome: Ok(step),
+                        handle_dead: false,
+                    },
+                ) {
+                    Ok(_) => panic!("incomplete PCM is a shell invariant defect"),
+                    Err(error) => error,
+                };
+                assert_eq!(code_attribute(py, &error), CODE_INTERNAL);
+                assert!(decoder.dead, "the defect kills the decoder handle");
+                assert_eq!(decoder.total_frames, None, "the defect announces no header");
+
+                let error = match decoder.push(py, &PyBytes::new(py, b"")) {
+                    Ok(_) => panic!("a killed decoder is not reusable"),
+                    Err(error) => error,
+                };
+                assert_eq!(code_attribute(py, &error), CODE_STATE_ERROR);
+            }
         });
     }
 }
