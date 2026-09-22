@@ -859,12 +859,20 @@ pub unsafe extern "C" fn wem_session_free(session: *mut WemSession) {
 // Decode surface (include/wem.h section 5)
 // ---------------------------------------------------------------------------
 
-/// Callback that receives the one-time header announcement: the PCM geometry
-/// and the setup packet this revision parsed. The pointers are valid only
-/// during the call. A non-`WEM_OK` return aborts the decode.
+/// Callback that receives the one-time header announcement: the PCM geometry,
+/// the frame count the container declares, and the setup packet this revision
+/// parsed. The pointers are valid only during the call. A non-`WEM_OK` return
+/// aborts the decode.
+///
+/// `total_frames` is announced here rather than left to the caller because the
+/// alternative is that every shell locates the container's `fmt` chunk and
+/// reads one field itself, which is container layout knowledge in a layer the
+/// integration topology keeps free of it. It is the same number the session
+/// will deliver if it finishes with `WEM_OK`.
 pub type WemHeaderFn = unsafe extern "C" fn(
     channels: u32,
     sample_rate: u32,
+    total_frames: u64,
     setup: *const u8,
     setup_len: usize,
     user_data: *mut c_void,
@@ -915,6 +923,7 @@ fn deliver_decode_step(state: &mut WemDecoder, step: DecodeStep) -> WemError {
                 (state.header_cb)(
                     header.channels,
                     header.sample_rate,
+                    header.total_frames,
                     header.setup_packet.as_ptr(),
                     header.setup_packet.len(),
                     state.user_data,
