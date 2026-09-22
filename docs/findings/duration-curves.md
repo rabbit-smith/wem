@@ -597,11 +597,13 @@ are measurement tools. `git status` on the lane's tree shows exactly the five
 deliverables plus `scripts/AGENTS.md`, and `corpus/` is untouched. Byte
 exactness was re-established on the final tree (tails in the lane report):
 
-Every command below was re-pointed on 2026-09-22 at the target and module names
-the test consolidation gave them, and each one still selects what its result
-column records. The workspace row is the exception: the consolidation merged 40
-targets into 27, so a selection preserving its counts no longer exists and its
-numbers are re-taken on today's tree (283 passed / 18 ignored were that tree's).
+Every command below was re-pointed at the target and module names the test
+consolidation gave them on 2026-09-22, and the ones that named a Makefile target
+were re-pointed again when `make test` became the single verdict; each one still
+selects what its result column records. Two rows are the exceptions, because no
+invocation reproduces their numbers on today's tree — the workspace row (the
+consolidation merged 40 targets into 27) and `make test-fast` (its three
+discovery runs have grown with the tree) — and both say so in the row.
 
 | check | result |
 | --- | --- |
@@ -610,7 +612,7 @@ numbers are re-taken on today's tree (283 passed / 18 ignored were that tree's).
 | `cargo test -p wem-core --test frame_pipeline_parity` (with `PYTHON` set to the shared venv's interpreter) | 1 passed, 0 failed, 35.29 s |
 | `cargo test -p wem-vorbis --test vorbis_codec oracle_values` | 9 passed, 0 failed |
 | `cargo test --workspace --all-targets --no-fail-fast` | exit 0: 27 targets, 315 passed, 0 failed, 19 ignored (re-taken; 40/283/18 on the tree this lane measured) |
-| `make test-fast` | 104 tests, OK |
+| `make test-fast` | 420 tests, OK (re-taken on the merged tree: 250 unit + 48 integration + 122 parity; the 104 this row carried no longer described what the target runs) |
 | `python3 scripts/fuzz_diff_parity.py --pr` | exit 0 |
 | `python3 -m unittest tests.parity.test_2ch_corpus.TwoChannelStressCorpusTests -v` | 1 test, OK |
 | `make 2ch-long` | 1 test, OK |
