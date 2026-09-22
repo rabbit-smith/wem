@@ -608,10 +608,22 @@ pub fn apply_synthesis_window_in_place(
 /// The window needs the *following* block's size, so a streaming caller pushes
 /// block `k` once packet `k + 1` has been parsed, and the last block at
 /// [`SynthesisOla::finish`].
+///
+/// The timeline accumulator is a **sliding window**, not the whole timeline: a
+/// block's window support reaches back only to the previous block's centre, so
+/// everything below that is final and — once handed to the caller — released
+/// by the next [`SynthesisOla::push`] (see `SynthesisOla::release`). A live state
+/// therefore holds a few blocks' worth of samples, whatever the stream's
+/// length; the samples it hands out are the caller's to keep.
 pub struct SynthesisOla {
     blocksizes: [i64; 2],
-    /// Timeline accumulator: `samples[i]` is timeline position `i`.
+    /// The retained timeline window: `samples[i]` is timeline position
+    /// `start + i`, and `start` only moves forward.
     samples: Vec<f64>,
+    /// Timeline position of `samples[0]` — how much of the front has been
+    /// released. The stream coordinate is `timeline - start`, so this is what
+    /// every index in this type subtracts.
+    start: usize,
     /// Lead-in length, `blocksizes[1] / 2`. A block's *centre* is
     /// `base + origin` whatever its size, which is why the planner's cursor
     /// sits there.
@@ -622,7 +634,9 @@ pub struct SynthesisOla {
     /// extent is measured from. Its own start is `base + origin - n/2`, so a
     /// long block following a short one starts *before* it.
     base: usize,
-    /// Final PCM samples handed out so far.
+    /// PCM samples finalized so far: a count, not a position, and monotone.
+    /// What the window still holds of that prefix is [`SynthesisOla::pcm`];
+    /// the rest has been released.
     completed: usize,
     /// Timeline position just past the last block's window support.
     support_end: usize,
@@ -645,6 +659,7 @@ impl SynthesisOla {
         Ok(Self {
             blocksizes: [blocksizes[0], blocksizes[1]],
             samples: vec![0.0f64; origin],
+            start: 0,
             origin,
             previous: 0,
             base: 0,
@@ -661,10 +676,66 @@ impl SynthesisOla {
         Ok((self.base + self.origin) as i64 - n / 2)
     }
 
-    /// The PCM samples synthesized so far that are final: every block that
-    /// reaches them has been pushed. Index `i` is PCM sample `i`.
+    /// The finalized PCM samples this state still retains: every block that
+    /// reaches them has been pushed, and sample `i` of the returned slice is
+    /// PCM sample `i + pcm_from()`.
+    ///
+    /// The window's front is released — the next [`SynthesisOla::push`] drops
+    /// what no later block can reach and what the caller has already been
+    /// handed — so a caller that keeps PCM past the call that released it must
+    /// copy it out of that call's return value rather than index this slice
+    /// later. What never moves is the *end*: the most recent samples are always
+    /// the last elements, and [`SynthesisOla::pcm_from`] is the absolute
+    /// coordinate that makes the window readable.
     pub fn pcm(&self) -> &[f64] {
-        &self.samples[self.origin..self.origin + self.completed]
+        let begin = self.origin.saturating_sub(self.start);
+        let end = self.origin + self.completed - self.start;
+        &self.samples[begin..end]
+    }
+
+    /// The PCM index of [`SynthesisOla::pcm`]'s first sample: the absolute
+    /// coordinate the retained window starts at, for a caller that reads the
+    /// window rather than the call that released it. Monotone, and only ever
+    /// moved by a release the caller has already been handed.
+    pub fn pcm_from(&self) -> usize {
+        self.start.saturating_sub(self.origin)
+    }
+
+    /// One past the last PCM sample [`SynthesisOla::pcm`] holds: how many
+    /// samples of the stream are final. Monotone, independent of how much of
+    /// the front has been released, and
+    /// `pcm_end() - pcm_from() == pcm().len()`.
+    pub fn pcm_end(&self) -> usize {
+        self.completed
+    }
+
+    /// Release the front of the retained window: everything below `keep` is
+    /// dead. Called once per push, before the new block is written.
+    ///
+    /// Two bounds, both monotone, and neither of them a recorded number:
+    ///
+    /// * **No block writes below `base`.** A block's first touched sample is
+    ///   `base + origin - n/2`, and `n <= blocksizes[1] = 2 * origin`, so it is
+    ///   at or after the `base` of the push it happens on; `base` only grows.
+    ///   This is the bound that has to be used — the *position* is not
+    ///   monotone, because a long block following a short one starts before it
+    ///   (that is what the planner's `(n + following) / 4` advance is for).
+    /// * **Nothing below the finalized frontier is read again.** `completed`
+    ///   only grows and [`SynthesisOla::pcm`] hands out `[pcm_from, pcm_end)`,
+    ///   so the caller has had everything below `pcm_end` since the call that
+    ///   finalized it — which is why a caller reads those samples out of
+    ///   `push`'s return value rather than off a timeline that is not kept.
+    ///
+    /// Between the two bounds the window holds at most one long block's worth
+    /// of samples (`end - keep <= blocksizes[1]`), however long the stream is;
+    /// `crates/wem-core/tests/decode_memory.rs` measures that on a live
+    /// session rather than trusting the arithmetic here.
+    fn release(&mut self) {
+        let keep = self.base.min(self.origin + self.completed);
+        if keep > self.start {
+            self.samples.drain(..keep - self.start);
+            self.start = keep;
+        }
     }
 
     /// Inverse-transform, window and overlap-add one block, and return the
@@ -677,8 +748,8 @@ impl SynthesisOla {
     /// Every later block's first touched sample is at or after this block's
     /// centre — a block zeroes everything before its left span, and that span
     /// begins exactly at the previous block's centre — so the samples below
-    /// that centre are final once this returns. The returned slice is a prefix
-    /// of [`SynthesisOla::pcm`] that no later push rewrites.
+    /// that centre are final once this returns. The returned slice is the tail
+    /// of [`SynthesisOla::pcm`], and no later push rewrites any element of it.
     pub fn push(
         &mut self,
         look: &MdctLook,
@@ -708,11 +779,12 @@ impl SynthesisOla {
 
         let position = self.base + self.origin - (n / 2) as usize;
         let end = position + n as usize;
-        if self.samples.len() < end {
-            self.samples.resize(end, 0.0f64);
+        self.release();
+        if self.start + self.samples.len() < end {
+            self.samples.resize(end - self.start, 0.0f64);
         }
         for (offset, value) in block.iter().enumerate() {
-            let slot = position + offset;
+            let slot = position + offset - self.start;
             self.samples[slot] = f32_of(self.samples[slot] + *value);
         }
 
@@ -724,7 +796,7 @@ impl SynthesisOla {
         self.support_end = position + spans.right_end as usize;
         self.previous = current;
         self.base += ((n + following_size) / 4) as usize;
-        Ok(&self.pcm()[before..])
+        Ok(self.released_since(before))
     }
 
     /// Release the last block's tail: with no further block to overlap, the
@@ -735,7 +807,16 @@ impl SynthesisOla {
         self.completed = self
             .completed
             .max(self.support_end.saturating_sub(self.origin));
-        &self.pcm()[before..]
+        self.released_since(before)
+    }
+
+    /// The samples finalized past PCM index `before`: `[before, pcm_end)` in
+    /// [`SynthesisOla::pcm`]'s own coordinates. `before` is never below
+    /// `pcm_from` — the front only ever releases samples the caller has had
+    /// since the call that finalized them — so the range is always in the
+    /// window.
+    fn released_since(&self, before: usize) -> &[f64] {
+        &self.pcm()[before - self.pcm_from()..]
     }
 
     /// The block size one mode names, rejecting a mode the pair does not have.
@@ -1385,6 +1466,115 @@ mod tests {
                     &spectrum,
                 )
                 .expect("push");
+            }
+        }
+    }
+
+    /// The overlap-add releases its timeline instead of keeping it, and the
+    /// release moves no sample.
+    ///
+    /// Two claims, checked together over the mode sequences that make the
+    /// release frontier interesting — including the transition a long block
+    /// following a short one is, which starts *before* the block it follows:
+    ///
+    /// * **The retained window is bounded by the geometry**, not by the
+    ///   stream: after every push the finalized samples still held are at most
+    ///   one long block's worth.
+    /// * **The released samples are the timeline's own.** The concatenation of
+    ///   every `push` return value and `finish` equals, bit for bit, what the
+    ///   pre-release accumulation produced — a full timeline, built here from
+    ///   the same primitives, so the comparison does not read the thing it is
+    ///   checking through itself.
+    ///
+    /// `crates/wem-core/tests/decode_memory.rs` holds the session to the same
+    /// property at the process level (a child's peak RSS on a 64x stream);
+    /// this is the exact, allocator-free half of it.
+    #[test]
+    fn the_retained_window_is_bounded_and_releases_the_same_samples() {
+        let sequences: [Vec<i64>; 5] = [
+            vec![1; 40],
+            vec![0; 80],
+            vec![1, 1, 0, 0, 0, 0, 1, 1],
+            vec![0, 1, 0, 1, 1, 0],
+            vec![0, 1, 0, 1, 1, 1, 0, 0, 1, 0],
+        ];
+        for blocksizes in [[256i64, 2048], [64, 512]] {
+            let frozen = frozen_window_halves(&blocksizes);
+            let looks: Vec<MdctLook> = blocksizes.iter().map(|n| synthetic_look(*n)).collect();
+            let origin = (blocksizes[1] / 2) as usize;
+            for modes in &sequences {
+                let spectra: Vec<Vec<f64>> = modes
+                    .iter()
+                    .map(|mode| source_stream((blocksizes[*mode as usize] / 2) as usize))
+                    .collect();
+                let mut ola = SynthesisOla::new(&blocksizes).expect("synthesis state");
+                let mut released: Vec<f64> = Vec::new();
+                let mut held = 0usize;
+
+                // The reference: one full timeline, accumulated the way the
+                // state accumulated before it released anything.
+                let mut timeline: Vec<f64> = vec![0.0f64; origin];
+                let mut base = 0usize;
+                let mut previous = 0i64;
+                for (index, &current) in modes.iter().enumerate() {
+                    let following = modes.get(index + 1).copied().unwrap_or(1);
+                    let n = blocksizes[current as usize] as usize;
+                    let spans =
+                        synthesis_window_spans(n, &blocksizes, previous, current, following)
+                            .expect("spans");
+                    let mut block = mdct_backward(&looks[current as usize], &spectra[index])
+                        .expect("inverse MDCT");
+                    window_frame(&mut block, &spans, Some(&frozen)).expect("window");
+                    let position = base + origin - n / 2;
+                    if timeline.len() < position + n {
+                        timeline.resize(position + n, 0.0f64);
+                    }
+                    for (offset, value) in block.iter().enumerate() {
+                        let slot = position + offset;
+                        timeline[slot] = f32_of(timeline[slot] + *value);
+                    }
+                    base += (n + blocksizes[following as usize] as usize) / 4;
+                    previous = current;
+
+                    // The released path, in lockstep.
+                    released.extend_from_slice(
+                        ola.push(
+                            &looks[current as usize],
+                            &frozen,
+                            current,
+                            following,
+                            &spectra[index],
+                        )
+                        .expect("push"),
+                    );
+                    held = held.max(ola.pcm().len());
+                }
+                released.extend_from_slice(ola.finish());
+
+                assert!(
+                    held <= blocksizes[1] as usize,
+                    "modes {modes:?} at {blocksizes:?}: the state held {held} finalized samples, \
+                     more than one long block ({}) — the front is not being released",
+                    blocksizes[1]
+                );
+                let reference = &timeline[origin..origin + released.len()];
+                assert_eq!(
+                    released.len(),
+                    ola.pcm_end(),
+                    "modes {modes:?} at {blocksizes:?}: the state released {} samples but \
+                     finalized {}",
+                    released.len(),
+                    ola.pcm_end()
+                );
+                for (index, (value, expected)) in released.iter().zip(reference.iter()).enumerate()
+                {
+                    assert_eq!(
+                        value.to_bits(),
+                        expected.to_bits(),
+                        "modes {modes:?} at {blocksizes:?}: released sample {index} is \
+                         {value:e}, the full timeline holds {expected:e}"
+                    );
+                }
             }
         }
     }
