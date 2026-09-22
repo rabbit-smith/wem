@@ -3,6 +3,7 @@ name = "wem-wasm"
 description = "wasm-bindgen shell over the WEM encoder kernel (browser/web encoding)."
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 # cdylib: the crate type wasm-bindgen / wasm-pack emit from; there is no
 # native use for this shell (the C ABI and PyO3 shells cover native).

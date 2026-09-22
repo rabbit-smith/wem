@@ -9,6 +9,12 @@ description = "Bit-exact Wwise Vorbis WAV-to-WEM encoder"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{name = "Wwise WEM Encoder Contributors"}]
+# PEP 639 SPDX expression plus the two licence files; both ship in the wheel.
+# Reading these keys needs a maturin recent enough to emit `License-Expression`;
+# the default isolated build fetches the latest maturin, so the floor below is
+# only reachable with --no-build-isolation, where a mismatch fails loudly.
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
 dependencies = []
 
 [project.optional-dependencies]

@@ -12,6 +12,7 @@ name = "wem-capi"
 description = "C ABI core surface for the WEM encoder kernel (include/wem.h)."
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 # cdylib: dynamic library for Go cgo / C consumers;
 # staticlib: static archive for embedded builds;

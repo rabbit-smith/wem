@@ -3,6 +3,7 @@ name = "wem-analysis"
 description = "WEM encoder analysis domain: typed resource models and DSP primitives (resource-free)."
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [features]
 # Per-channel rayon partitioning inside a single long-frame analysis call

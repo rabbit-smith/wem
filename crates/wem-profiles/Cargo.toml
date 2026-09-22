@@ -3,6 +3,7 @@ name = "wem-profiles"
 description = "WEM encoder profile identity, selection and the compiled profile carrier."
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 wem-analysis = { workspace = true }

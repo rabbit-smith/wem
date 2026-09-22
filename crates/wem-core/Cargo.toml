@@ -3,6 +3,7 @@ name = "wem-core"
 description = "WEM encoder end-to-end orchestration (the only layer that composes all domains)."
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [features]
 # The library imposes no threads on a caller that did not ask: `parallel` is
