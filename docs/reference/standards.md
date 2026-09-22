@@ -51,6 +51,7 @@ words; a stage is not done until it comes back zero.
 | The 2ch/48 kHz result, its corpora, and the limits of that evidence | `tests/parity/test_2ch_corpus.py`, [`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md) |
 | The decode of the committed paired-build container: the geometry and frame count it declares, and a reconstruction of the WAV it was produced from | `crates/wem-core/tests/decode_reference_wem.rs`, `tests/parity/test_decode_surface.py` |
 | The decode round trip: `decode(encode(x))` reconstructs `x` over both registered profiles and the tracked 2ch corpus, and decoding our own encode of the fixture equals decoding the paired build's container, sample for sample | `crates/wem-core/tests/decode_reference_wem.rs`, `crates/wem-core/tests/encoder.rs` |
+| The decode session's memory is bounded: a 64× (202 s) stream decodes in a child process whose peak RSS stays under a fixed ceiling, so a live session retains nothing that grows with the stream | `crates/wem-core/tests/decode_memory.rs` |
 | The C ABI decode surface: its lifecycle, its error classes, its callback delivery order and its terminal handles | `crates/wem-capi/tests/decode_capi.rs`, `crates/wem-capi/tests/capi_surface.rs` |
 | The decode shells' error table and step framing, mirrored 1:1 from the C ABI | `crates/wem-python/src/lib.rs`, `crates/wem-wasm/src/lib.rs` (their unit tests) |
 | The shipped wheel decodes through its embedded kernel, announcing the source's geometry and delivering exactly its frame count, in a clean environment | `make wheel-smoke` (`scripts/wheel_smoke.py`) |
@@ -66,10 +67,12 @@ not by byte identity with an external decoder: there is no paired artifact for
 the decode direction to be byte-identical to. The decoder must be deterministic
 (the same WEM decodes to the same samples, every run), exact in its geometry
 (exactly the container's declared frame count, output sample *i* being the
-encoder's input sample *i*), and a reconstruction of its source — established by
-round trip against this repository's own encoder, whose output is byte-exact
-against the paired build, so `decode(encode(x))` against `x` measures the
-decoder over every input this repository can encode.
+encoder's input sample *i*), bounded in memory (a live session retains nothing
+proportional to the stream it is decoding, which is what the surface's
+streaming-only shape exists to provide), and a reconstruction of its source —
+established by round trip against this repository's own encoder, whose output is
+byte-exact against the paired build, so `decode(encode(x))` against `x` measures
+the decoder over every input this repository can encode.
 
 No external decoder is an oracle here. The one route that would make a
 bit-exactness claim checkable binds the host's libvorbis through `ctypes` and

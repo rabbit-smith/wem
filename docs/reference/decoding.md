@@ -150,6 +150,16 @@ arrives, so that payload is held until then. Every container this repository's
 writer and the paired build produce puts `fmt ` first, and the exception is a
 memory bound, never a wrong sample.
 
+**This is a claim, so it has a test.**
+`crates/wem-core/tests/decode_memory.rs` decodes a 64× stream (202 s of audio)
+in a child process and caps that child's peak RSS, the way
+`crates/wem-core/tests/streaming.rs` caps a streaming *encode*. It asserts the
+child exited 0 as well as the ceiling, so a child that dies early cannot pass by
+dying. The bound is not decorative: before the overlap-add was bounded it
+retained the whole timeline and this test failed at 230.7 MB. The curve behind
+it, its before and after, and the two mechanisms that were repaired are in
+[`../findings/decode-performance.md`](../findings/decode-performance.md).
+
 The delivery framing keeps the same shape end to end: the kernel reports what
 each step completed, the C ABI hands it over in fixed-size callback blocks, the
 PyO3 and wasm shells return it as one step value, and the package facade yields

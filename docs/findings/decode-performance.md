@@ -22,9 +22,18 @@ drains it), so a live session holds **8 bytes per decoded sample per channel —
 twice the f32 PCM it hands the caller** — for as long as it lives.
 `crates/wem-core/src/decoder.rs:87-102` states the opposite ("Nothing
 proportional to the stream length is held") and
-[`../decoding-design-proposal.md`](../decoding-design-proposal.md) §3 states it
-as the design decision ("nothing proportional to the stream length"). See
+[`../reference/decoding.md`](../reference/decoding.md) states it as the design
+decision ("nothing proportional to the stream length"). See
 [finding 1](#1-the-overlap-add-retains-the-whole-timeline--contract-defect-the-headline).
+
+**Fixed, and re-measured.** Both mechanisms were repaired in `f64c871` and the
+curve was taken again with the same tool: **256×** the stream now grows peak RSS
+**1.68×** (10.76 → 18.04 MB, 0.17 bytes/frame over four points), where 64× grew
+it 10.19× before, and the whole-WEM-push penalty fell from +51.0% to +0.6%. The
+before curve below is kept as recorded on its own base; the after curve, the
+fixes and the release frontier they turn on are in
+[the fix](#the-fix-and-what-it-measured). The two claims quoted above are true
+again.
 
 This document is the evidence record. It is a measurement, not a budget: there
 is no threshold here, and `scripts/measure_decode_perf.py` has none either (see
@@ -205,14 +214,16 @@ point:
   stated exception, a container that puts `data` before `fmt `, which is not the
   shape of any of the nine tracked WEMs (each walks `fmt ` then `data`, checked
   from the files themselves).
-- `docs/decoding-design-proposal.md` §3: *"a live decode session holds only the
+- `docs/reference/decoding.md`: *"a live decode session holds only the
   bytes of a not-yet-complete packet (capped by the container's
   `u_max_packet_size`), one block of OLA state and scratch — **nothing
-  proportional to the stream length**"*, which is the §D3 "streaming only"
+  proportional to the stream length**"*, which is the "streaming only"
   decision the whole decode surface rests on.
 
-Both are false as written. The measurement in this section is what falsifies
-them; the code read in finding 1 says why.
+Both were false as written when this page was recorded, and the measurement in
+this section is what falsified them; the code read in finding 1 says why. They
+are true again as of `f64c871` — see
+[the fix](#the-fix-and-what-it-measured).
 
 ## Findings
 
@@ -362,6 +373,65 @@ once in 64 KiB chunks, and compares both against the staged replay. Time:
 faster**, not slower, because of finding 3's drain. Chunk boundaries changed
 nothing about the samples in any of the 9 repetitions. So there is no
 time-versus-memory trade to make here: bounded pushes are both.
+
+## The fix, and what it measured
+
+Both defects were repaired in `f64c871`, and the curve was taken again with
+`scripts/measure_decode_perf.py`, the same tool and the same command that found
+them. The before column is this page's own record, on its base; the after column
+is the fixed tree.
+
+| point | before (base `b3a6bf7`) | after (base `f64c871`) |
+|---|---:|---:|
+| 1× (139 398 frames) | 21.97 MB | **10.73 MB** |
+| 64× (8 921 472) | 232.90 MB | **16.09 MB** |
+| 256× (35 685 888) | — | **17.86 MB** |
+| growth, 1×→64× | 10.60× | **1.50×** |
+| fitted slope | 24.02 bytes/frame | **0.61 bytes/frame** |
+
+Over four points to 256× the slope is 0.17 bytes/frame and the marginal
+increment *shrinks* (+0.75, +4.70, +1.74 MB while each step lengthens the stream
+4–8×): what is left is a heap plateau, not stream state. Independently
+re-measured by the orchestrator on landed `main`, which is where the 1.68× and
+0.17 bytes/frame figures above come from. The mechanism that was removed would
+have added about 1.29 GB logical at 256×.
+
+**Defect 1 — a sliding window, released to the planner's `base`.** `SynthesisOla`
+drops everything below `min(base, origin + completed)` at the top of every push,
+and `pcm()` returns the retained finalized window with `pcm_from()`/`pcm_end()`
+for absolute coordinates; `push`/`finish` return exactly the newly finalized
+samples, which is what the decoder now consumes.
+
+The frontier is **`base`, not the previous block's centre** — and this page
+previously said centre, which is wrong in a way that panics rather than merely
+wasting memory. `position` is not monotone: a long block following a short one
+starts *before* it, so a release to the finalization frontier lets a later block
+write below the window's start. The centre bound is what makes a sample *final*
+(safe to hand out); `base` is what makes it safe to *release*, because every
+block's first touched sample is `base + origin − n/2 ≥ base` and `base` only
+grows. The code's `release()` doc states both bounds.
+
+**Defect 2 — a cursor instead of a front-drain.** `ContainerStream` releases the
+consumed prefix only when it is at least as long as what remains, which is
+amortised O(1) per byte. Batched drains were rejected by measurement, not
+preference: draining every T bytes still moves the remainder once per drain, so
+a whole-stream push stays O(push²/T). One push against 64 KiB pushes, same child
+driver: +0.30 ms (+1.0%) at 1×, +14.36 ms (+6.6%) at 8×, **+889.15 ms (+51.0%)**
+at 64× before; −0.14 ms, +1.15 ms and **+10.61 ms (+0.6%)** after. The 64×
+one-push resident figure fell 374.36 → 244.01 MB, and the remainder is
+`DecodeStep::pcm` (214 MB of f32) — API shape, unchanged by design.
+
+**The check whose absence let a documented bound drift.**
+`crates/wem-core/tests/decode_memory.rs` puts a child-process `ru_maxrss` ceiling
+of 64 MiB on a 64× stream byte-identical (SHA-256) to the one this page's script
+generates, so the ceiling and the finding describe the same stream. It was
+demonstrated trippable rather than assumed: on the unfixed tree the child reports
+230.7 MB and the test exits 101; on the fixed tree it reports 16.1 MB, 24% of the
+ceiling. It also asserts the child exited 0, which the encode check it mirrors
+does not — a child that dies early must not be able to pass a ceiling.
+
+No sample moved. The staged replay's bit-for-bit comparison against the session
+held on every repetition, one push and chunked.
 
 ## Trust boundary
 
