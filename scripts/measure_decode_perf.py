@@ -704,8 +704,15 @@ def measure_rss_curve(
     runs: int,
     chunk_bytes: int,
     log_dir: Path,
+    json_path: Path | None = None,
 ) -> list[tuple[int, list[ChildSample]]]:
-    """One child process per point, each reporting its own ``wait4`` rusage."""
+    """One child process per point, each reporting its own ``wait4`` rusage.
+
+    ``json_path`` writes the samples for a plotted figure. Like the concurrency
+    pair, the record is the source and the image is rendered from it, so the
+    figure can be re-made byte for byte without re-measuring -- which matters
+    because a re-measurement would carry a different machine load.
+    """
     channels, rate, frames = fixture_geometry()
     print(
         f"\n-- peak RSS against stream length: one child process per point, that "
@@ -760,7 +767,45 @@ def measure_rss_curve(
         )
         curve.append((multiple, case))
     _report_rss_growth(curve, channels)
+    if json_path is not None:
+        write_rss_curve_json(json_path, curve, channels, rate, frames, chunk_bytes)
     return curve
+
+
+def write_rss_curve_json(
+    path: Path,
+    curve: list[tuple[int, list[ChildSample]]],
+    channels: int,
+    rate: int,
+    fixture_frames: int,
+    chunk_bytes: int,
+) -> None:
+    """Record the curve so the figure can be re-rendered from it."""
+    record = {
+        "schema": "wwise-wem.decode-memory-curve.v1",
+        "script": "measure_decode_perf.py",
+        "machine": machine_identity(),
+        "chunk_bytes": chunk_bytes,
+        "channels": channels,
+        "sample_rate": rate,
+        "fixture_frames": fixture_frames,
+        "points": [
+            {
+                "multiple": multiple,
+                "frames": case[0].frames,
+                "audio_seconds": audio_seconds(case[0]),
+                "wem_bytes": case[0].bytes,
+                "rss_bytes": [sample.maxrss_bytes for sample in case],
+                "total_ms": [sample.total_ms for sample in case],
+            }
+            for multiple, case in curve
+        ],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    print(f"  recorded {len(curve)} points -> {path}")
 
 
 def _report_rss_growth(
@@ -873,6 +918,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=f"child processes per RSS point (default: {DEFAULT_RSS_RUNS})",
     )
     parser.add_argument(
+        "--rss-json",
+        default=None,
+        help="write the RSS curve's samples here, for "
+        "scripts/plot_decode_memory_curve.py to render (default: print only)",
+    )
+    parser.add_argument(
         "--chunk",
         type=int,
         default=DEFAULT_CHUNK_BYTES,
@@ -955,6 +1006,7 @@ def main() -> int:
                     args.rss_runs,
                     args.chunk,
                     log_dir,
+                    Path(args.rss_json).expanduser() if args.rss_json else None,
                 )
     except (RuntimeError, ValueError) as error:
         print(f"measure-decode-perf: {error}", file=sys.stderr)

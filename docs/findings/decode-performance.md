@@ -398,6 +398,17 @@ re-measured by the orchestrator on landed `main`, which is where the 1.68× and
 0.17 bytes/frame figures above come from. The mechanism that was removed would
 have added about 1.29 GB logical at 256×.
 
+![Decode peak RSS per decode against stream length, with the run spread, and the
+same curve relative to its own first
+point](../figures/decode-memory-curve.png)
+
+The figure is rendered from a record rather than from the run that printed the
+table: `scripts/measure_decode_perf.py --rss --rss-json
+docs/figures/decode-memory-samples.json` writes the samples, and
+`scripts/plot_decode_memory_curve.py` draws them, so the image can be re-made
+byte for byte without taking a second machine load. Its right panel divides each
+point by the first — the claim is a line at 1.0, not a slope someone judges.
+
 **Defect 1 — a sliding window, released to the planner's `base`.** `SynthesisOla`
 drops everything below `min(base, origin + completed)` at the top of every push,
 and `pcm()` returns the retained finalized window with `pcm_from()`/`pcm_end()`

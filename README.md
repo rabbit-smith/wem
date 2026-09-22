@@ -134,12 +134,12 @@ input.
 
 ## Performance
 
-Both figures come from committed measurement scripts, printed with the machine
-identity and the load average they were taken under. Neither carries a threshold:
-a number compared against a recorded one hides a change behind a re-record step,
-which is why a performance gate does not live in this repository. Reproduce
-either with `python3 scripts/measure_encode_perf.py` or
-`python3 scripts/measure_decode_perf.py`.
+The figures come from committed measurement scripts, printed with the machine
+identity and the load average they were taken under. None of them carries a
+threshold: a number compared against a recorded one hides a change behind a
+re-record step, which is why a performance gate does not live in this
+repository. `make benchmark` runs the encode and decode measurements; each
+figure's script and its recorded samples are named below it.
 
 Encode concurrency — throughput, per-encode latency and CPU per encode against N
 concurrent encodes, for both installed geometries with the parallel feature on
@@ -156,10 +156,25 @@ sizes and both geometries:
 concurrency, for both installed geometries at two push-chunk
 sizes](docs/figures/decode-concurrency-curves.png)
 
+Decode memory — peak RSS per decode against stream length, one child process per
+point. Decode expands: the fixture's 108,771-byte WEM becomes 3,345,552 bytes of
+f32 PCM, and the ratio across the tracked material runs from 11× to 838× because
+it is a property of the bitrate. That is why the surface is streaming-only, on
+the claim that a live session's memory does not grow with the stream. This is
+that claim: 64× the stream takes **1.50×** the peak RSS (10.60 → 15.86 MB), which
+is a heap plateau rather than retained stream state. The right panel divides each
+point by the first, so the claim reads as a line at 1.0 instead of as a judgement
+about a slope.
+
+![Decode peak RSS per decode against stream length, with the run spread, and the
+same curve relative to its own first
+point](docs/figures/decode-memory-curve.png)
+
 The stage splits, the scaling in stream length and the memory curves are in
 [`docs/findings/encode-performance.md`](docs/findings/encode-performance.md) and
-[`docs/findings/decode-performance.md`](docs/findings/decode-performance.md); the
-longer encode memory study is in
+[`docs/findings/decode-performance.md`](docs/findings/decode-performance.md) —
+the decode one carries this curve's before and after, the two mechanisms that
+were repaired, and its own trust boundary. The longer encode memory study is in
 [`docs/findings/duration-curves.md`](docs/findings/duration-curves.md).
 
 ## Reference

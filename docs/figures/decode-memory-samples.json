@@ -1,0 +1,134 @@
+{
+  "channels": 6,
+  "chunk_bytes": 65536,
+  "fixture_frames": 139398,
+  "machine": [
+    "platform          : macOS-27.0-arm64-arm-64bit-Mach-O",
+    "machine           : arm64",
+    "python            : 3.14.6 (/opt/homebrew/opt/python@3.14/bin/python3.14)",
+    "logical cpus      : 16",
+    "cpu               : Apple M3 Max",
+    "hw.ncpu           : 16",
+    "hw.memsize (bytes): 68719476736",
+    "toolchain         : rustc 1.96.0 (ac68faa20 2026-05-25)",
+    "toolchain         : host: aarch64-apple-darwin",
+    "toolchain         : LLVM version: 22.1.2"
+  ],
+  "points": [
+    {
+      "audio_seconds": 3.1609523809523807,
+      "frames": 139398,
+      "multiple": 1,
+      "rss_bytes": [
+        10616832,
+        10600448,
+        10567680
+      ],
+      "total_ms": [
+        28.761,
+        29.053,
+        28.778
+      ],
+      "wem_bytes": 108771
+    },
+    {
+      "audio_seconds": 6.3219047619047615,
+      "frames": 278796,
+      "multiple": 2,
+      "rss_bytes": [
+        10911744,
+        10911744,
+        10977280
+      ],
+      "total_ms": [
+        54.407,
+        53.735,
+        52.775
+      ],
+      "wem_bytes": 215649
+    },
+    {
+      "audio_seconds": 12.643809523809523,
+      "frames": 557592,
+      "multiple": 4,
+      "rss_bytes": [
+        12763136,
+        12795904,
+        11124736
+      ],
+      "total_ms": [
+        107.164,
+        105.988,
+        107.486
+      ],
+      "wem_bytes": 435886
+    },
+    {
+      "audio_seconds": 25.287619047619046,
+      "frames": 1115184,
+      "multiple": 8,
+      "rss_bytes": [
+        11223040,
+        11190272,
+        12435456
+      ],
+      "total_ms": [
+        207.756,
+        209.439,
+        207.936
+      ],
+      "wem_bytes": 869137
+    },
+    {
+      "audio_seconds": 50.57523809523809,
+      "frames": 2230368,
+      "multiple": 16,
+      "rss_bytes": [
+        12861440,
+        12795904,
+        12877824
+      ],
+      "total_ms": [
+        428.225,
+        447.688,
+        422.575
+      ],
+      "wem_bytes": 1747607
+    },
+    {
+      "audio_seconds": 101.15047619047618,
+      "frames": 4460736,
+      "multiple": 32,
+      "rss_bytes": [
+        15695872,
+        15499264,
+        15630336
+      ],
+      "total_ms": [
+        838.35,
+        822.728,
+        878.454
+      ],
+      "wem_bytes": 3492989
+    },
+    {
+      "audio_seconds": 202.30095238095237,
+      "frames": 8921472,
+      "multiple": 64,
+      "rss_bytes": [
+        15859712,
+        16007168,
+        15794176
+      ],
+      "total_ms": [
+        1653.601,
+        1662.96,
+        1650.721
+      ],
+      "wem_bytes": 6990256
+    }
+  ],
+  "sample_rate": 44100,
+  "schema": "wwise-wem.decode-memory-curve.v1",
+  "script": "measure_decode_perf.py"
+}

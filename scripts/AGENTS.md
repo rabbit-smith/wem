@@ -24,6 +24,12 @@ idempotent, and offline. What their outputs must satisfy is in
   `docs/figures/concurrency-curves.png`, `measure_decode_concurrency.py` →
   `docs/figures/decode-concurrency-samples.json`,
   `plot_decode_concurrency_curves.py` → `docs/figures/decode-concurrency-curves.png`.
+  The decode memory curve is the same shape: `measure_decode_perf.py --rss
+  --rss-json` → `docs/figures/decode-memory-samples.json` (its one committed
+  destination; without the flag it prints and writes nothing), and
+  `plot_decode_memory_curve.py` → `docs/figures/decode-memory-curve.png`, which
+  reads that record rather than re-measuring, so the figure can be re-rendered
+  byte for byte without taking a second machine load.
   Never write outside these trees as a side effect.
 - The decode measurement writes only generated measurement inputs, and only to
   gitignored scratch: `measure_decode_perf.py` →
