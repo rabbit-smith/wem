@@ -8,7 +8,7 @@ use std::fmt;
 pub enum BitError {
     /// The stream ran out of bits.
     OutOfBits,
-    /// Write requested more than 32 bits.
+    /// A read or write requested a width this primitive cannot represent.
     BitsOutOfRange { bits: u32 },
 }
 
@@ -16,7 +16,7 @@ impl fmt::Display for BitError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             BitError::OutOfBits => write!(f, "out of bits"),
-            BitError::BitsOutOfRange { bits } => write!(f, "bits must be 0..32, got {bits}"),
+            BitError::BitsOutOfRange { bits } => write!(f, "unsupported bit width: {bits}"),
         }
     }
 }
@@ -42,6 +42,9 @@ impl<'a> BitReader<'a> {
 
     /// Read `n` bits (LSB first); `n` must be <= 64.
     pub fn read(&mut self, n: u32) -> Result<u64, BitError> {
+        if n > 64 {
+            return Err(BitError::BitsOutOfRange { bits: n });
+        }
         let mut v = 0u64;
         for i in 0..n {
             if self.byte >= self.data.len() {
@@ -181,6 +184,16 @@ mod tests {
         assert_eq!(reader.read(5).unwrap(), 0b11100); // bits 0..4
         assert_eq!(reader.read(3).unwrap(), 0b001); // bits 5..7 (1,0,0)
         assert_eq!(reader.read(1).unwrap_err(), BitError::OutOfBits);
+    }
+
+    #[test]
+    fn read_rejects_a_width_that_does_not_fit_the_return_word() {
+        let mut reader = BitReader::new(&[0xFF; 9]);
+        assert_eq!(reader.read(64).unwrap(), u64::MAX);
+        assert_eq!(
+            reader.read(65).unwrap_err(),
+            BitError::BitsOutOfRange { bits: 65 }
+        );
     }
 
     #[test]

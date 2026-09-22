@@ -25,8 +25,7 @@ use crate::error::EncoderError;
 pub struct Wav16 {
     sample_rate: i64,
     channels: usize,
-    /// The `data` chunk's interleaved little-endian signed-16 bytes, trimmed
-    /// to whole samples (an odd trailing byte is not a sample).
+    /// The `data` chunk's complete interleaved little-endian signed-16 frames.
     data: Vec<u8>,
 }
 
@@ -59,14 +58,10 @@ impl Wav16 {
     /// Takes `&self` because the borrow is what the caller has: `Pcm16` owns
     /// its samples, so this copies the file's bytes into that storage.
     pub fn to_pcm16(&self) -> Result<crate::encoder::Pcm16, EncoderError> {
-        // Only whole frames are a PCM buffer: a data chunk whose last frame is
-        // cut short contributes the frames before it, exactly as the frame
-        // count above reports.
-        let whole_frames = self.frames() * self.channels * 2;
         crate::encoder::Pcm16::from_interleaved_le(
             self.sample_rate,
             self.channels,
-            &self.data[..whole_frames],
+            self.data.as_slice(),
         )
     }
 }
@@ -146,20 +141,22 @@ pub fn parse_pcm16(raw: &[u8]) -> Result<Wav16, EncoderError> {
         Some(data) if sample_rate > 0 && channels > 0 => data,
         _ => return Err(format_error()),
     };
-    let frames = data.len() / (2 * channels);
+    let bytes_per_frame = 2 * channels;
+    if data.len() % bytes_per_frame != 0 {
+        return Err(format_error());
+    }
+    let frames = data.len() / bytes_per_frame;
     if frames == 0 {
         return Err(EncoderError::FormatUnsupported {
             message: "encoder input WAV must contain at least one frame".into(),
         });
     }
-    // The file's own form, taken as it is: the bytes are the samples, so no
-    // decode pass runs here. Only a trailing odd byte is dropped — it is half
-    // of a sample and was never one.
-    let whole_samples = (data.len() / 2) * 2;
+    // The file's complete frame form, taken as it is: the bytes are samples,
+    // so no decode pass runs here.
     Ok(Wav16 {
         sample_rate,
         channels,
-        data: data[..whole_samples].to_vec(),
+        data: data.to_vec(),
     })
 }
 
@@ -174,6 +171,7 @@ mod tests {
         bits_per_sample: u16,
         channels: u16,
         with_junk: bool,
+        data: &[u8],
     ) -> Vec<u8> {
         let mut out = Vec::new();
         let mut body = Vec::new();
@@ -192,8 +190,8 @@ mod tests {
         body.extend_from_slice(&2u16.to_le_bytes());
         body.extend_from_slice(&bits_per_sample.to_le_bytes());
         body.extend_from_slice(b"data");
-        body.extend_from_slice(&6u32.to_le_bytes());
-        body.extend_from_slice(&[1u8, 0, 0xFE, 0xFF, 3u8, 0]);
+        body.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        body.extend_from_slice(data);
         out.extend_from_slice(b"RIFF");
         out.extend_from_slice(&(body.len() as u32 + 4).to_le_bytes());
         out.extend_from_slice(b"WAVE");
@@ -203,7 +201,8 @@ mod tests {
 
     #[test]
     fn parses_minimal_pcm16_wav() {
-        let wav = parse_pcm16(&make_wav(1, 16, 1, false)).expect("valid wav parses");
+        let wav = parse_pcm16(&make_wav(1, 16, 1, false, &[1, 0, 0xFE, 0xFF, 3, 0]))
+            .expect("valid wav parses");
         assert_eq!(wav.channels(), 1);
         assert_eq!(wav.sample_rate(), 44100);
         assert_eq!(wav.frames(), 3);
@@ -218,27 +217,27 @@ mod tests {
 
     #[test]
     fn skips_odd_intermediate_chunks() {
-        let wav = parse_pcm16(&make_wav(1, 16, 2, true)).expect("junk chunk handled");
+        let wav = parse_pcm16(&make_wav(1, 16, 2, true, &[1, 0, 0xFE, 0xFF, 3, 0, 4, 0]))
+            .expect("junk chunk handled");
         assert_eq!(wav.channels(), 2);
-        // 6 bytes of data = 3 interleaved i16 samples `[1, -2, 3]`, held as
-        // the file's own little-endian bytes.
-        assert_eq!(wav.interleaved_le_bytes(), &[1, 0, 0xFE, 0xFF, 3, 0][..]);
-        // Two channels of 4 bytes hold one whole frame: the frame count, and
-        // the samples `to_pcm16` hands over, stop at that boundary.
-        assert_eq!(wav.frames(), 1);
+        assert_eq!(
+            wav.interleaved_le_bytes(),
+            &[1, 0, 0xFE, 0xFF, 3, 0, 4, 0][..]
+        );
+        assert_eq!(wav.frames(), 2);
         let pcm = wav.to_pcm16().expect("whole frames convert");
-        assert_eq!(pcm.frame_count(), 1);
+        assert_eq!(pcm.frame_count(), 2);
         assert_eq!(pcm.channel_count(), 2);
     }
 
     #[test]
     fn rejects_non_pcm_layouts() {
         assert!(matches!(
-            parse_pcm16(&make_wav(3, 16, 1, false)),
+            parse_pcm16(&make_wav(3, 16, 1, false, &[1, 0, 0xFE, 0xFF, 3, 0])),
             Err(EncoderError::FormatUnsupported { .. })
         ));
         assert!(matches!(
-            parse_pcm16(&make_wav(1, 32, 1, false)),
+            parse_pcm16(&make_wav(1, 32, 1, false, &[1, 0, 0xFE, 0xFF, 3, 0])),
             Err(EncoderError::FormatUnsupported { .. })
         ));
         assert!(parse_pcm16(b"notriff").is_err());
@@ -246,8 +245,19 @@ mod tests {
     }
 
     #[test]
+    fn rejects_incomplete_interleaved_frames() {
+        for (channels, data) in [(1, &[1, 0, 0xFE][..]), (2, &[1, 0, 0xFE, 0xFF, 3, 0][..])] {
+            let partial = make_wav(1, 16, channels, false, data);
+            assert!(matches!(
+                parse_pcm16(&partial),
+                Err(EncoderError::FormatUnsupported { .. })
+            ));
+        }
+    }
+
+    #[test]
     fn rejects_truncated_chunks() {
-        let mut raw = make_wav(1, 16, 1, false);
+        let mut raw = make_wav(1, 16, 1, false, &[1, 0, 0xFE, 0xFF, 3, 0]);
         raw.truncate(raw.len() - 2); // cut into the data chunk
         assert!(parse_pcm16(&raw).is_err());
     }

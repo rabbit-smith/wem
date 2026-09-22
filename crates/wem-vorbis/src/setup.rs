@@ -548,3 +548,53 @@ pub fn parse_setup(data: &[u8], channels: i64) -> Result<SetupInfo, BitError> {
         book_id_assignment: "t97:0-96, t219:97-315, t282:316-597",
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minimal_setup_with_padding(padding_bits: u32) -> Vec<u8> {
+        let mut pack = OggPack::new(32);
+        pack.write(0, 8).unwrap(); // one book
+        pack.write(0, 10).unwrap(); // book id
+        pack.write(0, 6).unwrap(); // one floor
+        pack.write(0, 5).unwrap(); // floor partitions
+        pack.write(0, 2).unwrap(); // floor multiplier minus one
+        pack.write(0, 4).unwrap(); // floor rangebits
+        pack.write(0, 6).unwrap(); // one residue
+        pack.write(0, 2).unwrap(); // residue type
+        pack.write(0, 24).unwrap(); // residue begin
+        pack.write(0, 24).unwrap(); // residue end
+        pack.write(0, 24).unwrap(); // residue partition size minus one
+        pack.write(0, 6).unwrap(); // one residue classification
+        pack.write(0, 8).unwrap(); // residue classbook
+        pack.write(0, 3).unwrap(); // residue cascade low bits
+        pack.write(0, 1).unwrap(); // residue cascade has no high bits
+        pack.write(0, 6).unwrap(); // one mapping
+        pack.write(0, 1).unwrap(); // one mapping submap
+        pack.write(0, 1).unwrap(); // no channel coupling
+        pack.write(0, 2).unwrap(); // mapping reserved
+        pack.write(0, 8).unwrap(); // mapping time configuration
+        pack.write(0, 8).unwrap(); // mapping floor
+        pack.write(0, 8).unwrap(); // mapping residue
+        pack.write(0, 6).unwrap(); // one mode
+        pack.write(0, 1).unwrap(); // mode block flag
+        pack.write(0, 8).unwrap(); // mode mapping
+        for _ in 0..padding_bits / 32 {
+            pack.write(0, 32).unwrap();
+        }
+        if !padding_bits.is_multiple_of(32) {
+            pack.write(0, padding_bits % 32).unwrap();
+        }
+        pack.into_buffer()
+    }
+
+    #[test]
+    fn parse_setup_refuses_trailing_padding_wider_than_a_u64() {
+        let packet = minimal_setup_with_padding(98);
+        assert_eq!(
+            parse_setup(&packet, 1),
+            Err(BitError::BitsOutOfRange { bits: 98 })
+        );
+    }
+}

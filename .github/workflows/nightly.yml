@@ -17,6 +17,23 @@ on:
   workflow_dispatch:
 
 jobs:
+  input-fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: cargo install cargo-fuzz --locked --version 0.13.2
+      - run: python3 scripts/fuzz_inputs.py --seconds 300
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: nightly-input-fuzz-crashes
+          path: crates/fuzz/artifacts/
+
   differential-parity-and-perf:
     runs-on: ubuntu-latest
     timeout-minutes: 45

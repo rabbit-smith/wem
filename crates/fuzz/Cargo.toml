@@ -1,0 +1,30 @@
+[package]
+name = "wem-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+wem-core = { path = "../wem-core" }
+wem-container = { path = "../wem-container" }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "wem_decode"
+path = "fuzz_targets/wem_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wav_parse"
+path = "fuzz_targets/wav_parse.rs"
+test = false
+doc = false
+bench = false

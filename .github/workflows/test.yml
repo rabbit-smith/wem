@@ -5,6 +5,23 @@ on:
   pull_request:
 
 jobs:
+  input-fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: cargo install cargo-fuzz --locked --version 0.13.2
+      - run: python3 scripts/fuzz_inputs.py --seconds 30
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: input-fuzz-crashes
+          path: crates/fuzz/artifacts/
+
   lint:
     runs-on: ubuntu-latest
     steps:

@@ -80,23 +80,37 @@ pub fn parse_chunks(raw: &[u8]) -> Result<(Endian, Vec<ParsedChunk>), ContainerE
         return Err(ContainerError::NotRiff);
     };
     let rsize = endian.read_u32(raw, 4)?;
-    let end = (8usize + rsize as usize).min(raw.len());
+    // The declared extent is permissively clamped to the supplied bytes. On a
+    // 32-bit target a u32 RIFF size plus its eight-byte prefix can exceed
+    // `usize`; that still means the supplied bytes are the whole readable
+    // extent, rather than an arithmetic panic.
+    let end = 8usize.saturating_add(rsize as usize).min(raw.len());
     let mut pos = 12usize;
     let mut chunks = Vec::new();
-    while pos + 8 <= end {
+    while pos
+        .checked_add(8)
+        .is_some_and(|header_end| header_end <= end)
+    {
         let mut cid = [0u8; 4];
         cid.copy_from_slice(&raw[pos..pos + 4]);
         let csize = endian.read_u32(raw, pos + 4)?;
-        let avail = raw.len().saturating_sub(pos + 8);
+        let payload_start = pos + 8;
+        let avail = raw.len() - payload_start;
         let take = (csize as usize).min(avail);
-        let payload = raw[pos + 8..pos + 8 + take].to_vec();
+        let payload = raw[payload_start..payload_start + take].to_vec();
         chunks.push(ParsedChunk {
             id: cid,
             size: csize,
             off: pos,
             payload,
         });
-        pos += 8 + csize as usize + (csize as usize & 1);
+        // Once a declared chunk end cannot fit in `usize`, no later header can
+        // be addressable in this input. Saturating to the end of the address
+        // space preserves the permissive walk while stopping cleanly.
+        let advance = 8usize
+            .saturating_add(csize as usize)
+            .saturating_add(csize as usize & 1);
+        pos = pos.saturating_add(advance);
     }
     Ok((endian, chunks))
 }
@@ -204,5 +218,31 @@ mod tests {
     #[test]
     fn parse_chunks_bad_chunk_id_in_build() {
         assert!(build_riff(&[(b"fm", b"")], Endian::Little, false).is_err());
+    }
+
+    #[test]
+    fn parse_chunks_clamps_a_maximum_riff_size() {
+        let mut raw = Vec::from(&b"RIFF"[..]);
+        raw.extend_from_slice(&u32::MAX.to_le_bytes());
+        raw.extend_from_slice(b"WAVE");
+
+        let (_, chunks) = parse_chunks(&raw).expect("the truncated RIFF extent is permissive");
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn parse_chunks_keeps_available_payload_for_a_maximum_chunk_size() {
+        let mut raw = Vec::from(&b"RIFF"[..]);
+        raw.extend_from_slice(&13u32.to_le_bytes());
+        raw.extend_from_slice(b"WAVE");
+        raw.extend_from_slice(b"data");
+        raw.extend_from_slice(&u32::MAX.to_le_bytes());
+        raw.push(0xA5);
+
+        let (_, chunks) = parse_chunks(&raw).expect("the truncated chunk remains observable");
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].id, *b"data");
+        assert_eq!(chunks[0].size, u32::MAX);
+        assert_eq!(chunks[0].payload, [0xA5]);
     }
 }
