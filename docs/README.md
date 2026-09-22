@@ -10,10 +10,13 @@ Each fact has exactly one home:
   [`reference/standards.md`](reference/standards.md). It states each norm and
   names the test that establishes it. The other reference documents hold the
   design of one area each: [architecture](reference/architecture.md) (layers,
-  dependency direction, encoding flow), [domain model](reference/domain-model.md)
+  dependency direction, the encoding and decoding flows),
+  [domain model](reference/domain-model.md)
   (the vocabulary), [profiles](reference/profiles.md) (profile data and its
   provenance), [public interface](reference/public-interface.md) (exports, the
-  `encode` API, the CLI).
+  `encode` and `decode` APIs, the CLI), [decoding](reference/decoding.md) (the
+  decode design: lifecycle, refusal classes, output alignment, the streaming
+  property).
 - **How work is done here:** [`guides/development.md`](guides/development.md) —
   the verification ladder, lanes and the shared checkout, commit discipline and
   the code-writing standards. [`guides/usage.md`](guides/usage.md) holds the task
@@ -29,12 +32,13 @@ at these documents instead of restating them.
 
 | Document | Open it when |
 | --- | --- |
-| [`reference/standards.md`](reference/standards.md) | You need a product norm — bit-exactness, determinism, bit-pattern transport, layers, errors, panics, caller state, profile ownership, the integration topology, the portability floor — or the test that establishes it |
-| [`reference/architecture.md`](reference/architecture.md) | Changing a layer boundary or the encoding flow |
+| [`reference/standards.md`](reference/standards.md) | You need a product norm — bit-exactness, the decode contract, determinism, bit-pattern transport, layers, errors, panics, caller state, profile ownership, the integration topology, the portability floor — or the test that establishes it |
+| [`reference/architecture.md`](reference/architecture.md) | Changing a layer boundary or the encoding or decoding flow |
 | [`reference/domain-model.md`](reference/domain-model.md) | Naming anything: the vocabulary is normative |
 | [`reference/profiles.md`](reference/profiles.md) | Touching profile data, profile selection, or its provenance |
-| [`reference/public-interface.md`](reference/public-interface.md) | Touching package exports, the `encode` API, or the CLI |
-| [`guides/usage.md`](guides/usage.md) | Installing the encoder, encoding a file, calling it from each language |
+| [`reference/public-interface.md`](reference/public-interface.md) | Touching package exports, the `encode` and `decode` APIs, or the CLI |
+| [`reference/decoding.md`](reference/decoding.md) | Touching the decoder: its lifecycle, what it refuses and with which class, its output length and alignment, the streaming property, or what establishes the decode claims |
+| [`guides/usage.md`](guides/usage.md) | Installing the package, encoding a file, decoding one, calling it from each language |
 | [`guides/development.md`](guides/development.md) | Building, running the tests, and the rules the work is held to |
 | [`findings/2ch-byte-exactness.md`](findings/2ch-byte-exactness.md) | Needing the 2ch evidence, its root causes, its retractions, or its trust boundary |
 | [`findings/concurrency-curves.md`](findings/concurrency-curves.md) | Asking how many encodes this machine runs at once, whether the kernel's internal parallelism pays for itself, or how to size a worker pool (that page's later change: the feature is opt-in now, and the instrument is `crates/wem-core/tests/concurrency_worker.rs`) |
