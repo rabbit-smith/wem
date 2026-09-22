@@ -197,6 +197,26 @@ pub struct TransientDetector {
     pub quanta: i64,
 }
 
+/// A summary, deliberately: the geometry and the quantum counter, with the
+/// frozen tables reported by length.
+///
+/// `tables` and `mdct_look` are per-bin profile calibration (a hundred-odd
+/// values each) and the histories carry per-channel filter state; printing
+/// them would drown the diagnostic that asked for the detector, so only the
+/// shapes and the counter are shown.
+impl std::fmt::Debug for TransientDetector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TransientDetector")
+            .field("channels", &self.channels)
+            .field("bins", &self.bins)
+            .field("quanta", &self.quanta)
+            .field("histories", &self.histories.len())
+            .field("table_bins", &self.tables.n)
+            .field("mdct_bins", &self.mdct_look.n)
+            .finish()
+    }
+}
+
 impl TransientDetector {
     /// Construct and reset (Python `__post_init__` + `reset`).
     pub fn new(

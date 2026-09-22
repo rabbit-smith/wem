@@ -481,6 +481,29 @@ pub struct Encoder {
     resources: EncoderProfileResources,
 }
 
+/// A summary, deliberately: the encoder's identity and the sizes of the
+/// compiled profile resources it carries.
+///
+/// The resources themselves — the analysis tables, the setup packet, the
+/// codebooks — are thousands of frozen values, and printing them would bury
+/// the diagnostic that asked for the encoder. They are reported by length and
+/// count instead, which is what tells one encoder from another and shows a
+/// caller which one it holds.
+impl std::fmt::Debug for Encoder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Encoder")
+            .field("generation", &self.profile.key().generation())
+            .field("channels", &self.profile.channels())
+            .field("sample_rate", &self.profile.sample_rate())
+            .field("block_sizes", &self.profile.block_sizes())
+            .field("quality", &self.profile.quality())
+            .field("metadata_source", &self.container.metadata_source())
+            .field("setup_packet_len", &self.resources.setup_packet.len())
+            .field("codebooks", &self.resources.codebooks.len())
+            .finish()
+    }
+}
+
 impl Encoder {
     /// Construct the encoder from a structured profile selection — the only
     /// caller-facing profile selector (Python `Encoder(profile=...)`).
