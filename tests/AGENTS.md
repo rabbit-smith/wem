@@ -1,8 +1,10 @@
 # tests/ — suites and the assets they read
 
-Tests are the executable definition of "bit-exact". When code and a test
-disagree, the difference is the report: fix one of them, do not re-record
-the other.
+The suites are the executable form of the bit-exactness claim, and they are what
+establishes each claim listed in
+[`../docs/reference/standards.md`](../docs/reference/standards.md#what-is-established);
+how a failing comparison is read is in the same document, under
+[Bit-exactness](../docs/reference/standards.md#bit-exactness).
 
 ## Suite map (run order = cheap → expensive)
 
@@ -67,15 +69,12 @@ native-absent environments — a missing kernel fails the suite, on purpose.
 ## Writing pipeline tests
 
 - A cross-implementation test runs both implementations and compares values:
-  per frame, per stage, per channel, per bin. Recorded expectations are not a
-  comparison — when they disagree with a run, they hide the change behind a
-  re-record step instead of reporting it. Values travel as 8-hex-digit words
-  (see `tests/parity/oracle_frame_values.py`), never as decimal reprs.
+  per frame, per stage, per channel, per bin.
 - Failures must localize: name the first differing frame index, stage, channel,
   and bin, and print both words.
-- Byte-level dumps are always LE numeric or raw bytes; never text floats, never
-  repr, never platform-dependent formatting. Encode endianness in file suffixes
-  (`.f32le`, `.u16le`, `.u8`, `.u64le`).
+- Byte-level dumps encode endianness in the file suffix (`.f32le`, `.u16le`,
+  `.u8`, `.u64le`); the values they carry follow
+  [`../docs/reference/standards.md`](../docs/reference/standards.md#bit-patterns).
 - Deviations (deliberate skips when optional dev tooling is absent) must print
   an install hint, and CI must install the extras so the suite is truly enforced
   there, not silently skipped.

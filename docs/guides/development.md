@@ -1,9 +1,10 @@
 # Development
 
-How the repository is laid out, how to build and verify it, and which rules are
-load-bearing. The agent-conduct rules live in the layered
-[`AGENTS.md`](../../AGENTS.md) set; this page is the human-facing summary of the
-same ground.
+How the repository is laid out, how to build and verify it, and the rules the
+work is held to. The product norms are in
+[`../reference/standards.md`](../reference/standards.md); the map of the doc set
+is [`../README.md`](../README.md). The `AGENTS.md` set carries the same working
+rules for an agent, together with where to start and what to register.
 
 ## Repository map
 
@@ -17,14 +18,14 @@ same ground.
 | `tests/` | `unit/`, `integration/`, `parity/`, `whole_file/`, and the `data/` regression assets |
 | `scripts/` | Regeneration, decoding, fuzz, and packaging tools |
 | `examples/`, `js/` | Runnable bindings: Python, Rust, C, Go via cgo, Node and browser via wasm |
-| `docs/` | This guide set; see [Documentation map](#documentation-map) |
+| `docs/` | This guide set; see the [map](../README.md) |
 
 Dependency direction is one-directional and acyclic: `scheduling` imports
 nothing downstream, `analysis`/`vorbis`/`container` never open package
 resources, `profiles` is the sole resource owner, and one application layer
-assembles the use case. The authoritative rules are in
-[`../reference/architecture.md`](../reference/architecture.md), and the same
-split applies to both implementations.
+assembles the use case. The rules are in
+[`../reference/standards.md`](../reference/standards.md#layers-and-dependency-direction)
+and [`../reference/architecture.md`](../reference/architecture.md).
 
 ## Build
 
@@ -53,7 +54,8 @@ Climb from the cheapest executable target; do not start from the full suite.
 
 A passing suite is reused. Do not re-run a green suite per task or per agent;
 rerun it only on a named invalidator — code, test, data, or configuration that
-the suite actually exercises.
+the suite actually exercises. `make fuzz-parity` is the one to reach for when a
+change touches streaming, scheduling, profile assembly, or packet packing.
 
 ### What each target runs
 
@@ -72,58 +74,56 @@ to fix the code or the test rather than to re-record the expectation.
 | `make wheel-smoke` | Installed-wheel profile digest chain (payload → manifest → index) and one real encode |
 | `make check` | All of the above plus `ruff`, `mypy` and `clippy` |
 
-## Determinism rules
+The same targets from the test tree's point of view — layer, command and run
+order — are in [`../../tests/AGENTS.md`](../../tests/AGENTS.md).
 
-The normative rules are in [`AGENTS.md`](../../AGENTS.md); the four that decide
-most reviews:
+## Code-writing standards
 
-- No runtime transcendental in an encoder path — values come from profile data or
-  frozen tables, and a new geometry needs `scripts/record_tmath.py` →
-  `scripts/generate_frozen_tables.py` first.
-- Float32 at every assignment point: the Python `_f32` locations mark those
-  points, Rust rounds at the same statements, and the parity suites compare the
-  resulting values, so summation and butterfly order may not be rearranged.
-- Bit patterns travel as integers or little-endian bytes, never via decimal
-  strings.
-- Generated assets must regenerate byte-stably (run twice, diff empty),
-  with `sort_keys` JSON; the kernel stays `wasm32`-scalar-compilable.
+What a change is expected to look like, beyond passing the tests. Where a check
+exists it is named; where it does not, the rule is read in review. Formatting is
+not a review topic: `make rust-fmt` and `make lint` decide it.
 
-## Profile data
+- **A name says what the thing is or does.** A function named for the work it
+  performs or the value it returns, a variable for the value it holds, a test
+  for the behaviour it pins (`test_windows_reproduce_reference_synthesis`). No
+  abbreviation that needs a comment to decode. No check carries a naming rule;
+  this is read in review.
+- **A unit does one thing.** One reason to change per function, one owner per
+  module; split a function before adding a second mode to it. Not machine-checked
+  — clippy's complexity lints are not enabled.
+- **No dead code and no commented-out code.** Delete it; the git history has it.
+  Unused imports and locals are caught by `ruff` (`F`), unused Rust items by
+  rustc's `dead_code` through `make rust-lint`; a commented-out block is read in
+  review.
+- **No duplicated logic that has to be kept in step by hand.** One
+  implementation, one home. Where two surfaces must agree byte for byte the
+  parity suites are the check, but they report the divergence, they do not
+  prevent it; a copy-paste pair that must move together is a design error.
+  Nothing in the pipeline detects duplication.
+- **Errors are handled at the boundary, not swallowed in the middle.** A failure
+  a caller cannot see is a defect
+  ([standards](../reference/standards.md#errors)). The boundary is the one place
+  allowed to decide what a failure means. No lint in the set flags a blind
+  `except` or a discarded result, so this is read in review.
+- **A test states behaviour, not the implementation.** It asserts an observable
+  — bytes, values, an error class — rather than restating the code path that
+  produced it, so that a rewrite of the path keeps the test meaningful. Read in
+  review.
 
-A profile owns its complete calibration set — setup, codebooks, transforms,
-transient tables, psychoacoustic tables, geometry, and container defaults — under
-`src/wwise_wem/data/profiles/<name>/`. `manifest.json` is the single source for
-identity, geometry, logical resource names, paths, schemas, and SHA-256 values;
-`src/wwise_wem/data/profiles/index.json` selects the default and
-checksum-addresses the manifest. Loaders resolve both through package
-traversables, so the same inventory works from a source tree, an installed wheel,
-or a ZIP import.
+## Adding and removing files
 
-Adding any file under `src/wwise_wem/`, or any packaged data, requires:
+Adding a file under `src/wwise_wem/` or packaged data, and the wheel check that
+follows it, are in the root
+[`AGENTS.md`](../../AGENTS.md#new-file-registration-checklist) and
+[`../../src/wwise_wem/AGENTS.md`](../../src/wwise_wem/AGENTS.md#registration-duties).
 
-1. an entry in `tests/parity/distribution_allowlist.json`;
-2. package-data glob coverage in `pyproject.toml` for data;
-3. for profile data, a manifest `resources` entry with its SHA-256 and a
-   re-addressed index, followed by `make wheel-smoke`.
+Removing a mechanism, target, asset or public item is the same kind of change
+from the other side, and the documents that describe it are part of it: the same
+change updates or deletes those documents and corrects the [map](../README.md).
+A document describing something that no longer exists is worse than no document.
 
 Provenance rules — what may be recorded as profile data and what evidence a
 value needs — are in [`../reference/profiles.md`](../reference/profiles.md).
-
-## Documentation map
-
-| Surface | Holds |
-| --- | --- |
-| [`usage.md`](usage.md) | Install, CLI, per-language entry points |
-| this page | Layout, build, test targets, determinism, conventions |
-| [`../reference/`](../reference/) | Normative surfaces: architecture, domain model, profiles, public interface |
-| [`../findings/`](../findings/) | Evidence records for a completed result, with its retractions and trust boundary |
-| [`../methodology/`](../methodology/) | How to run a diagnosis: instruments, oracles, evidence discipline |
-| [`../roadmap.md`](../roadmap.md) | What is proven today, what is left |
-| `AGENTS.md` (root and per subtree) | Binding agent-conduct rules |
-
-Write a result into `findings/` only with reproducible evidence attached; write
-a method into `methodology/` only after it has actually decided a case. Do not
-restate reference material in a finding — link to it.
 
 ## Shared checkout and concurrent lanes
 
@@ -157,11 +157,19 @@ the rules the failure mode taught us.
 
 ## Conventions
 
-The binding rules are the Git discipline and provenance-hygiene sections of
-[`AGENTS.md`](../../AGENTS.md). In short: stage explicit paths only, one logical
-change per conventional commit (`feat(rust):`, `fix(profiles):`, `test:`,
-`docs:`, `ci:`, `chore:`), keep `crates/Cargo.lock` committed, push only when the
-human asks, and keep repository surfaces clean-room phrased — inside
-`src/wwise_wem/` the marker substrings enforced by
-`tests/parity/distribution_allowlist.json` must not appear in literals,
-identifiers, or paths.
+The binding git and provenance rules are the Git discipline and provenance
+sections of the root [`AGENTS.md`](../../AGENTS.md). In short: stage explicit
+paths only, one logical change per conventional commit (`feat(rust):`,
+`fix(profiles):`, `test:`, `docs:`, `ci:`, `chore:`), keep `crates/Cargo.lock`
+committed, push only when the human asks, and keep repository surfaces clean-room
+phrased — inside `src/wwise_wem/` the marker substrings listed in
+[`../../src/wwise_wem/AGENTS.md`](../../src/wwise_wem/AGENTS.md#provenance-vocabulary-checked-by-tests)
+must not appear in literals, identifiers, or paths.
+
+## Documentation
+
+The map is [`../README.md`](../README.md), and it is the place to correct when a
+document is added or removed. Two writing rules: a result goes into
+`findings/` only with reproducible evidence attached, and a method goes into
+`methodology/` only after it has actually decided a case. Do not restate
+reference material in a finding — link to it.

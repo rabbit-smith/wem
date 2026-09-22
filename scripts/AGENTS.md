@@ -2,14 +2,16 @@
 
 Scripts here produce the versioned assets and run the CI checks: their outputs
 are read by the test suites and by the packaging steps. They must be boring,
-idempotent, and offline.
+idempotent, and offline. What their outputs must satisfy is in
+[`../docs/reference/standards.md`](../docs/reference/standards.md#determinism)
+(byte-stable regeneration) and
+[`../docs/reference/standards.md`](../docs/reference/standards.md#bit-patterns)
+(little-endian packing).
 
 ## Rules
 
-- **Byte-stable outputs by construction**: deterministic ordering
-  (`sort_keys`, sorted file walks), explicit little-endian packing, and no
-  timestamps/paths/absolute locations embedded in artifacts.
-  Every emit/record script must be safe to run twice with an empty diff.
+- **Byte-stable outputs by construction**: every emit/record script here must be
+  safe to run twice with an empty diff.
 - **No network, no ambient state**: operate on repo paths resolved from
   `Path(__file__)`; env overrides must be declared in `--help`.
 - **Write only to declared destinations**: e.g. `record_tmath.py` →

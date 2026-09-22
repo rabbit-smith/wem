@@ -12,11 +12,12 @@ behavioural similarity.
 | 2013.2 | signed 16-bit | 6 (5.1) | 44100 Hz | 256/2048 | bit-exact: whole-file, per-frame and per-stage comparisons |
 | 2013.2 | signed 16-bit | 2 | 48000 Hz | 256/2048 | bit-exact: paired input plus eight real-build corpus cases |
 
-The registry is keyed by `(channels, sample_rate)`; further layouts and rates are
-added as new profiles without changing the stream encoder API. Profile
-provenance, the evidence behind both profiles, and the limits of that evidence
+The configuration is selected with one structured value — the Wwise generation
+plus the PCM channel count and sample rate; further layouts and rates are added
+as new profiles without changing the encoder API. Profile provenance, the
+evidence behind both profiles, and the limits of that evidence
 are in [`docs/findings/2ch-byte-exactness.md`](docs/findings/2ch-byte-exactness.md)
-and [`docs/roadmap.md`](docs/roadmap.md).
+and [`docs/reference/profiles.md`](docs/reference/profiles.md).
 
 ## Install and encode
 
@@ -53,7 +54,7 @@ are in [`docs/guides/usage.md`](docs/guides/usage.md).
 ## Integration surface
 
 The canonical interface is the C ABI core surface ([`include/wem.h`](include/wem.h),
-implemented by `crates/wem-capi`): the `Init` → `chunk*` → `Finish` lifecycle,
+implemented by `crates/wem-capi`): the `Init` → `push*` → `Finish` lifecycle,
 reply framing (`seq 0` carries the setup packet, then audio packets), and the
 error codes are pinned there. Every language binding is a thin parallel shell
 over the kernel — PyO3 (`wwise_wem._core`), Node and browser via wasm (`js/`),
@@ -79,14 +80,16 @@ stress corpora. The full list of test targets is in
 | Document | Covers |
 | --- | --- |
 | [`docs/README.md`](docs/README.md) | Index of the whole doc set |
+| [`docs/reference/standards.md`](docs/reference/standards.md) | The product norms, and the test that establishes each |
 | [`docs/guides/usage.md`](docs/guides/usage.md) | Install, CLI, Python API, every language binding |
-| [`docs/guides/development.md`](docs/guides/development.md) | Layout, build, verification ladder, determinism, conventions |
+| [`docs/guides/development.md`](docs/guides/development.md) | Layout, build, verification ladder, code-writing standards |
 | [`docs/reference/architecture.md`](docs/reference/architecture.md) | Layers, dependency direction, encoding flow |
 | [`docs/reference/domain-model.md`](docs/reference/domain-model.md) | The vocabulary to use in code and messages |
-| [`docs/reference/profiles.md`](docs/reference/profiles.md) | Profile ownership, provenance, frozen tables |
+| [`docs/reference/profiles.md`](docs/reference/profiles.md) | Profile ownership, selection, provenance, frozen tables |
 | [`docs/reference/public-interface.md`](docs/reference/public-interface.md) | Package exports, the `encode` API and the CLI |
 | [`docs/findings/`](docs/findings/) | Evidence records for completed results |
 | [`docs/methodology/`](docs/methodology/) | How a byte-exactness diagnosis is run |
+| [`docs/roadmap.md`](docs/roadmap.md) | What is still open |
 | [`AGENTS.md`](AGENTS.md) | Binding agent-conduct rules (root plus per-subtree guides) |
 
 ## Project boundary

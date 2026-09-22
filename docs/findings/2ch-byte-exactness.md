@@ -298,5 +298,5 @@ What is not proven:
 The no-fitting rule: profile data comes from direct reads or published reference
 algorithms, never output fitting, and local rules must stay anchored to
 independent observables rather than being back-derived from the total byte count.
-The maintenance rules that keep both paired results and the corpora unchanged
-are in [`../roadmap.md`](../roadmap.md).
+The claims those results establish, and the tests that hold them, are in
+[`../reference/standards.md`](../reference/standards.md#what-is-established).

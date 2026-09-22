@@ -1,23 +1,18 @@
 # AGENTS.md — wwise-wem
 
 Standalone bit-exact implementation of Wwise 2013.2 Vorbis WAV→WEM encoding.
-Correctness is defined by exact bytes, not by behavior similarity. Read this
-file first; subtree rules live in the child `AGENTS.md` files listed below.
+Read this file first; subtree rules live in the child `AGENTS.md` files listed
+below.
 
-## What the tests cover
+## Product norms
 
-| Claim | Where it is checked |
-|---|---|
-| Reference WEM `SHA-256 17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247` | `make wem-bytes` |
-| Per-frame × per-stage pipeline hashes + representative raw dumps | `tests/parity/test_stage_pipeline.py` over `tests/data/stage-records/` |
-| Package-root public exports (see `docs/reference/public-interface.md`) | `tests/parity/test_public_api.py`; the export list in `tests/parity/test_distribution.py`; wheel smoke |
-| Geometry-materializer parity: ported builder == registered 6ch surfaces == kernel `psy_geom*` | `tests/parity/test_geometry_materializer_parity.py` + `cargo test -p wem-analysis` parity suites |
-| Profile data digest chain: payload → manifest SHA → index SHA | `bundle.verify_all`, wheel smoke |
-
-Running those suites is what establishes each claim. A refactor is checked
-against them: when one reports a difference, the difference says what moved —
-either the code is wrong, or the expected bytes have changed as part of the
-work, and those are two different changes.
+What the system must be — bit-exactness and what establishes it, determinism and
+float semantics, bit-pattern transport, layers and dependency direction, errors
+and panics, caller streams and ambient state, profile data ownership, the
+integration topology, the portability floor — is in
+[`docs/reference/standards.md`](docs/reference/standards.md). This file holds the
+working rules: what to read, the verification ladder, git discipline and the
+registration duties.
 
 ## Verification ladder (reuse before rerunning)
 
@@ -28,34 +23,6 @@ work, and those are two different changes.
    the change touches shared state, configuration, lockfiles, or generated assets.
 4. A passing suite is reused — do not re-run it per task or per agent; rerun only
    on a named material invalidator (code/test/data/config the suite exercises).
-
-## Determinism rules (project-wide)
-
-- No runtime transcendental (`sin/cos/log/log10/pow/exp`) in any encoder path.
-  All such values come from profile data (`FrozenMathTables`, static trig
-  banks). New geometry requiring a new transcendental input must first extend
-  `scripts/record_tmath.py` → `scripts/generate_frozen_tables.py` and ship it
-  as a checksummed profile resource; encoder code may only table-read it.
-- Float semantics: values are float32 at every assignment point (the Python
-  `_f32` call sites mark those points; Rust must round at the same statements).
-  Summation and butterfly ordering are fixed — the per-frame parity tests compare
-  the resulting values, and reordering them changes what they read.
-- Bit patterns travel as integers or little-endian bytes, never via decimal strings.
-- Portability floor: the kernel must stay compilable for `wasm32-unknown-unknown`
-  in a scalar configuration — parallel acceleration (e.g. rayon) lives behind a
-  default-on, off-able feature, and profile bytes must be consumable via an
-  I/O-free entry (`from_resources`), not only the filesystem loader.
-- Generated assets (`tests/data/stage-records/`, the frozen tables) must come out
-  byte-identical when regenerated: run the generator twice and the diff is empty,
-  JSON is written with `sort_keys`, and file names carry explicit endianness.
-
-## Dependency direction
-
-The import graph is one-directional and acyclic; the authoritative rule list is
-`docs/reference/architecture.md`. Summary: `scheduling` imports nothing downstream;
-`analysis`/`vorbis`/`container` never open package resources; `profiles` is the
-sole resource owner; one application/core layer alone assembles the use case.
-This applies identically to Python (oracle) and Rust (kernel) crates.
 
 ## Git discipline
 
@@ -81,12 +48,11 @@ This applies identically to Python (oracle) and Rust (kernel) crates.
 
 ## Provenance hygiene
 
-Repository surfaces are clean-room phrased. Inside the `src/wwise_wem` package,
-string literals, identifiers, and paths must not contain the forbidden marker
-substrings enforced by `tests/parity/distribution_allowlist.json` and the
-cleanliness tests (`capture`, `fixture`, `the probe`, `research`, `experimental`
-— case-insensitive, substring level in package text; docs/README are exempt).
-Preferred vocabulary: `recording`/`record`, `representative`, `sample`, `site`.
+Repository surfaces are clean-room phrased. The marker substrings the
+distribution and cleanliness suites reject anywhere in package text, and the
+vocabulary to use instead, are listed in
+[`src/wwise_wem/AGENTS.md`](src/wwise_wem/AGENTS.md#provenance-vocabulary-checked-by-tests)
+(docs and README are exempt from the marker rule).
 
 ## New-file registration checklist
 
@@ -109,34 +75,17 @@ Adding any file under `src/wwise_wem/` or packaged data requires:
 | Tooling scripts | [`scripts/AGENTS.md`](scripts/AGENTS.md) |
 | Documentation set | [`docs/README.md`](docs/README.md) |
 
-## Integration topology
-
-- The Rust kernel is the sole integration point; its **C ABI core
-  surface** is `crates/wem-capi`, and [`include/wem.h`](include/wem.h) is the
-  interface it implements. The lifecycle (Init -> chunk* -> Finish), the
-  reply framing (seq 0 = setup packet, then audio packets), and the
-  error codes are declared in `include/wem.h` and implemented 1:1 by
-  `wem-capi`; every language binding mirrors that interface.
-- Every binding is a **parallel shell** over the kernel, never a
-  parallel implementation: PyO3 today (in-package `wwise_wem._core`),
-  Go via cgo (`examples/go-cgo` is the reference shell), a wasm build
-  next. Shells mirror the interface 1:1 and own no numerics; a new language
-  integrates by writing a shim over the C ABI — never by changing the
-  kernel for it.
-- Same-process consumers bind the kernel **directly**: never route a
-  call through RPC or a serialization hop, and never keep a second
-  integration surface in parallel with the C ABI.
-- Streaming chunk boundaries must not affect output bytes; any
-  client-side framing rule added later needs a parity case proving that.
-- Browsers use the wasm build of the same core, not a remote service.
-
 ## Governing documents
 
-`docs/reference/architecture.md` (layers), `docs/reference/domain-model.md` (vocabulary — use these
-terms in code and messages), `docs/reference/profiles.md` (profile & frozen-table
-ownership), `docs/reference/public-interface.md` (package exports, the `encode`
-API, result types, and the CLI). The domain model's terms are the ones to use; do
-not invent parallel names for defined concepts.
+[`docs/reference/standards.md`](docs/reference/standards.md) (the product norms
+and the test that establishes each), `docs/reference/architecture.md` (layers),
+`docs/reference/domain-model.md` (vocabulary — use these terms in code and
+messages), `docs/reference/profiles.md` (profile & frozen-table ownership),
+`docs/reference/public-interface.md` (package exports, the `encode` API, result
+types, and the CLI), `docs/guides/development.md` (how work is done here: the
+verification ladder, the shared checkout, commit discipline and the code-writing
+standards). The domain model's terms are the ones to use; do not invent parallel
+names for defined concepts.
 
 The rest of the set is split by purpose: `docs/guides/` holds task instructions,
 `docs/findings/` holds the evidence record for a completed result (root causes,

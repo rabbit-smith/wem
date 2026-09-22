@@ -127,15 +127,9 @@ mechanism and read-verified. Any change to either set means regenerating the
 registered bytes and re-running both suites.
 Per-field provenance is in [`profiles.md`](profiles.md).
 
-## Acceptance boundaries
+## Acceptance
 
-Structural changes must preserve:
-
-- the exact package-root public exports;
-- an acyclic layer-compliant import graph;
-- the exact wheel inventory;
-- the 205-frame regression values;
-- the reference WEM byte stream and SHA-256;
-- installed-wheel and ZIP-import resource verification.
-
-Domain terminology is defined in [`domain-model.md`](domain-model.md); migration history lives in the git log.
+A structural change is accepted when every claim in
+[`standards.md`](standards.md#what-is-established) still holds. Domain
+terminology is defined in [`domain-model.md`](domain-model.md); migration
+history lives in the git log.
