@@ -387,6 +387,50 @@ pub fn pack_floor1_body(
     Ok(())
 }
 
+/// Borrow the two channel rows a coupling step names, with the structural
+/// checks both directions share.
+fn coupling_pair<'a>(
+    rows: &'a mut [Vec<f64>],
+    step: &CouplingStep,
+) -> Result<(&'a mut Vec<f64>, &'a mut Vec<f64>), PacketError> {
+    let channels = rows.len();
+    // Compare in the step's own width first: a channel index that does not fit
+    // the index type is out of range, not a wrapped index 0.
+    let mag = usize::try_from(step.mag)
+        .ok()
+        .filter(|&channel| channel < channels)
+        .ok_or(PacketError::CouplingChannelOutOfRange {
+            channel: if step.mag > usize::MAX as u64 {
+                usize::MAX
+            } else {
+                step.mag as usize
+            },
+            channels,
+        })?;
+    let ang = usize::try_from(step.ang)
+        .ok()
+        .filter(|&channel| channel < channels)
+        .ok_or(PacketError::CouplingChannelOutOfRange {
+            channel: if step.ang > usize::MAX as u64 {
+                usize::MAX
+            } else {
+                step.ang as usize
+            },
+            channels,
+        })?;
+    if mag == ang {
+        return Err(PacketError::CouplingChannelsEqual { channel: mag });
+    }
+    let (mag_row, ang_row) = if mag < ang {
+        let (before_ang, from_ang) = rows.split_at_mut(ang);
+        (&mut before_ang[mag], &mut from_ang[0])
+    } else {
+        let (before_mag, from_mag) = rows.split_at_mut(mag);
+        (&mut from_mag[0], &mut before_mag[ang])
+    };
+    Ok((mag_row, ang_row))
+}
+
 /// In-place forward mapping0 stereo coupling (exact 4-branch pre-image)
 /// (Python `apply_mapping_coupling`).
 ///
@@ -406,30 +450,7 @@ fn apply_mapping_coupling(
     coupling: &[CouplingStep],
 ) -> Result<(), PacketError> {
     for step in coupling {
-        let mag = step.mag as usize;
-        let ang = step.ang as usize;
-        if mag >= residuals.len() {
-            return Err(PacketError::CouplingChannelOutOfRange {
-                channel: mag,
-                channels: residuals.len(),
-            });
-        }
-        if ang >= residuals.len() {
-            return Err(PacketError::CouplingChannelOutOfRange {
-                channel: ang,
-                channels: residuals.len(),
-            });
-        }
-        if mag == ang {
-            return Err(PacketError::CouplingChannelsEqual { channel: mag });
-        }
-        let (mag_row, ang_row) = if mag < ang {
-            let (before_ang, from_ang) = residuals.split_at_mut(ang);
-            (&mut before_ang[mag], &mut from_ang[0])
-        } else {
-            let (before_mag, from_mag) = residuals.split_at_mut(mag);
-            (&mut from_mag[0], &mut before_mag[ang])
-        };
+        let (mag_row, ang_row) = coupling_pair(residuals, step)?;
         if mag_row.len() != ang_row.len() {
             return Err(PacketError::CouplingRowLengthMismatch);
         }
@@ -451,6 +472,91 @@ fn apply_mapping_coupling(
                 *magnitude = a_value;
                 *angle = a_value - m_value;
             }
+        }
+    }
+    Ok(())
+}
+
+/// Decoder-direction mapping0 coupling inverse for one coefficient
+/// (libvorbis `mapping0.c`; Python `scripts/decode_wem.py::decouple_db_domain`).
+///
+/// The decoder recovers the pre-coupling pair `(mag, ang)` from the stored
+/// pair `(mag', ang')` through four branches, applied to the residue-domain
+/// coefficients *before* the floor envelope:
+///
+/// - `mag' > 0` and `ang' > 0`: `mag = mag'`, `ang = mag' - ang'`
+/// - `mag' > 0` and `ang' <= 0`: `ang = mag'`, `mag = mag' + ang'`
+/// - `mag' <= 0` and `ang' > 0`: `mag = mag'`, `ang = mag' + ang'`
+/// - `mag' <= 0` and `ang' <= 0`: `ang = mag'`, `mag = mag' - ang'`
+///
+/// [`apply_mapping_coupling`] stores the exact pre-image of this map, so the
+/// two compose to the identity — the round-trip test below is that statement.
+pub fn decode_branches(mag_stored: f64, ang_stored: f64) -> (f64, f64) {
+    if mag_stored > 0.0 {
+        if ang_stored > 0.0 {
+            // M' > 0, A' > 0: mag = M', ang = M' - A'
+            (mag_stored, mag_stored - ang_stored)
+        } else {
+            // M' > 0, A' <= 0: ang = M', mag = M' + A'
+            (mag_stored + ang_stored, mag_stored)
+        }
+    } else if ang_stored > 0.0 {
+        // M' <= 0, A' > 0: mag = M', ang = M' + A'
+        (mag_stored, mag_stored + ang_stored)
+    } else {
+        // M' <= 0, A' <= 0: ang = M', mag = M' - A'
+        (mag_stored - ang_stored, mag_stored)
+    }
+}
+
+/// In-place mapping0 coupling inverse over full coefficient rows
+/// (Python `decouple_db_domain`).
+///
+/// Steps unwind in reverse order, mirroring libvorbis's `mapping0_inverse`,
+/// so a chain of coupling steps decodes to exactly the rows
+/// [`apply_mapping_coupling`] started from.
+pub fn apply_mapping_coupling_inverse(
+    rows: &mut [Vec<f64>],
+    coupling: &[CouplingStep],
+) -> Result<(), PacketError> {
+    for step in coupling.iter().rev() {
+        let (mag_row, ang_row) = coupling_pair(rows, step)?;
+        if mag_row.len() != ang_row.len() {
+            return Err(PacketError::CouplingRowLengthMismatch);
+        }
+        for (magnitude, angle) in mag_row.iter_mut().zip(ang_row.iter_mut()) {
+            let (mag, ang) = decode_branches(*magnitude, *angle);
+            *magnitude = mag;
+            *angle = ang;
+        }
+    }
+    Ok(())
+}
+
+/// The development script's own mid/side coupling inverse (Python
+/// `scripts/decode_wem.py::apply_coupling`).
+///
+/// Its convention is `mid = L + R` and `side = L - R`, so it reconstructs
+/// `L = mid + side` and `R = mid - side`, in coupling order. This is **not**
+/// the map [`apply_mapping_coupling_inverse`] implements: the script carries
+/// both, and only the four-branch map is the inverse of this crate's forward
+/// [`apply_mapping_coupling`] (which the round-trip test pins). Provided
+/// because a lane mirroring that script's generic path needs the same
+/// convention it uses, with the discrepancy visible rather than implicit.
+pub fn apply_mid_side_coupling_inverse(
+    rows: &mut [Vec<f64>],
+    coupling: &[CouplingStep],
+) -> Result<(), PacketError> {
+    for step in coupling {
+        let (mag_row, ang_row) = coupling_pair(rows, step)?;
+        if mag_row.len() != ang_row.len() {
+            return Err(PacketError::CouplingRowLengthMismatch);
+        }
+        for (magnitude, angle) in mag_row.iter_mut().zip(ang_row.iter_mut()) {
+            let mid = *magnitude;
+            let side = *angle;
+            *magnitude = mid + side;
+            *angle = mid - side;
         }
     }
     Ok(())
@@ -1118,35 +1224,11 @@ mod coupling_round_trip {
     //! invariant (leftover from the 2ch/48k release).
 
     use super::{
-        aotuv_stereo_residue, apply_mapping_coupling, lossless_couple_i64,
+        aotuv_stereo_residue, apply_mapping_coupling, apply_mapping_coupling_inverse,
+        apply_mid_side_coupling_inverse, decode_branches, lossless_couple_i64,
         propagate_mapping_nonzero, PacketError,
     };
     use crate::setup::CouplingStep;
-
-    /// Mirror of the decoder's four-branch coupling inverse, per
-    /// libvorbis 1.3.7's mapping0.c:765-787 (the published decoder's
-    /// decouple_db_domain in scripts/decode_wem.py transcribes it).
-    /// For the stored pair (mag', ang') it returns the recovered
-    /// pre-coupling (mag, ang).
-    fn decode_branches(mag_stored: f64, ang_stored: f64) -> (f64, f64) {
-        if mag_stored > 0.0 {
-            if ang_stored > 0.0 {
-                // M' > 0, A' > 0: mag = M', ang = M' - A'
-                (mag_stored, mag_stored - ang_stored)
-            } else {
-                // M' > 0, A' <= 0: ang = M', mag = M' + A'
-                (mag_stored + ang_stored, mag_stored)
-            }
-        } else {
-            if ang_stored > 0.0 {
-                // M' <= 0, A' > 0: mag = M', ang = M' + A'
-                (mag_stored, mag_stored + ang_stored)
-            } else {
-                // M' <= 0, A' <= 0: ang = M', mag = M' - A'
-                (mag_stored - ang_stored, mag_stored)
-            }
-        }
-    }
 
     /// One coupling step over two channels, one bin: forward map then the
     /// decoder's four-branch inverse must be the identity.
@@ -1216,8 +1298,8 @@ mod coupling_round_trip {
 
     /// Per-coefficient invariant: a full coefficient row (many bins) and a
     /// two-step coupling chain must each round-trip exactly, coefficient by
-    /// coefficient, against the decoder's four-branch inverse applied in
-    /// reverse step order.
+    /// coefficient, through the promoted row-level inverse (which applies the
+    /// decoder's four-branch map in reverse step order).
     #[test]
     fn apply_mapping_coupling_round_trips_per_coefficient_and_chained_steps() {
         // Three channels, eight bins; each (mag, ang) pair is chosen so the
@@ -1246,32 +1328,47 @@ mod coupling_round_trip {
             CouplingStep { mag: 0, ang: 2 },
         ];
         apply_mapping_coupling(&mut residuals, &coupling).unwrap();
+        apply_mapping_coupling_inverse(&mut residuals, &coupling).unwrap();
 
-        for step in coupling.iter().rev() {
-            let (mag, ang) = (step.mag as usize, step.ang as usize);
-            let (mag_row, ang_row) = if mag < ang {
-                let (before_ang, from_ang) = residuals.split_at_mut(ang);
-                (&mut before_ang[mag], &mut from_ang[0])
-            } else {
-                let (before_mag, from_mag) = residuals.split_at_mut(mag);
-                (&mut from_mag[0], &mut before_mag[ang])
-            };
-            for (mag_value, ang_value) in mag_row.iter_mut().zip(ang_row.iter_mut()) {
-                let (mag_stored, ang_stored) = (*mag_value, *ang_value);
-                let (mag_rec, ang_rec) = decode_branches(mag_stored, ang_stored);
-                *mag_value = mag_rec;
-                *ang_value = ang_rec;
-            }
-        }
+        assert_eq!(residuals, original);
+    }
 
-        for ch in 0..3usize {
-            for j in 0..8usize {
-                assert_eq!(
-                    residuals[ch][j], original[ch][j],
-                    "coefficient (ch {ch}, bin {j}) not recovered",
-                );
+    #[test]
+    fn row_coupling_inverses_report_structural_errors() {
+        // A channel the row list does not carry.
+        let mut rows = vec![vec![1.0], vec![2.0]];
+        let err = apply_mapping_coupling_inverse(&mut rows, &[CouplingStep { mag: 0, ang: 2 }])
+            .expect_err("missing channel must be rejected");
+        assert_eq!(
+            err,
+            PacketError::CouplingChannelOutOfRange {
+                channel: 2,
+                channels: 2
             }
-        }
+        );
+
+        // A step that names one channel twice.
+        let err = apply_mapping_coupling_inverse(&mut rows, &[CouplingStep { mag: 1, ang: 1 }])
+            .expect_err("a step cannot couple a channel to itself");
+        assert_eq!(err, PacketError::CouplingChannelsEqual { channel: 1 });
+
+        // Rows of different lengths cannot be coupled coefficient by
+        // coefficient.
+        let mut ragged = vec![vec![1.0, 2.0], vec![3.0]];
+        let err = apply_mid_side_coupling_inverse(&mut ragged, &[CouplingStep { mag: 0, ang: 1 }])
+            .expect_err("ragged rows must be rejected");
+        assert_eq!(err, PacketError::CouplingRowLengthMismatch);
+    }
+
+    /// The script's generic path carries a second, different inverse
+    /// (`apply_coupling`: mid/side pairs, forward step order). It is recorded
+    /// here so its convention is not lost: `mid = L + R`, `side = L - R`, so
+    /// `L = mid + side` and `R = mid - side`.
+    #[test]
+    fn mid_side_inverse_is_the_scripts_pair_map() {
+        let mut rows = vec![vec![3.0, -1.0], vec![1.0, 2.0]];
+        apply_mid_side_coupling_inverse(&mut rows, &[CouplingStep { mag: 0, ang: 1 }]).unwrap();
+        assert_eq!(rows, vec![vec![4.0, 1.0], vec![2.0, -3.0]]);
     }
 
     #[test]
