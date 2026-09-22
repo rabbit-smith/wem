@@ -93,7 +93,13 @@ jobs:
           set -euo pipefail
           python -m pip install "maturin>=1.7"
           python - <<'PY' > "${RUNNER_TEMP}/dev-requirements.txt"
-          import pathlib, tomllib
+          import pathlib
+          try:
+              import tomllib
+          except ModuleNotFoundError:
+              # Python 3.10, which this matrix includes: tomllib arrived in
+              # 3.11. pip vendors tomli for exactly this parse.
+              from pip._vendor import tomli as tomllib
           project = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
           print("\n".join(project["optional-dependencies"]["dev"]))
           PY
@@ -157,6 +163,39 @@ jobs:
         # to a private one compiles, lints and tests clean, and only rustdoc
         # reports it. Deterministic, so unlike a timing it is a fair check.
         run: cd crates && RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+      # One test in this workspace reaches into Python by design:
+      # `wem-container`'s container parity case drives the pure-Python oracle,
+      # and that oracle reads its profile values from the compiled carrier
+      # (`reference/wwise_wem_reference/profiles/artifact.py` ->
+      # `wwise_wem._core.profile_tables()`), so the extension has to exist
+      # before the suite runs. It is built the same way the regression job
+      # builds it. Without this the job fails on
+      # `ImportError: cannot import name '_core'` in a Rust test binary, which
+      # is a confusing way to learn that a Rust suite has a Python prerequisite.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install "maturin>=1.7" "numpy>=1.24"
+      - name: in-package native kernel (the oracle reads its tables from it)
+        shell: bash
+        run: |
+          set -euo pipefail
+          maturin build --release -o native-wheel
+          python - <<'PY'
+          import glob, pathlib, zipfile
+          wheel = sorted(glob.glob("native-wheel/*.whl"))[-1]
+          with zipfile.ZipFile(wheel) as z:
+              members = [
+                  n for n in z.namelist()
+                  if n.startswith("wwise_wem/_core.")
+                  and n.rsplit(".", 1)[-1] in ("so", "pyd", "dylib")
+              ]
+              assert members, f"no _core extension in {wheel}"
+              for m in members:
+                  target = pathlib.Path("src") / m
+                  target.write_bytes(z.read(m))
+                  print("installed", target)
+          PY
       - name: workspace tests (unit, integration, doc)
         run: cd crates && cargo test --workspace
 
