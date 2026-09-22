@@ -722,7 +722,7 @@ fn run_worker(exe: &Path, worker: &str, spec: &Spec) -> Result<ChildRun, String>
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (exe, worker, spec);
-        return Err("ru_maxrss reporting is implemented for macOS only".to_string());
+        Err("ru_maxrss reporting is implemented on macOS only".to_string())
     }
     #[cfg(target_os = "macos")]
     {
@@ -773,6 +773,9 @@ fn run_worker(exe: &Path, worker: &str, spec: &Spec) -> Result<ChildRun, String>
     }
 }
 
+/// Only the macOS arm of `run_worker` reads `rusage`, so this is dead code on
+/// every other target and `-D warnings` is right to say so.
+#[cfg(target_os = "macos")]
 fn duration_from(sec: i64, usec: i64) -> std::time::Duration {
     std::time::Duration::new(sec.max(0) as u64, (usec.max(0) as u32) * 1_000)
 }

@@ -435,6 +435,7 @@ mod session {
         }
         #[cfg(not(target_os = "macos"))]
         {
+            let _ = (exe, worker);
             None
         }
     }
