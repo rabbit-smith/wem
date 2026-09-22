@@ -170,25 +170,26 @@ unassigned branch taken on the packet's very last bit leaves no bits either and
 is accepted as an early end — and the asymmetry is stated in
 `crates/wem-core/src/decoder.rs` rather than papered over.
 
-## The declared frame count, and one shell-side read
+## The declared frame count
 
-The decode surface announces the geometry through its header announcement and
-reports the declared frame count only as *what the callbacks received* once a
-session has finished (`include/wem.h` section 5). The Python facade documents
-`total_frames` as the container's own `dwTotalPCMFrames` and makes it readable
-*before* iteration, so `crates/wem-python` reads that one field from the header
-region the kernel has already parsed and accepted, in the container's own byte
-order.
+The header announcement carries the declared frame count beside the geometry and
+the setup packet, so it is readable before any sample arrives and **no shell
+reads the container for it**.
 
-That read is bounded and deliberate: it is a field read of `fmt `'s
-`dwTotalPCMFrames` (the offset `wem-container`'s `VorbisFmtFields` names), not a
-second container reader — the kernel decides whether the container parses, and
-the header announcement is the proof that it did. No other shell reads a
-container field, and the value is consistent by construction: a session that
-finishes successfully has delivered exactly the declared count, and the kernel
-reports a mismatch instead of a result when it has not. If the decode surface
-ever announces the declared count itself, this read is deleted and nothing else
-changes.
+It travels there because the alternatives are worse. The session has already
+parsed the value — it needs it to clamp its output — so announcing it costs
+nothing; leaving it out would make every shell locate the container's `fmt `
+chunk and read `dwTotalPCMFrames` at the offset `wem-container`'s
+`VorbisFmtFields` names. That is container layout knowledge in a layer the
+integration topology keeps free of it, and it would be duplicated once per
+shell rather than fixed once. The announcement also keeps the header callback's
+own justification intact: the geometry is required because it is available
+nowhere else in the output, and the declared count is a container fact of
+exactly that kind.
+
+The value is consistent by construction: a session that finishes successfully
+has delivered exactly the declared count, and the kernel reports a mismatch
+instead of a result when it has not.
 
 ## Settled decisions
 

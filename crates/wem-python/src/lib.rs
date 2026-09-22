@@ -897,6 +897,11 @@ struct PyDecodedHeader {
     /// PCM sample rate the container declares.
     #[pyo3(get)]
     sample_rate: u32,
+    /// `dw_total_pcm_frames`: the frame count the container declares, and so
+    /// the number this session delivers if it finishes successfully. Announced
+    /// by the kernel, which has already read it to reach this point.
+    #[pyo3(get)]
+    total_frames: u64,
     /// The setup packet this revision parsed, exactly as the container carried
     /// it.
     #[pyo3(get)]
@@ -908,6 +913,7 @@ impl PyDecodedHeader {
         Self {
             channels: header.channels,
             sample_rate: header.sample_rate,
+            total_frames: header.total_frames,
             setup_packet: header.setup_packet,
         }
     }
@@ -964,15 +970,9 @@ struct PyDecoder {
     /// A defect killed this handle: every later call raises `STATE_ERROR`
     /// without touching the kernel again.
     dead: bool,
-    /// Bytes pushed up to the header announcement — the container's header
-    /// region, which the declared frame count is read from (see
-    /// [`declared_total_frames`]). Held only until the announcement resolves:
-    /// for a container the kernel accepts that is the `fmt ` chunk and the
-    /// first packet, never the stream.
-    header_region: Vec<u8>,
-    /// The container's declared frame count, once the header announcement has
-    /// resolved it.
-    total_frames: Option<u32>,
+    /// The container's declared frame count, taken from the kernel's header
+    /// announcement once it fires.
+    total_frames: Option<u64>,
 }
 
 impl PyDecoder {
@@ -995,9 +995,8 @@ impl PyDecoder {
             self.dead = true;
         }
         let step = guarded.outcome?;
-        if self.total_frames.is_none() && step.header.is_some() {
-            self.total_frames = declared_total_frames(&self.header_region);
-            self.header_region = Vec::new();
+        if let Some(header) = step.header.as_ref() {
+            self.total_frames = Some(header.total_frames);
         }
         match decode_step(py, step) {
             Ok(py_step) => Ok(py_step),
@@ -1028,15 +1027,15 @@ impl PyDecoder {
             inner: WemDecodeSession::new(),
             finished: false,
             dead: false,
-            header_region: Vec::new(),
             total_frames: None,
         }
     }
 
     /// The container's declared frame count (`dwTotalPCMFrames`), readable once
-    /// the header announcement has resolved; `None` before that.
+    /// the header announcement has resolved; `None` before that. The kernel
+    /// announces it, so no shell reads the container for it.
     #[getter]
-    fn total_frames(&self) -> Option<u32> {
+    fn total_frames(&self) -> Option<u64> {
         self.total_frames
     }
 
@@ -1059,9 +1058,6 @@ impl PyDecoder {
         // Copy out before releasing the GIL so no Python object pointer
         // crosses the thread boundary.
         let data: Vec<u8> = chunk.as_bytes().to_vec();
-        if self.total_frames.is_none() {
-            self.header_region.extend_from_slice(&data);
-        }
         let guarded = guard(
             PanicScope::Handle,
             "Decoder",
@@ -1092,11 +1088,7 @@ impl PyDecoder {
         );
         // Terminal whatever it returned, like the C ABI's `wem_decoder_finish`.
         self.finished = true;
-        let step = self.settle(py, guarded);
-        // No further push can arrive, so the retained header region is released
-        // whether or not the header resolved.
-        self.header_region = Vec::new();
-        step
+        self.settle(py, guarded)
     }
 }
 
@@ -1148,55 +1140,6 @@ fn decode_step(py: Python<'_>, step: WemDecodeStep) -> PyResult<PyDecodeStep> {
         frames,
         error,
     })
-}
-
-/// The container's declared frame count (`dwTotalPCMFrames`), read from the
-/// `fmt ` chunk of the container's header region.
-///
-/// The decode surface announces the geometry (channels, sample rate) and the
-/// setup packet, but not the declared frame count: `include/wem.h` section 5
-/// reports that only as "what the callbacks received" once a session has
-/// finished. The Python facade documents `total_frames` as the container's own
-/// declaration and makes it readable *before* iteration, so this shell reads
-/// that one field from the header region the kernel has already parsed and
-/// accepted — the container's `fmt ` payload at the offset
-/// `wem-container`'s `VorbisFmtFields` names, in the container's own byte
-/// order.
-///
-/// It is a field read, not a second container reader: the kernel decides
-/// whether the container parses (the header announcement is the proof that it
-/// did), no chunk is interpreted beyond locating `fmt `, and nothing is derived
-/// from the value here. `None` means the field could not be read — the facade
-/// reports that rather than substituting a guess.
-fn declared_total_frames(header_region: &[u8]) -> Option<u32> {
-    let big_endian = if header_region.starts_with(b"RIFF") {
-        false
-    } else if header_region.starts_with(b"RIFX") {
-        true
-    } else {
-        return None;
-    };
-    let read_u32 = |at: usize| -> Option<u32> {
-        let bytes: [u8; 4] = header_region.get(at..at + 4)?.try_into().ok()?;
-        Some(if big_endian {
-            u32::from_be_bytes(bytes)
-        } else {
-            u32::from_le_bytes(bytes)
-        })
-    };
-    // The chunk walk the container format defines: 12 bytes of RIFF/WAVE
-    // framing, then `id`, `size`, payload, one word pad for an odd payload.
-    let mut pos = 12usize;
-    while pos + 8 <= header_region.len() {
-        let id = header_region.get(pos..pos + 4)?;
-        let size = read_u32(pos + 4)? as usize;
-        if id == b"fmt " {
-            // `dwTotalPCMFrames` at 0x18 of the fmt payload.
-            return read_u32(pos + 8 + 0x18);
-        }
-        pos += 8 + size + (size & 1);
-    }
-    None
 }
 
 // ---------------------------------------------------------------------------
@@ -2697,26 +2640,6 @@ assert result.channels == 6, result.channels
                 assert_eq!(code_attribute(py, &pyerr), code);
             }
         });
-    }
-
-    /// The declared frame count is read from the container's own `fmt ` field,
-    /// and a container that does not carry one is reported as unreadable rather
-    /// than as a guess.
-    #[test]
-    fn declared_total_frames_reads_the_container_field() {
-        let wem = reference_wem();
-        assert_eq!(declared_total_frames(&wem), Some(139_398));
-        assert_eq!(
-            declared_total_frames(b"NOTARIFF and no chunks at all"),
-            None
-        );
-        // A header region that stops before the fmt payload has nothing to
-        // read; the kernel would not have announced a header from it either.
-        let fmt_at = wem
-            .windows(4)
-            .position(|window| window == b"fmt ")
-            .expect("the fixture carries a fmt chunk");
-        assert_eq!(declared_total_frames(&wem[..fmt_at + 8 + 0x10]), None);
     }
 
     /// The decode shell's PCM geometry comes from the kernel, never from a

@@ -141,9 +141,9 @@ class DecodeResult(Iterator[list[float]]):
 
         total_frames = session.total_frames
         if total_frames is None:
-            # The geometry was announced, so the container's header region is
-            # the session's to read: a declared frame count it cannot read is a
-            # defect, never a value to guess.
+            # The kernel announces the geometry and the declared frame count in
+            # the same header announcement, so a resolved header without one is
+            # a kernel defect, never a value to guess at.
             raise WwiseWemError(
                 _INTERNAL,
                 "the container's declared frame count is not readable after "
