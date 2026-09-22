@@ -30,13 +30,15 @@ jobs:
         run: cd crates && cargo clippy -p wem-wasm --target wasm32-unknown-unknown -- -D warnings
       - name: unit tests (native; error-code table)
         run: cd crates && cargo test -p wem-wasm
-      - name: wasm test (build both packages, then the Node parity test)
-        # Build and test in one invocation: the target builds js/pkg (web) and
-        # js/pkg-node (nodejs) and then runs js/test-node.mjs against the bytes
-        # it just built. wasm-pack resolves --out-dir against the crate
-        # directory rather than the current one, which is why the out-dirs are
-        # absolute (js/package.json).
-        run: make wasm-test
+      - name: wasm packages (wasm-pack: js/pkg web, js/pkg-node nodejs)
+        # Build and test in one run: this step builds both packages, and the
+        # next one runs js/test-node.mjs against the bytes it just built.
+        # wasm-pack resolves --out-dir against the crate directory rather than
+        # the current one, which is why the out-dirs are absolute
+        # (js/package.json).
+        run: make wasm-build
+      - name: wasm parity test (the shell's bytes against tests/fixtures/reference.wem)
+        run: node js/test-node.mjs
       - name: publish the built wasm packages (distribution artifact, not a check)
         uses: actions/upload-artifact@v4
         with:

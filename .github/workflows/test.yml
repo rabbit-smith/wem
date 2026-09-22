@@ -98,6 +98,11 @@ jobs:
         run: cd crates && cargo fmt --all --check
       - name: clippy (workspace, all targets, warnings denied)
         run: cd crates && cargo clippy --workspace --all-targets -- -D warnings
+      - name: rustdoc (workspace, warnings denied)
+        # clippy does not read doc comments: a public item documented with a link
+        # to a private one compiles, lints and tests clean, and only rustdoc
+        # reports it. Deterministic, so unlike a timing it is a fair check.
+        run: cd crates && RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
       - name: workspace tests (unit, integration, doc)
         run: cd crates && cargo test --workspace
 

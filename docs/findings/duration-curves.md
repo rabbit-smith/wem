@@ -600,17 +600,17 @@ exactness was re-established on the final tree (tails in the lane report):
 | check | result |
 | --- | --- |
 | `make wem-bytes` | ok, 1 test, 0.13 s |
-| `cargo test -p wem-core --test complete_wem_bytes` | 9 passed, 0 failed |
+| `cargo test -p wem-core --test encoder reference_bytes` | 9 passed, 0 failed |
 | `cargo test -p wem-core --test frame_pipeline_parity` (with `PYTHON` set to the shared venv's interpreter) | 1 passed, 0 failed, 35.29 s |
-| `cargo test -p wem-vorbis --test vorbis_oracle_values` | 9 passed, 0 failed |
+| `cargo test -p wem-vorbis --test vorbis_codec oracle_values` | 9 passed, 0 failed |
 | `cargo test --workspace --all-targets --no-fail-fast` | exit 0: 40 targets, 283 passed, 0 failed, 18 ignored |
 | `make test-fast` | 104 tests, OK |
-| `make fuzz-parity` | exit 0 |
-| `make 2ch-stress` | 1 test, OK |
+| `python3 scripts/fuzz_diff_parity.py --pr` | exit 0 |
+| `python3 -m unittest tests.parity.test_2ch_corpus.TwoChannelStressCorpusTests -v` | 1 test, OK |
 | `make 2ch-long` | 1 test, OK |
 | `cargo fmt --all --check` | exit 0 |
 | `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 |
-| `make lint` (ruff + mypy) | exit 0: "All checks passed!", 77 source files |
+| `ruff check src reference tests scripts`, `mypy --no-site-packages src reference` | exit 0: "All checks passed!", 77 source files |
 
 The 18 ignored are the two `#[ignore]`d harnesses themselves plus the
 pre-existing ones: 12 in `duration_curves.rs`, 2 in `stage_timings.rs`, 4 in
@@ -621,8 +621,9 @@ Two things about the harness itself are worth recording, because both were
 needed to make the taken instrument land:
 
 * It is `#[ignore]`d and test-only, so it does not run in the suite; but
-  `make rust-lint` (`-D warnings`) rejected six `doc_overindented_list_items`
-  hits in the taken module doc, and `cargo fmt --all --check` rejected the
+  `cargo clippy --workspace --all-targets -- -D warnings` rejected six
+  `doc_overindented_list_items` hits in the taken module doc, and
+  `cargo fmt --all --check` rejected the
   taken file. Both were fixed (comments and whitespace only), which is why the
   instrument differs from `codex/duration-curves` in lines the earlier lane
   wrote. The measurement workers' logic is untouched apart from the two `Cow`

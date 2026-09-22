@@ -34,8 +34,8 @@ Every new module or packaged data file requires, in the same commit:
    `scripts/generate_profile_code.py` from `corpus/profiles/` (untracked
    development material); `scripts/generate_frozen_tables.py` writes that
    material, it does not touch the package,
-4. the wheel packaging test (`make wheel-smoke`) passing for the installed and
-   the zip import path.
+4. the wheel packaging test (`python3 scripts/wheel_smoke.py`) passing for the
+   installed and the zip import path.
 
 This applies to the facade only: reference-tree modules are development-tree
 code and must not be added to the allowlist.
@@ -54,6 +54,8 @@ even though it does not ship.
 
 ## Style checks
 
-`make lint` (ruff E4/E7/E9/F/W + mypy baseline with `check_untyped_defs`).
+`ruff check src reference tests scripts` (ruff E4/E7/E9/F/W) and
+`mypy --no-site-packages src reference` (the mypy baseline with
+`check_untyped_defs`); both run inside `make test`.
 New code: typed signatures, `from __future__ import annotations`, no unused
 imports. `tests/` may relax only what the config already relaxes.

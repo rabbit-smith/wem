@@ -22,12 +22,12 @@ and the shell-mapping rules. `crates/wem-capi` implements the header 1:1.
   the edges are held by the crate manifests and by review, not by runtime checks.
 - External dependencies are locked at workspace level (`serde`, `serde_json`).
   Adding any dependency requires an approved task, not a lane fix.
-- `make rust-fmt` (`cargo fmt --all --check`), `make rust-lint`
-  (`cargo clippy --workspace --all-targets -- -D warnings`) and `make rust-doc`
-  (`RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`) must all come
-  back clean. The doc gate exists because clippy does not read doc comments: a
-  public item whose documentation links to a private one compiles, lints and
-  tests clean, and only rustdoc reports it.
+- `cargo fmt --all --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` must come back clean,
+  and so must `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`;
+  `make test` runs the three in that order. The rustdoc check exists because
+  clippy does not read doc comments: a public item whose documentation links to
+  a private one compiles, lints and tests clean, and only rustdoc reports it.
 
 ## Verification workflow per crate
 

@@ -37,9 +37,11 @@ idempotent, and offline. What their outputs must satisfy is in
   writing, and with `--check` also report a missing file); the reference
   container is compared byte for byte after, not assumed. Nothing writes a
   value for a later run to compare against — that comparison belongs in a test.
-- Scripts must pass `make lint` (ruff covers `scripts/`), use `#!/usr/bin/env
-  python3`, type hints, and `SystemExit` codes; failures print the offending
-  artifact path, never a stack-trace shrug.
+- Scripts must pass the lint step of `make test` — `ruff check src reference
+  tests scripts`; the mypy baseline (`mypy --no-site-packages src reference`)
+  does not cover `scripts/`. Use `#!/usr/bin/env python3`, type hints, and
+  `SystemExit` codes; failures print the offending artifact path, never a
+  stack-trace shrug.
 - `wheel_smoke.py` verifies the single-wheel distribution end-to-end:
   the facade + native extension inventory against the distribution
   allowlist, the zip-import and installed metadata paths, and a clean-venv

@@ -26,5 +26,7 @@ Those two facts, and everything else this tree must satisfy, are product norms:
 
 ## Style checks
 
-`make lint` (ruff E4/E7/E9/F/W + mypy baseline with `check_untyped_defs`)
-covers this tree alongside `src/`, `tests/`, and `scripts/`.
+`ruff check src reference tests scripts` and
+`mypy --no-site-packages src reference` (ruff E4/E7/E9/F/W + mypy baseline with
+`check_untyped_defs`) cover this tree alongside `src/`, `tests/`, and
+`scripts/`; both run inside `make test`.

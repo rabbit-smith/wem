@@ -8,6 +8,10 @@ how a failing comparison is read is in the same document, under
 
 ## Suite map (run order = cheap → expensive)
 
+Every layer runs inside `make test`, which runs them all in one command and in
+its own order ([`../docs/guides/development.md`](../docs/guides/development.md#what-make-test-runs));
+the commands here are what each layer is when run alone.
+
 | Layer | Command | Meaning |
 |---|---|---|
 | unit | `make test-fast` (discovery) | module behavior, validation, loaders |
@@ -15,8 +19,8 @@ how a failing comparison is read is in the same document, under
 | cross-implementation | in `make test-fast` (discovery) | pipeline invariants, cross-implementation parity |
 | whole-file | `make wem-bytes` | whole-file byte identity against the committed container |
 | capi | `cargo test -p wem-capi` | C ABI surface: reference byte identity via the FFI, error-code mapping, lifecycle violations |
-| wheel | `make wheel-smoke` | single-wheel (facade + native extension) inventory, clean-venv byte-exact encode |
-| wasm (Node) | `make wasm-test` | builds both wasm packages, then the shell's bytes against `tests/fixtures/reference.wem`: one-shot and three chunkings, plus the selection and error-code mapping |
+| wheel | `python3 scripts/wheel_smoke.py` | single-wheel (facade + native extension) inventory, clean-venv byte-exact encode |
+| wasm (Node) | `make wasm-build` then `node js/test-node.mjs` | builds both wasm packages, then the shell's bytes against `tests/fixtures/reference.wem`: one-shot and three chunkings, plus the selection and error-code mapping |
 
 `tests/parity/` holds the cross-implementation suites. Each module sets two
 implementations side by side — the Python oracle against the native kernel, the
@@ -69,8 +73,8 @@ before running the suite, and no test designs skip cases for
 native-absent environments — a missing kernel fails the suite, on purpose.
 
 The wasm packages (`js/pkg`, `js/pkg-node`) are wasm-pack output and are not in
-the checkout either. `make wasm-test` builds them and then runs the Node test
-(`js/test-node.mjs`), which reads the fixture and the reference bytes and
+the checkout either. `make wasm-build` builds them and the Node test
+(`node js/test-node.mjs`) then reads the fixture and the reference bytes and
 compares them against the freshly built package; with no package built it
 fails, printing the build command, and never skips.
 

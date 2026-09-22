@@ -42,7 +42,7 @@ words; a stage is not done until it comes back zero.
 |---|---|
 | The reference WEM for `tests/fixtures/input.wav`, byte for byte — the committed `tests/fixtures/reference.wem`, compared as the bytes it is | `make wem-bytes` (`tests/whole_file/test_whole_file.py`); `crates/wem-core/tests/encoder.rs` |
 | Per-frame values: scheduling fields, eight analysis stages, floor posts, residue rows, packet bytes, all 205 frames | `crates/wem-core/tests/frame_pipeline_parity.rs`, `tests/parity/test_frame_pipeline_parity.py` |
-| The package-root public exports and the wheel inventory | `tests/parity/test_public_surface.py`, `tests/parity/test_distribution.py`, `make wheel-smoke`; the export list is in [`public-interface.md`](public-interface.md) |
+| The package-root public exports and the wheel inventory | `tests/parity/test_public_surface.py`, `tests/parity/test_distribution.py`, `python3 scripts/wheel_smoke.py`; the export list is in [`public-interface.md`](public-interface.md) |
 | Geometry-materializer parity: the ported builder == the carrier's registered words == the kernel's `psy_geom*` surfaces | `tests/parity/test_geometry_materializer_parity.py`; `cargo test -p wem-analysis` |
 | The compiled profile carrier: the kernel's tables equal the recorded material, table by table | `crates/wem-profiles/src/carrier_tests.rs` (stage 1, retired with the recorded tree), `tests/parity/test_geometry_materializer_parity.py`, `cargo test -p wem-profiles` |
 | The 2ch/48 kHz result, its corpora, and the limits of that evidence | `tests/parity/test_2ch_corpus.py`, [`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md) |
@@ -278,7 +278,7 @@ Streaming chunk boundaries must not affect the output bytes: any chunking of the
 input yields the same container.
 `crates/wem-core/tests/streaming.rs` and
 `tests/parity/test_2ch_corpus.py` compare the batch, one-chunk and uneven
-chunking paths, and `make fuzz-parity` (`scripts/fuzz_diff_parity.py`) runs the
+chunking paths, and `python3 scripts/fuzz_diff_parity.py --pr` runs the
 oracle against the native kernel over a fixed seed set of random PCM streams and
 random frame-aligned chunk splits.
 

@@ -23,8 +23,8 @@
  *   4. ERROR MAPPING: kernel failures surface as JS Errors whose `code` is
  *      the stable WEM_ERR_* string.
  *
- * Run: make wasm-test   (builds js/pkg-node first, then runs this file)
- *      node js/test-node.mjs   — needs a built package: make wasm-build.
+ * Run: make wasm-build   (both packages: js/pkg, js/pkg-node)
+ *      node js/test-node.mjs   — needs a built js/pkg-node.
  * The package is wasm-pack output and is not part of the checkout; with no
  * package built there is nothing to compare, so this test fails and names the
  * build command rather than skipping.

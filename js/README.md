@@ -27,7 +27,7 @@ Rebuilds (need wasm-pack + a wasm32 toolchain):
 
 ```sh
 make wasm-build      # repo root: builds both packages (js/pkg, js/pkg-node)
-make wasm-test       # repo root: builds both, then runs test-node.mjs
+node js/test-node.mjs   # repo root: the Node parity test, over a built js/pkg-node
 
 cd js
 npm run build:web    # → pkg/
@@ -114,6 +114,7 @@ file's bytes, so it restates neither a digest nor a length of it —
 across one-shot (auto-selected, explicit, and raw-PCM paths) and three
 chunking schemes; the compiled-in version table, the resolved selection of
 every constructor, and the selection/error code mapping must hold.
-`make wasm-test` builds both packages and then runs it; CI's `web` job runs that
-one target and publishes the built packages as a distribution artifact
+`make wasm-build` builds both packages and `node js/test-node.mjs` then runs the
+test; CI's `web` job runs those two steps and publishes the built packages as a
+distribution artifact
 (`.github/workflows/web.yml`).

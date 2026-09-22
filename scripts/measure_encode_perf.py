@@ -33,7 +33,7 @@ average are part of the result, and the clock is what is being measured.
 Nothing else is read from the environment, and nothing is written anywhere.
 
 Usage:
-  cargo build --release -p wem-core        # or: make rust-bench
+  cd crates && cargo build --release -p wem-core   # the build it measures
   python3 scripts/measure_encode_perf.py
   python3 scripts/measure_encode_perf.py --runs 15 --no-stages
   python3 scripts/measure_encode_perf.py --bin /path/to/wwise-wem
@@ -452,7 +452,7 @@ def main() -> int:
     if not bin_path.is_file():
         print(
             f"measure-encode-perf: no release binary at {bin_path}.\n"
-            "  build it first:  cargo build --release -p wem-core   (or: make rust-bench)",
+            "  build it first:  cd crates && cargo build --release -p wem-core",
             file=sys.stderr,
         )
         return 2

@@ -24,7 +24,7 @@ native-wheel/
 
 # wasm-pack --out-dir output (web target -> js/pkg, nodejs target -> js/pkg-node).
 # Build output like target/ and the wheels above: `make wasm-build` before the
-# Node parity test (`make wasm-test`) or the browser demo.
+# Node parity test (`node js/test-node.mjs`) or the browser demo.
 js/pkg/
 js/pkg-node/
 

@@ -305,7 +305,7 @@ Unchanged from the standing rules, listed because decode is easy to forget:
 
 - `tests/parity/distribution_allowlist.json` for any new module,
 - `reference/public-interface.md` for the new export,
-- `make wheel-smoke` for the installed and zip-import paths,
+- `python3 scripts/wheel_smoke.py` for the installed and zip-import paths,
 - `reference/standards.md` for the decode contract and its "established by"
   rows,
 - and no profile data changes: the decoder consumes the carrier the encoder

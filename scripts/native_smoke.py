@@ -10,7 +10,7 @@ smoke proves, from the Python side:
   3. the error surface maps wem-core rejections to WemEncoderError codes.
 
 Usage:
-  PYTHONPATH=src .venv/bin/python scripts/native_smoke.py
+  PYTHONPATH=src:reference .venv/bin/python scripts/native_smoke.py
 
 Exit code 0 on success, 1 on any failure.
 """
