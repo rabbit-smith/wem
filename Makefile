@@ -1,4 +1,4 @@
-.PHONY: test test-fast fuzz-parity 2ch-stress 2ch-long wem-bytes lint rust-fmt rust-lint rust-doc rust-test rust-bench build wheel-smoke wasm-build wasm-test check clean native
+.PHONY: test test-fast fuzz-parity 2ch-stress 2ch-long wem-bytes lint rust-fmt rust-lint rust-doc rust-test rust-bench benchmark build wheel-smoke wasm-build wasm-test check clean native
 
 PY ?= python3
 NODE ?= node
@@ -72,6 +72,18 @@ rust-test:
 # measurement reads the binary this target builds.
 rust-bench:
 	cd crates && cargo build --release -p wem-core --features parallel && target/release/wwise-wem ../tests/fixtures/input.wav --output /dev/null --time
+
+# The measurements, and deliberately not a gate. `scripts/measure_*_perf.py`
+# report numbers over several runs with the machine identity and the load
+# average; they take minutes, and their exit status says only whether the run
+# completed. No threshold and no recorded baseline live here, because a number
+# compared against a recorded one hides a change behind a re-record step
+# (docs/reference/standards.md). This target is therefore not part of
+# `make check`; `rust-bench` above is the one-shot encode smoke against it.
+benchmark:
+	cd crates && cargo build --release -p wem-core
+	$(PY) scripts/measure_encode_perf.py
+	$(PY) scripts/measure_decode_perf.py
 
 # Web/Node shell packages: wasm-pack builds both targets — js/pkg (web) and
 # js/pkg-node (nodejs). They are wasm-pack output and are not committed, so

@@ -83,13 +83,17 @@ to fix the code or the test rather than to re-record the expectation.
 | `make wasm-test` | Builds both packages, then runs `js/test-node.mjs`: the shell's bytes against `tests/fixtures/reference.wem` (one-shot, three chunkings) plus the selection and error-code mapping; with no package built it fails and prints the build command |
 | `make check` | `lint`, `rust-fmt`, `rust-lint`, `rust-doc`, the full Python ladder and the wheel smoke |
 | `make rust-doc` | Rustdoc over the workspace with warnings denied. It resolves every intra-doc link, which clippy does not read: a public item whose documentation links to a private one compiles, lints and tests clean, and only this target reports it |
+| `make benchmark` | The measurements for both directions: `scripts/measure_encode_perf.py` then `scripts/measure_decode_perf.py`, each reporting min / median / p95 / spread with the machine identity and the load it ran under. **Not a check** and not part of `make check` — it takes minutes and never goes red |
+| `make rust-bench` | The one-shot encode smoke against `make benchmark`: builds the CLI with `--features parallel` and times a single fixture encode |
 
 One target is **not** a check: `python3 scripts/measure_encode_perf.py` measures
 the release build — the CLI stage timers and the kernel's per-stage split, each
 as min / median / p95 / spread with the machine identity and the load it ran
-under — and never goes red ([Watching performance](#watching-performance)). What
-it reported, and what the numbers show, is in
-[`../findings/encode-performance.md`](../findings/encode-performance.md).
+under — and never goes red ([Watching performance](#watching-performance)).
+`make benchmark` runs it and its decode counterpart together. What they
+reported, and what the numbers show, is in
+[`../findings/encode-performance.md`](../findings/encode-performance.md) and
+[`../findings/decode-performance.md`](../findings/decode-performance.md).
 
 The same targets from the test tree's point of view — layer, command and run
 order — are in [`../../tests/AGENTS.md`](../../tests/AGENTS.md).

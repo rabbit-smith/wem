@@ -21,28 +21,41 @@ each, with the limits of it, is in
 
 ## Install
 
-A wheel needs nothing but Python 3.10+. The kernel is compiled into the package,
-and it is a version-stable abi3 build, so one wheel serves every Python 3.10+ on
-its platform:
+There are two front ends over the same kernel, and neither needs the other.
+
+**The Rust binary** is standalone — no Python anywhere in the path — and is what
+the encode and decode examples link or drive:
+
+```bash
+cargo build --release --manifest-path crates/Cargo.toml -p wem-core
+./crates/target/release/wwise-wem tests/fixtures/input.wav --output output.wem
+```
+
+Add `--features parallel` to build the variant that uses the internal thread
+pool; the default is scalar, because a wheel's user cannot change a compile-time
+feature (see [Performance](#performance)).
+
+**The Python package** carries the same kernel compiled in, plus the typed API
+and the decoder. A wheel needs nothing but Python 3.10+, and it is a
+version-stable abi3 build, so one wheel serves every Python 3.10+ on its
+platform:
 
 ```bash
 make build                                    # writes one into dist/
-pip install dist/wwise_wem-*.whl
+uv venv && uv pip install dist/wwise_wem-*.whl
 ```
 
-From a checkout, an editable install builds the kernel and needs Python 3.10+, a
-Rust toolchain on `PATH`, and network access so pip can fetch the `maturin`
-build backend:
+From a checkout, an editable install builds the kernel and needs a Rust
+toolchain on `PATH` and network access so the build backend can fetch `maturin`:
 
 ```bash
-python3 -m venv .venv && . .venv/bin/activate
-pip install -e .                              # or: make native
+uv venv && uv pip install -e .                # or: make native
 ```
 
-Measured on an Apple M3 Max with a warm cargo cache: 2–5 s to create the virtual
-environment, about 12 s for the install including the Rust build, and about a
-second to encode the 1.7 MB fixture — 15–20 s end to end. A build against an
-empty cargo cache also downloads and compiles the dependencies.
+Measured on an Apple M3 Max with a warm cargo cache: about 12 s for the editable
+install including the Rust build, against 2–5 s to create the environment, and
+about a second to encode the 1.7 MB fixture — 15–20 s end to end. A build
+against an empty cargo cache also downloads and compiles the dependencies.
 
 ## Encode a file
 
