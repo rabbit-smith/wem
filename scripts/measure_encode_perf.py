@@ -71,6 +71,15 @@ STAGE_TEST = "stage_timings"
 # ignored test in the file is not what this measurement means.
 STAGE_REPORT = "stage_timings_report"
 
+# The harness must be built the way the binary it is reported beside is built.
+# The command line this script times requires the feature (`required-features`
+# on the bin), and while that feature was a default the two halves of one run
+# happened to describe a single build; once it became opt-in, a harness built
+# without this flag silently described the other configuration, and the same
+# stage read 2.66x apart depending on which half of the report a reader
+# compared. Keeping the flag in one place is what stops the halves drifting.
+STAGE_FEATURES = ("--features", "parallel")
+
 CLI_STAGES = ("wav_load", "profile_assembly", "encode", "output_write")
 CLI_STAGE_PATTERN = re.compile(
     r"stages: wav_load ([\d.]+)ms \| profile_assembly ([\d.]+)ms \| "
