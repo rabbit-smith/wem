@@ -63,7 +63,9 @@ ROOT_ALLOWED_ENTRIES = frozenset(
         ".pi-lens.json",
         "AGENTS.md",
         "CONTRIBUTING.md",
-        "LICENSE",
+        # Deliberately no bare "LICENSE": the licensing is the MIT/Apache pair,
+        # and a single unparseable file makes GitHub report no licence at all.
+        # Re-adding one should trip this guard, not pass it.
         "LICENSE-APACHE",
         "LICENSE-MIT",
         "Makefile",

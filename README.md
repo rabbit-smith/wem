@@ -195,10 +195,14 @@ were repaired, and its own trust boundary. The longer encode memory study is in
 ## Licence, provenance and notices
 
 The project is offered under `MIT OR Apache-2.0`: the two texts are
-[`LICENSE-MIT`](LICENSE-MIT) and [`LICENSE-APACHE`](LICENSE-APACHE), and
-[`LICENSE`](LICENSE) points at both for tooling that looks for a singular file.
-Dual licensing is the Rust convention, and Apache-2.0 carries an express patent
-grant that MIT does not.
+[`LICENSE-MIT`](LICENSE-MIT) and [`LICENSE-APACHE`](LICENSE-APACHE). Dual
+licensing is the Rust convention, and Apache-2.0 carries an express patent grant
+that MIT does not.
+
+There is deliberately no single `LICENSE` file. GitHub's licence detection reads
+one file and reports one identifier, so a pointer it cannot parse would show the
+repository as having no licence at all; with the pair present it reports the
+Apache half, and the manifests and this paragraph carry the full expression.
 
 - [`PROVENANCE.md`](PROVENANCE.md) — how the implementation was derived, what it
   claims and what it does not.
