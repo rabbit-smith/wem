@@ -293,6 +293,7 @@ def run_stage_harness(cargo: str, runs: int) -> tuple[list[str], tuple[float | N
         "test",
         f"--manifest-path={CARGO_MANIFEST}",
         "--release",
+        *STAGE_FEATURES,
         "-p",
         "wem-core",
         "--test",
