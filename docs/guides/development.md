@@ -37,7 +37,8 @@ make wasm-build      # wasm-pack: both shell packages (js/pkg, js/pkg-node)
 ```
 
 `pip install -e .` is equivalent to `make native`. Python-only tooling:
-`make lint` (ruff + mypy), `make rust-lint` (clippy, warnings denied).
+`make lint` (ruff + mypy), `make rust-lint` (clippy, warnings denied),
+`make rust-doc` (rustdoc, warnings denied).
 
 The wasm packages are build output and are not committed, so `make wasm-build`
 runs before the Node test and before the browser demo
@@ -54,8 +55,8 @@ Climb from the cheapest executable target; do not start from the full suite.
 3. The full ladders (`make test`, `cargo test --workspace`) at phase
    boundaries, or whenever the change touches shared state, configuration,
    lockfiles, or generated assets.
-4. `make check` before handing work back: lint, rust-lint, the full test
-   ladder, and the wheel smoke.
+4. `make check` before handing work back: lint, rust-lint, rust-doc, the full
+   test ladder, and the wheel smoke.
 
 A passing suite is reused. Do not re-run a green suite per task or per agent;
 rerun it only on a named invalidator — code, test, data, or configuration that
@@ -79,7 +80,8 @@ to fix the code or the test rather than to re-record the expectation.
 | `make wheel-smoke` | Installed-wheel inventory (facade + native engine, no profile data) and one real encode |
 | `make wasm-build` | wasm-pack builds both shell packages: `js/pkg` (web) and `js/pkg-node` (nodejs) |
 | `make wasm-test` | Builds both packages, then runs `js/test-node.mjs`: the shell's bytes against `tests/fixtures/reference.wem` (one-shot, three chunkings) plus the selection and error-code mapping; with no package built it fails and prints the build command |
-| `make check` | `lint`, `rust-fmt`, `rust-lint`, the full Python ladder and the wheel smoke |
+| `make check` | `lint`, `rust-fmt`, `rust-lint`, `rust-doc`, the full Python ladder and the wheel smoke |
+| `make rust-doc` | Rustdoc over the workspace with warnings denied. It resolves every intra-doc link, which clippy does not read: a public item whose documentation links to a private one compiles, lints and tests clean, and only this target reports it |
 
 One target is **not** a check: `python3 scripts/measure_encode_perf.py` measures
 the release build — the CLI stage timers and the kernel's per-stage split, each

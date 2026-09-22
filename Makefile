@@ -1,4 +1,4 @@
-.PHONY: test test-fast fuzz-parity 2ch-stress 2ch-long wem-bytes lint rust-fmt rust-lint rust-test rust-bench build wheel-smoke wasm-build wasm-test check clean native
+.PHONY: test test-fast fuzz-parity 2ch-stress 2ch-long wem-bytes lint rust-fmt rust-lint rust-doc rust-test rust-bench build wheel-smoke wasm-build wasm-test check clean native
 
 PY ?= python3
 NODE ?= node
@@ -38,6 +38,13 @@ rust-fmt:
 rust-lint:
 	cd crates && cargo clippy --workspace --all-targets -- -D warnings
 
+# Rustdoc resolves every intra-doc link and reports the ones it cannot follow.
+# clippy does not read doc comments, so a public item whose documentation links
+# to something private reaches main under a green `rust-lint`; this target is
+# the check that catches it. Deterministic, so unlike a timing it is a fair gate.
+rust-doc:
+	cd crates && RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+
 # Development-tree native kernel: builds the in-package extension
 # (src/wwise_wem/_core.abi3.so) into the active venv via maturin.
 # Required for every byte-producing call — there is no other path.
@@ -71,7 +78,7 @@ wasm-build:
 wasm-test: wasm-build
 	$(NODE) js/test-node.mjs
 
-check: lint rust-fmt rust-lint test wheel-smoke
+check: lint rust-fmt rust-lint rust-doc test wheel-smoke
 
 clean:
 	$(PY) scripts/clean.py
