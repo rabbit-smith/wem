@@ -183,7 +183,11 @@ async function streamEncode(chunks, source) {
     for (const chunk of chunks) {
       session.push(chunk);
     }
-    return { result: session.finish(), resolved };
+    // Streaming observability: the count reflects exactly the frames pushed
+    // so far, and crosses the boundary as a JS number (the shell returns it
+    // as f64, so no count a session can reach is truncated).
+    const frames = session.pcmFrames();
+    return { result: session.finish(), resolved, frames };
   } finally {
     session.destroy();
   }
@@ -218,7 +222,7 @@ for (const [label, chunks] of Object.entries(plans)) {
   // first plan: explicit geometry, generation auto-selected; the rest: the
   // parsed WAV as the geometry source
   const source = label === "single-chunk" ? { channels: 6, sampleRate: 44100 } : parsed;
-  const { result, resolved } = await streamEncode(chunks, source);
+  const { result, resolved, frames } = await streamEncode(chunks, source);
   results.push(result);
   check(
     `streaming (${label}) bytes == reference.wem`,
@@ -229,6 +233,11 @@ for (const [label, chunks] of Object.entries(plans)) {
     `streaming (${label}) session selection`,
     sameSelection(resolved, SIX_CHANNEL),
     describe(resolved),
+  );
+  check(
+    `streaming (${label}) pcmFrames() reports the pushed frames exactly`,
+    Number.isSafeInteger(frames) && frames === framesPer,
+    `pcmFrames=${frames}, pushed=${framesPer}, type=${typeof frames}`,
   );
 }
 
