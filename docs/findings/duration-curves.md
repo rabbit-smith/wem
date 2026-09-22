@@ -11,22 +11,22 @@ belong to named on every table.
 
 | set | base commit | when it is the answer |
 | --- | --- | --- |
-| **earlier** | `5b5fea0` — *Merge commit 'a2e19c7' into codex/library-standards-2* | what the curves were before the one-frame-at-a-time change |
-| **current** | `92b25cc` — *perf(analysis): build the long seed look once per encode, not per channel job* (current `main`) | what the curves are now |
+| **earlier** | *Merge commit 'a2e19c7' into codex/library-standards-2* | what the curves were before the one-frame-at-a-time change |
+| **current** | *perf(analysis): build the long seed look once per encode, not per channel job* (current `main`) | what the curves are now |
 
-The change between them is **`539194e` *perf(analysis): hand out one analysis
-frame at a time from session scratch***, one commit that did two things to
-`encode_pcm`: it replaced `selected_windows` (which materializes the whole
-frame sequence) with `selected_window_source` + `analyze_window` one frame at a
-time, and it made `condition_pcm` return a `Cow`, so the conditioned rows are
-*borrowed* when the profile selects no input conditioner.
+The change between them is **the one-frame-at-a-time change**, *perf(analysis):
+hand out one analysis frame at a time from session scratch*, one commit that did
+two things to `encode_pcm`: it replaced `selected_windows` (which materializes
+the whole frame sequence) with `selected_window_source` + `analyze_window` one
+frame at a time, and it made `condition_pcm` return a `Cow`, so the conditioned
+rows are *borrowed* when the profile selects no input conditioner.
 
 Reproduce either set with `scripts/measure_duration_curves.py`; it has no
 thresholds and no recorded baseline, and nothing in the tree compares against
 it. The inputs are byte-identical between the two sets (all twelve generated
 WAVs hash the same), so the only difference in the numbers is the code.
 
-## Result — current main (`92b25cc`)
+## Result — current main
 
 * **Both of the changes did what they were meant to do, and the five-minute
   one-shot peak fell 41%.** At 300 s / 6 ch the one-shot path peaks at
@@ -69,7 +69,7 @@ WAVs hash the same), so the only difference in the numbers is the code.
   about one container's worth (7.3 MB measured, ≤ 15.6 MB bounded) is the
   session's own extra copy.
 
-## Result — the earlier set (`5b5fea0`), as first recorded
+## Result — the earlier set, as first recorded
 
 Kept verbatim; the two levers it ranked 2 and 3 have since been taken, which is
 why the current set exists. Its numbers are the earlier base's and are not
@@ -134,7 +134,7 @@ difference between them is where the input lives:
 | `batch` | `Encoder::encode_pcm` over that PCM, WAV bytes still held as the CLI holds them |
 | `stream` | `StreamSession` fed from a **streaming** WAV reader one 10 s block at a time — the whole input is never resident |
 | `rows`, `condition` | phase replays of `encode_pcm`'s own statements (float rows / conditioned rows), each holding what it built |
-| `detector`, `source` | phase replays of the two whole-input terms `539194e` added: the detector stream sets `select_modes` builds, held as `select_modes` holds them; and `selected_window_source` held |
+| `detector`, `source` | phase replays of the two whole-input terms the one-frame-at-a-time change added: the detector stream sets `select_modes` builds, held as `select_modes` holds them; and `selected_window_source` held |
 | `windows` | the *collecting* frame sequence (`selected_windows`), which the one-shot path no longer calls |
 | `stream_push` | `stream` stopped before `finish`, to attribute the streaming peak |
 | `assembly` | `build_vorbis_wem` **alone**, over a synthetic packet set carrying a measured packet count and output size, so the container builder's own copies can be separated from the session's retention |
@@ -240,10 +240,10 @@ point) and 600 s:
 | 2ch48000 | 300 s | 2.7 | 118.0 | 355.0 | 585.9 | 931.3 | 1 167.8 | 1 636.6 | **1 214.8** |
 | 2ch48000 | 600 s | 2.7 | 233.2 | 700.4 | 1 161.9 | 1 852.9 | 2 326.8 | 3 260.4 | **2 417.1** |
 
-`+detector` and `+source` are the two whole-input terms `539194e` added;
-`+windows` is the collecting call the one-shot path no longer makes. The
-columns are statements of `encode_pcm`, not deltas to be summed — but here they
-happen to be, because `batch` peaks last.
+`+detector` and `+source` are the two whole-input terms the one-frame-at-a-time
+change added; `+windows` is the collecting call the one-shot path no longer
+makes. The columns are statements of `encode_pcm`, not deltas to be summed — but
+here they happen to be, because `batch` peaks last.
 
 The five-minute 6 ch peak, term by term, against the earlier decomposition:
 
@@ -268,7 +268,7 @@ sequence builds two full detector stream sets. Whether *that* can be done in
 one pass — the first call's set is only needed for the pre-EOS quanta, the
 second for the rest — is a question for a change, not for this measurement.
 
-## (b′) The earlier set's memory tables, as measured on `5b5fea0`
+## (b′) The earlier set's memory tables, as measured on the earlier base
 
 Kept as recorded. These are the numbers the current set is compared against,
 and they were taken on a machine whose 1-minute load average was 79.8 (min) /
@@ -423,8 +423,9 @@ call sequence replayed through the public API and guarded by a comparison
 **The 6 ch proportions do not move** — packing plus the two analysis stages is
 75.4%, 76.0% and 76.6% at 10 s, 60 s and 300 s, against the earlier set's
 75.0%, 76.0% and 75.0% on the same input, every share within 1.2 points across
-a 30x duration range. The stage *shares* are unchanged by `539194e`; what
-changed is the memory those stages hold, not their time.
+a 30x duration range. The stage *shares* are unchanged by the
+one-frame-at-a-time change; what changed is the memory those stages hold, not
+their time.
 
 **The 2 ch drift the earlier set reported does *not* reproduce at its
 magnitude, and the difference is not attributed.** The earlier set saw long

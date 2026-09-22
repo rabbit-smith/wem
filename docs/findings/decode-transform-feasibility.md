@@ -111,7 +111,7 @@ Three facts hold at once:
 
 Together these say the contract between the carried twiddles, the carried window,
 and the overlap geometry is sound. The transform stage is therefore **bounded
-porting work, not open research**.
+porting work, not an open question**.
 
 The two profiles produce identical numbers because the Vorbis window and the
 trig bank are functions of the block size alone; the registered profiles share
