@@ -46,6 +46,29 @@ registration duties.
   or revert files another lane left in the tree. Procedure:
   [`docs/guides/development.md`](docs/guides/development.md#shared-checkout-and-concurrent-lanes).
 
+## Splitting and supervising work
+
+- **Split by file, not by topic.** Lanes run in parallel only when the paths they
+  own are disjoint; the brief names both the paths it owns and the paths it must
+  not touch, and says why they are fenced.
+- **A lane owns a worktree; the orchestrator owns `main`.** A lane merges `main`
+  before handing back and reports what conflicted; it never commits.
+- **A lane's report is against its merge base.** Anything it says about the rest
+  of the tree is stale by construction — re-derive it against the merged tree
+  before acting on it.
+- **Delete only after proving coverage.** Write the replacement, replay the old
+  check against the new output, show they agree, and only then delete. Never
+  delete first.
+- **Verify independently and after landing, on a freshly built artifact.** A
+  worktree's compiled extension is stale by definition, so a red result there
+  says nothing about the change; and the failure may be the artifact, not the
+  code.
+- **Capture exit codes explicitly.** A piped verdict belongs to the last command
+  in the pipe — `cargo test … | tail` reports `tail`'s status — so a real failure
+  passes unnoticed.
+- **Concurrency has a supervision cost.** Keep in flight only as many lanes as
+  can be verified one at a time; more than that and things land unverified.
+
 ## Provenance hygiene
 
 Repository surfaces are clean-room phrased. The marker substrings the
