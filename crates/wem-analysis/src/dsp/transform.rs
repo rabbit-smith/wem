@@ -401,6 +401,12 @@ pub fn mdct_forward(look: &MdctLook, samples: &[f64]) -> Result<Vec<f64>, Analys
 /// Symmetric same-size Vorbis window from the converter's f32 table
 /// (Python `vorbis_window`). The exact-profile channel always supplies
 /// `frozen_half`; a missing half is a domain error, not an analytic fallback.
+///
+/// The encoder-side hybrid window reads `frozen_half` directly instead
+/// (see [`apply_vorbis_window_in_place`]): every index it touches lies in
+/// each window's first half, which is that table verbatim, so building the
+/// full `half ++ reverse(half)` per frame would compute a half no caller
+/// reads.
 pub fn vorbis_window(n: i64, frozen_half: Option<&[f64]>) -> Result<Vec<f64>, AnalysisError> {
     if n < 2 || n & 1 != 0 {
         return Err(AnalysisError::WindowSizeInvalid { n });
@@ -472,13 +478,58 @@ pub fn apply_vorbis_window(
     following: i64,
     frozen_windows: Option<&std::collections::HashMap<i64, Vec<f32>>>,
 ) -> Result<Vec<f64>, AnalysisError> {
+    let spans = frame_window_spans(samples.len(), blocksizes, previous, current, following)?;
+    let mut out: Vec<f64> = samples[..spans.n as usize].to_vec();
+    window_frame(&mut out, &spans, frozen_windows)?;
+    Ok(out)
+}
+
+/// Apply the same hybrid window in place, to the rows the caller already
+/// gathered (the analysis-input materializer fills a frame's own row
+/// buffers and windows them there — no gather buffer, no copy).
+///
+/// `out` holds the frame's `n` raw values, exactly as the copying form's
+/// `samples[..n]` does; the arithmetic and its order are the copying
+/// form's, statement for statement.
+pub fn apply_vorbis_window_in_place(
+    out: &mut [f64],
+    blocksizes: &[i64],
+    previous: i64,
+    current: i64,
+    following: i64,
+    frozen_windows: Option<&std::collections::HashMap<i64, Vec<f32>>>,
+) -> Result<(), AnalysisError> {
+    let spans = frame_window_spans(out.len(), blocksizes, previous, current, following)?;
+    window_frame(out, &spans, frozen_windows)
+}
+
+/// The validated hybrid-window spans of one frame's block sizes.
+struct WindowSpans {
+    n: i64,
+    left_n: i64,
+    right_n: i64,
+    left_begin: i64,
+    left_end: i64,
+    right_begin: i64,
+    right_end: i64,
+}
+
+/// Validate one frame's block-size triple and derive its window spans:
+/// the checks `apply_vorbis_window` has always made, in the same order.
+fn frame_window_spans(
+    samples_len: usize,
+    blocksizes: &[i64],
+    previous: i64,
+    current: i64,
+    following: i64,
+) -> Result<WindowSpans, AnalysisError> {
     let n = blocksizes[current as usize];
     let left_n = blocksizes[previous as usize];
     let right_n = blocksizes[following as usize];
-    if samples.len() < n as usize {
+    if samples_len < n as usize {
         return Err(AnalysisError::SamplesShort {
             need: n,
-            got: samples.len() as i64,
+            got: samples_len as i64,
         });
     }
     if blocksizes.iter().any(|size| *size < 2 || *size & 1 != 0) {
@@ -502,40 +553,73 @@ pub fn apply_vorbis_window(
     {
         return Err(AnalysisError::WindowIntervalsIncompatible);
     }
+    Ok(WindowSpans {
+        n,
+        left_n,
+        right_n,
+        left_begin,
+        left_end,
+        right_begin,
+        right_end,
+    })
+}
 
-    let frozen = frozen_windows.ok_or(AnalysisError::FrozenWindowDomainMiss { size: n })?;
-    let get_window = |size: i64| -> Result<Vec<f64>, AnalysisError> {
-        let half = frozen
-            .get(&size)
-            .ok_or(AnalysisError::FrozenWindowDomainMiss { size })?;
-        vorbis_window(
-            size,
-            Some(
-                half.iter()
-                    .map(|v| *v as f64)
-                    .collect::<Vec<_>>()
-                    .as_slice(),
-            ),
-        )
-    };
-    let left_window = get_window(left_n)?;
-    let right_window = get_window(right_n)?;
+/// Apply the hybrid window to a frame's raw rows in place.
+///
+/// Both spans read only the frozen half of their window: the left span
+/// walks offsets `0..left_n / 2` forwards, the right span walks
+/// `right_n / 2 - 1` down to `0`. In [`vorbis_window`]'s
+/// `half ++ reverse(half)` layout those indices are all in the first half,
+/// where the value is the frozen entry itself, so materializing the full
+/// window per frame would build a second half no index here reaches.
+fn window_frame(
+    out: &mut [f64],
+    spans: &WindowSpans,
+    frozen_windows: Option<&std::collections::HashMap<i64, Vec<f32>>>,
+) -> Result<(), AnalysisError> {
+    let frozen = frozen_windows.ok_or(AnalysisError::FrozenWindowDomainMiss { size: spans.n })?;
+    let left_half = frozen_window_half(frozen, spans.left_n)?;
+    let right_half = frozen_window_half(frozen, spans.right_n)?;
 
-    let mut out: Vec<f64> = samples[..n as usize].to_vec();
-    for i in 0..left_begin {
+    for i in 0..spans.left_begin {
         out[i as usize] = 0.0;
     }
-    for i in left_begin..left_end {
-        out[i as usize] = f32_of(out[i as usize] * left_window[(i - left_begin) as usize]);
-    }
-    for i in right_begin..right_end {
+    for i in spans.left_begin..spans.left_end {
         out[i as usize] =
-            f32_of(out[i as usize] * right_window[(right_n / 2 - 1 - (i - right_begin)) as usize]);
+            f32_of(out[i as usize] * (left_half[(i - spans.left_begin) as usize] as f64));
     }
-    for i in right_end..n {
+    for i in spans.right_begin..spans.right_end {
+        out[i as usize] = f32_of(
+            out[i as usize]
+                * (right_half[(spans.right_n / 2 - 1 - (i - spans.right_begin)) as usize] as f64),
+        );
+    }
+    for i in spans.right_end..spans.n {
         out[i as usize] = 0.0;
     }
-    Ok(out)
+    Ok(())
+}
+
+/// The frozen window half for `size`, validated exactly as the full
+/// window builder validated it (domain miss, then size, then length).
+fn frozen_window_half(
+    frozen: &std::collections::HashMap<i64, Vec<f32>>,
+    size: i64,
+) -> Result<&[f32], AnalysisError> {
+    let half = frozen
+        .get(&size)
+        .ok_or(AnalysisError::FrozenWindowDomainMiss { size })?;
+    if size < 2 || size & 1 != 0 {
+        return Err(AnalysisError::WindowSizeInvalid { n: size });
+    }
+    if half.len() as i64 != size / 2 {
+        return Err(AnalysisError::FrozenWindowHalfMismatch {
+            size,
+            want: size / 2,
+            got: half.len() as i64,
+        });
+    }
+    Ok(half)
 }
 
 /// Return the block view exposed by the reference routine

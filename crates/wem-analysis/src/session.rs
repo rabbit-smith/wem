@@ -9,11 +9,12 @@ use crate::config::{AnalysisError, AnalysisProfileResources};
 use crate::model::{PsyFrame, SpectrumFrame};
 use crate::preprocessing::conditioner::InputConditioner;
 use crate::preprocessing::detector_input::detector_pcm_streams;
-use crate::preprocessing::windowing::{iter_pcm_windows, iter_planned_pcm_windows, WindowedFrame};
+use crate::preprocessing::windowing::{iter_pcm_windows, PlannedWindowSource, WindowedFrame};
 use crate::psychoacoustics::pipeline::{analyze_long_frame, analyze_short_frame};
 use crate::psychoacoustics::seed::SpectrumPeakState;
 use crate::psychoacoustics::short::ShortPsyAnalyzer;
 use crate::transient::detector::TransientDetector;
+use std::borrow::Cow;
 use wem_scheduling::{plan_mode_sequence, ModeSelector, SelectorError};
 
 fn selector_err(e: SelectorError) -> AnalysisError {
@@ -234,7 +235,15 @@ impl AnalysisSession {
     }
 
     /// Condition the next contiguous PCM rows for this stream.
-    pub fn condition_pcm(&mut self, pcm: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, AnalysisError> {
+    ///
+    /// The rows are borrowed when this session's profile selects no input
+    /// conditioner — the ordinary case — and owned only when a conditioner
+    /// rewrites them, so the caller pays a whole-PCM copy only when a whole
+    /// PCM actually changed.
+    pub fn condition_pcm<'a>(
+        &mut self,
+        pcm: &'a [Vec<f64>],
+    ) -> Result<Cow<'a, [Vec<f64>]>, AnalysisError> {
         if pcm.len() as i64 != self.channels {
             return Err(AnalysisError::InputConditionerChannelCountMismatch {
                 want: self.channels,
@@ -242,8 +251,8 @@ impl AnalysisSession {
             });
         }
         match self.input_conditioner.as_mut() {
-            Some(conditioner) => conditioner.process(pcm),
-            None => Ok(pcm.to_vec()),
+            Some(conditioner) => Ok(Cow::Owned(conditioner.process(pcm)?)),
+            None => Ok(Cow::Borrowed(pcm)),
         }
     }
 
@@ -524,21 +533,43 @@ impl AnalysisSession {
 
     /// Select modes and return their windowed PCM frames
     /// (Python `selected_windows`).
+    ///
+    /// Collecting form: it materializes the whole frame sequence, which is
+    /// what a harness that inspects every frame wants. A conversion uses
+    /// [`selected_window_source`](Self::selected_window_source) instead and
+    /// materializes one frame at a time.
     pub fn selected_windows(
         &mut self,
         pcm: &[Vec<f64>],
     ) -> Result<(Vec<i64>, Vec<WindowedFrame>), AnalysisError> {
+        let (modes, source) = self.selected_window_source(pcm)?;
+        let frozen = self.frozen_windows();
+        let frames = source
+            .plans()
+            .iter()
+            .map(|plan| source.materialize(plan, frozen, None))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((modes, frames))
+    }
+
+    /// Select modes and take ownership of their complete analysis input:
+    /// the source hands out one windowed frame per request, into scratch
+    /// the caller keeps (Python `selected_windows`, session-boundary
+    /// shape).
+    pub fn selected_window_source(
+        &mut self,
+        pcm: &[Vec<f64>],
+    ) -> Result<(Vec<i64>, PlannedWindowSource), AnalysisError> {
         let modes = self.select_modes(pcm)?;
         let plans = plan_mode_sequence(&modes, &self.blocksizes, 1)
             .map_err(|_| AnalysisError::FramePlanIntervalMismatch)?;
-        let windows = iter_planned_pcm_windows(
+        let source = PlannedWindowSource::new(
             pcm,
             &plans,
             &self.blocksizes,
-            self.frozen_windows(),
             Some(self.eos_training_samples),
         )?;
-        Ok((modes, windows))
+        Ok((modes, source))
     }
 
     /// The frozen Vorbis window halves, if present (Python `_frozen_windows`).
