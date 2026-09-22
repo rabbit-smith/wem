@@ -19,7 +19,7 @@ living in `.git/hooks/`, which no clone carries.
 | Step | Check | Rule |
 | --- | --- | --- |
 | 1 | `scripts/check_staged_assets.py` | media and bank payloads (`.wem`, `.bnk`, `.pck`, `.wav`, `.ogg`, `.mp3`, `.flac`) under `tests/` only, the sanctioned asset tree in [`tests/AGENTS.md`](../../tests/AGENTS.md) ("Versioned assets"); nothing staged from `corpus/` or `local/`; no unexpected entry at the repository root |
-| 2 | `scripts/provenance_check.py --staged` | the provenance patterns, over the staged content |
+| 2 | `scripts/check_provenance.py --staged` | the provenance patterns, over the staged content |
 | 3 | `ruff check` on the staged `.py` files | the lint step of `make test`, over the files this commit touches |
 
 Why at commit time: the repository was put through a full history rewrite to
@@ -44,7 +44,7 @@ here, and where each of those lives instead:
 | profile code generation, which reads the untracked development tree | `scripts/generate_profile_code.py`, with the wheel check after it |
 
 CI runs the ladder and is the verdict (`.github/workflows/test.yml`). A check
-skipped here — no `ruff` on `PATH`, no `scripts/provenance_check.py` in the
+skipped here — no `ruff` on `PATH`, no `scripts/check_provenance.py` in the
 checkout — is still enforced there, and the hook prints why it skipped rather
 than looking successful. `git commit --no-verify` stays legitimate: a hook on a
 developer machine is early feedback, never the only enforcement.

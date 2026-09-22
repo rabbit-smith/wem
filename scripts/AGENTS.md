@@ -97,6 +97,16 @@ idempotent, and offline. What their outputs must satisfy is in
   writes with `metadata={}`. Matplotlib is a documentation tool for that one
   script and is deliberately absent from `pyproject.toml` and from every crate;
   run it from a venv of your own, as its docstring says.
+- The two check scripts are the pre-commit layer's shared half, and they generate
+  nothing: `check_provenance.py` holds the provenance pattern sets and the
+  surfaces they cover, and is the single definition that the suite
+  (`tests/parity/test_distribution.py`) and the hook both consume — it runs over
+  the whole tracked tree, over explicit paths, or over the staged content with
+  `--staged`; `check_staged_assets.py` refuses a media or bank payload outside
+  `tests/`, anything staged from the ignored `corpus/` and `local/` trees even
+  under `git add -f`, and a staged repository-root entry that is not in its
+  declared set. Neither writes anything; both report one line per violation and
+  exit non-zero. See [`../docs/guides/hooks.md`](../docs/guides/hooks.md).
 - Naming: verb-first (`record_`, `generate_`, `emit_`, `verify_`, `fuzz_`,
   `measure_`); one script, one artifact family; shared helpers belong in
   `tests/*_support.py` when the consumer is a test suite.

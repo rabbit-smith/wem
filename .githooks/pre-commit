@@ -21,7 +21,7 @@
 #
 # What it runs, in order:
 #   1. scripts/check_staged_assets.py         staged assets, development trees, root entries
-#   2. scripts/provenance_check.py --staged   the pattern scan, when that file is present
+#   2. scripts/check_provenance.py --staged   the pattern scan, when that file is present
 #   3. ruff check, on the staged Python files only, when ruff is installed
 #
 # What it must never run here: mypy, cargo, `make test`, the suites, the wheel
@@ -78,11 +78,11 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 2/3 - the provenance pattern scan. Owned by scripts/provenance_check.py; this
+# 2/3 - the provenance pattern scan. Owned by scripts/check_provenance.py; this
 # hook only calls it, so a checkout where that file does not exist yet is a
 # skip with a reason, never a failure.
 # ---------------------------------------------------------------------------
-provenance_script=scripts/provenance_check.py
+provenance_script=scripts/check_provenance.py
 if [ ! -f "$provenance_script" ]; then
     skipped=$((skipped + 1))
     printf 'pre-commit: SKIP [2/3] provenance scan - %s is not in this checkout; that file owns the pattern scan, so nothing was scanned here.\n' \

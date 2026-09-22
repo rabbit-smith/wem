@@ -7,9 +7,9 @@ module, and a pre-commit hook runs it as a script. Nothing here imports
 `wwise_wem` — this is the one check that must work on a fresh checkout with no
 compiled extension.
 
-    python3 scripts/provenance_check.py             # every published surface
-    python3 scripts/provenance_check.py --staged    # the content in the index
-    python3 scripts/provenance_check.py PATH...     # these files
+    python3 scripts/check_provenance.py             # every published surface
+    python3 scripts/check_provenance.py --staged    # the content in the index
+    python3 scripts/check_provenance.py PATH...     # these files
 
 A violation prints as `path:line: label: match`, one per line; line 0 means the
 path itself is the surface. Exit status is 0 when clean, 1 on any violation, 2
@@ -475,7 +475,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             found = audit_violations()
     except (GitError, OSError) as failure:
-        print(f"provenance_check: {failure}", file=sys.stderr)
+        print(f"check_provenance: {failure}", file=sys.stderr)
         return 2
 
     for violation in found:

@@ -8,7 +8,7 @@ published tree can see — not only the distributable package. Both read the
 same package, so they share a module; each class keeps its own test names and
 failure messages.
 
-The pattern sets and the scan itself live in `scripts/provenance_check.py`,
+The pattern sets and the scan itself live in `scripts/check_provenance.py`,
 which runs on a fresh checkout with no compiled extension. The cases here
 consume them rather than owning them, so this audit and the pre-commit hook
 cannot disagree about what a published surface is.
@@ -22,7 +22,7 @@ import wwise_wem
 
 from pathlib import Path
 
-import scripts.provenance_check as provenance_check
+import scripts.check_provenance as provenance
 
 # --------------------------------------------------------------------------
 # merged from tests/parity/test_distribution.py
@@ -30,10 +30,10 @@ import scripts.provenance_check as provenance_check
 
 # Exact public and wheel-source distribution boundaries.
 
-ROOT = provenance_check.ROOT
-PACKAGE = provenance_check.PACKAGE
+ROOT = provenance.ROOT
+PACKAGE = provenance.PACKAGE
 ALLOWLIST = Path(__file__).with_name("distribution_allowlist.json")
-TEXT_SUFFIXES = provenance_check.TEXT_SUFFIXES
+TEXT_SUFFIXES = provenance.TEXT_SUFFIXES
 
 
 def _allowlist() -> dict[str, object]:
@@ -169,27 +169,27 @@ class ProjectCleanlinessTests(unittest.TestCase):
         # the code surfaces, the documents, the declared root files, the file
         # names themselves, and the guard that refuses an undeclared root file.
         self.assertEqual(
-            [violation.report() for violation in provenance_check.audit_violations()],
+            [violation.report() for violation in provenance.audit_violations()],
             [],
         )
 
     def test_package_paths_have_no_provenance_markers(self):
         failures: list[str] = []
-        for path in provenance_check.package_files():
+        for path in provenance.package_files():
             relative = path.relative_to(PACKAGE).as_posix()
-            for label, marker in provenance_check.violations(relative):
+            for label, marker in provenance.violations(relative):
                 failures.append(f"{relative}: {label}: {marker!r}")
         self.assertEqual(failures, [])
 
     def test_python_and_json_strings_have_no_provenance_markers(self):
         failures: list[str] = []
-        for path in provenance_check.package_files():
+        for path in provenance.package_files():
             if path.suffix not in TEXT_SUFFIXES:
                 continue
             relative = path.relative_to(PACKAGE).as_posix()
             if path.suffix == ".json":
                 value = json.loads(path.read_text(encoding="utf-8"))
-                surfaces = provenance_check.json_strings(value)
+                surfaces = provenance.json_strings(value)
             else:
                 surfaces = (
                     (f"line {number}", line)
@@ -198,7 +198,7 @@ class ProjectCleanlinessTests(unittest.TestCase):
                     )
                 )
             for location, surface in surfaces:
-                for label, marker in provenance_check.violations(surface):
+                for label, marker in provenance.violations(surface):
                     failures.append(
                         f"{relative}:{location}: {label}: {marker!r}"
                     )
@@ -210,9 +210,9 @@ class ProjectCleanlinessTests(unittest.TestCase):
         # suffix rule reaches: the licence texts, the makefile, the ignore and
         # attribute files, the pyright configuration and the packaging manifest.
         failures: list[str] = []
-        for path in provenance_check.document_files():
+        for path in provenance.document_files():
             text = path.read_text(encoding="utf-8")
-            for label, marker in provenance_check.violations(text):
+            for label, marker in provenance.violations(text):
                 failures.append(
                     f"{path.relative_to(ROOT)}: {label}: {marker!r}"
                 )
@@ -224,11 +224,11 @@ class ProjectCleanlinessTests(unittest.TestCase):
         # with the tree. They are held to the development-corpus patterns as
         # well, because a shipped surface may only point at a live reference.
         patterns = (
-            *provenance_check.PROVENANCE_PATTERNS.items(),
-            *provenance_check.CODE_SURFACE_PATTERNS.items(),
+            *provenance.PROVENANCE_PATTERNS.items(),
+            *provenance.CODE_SURFACE_PATTERNS.items(),
         )
         failures: list[str] = []
-        for path in provenance_check.code_surface_files():
+        for path in provenance.code_surface_files():
             relative = path.relative_to(ROOT).as_posix()
             text = path.read_text(encoding="utf-8")
             for label, pattern in patterns:
@@ -241,13 +241,13 @@ class ProjectCleanlinessTests(unittest.TestCase):
             "RIFF = 0x52494646; float_word = 0x3f800000; "
             "sha256 = 17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247"
         )
-        self.assertEqual(provenance_check.violations(representative_format_data), [])
+        self.assertEqual(provenance.violations(representative_format_data), [])
 
     def test_synthetic_frame_count_is_not_an_address_marker(self):
         # `dwTotalPCMFrames` carries a synthetic frame count in the container
         # suites; the image-address pattern must not read it as a location.
         self.assertEqual(
-            provenance_check.violations('"dwTotalPCMFrames": 0x10203040,'),
+            provenance.violations('"dwTotalPCMFrames": 0x10203040,'),
             [],
         )
 

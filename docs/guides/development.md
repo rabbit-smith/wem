@@ -81,6 +81,12 @@ Climb from the cheapest executable target; do not start from the full suite.
    It is the whole verdict — the static checks, every suite, the wheel and the
    wasm shell's bytes — so there is no second command to remember.
 
+Before any of that, `git config core.hooksPath .githooks` arms the local
+pre-commit layer: the same provenance patterns and asset guard the CI job runs,
+plus `ruff` on the staged files, inside the couple of seconds a hook can afford.
+It is early feedback and never the verdict — [`hooks.md`](hooks.md) says what is
+deliberately absent from it and why that matters more than coverage here.
+
 A passing suite is reused. Do not re-run a green suite per task or per agent;
 rerun it only on a named invalidator — code, test, data, or configuration that
 the suite actually exercises. `python3 scripts/fuzz_diff_parity.py --pr` is the

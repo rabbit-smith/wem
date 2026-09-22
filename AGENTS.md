@@ -82,7 +82,7 @@ registration duties.
 Repository surfaces are phrased in project vocabulary: they say what was
 observed, never the coordinates it was observed at. The pattern sets and the
 surfaces they cover are defined once, in
-[`scripts/provenance_check.py`](scripts/provenance_check.py). That module is the
+[`scripts/check_provenance.py`](scripts/check_provenance.py). That module is the
 single definition: the suite at `tests/parity/test_distribution.py` consumes it,
 and the pre-commit hook runs its `--staged` audit over the staged content.
 Documents under `docs/` are held to the same patterns but may discuss the
