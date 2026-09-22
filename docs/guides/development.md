@@ -50,6 +50,28 @@ all part of an editable install: `pip install -e ".[dev]"` brings `ruff` and
 maturin build backend into an isolated environment for the install itself and
 does not leave the command in the venv.
 
+The dev extra also installs `pytest`. After building the extension, `python -m
+pytest` runs from the repository root without a manual `PYTHONPATH`; its import
+paths are declared in `pyproject.toml`. Child-process tests declare their own
+source paths because pytest's interpreter paths do not propagate to children.
+
+### Preparing a release
+
+Keep user-visible changes under **Unreleased** in [the changelog](../changelog.md),
+including Rust interface removals and changes to error behavior. Before a release:
+
+1. Set the intended version in `pyproject.toml`, `crates/Cargo.toml` and
+   `js/package.json`, and refresh their tracked lockfiles with the normal build
+   tools. Review the lockfile diff.
+2. Run `make test` on that exact revision, and require the platform CI jobs,
+   including the C and Go clients, to pass. The wheel check builds and installs
+   an isolated package; the wasm check builds both JavaScript packages.
+3. Move Unreleased notes into a dated version section, naming any remaining
+   evidence limits. Review the packaged licenses and artifact inventory.
+4. The maintainer creates the version tag and publishes the verified artifacts
+   when a release is requested. Do not rewrite an existing tag or publish a
+   rebuilt, unverified artifact under it.
+
 ### Toolchain
 
 `rustdoc` and `clippy-driver` can resolve from a different toolchain than
@@ -101,6 +123,8 @@ itself.
 
 | Step | Checks |
 | --- | --- |
+| `python3 scripts/check_documentation.py` | Local Markdown link targets and current source-file references; historical findings may name retired files in inline code |
+| `PYTHONPATH= python3 -m pytest --collect-only -q` | Test discovery without an inherited import path |
 | `ruff check src reference tests scripts`, `mypy --no-site-packages src reference` | Python lint and the typed baseline |
 | `cd crates && cargo fmt --all --check` | Rust formatting |
 | `cd crates && cargo clippy --workspace --all-targets -- -D warnings` | The Rust workspace lints with warnings denied |
@@ -133,6 +157,29 @@ performance instruments are not in this ladder at all
 because they need toolchains the ladder does not: the C client and the Go cgo
 binding, which stream the fixture through `include/wem.h` and compare the bytes
 (`.github/workflows/test.yml`, the `capi` job).
+
+Coverage-guided input fuzzing also has its own CI job: 30 seconds per target on
+each change and 300 seconds nightly. Install `cargo-fuzz` and a nightly Rust
+toolchain, then run `python3 scripts/fuzz_inputs.py --seconds 60`. It checks WEM
+container parsing and streaming decode, plus WAV parsing, with AddressSanitizer
+and overflow checks. A bounded run is evidence about those executions, not a
+proof that no malformed input can fail. Crash artifacts are uploaded on CI
+failure; convert each confirmed defect into a small deterministic regression.
+
+For a separately installed external decoder, run:
+
+```bash
+python3 scripts/check_decode_external.py tests/fixtures/reference.wem
+python3 scripts/check_decode_external.py /path/to/local.wem --vgmstream /path/to/vgmstream-cli
+```
+
+This compares native streaming output with vgmstream float32 PCM, checking
+geometry, total length, finite samples and every sample's error. The defaults
+are `abs(error) <= 1e-6 + 1e-6 * abs(reference)`; the report includes the selected
+tolerances, maximum error and RMS error. It buffers only the current PCM block,
+disables playback loops, and fails if either decoder fails. The external tool
+and any private input are explicit prerequisites, outside `make test`; a run on
+private material is local evidence and does not expand the committed corpus.
 
 ## Code-writing standards
 

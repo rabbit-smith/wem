@@ -20,11 +20,17 @@ statement by statement — each `_f32(...)` in Python is one `f32` operation
 boundary in Rust — and the kernel is checked against the oracle's output, never
 the reverse.
 
-A comparison runs two implementations against each other (the oracle against the
-kernel, the C ABI against the kernel, the built wheel against its allowlist), or
-a run against an external reference (the paired build's WEM for the fixture and
-for each corpus case). A recorded expectation is not a comparison: when it
-disagrees with a run it hides the change behind a re-record step.
+A comparison must state its source of truth. Live oracle/kernel comparisons
+establish port consistency, including operation ordering and float semantics;
+they cannot rule out a shared algorithmic mistake or a wrong shared profile
+value. Committed paired-build outputs supply independent whole-file evidence
+for their inputs, not an exhaustive proof over all PCM or quality settings.
+
+Recorded expectations are valid regression evidence when their origin and
+acceptance rule are explicit. External bytes, independently recorded profile
+values, and justified numerical tolerances must not be regenerated from the
+implementation under test merely to make a failure pass. A self-recorded
+baseline can detect change, but does not independently establish correctness.
 
 When a comparison reports a difference, the difference says what moved: either
 the code is wrong, or the expected bytes have changed as part of the work. Those
@@ -48,10 +54,10 @@ words; a stage is not done until it comes back zero.
 | The package-root public exports and the wheel inventory | `tests/parity/test_public_surface.py`, `tests/parity/test_distribution.py`, `python3 scripts/wheel_smoke.py`; the export list is in [`public-interface.md`](public-interface.md) |
 | The command line in both directions: `wwise-wem INPUT.wav --output OUTPUT.wem` writes the reference bytes, `--decode` writes signed-16 PCM WAV and refuses the encoder options, a file named `decode` is still a file, and a refused decode writes no file at all | `tests/integration/test_cli.py`, `tests/parity/test_cli_decode.py`, and the binary's own cases (`cargo test -p wem-core --features parallel --bin wwise-wem`) |
 | Geometry-materializer parity: the ported builder == the carrier's registered words == the kernel's `psy_geom*` surfaces | `tests/parity/test_geometry_materializer_parity.py`; `cargo test -p wem-analysis` |
-| The compiled profile carrier: the kernel's tables equal the recorded material, table by table | `crates/wem-profiles/src/carrier_tests.rs` (stage 1, retired with the recorded tree), `tests/parity/test_geometry_materializer_parity.py`, `cargo test -p wem-profiles` |
+| The compiled profile carrier's structure, readers and materialized geometry | `tests/unit/profiles/test_profile_carrier.py`, `tests/parity/test_geometry_materializer_parity.py`, `cargo test -p wem-profiles`; algorithm parity shares the carrier values and does not independently establish every recorded profile value |
 | The 2ch/48 kHz result, its corpora, and the limits of that evidence | `tests/parity/test_2ch_corpus.py`, [`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md) |
-| The decode of the committed paired-build container: the geometry and frame count it declares, and a reconstruction of the WAV it was produced from | `crates/wem-core/tests/decode_reference_wem.rs`, `tests/parity/test_decode_surface.py` |
-| The decode round trip: `decode(encode(x))` reconstructs `x` over both registered profiles and the tracked 2ch corpus, and decoding our own encode of the fixture equals decoding the paired build's container, sample for sample | `crates/wem-core/tests/decode_reference_wem.rs`, `crates/wem-core/tests/encoder.rs` |
+| The decode of the committed paired-build container preserves geometry and frame count; synthesis agrees with the separate NumPy decoder within the documented tolerances for both registered geometries | `crates/wem-core/tests/decode_reference_wem.rs`, `tests/parity/test_decode_surface.py`; tolerances and independence limits are in [`decoding.md`](decoding.md) |
+| The decode round trip preserves tested source geometry and length; decoding our own encode of the fixture equals decoding the paired build's container, sample for sample | `crates/wem-core/tests/decode_reference_wem.rs`, `crates/wem-core/tests/encoder.rs` |
 | The decode session's memory is bounded: a 64× (202 s) stream decodes in a child process whose peak RSS stays under a fixed ceiling, so a live session retains nothing that grows with the stream | `crates/wem-core/tests/decode_memory.rs` |
 | The C ABI decode surface: its lifecycle, its error classes, its callback delivery order and its terminal handles | `crates/wem-capi/tests/decode_capi.rs`, `crates/wem-capi/tests/capi_surface.rs` |
 | The decode shells' error table and step framing, mirrored 1:1 from the C ABI | `crates/wem-python/src/lib.rs`, `crates/wem-wasm/src/lib.rs` (their unit tests) |
@@ -71,17 +77,18 @@ the decode direction to be byte-identical to. The decoder must be deterministic
 encoder's input sample *i*), bounded in memory (a live session retains nothing
 proportional to the stream it is decoding, which is what the surface's
 streaming-only shape exists to provide), and a reconstruction of its source —
-established by round trip against this repository's own encoder, whose output is
-byte-exact against the paired build, so `decode(encode(x))` against `x` measures
-the decoder over every input this repository can encode.
+checked through round trips and a separate synthesis comparison. The encoder's
+paired-build equality is established for the committed vectors; a round trip
+measures the decoder on the inputs actually exercised, not on every possible
+input this repository can encode.
 
-No external decoder is an oracle here. The one route that would make a
-bit-exactness claim checkable binds the host's libvorbis through `ctypes` and
-compiles a C helper with `cc` on first use (`scripts/decode_wem.py
---libvorbis-exact`), and is documented as not byte-stable across environments —
-a comparison against it would be a comparison against the machine's libraries,
-not against a specification. The design, the surface and the refusal classes are
-in [`decoding.md`](decoding.md).
+Cross-environment differences in an external decoder preclude an unqualified
+byte-identity claim, not a numerical comparison. The default NumPy synthesis in
+`scripts/decode_wem.py` can be compared with explicit tolerances; it shares
+profile values and some codec primitives, so this is additional implementation
+evidence rather than a completely independent specification. Its optional
+`--libvorbis-exact` path binds system libraries and is not the portable test
+oracle. The design and refusal classes are in [`decoding.md`](decoding.md).
 
 Everywhere else the decode direction carries the same norms as the encode
 direction. Failures are the same stable classes, with `WEM_ERR_INPUT_MALFORMED`
@@ -152,7 +159,7 @@ downstream domain.
 Rust crates follow the same direction, with the same ownership:
 
 ```text
-wem-profiles   → (types of wem-vorbis/wem-analysis/wem-container; sole resource owner)
+wem-profiles   → (types of wem-vorbis/wem-analysis; sole profile carrier owner)
 wem-scheduling → (none below it)
 wem-analysis   → wem-scheduling (+ own dsp)
 wem-vorbis     → (pure codec primitives; never profiles/container/application)
@@ -205,9 +212,15 @@ cause is reachable. At the Python boundary,
 kernel's own class, that `str(error)` is the kernel's diagnostic unchanged, and
 that the kernel error stays reachable as `__cause__`.
 
-**Error types are exhaustively matchable.** A public error enum carries no
-`#[non_exhaustive]`, on purpose: adding a variant is a breaking change, and the
-compiler must tell every caller that a new failure mode exists.
+**Match failure classes, not source locations.** Public error enums describe
+caller-relevant domain categories. The diagnostic carries the failing operation,
+observed values and expected constraints; a new validation site within an
+existing category does not add a public variant. Nested failures retain their
+`source()` chain. Analysis separates configuration, geometry, input, state and
+invariant failures; profile and packet errors likewise group failures by domain.
+
+A public error enum carries no `#[non_exhaustive]`: adding a failure class is a
+breaking change, and the compiler must tell every caller that it exists.
 `crates/wem-core/tests/errors.rs` (`variants`) matches every public error enum with
 no `_` arm, from a caller's position, so the rule is compiler-enforced: a new
 variant fails that build until the caller's arm is written. Adding an error

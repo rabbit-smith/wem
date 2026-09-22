@@ -6,14 +6,16 @@ Python package, with the C ABI declared in [`include/wem.h`](include/wem.h).
 
 The two directions are held to different claims, deliberately. On the encode
 side correctness means the exact bytes of a paired Wwise build, never behavioural
-similarity. The decoder claims no such thing and could not: no external decoder
-is reproducible across environments, so its contract is determinism plus a round
-trip against this repository's own encoder. What each side establishes, and the
+similarity. The decoder's contract is determinism and reconstruction, without
+a claim of byte identity to another decoder. Independent numerical comparisons
+use explicit tolerances. What each side establishes, and the
 test that establishes it, is in
 [`docs/reference/standards.md`](docs/reference/standards.md).
 
 Two configurations are installed — Wwise 2013.2 at 6 channels/44.1 kHz and
-2 channels/48 kHz — and both are byte-exact against their paired builds. How a
+2 channels/48 kHz — and their outputs match the committed paired-build vectors
+byte for byte: one 6-channel vector and eight 2-channel vectors. This finite
+corpus does not establish equality for every possible input or quality setting. How a
 configuration is selected is in
 [`docs/reference/profiles.md`](docs/reference/profiles.md); the evidence behind
 each, with the limits of it, is in

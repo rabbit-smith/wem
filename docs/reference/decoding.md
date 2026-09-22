@@ -264,18 +264,24 @@ Recorded with their reasons so none is reopened without one.
 
 | Claim | Established by |
 |---|---|
-| The committed paired-build container decodes to its WAV source: geometry, 139 398 frames, and a reconstruction bounded by the source's own peak | `crates/wem-core/tests/decode_reference_wem.rs`; `tests/parity/test_decode_surface.py` through the shipped facade |
-| `decode(encode(x))` reconstructs `x` across both registered profiles and the tracked 2ch corpus, and `decode(reference.wem)` equals `decode(encode(input.wav))` exactly | `crates/wem-core/tests/decode_reference_wem.rs`, `crates/wem-core/tests/encoder.rs` |
+| The committed paired-build container preserves its source geometry and declared frame count; gross output magnitudes are bounded | `crates/wem-core/tests/decode_reference_wem.rs`; `tests/parity/test_decode_surface.py` through the shipped facade |
+| Native synthesis agrees numerically with the separate NumPy synthesis on a committed paired-build WEM of each geometry: finite samples, aligned shape, per-channel correlation at least 0.999999 and normalized RMS difference at most 1e-5 | `tests/parity/test_decode_surface.py` (`DecodeReferenceQualityTests`); mutations prove the predicate rejects silence, doubled gain, sign reversal, swapped channels and a one-frame shift |
+| `decode(encode(x))` preserves geometry and length across the tested corpus, and `decode(reference.wem)` equals `decode(encode(input.wav))` exactly | `crates/wem-core/tests/decode_reference_wem.rs`, `crates/wem-core/tests/encoder.rs` |
 | Chunk boundaries never move a sample, and empty chunks are no-ops | `crates/wem-core/tests/decode_reference_wem.rs`; `crates/wem-python/src/lib.rs` (the shell's own surface) |
 | A rejection does not advance the stream, `Finish` is terminal, and a decoded stream is deterministic | `crates/wem-core/tests/decode_reference_wem.rs` |
 | The C ABI decode surface: lifecycle, error-class mapping, callback delivery order, terminal handles | `crates/wem-capi/tests/decode_capi.rs`, `crates/wem-capi/tests/capi_surface.rs` |
 | The shells mirror the error table and the step framing 1:1 | `crates/wem-python/src/lib.rs`, `crates/wem-wasm/src/lib.rs` (their unit tests) |
 | The shipped wheel decodes through its embedded kernel: the declared geometry and frame count of the container it encoded, in a clean environment | `python3 scripts/wheel_smoke.py` |
 
-The comparison these rows describe is a live one, never a recorded number: the
-decoded samples are compared against the source PCM at run time, and the
-structural bound (`max|error|` within the source's own peak) is what catches a
-decode that is not a reconstruction at all.
+The source-peak bound alone is not a quality check: an all-zero output can pass
+it. The separate synthesis comparison supplies the waveform check. Its NumPy
+path shares profile data and some bitstream primitives, so it cannot exclude
+every common error. The generic reference path evaluates the inverse transform
+definition separately from the kernel's fast transform and checks hybrid window
+support explicitly. External float decoding helped identify and repair an
+incorrect fitted operator in the reference path. Current numerical evidence,
+including the separate external-decoder checks, and its limits are recorded in
+[`../findings/evidence-audit.md`](../findings/evidence-audit.md).
 
 ## What is not claimed
 
@@ -285,7 +291,8 @@ decoder verified by round trip against this repository's own encoder. The
 reference path that would make an external comparison look bit-exact binds the
 host's libvorbis through `ctypes` and compiles a C helper with `cc` on first use
 (`scripts/decode_wem.py --libvorbis-exact`), and is documented as not
-byte-stable across environments — so it cannot be a test oracle, and no row
-above depends on it. The feasibility evidence for the transform, and why that
+byte-stable across environments. That prevents an unqualified byte comparison,
+but does not prevent an external numerical comparison with justified tolerances.
+No row above depends on the optional system-library path. The feasibility evidence for the transform, and why that
 route was rejected, is in
 [`../findings/decode-transform-feasibility.md`](../findings/decode-transform-feasibility.md).

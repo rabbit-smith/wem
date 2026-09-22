@@ -151,7 +151,7 @@ jobs each wave spawns, so the pool never holds more workers than the wave has
 jobs; the measured wall plateau's bottom sits at that same number.
 
 The size is *derived*: there is no pool to submit to, no queue and no dispatch
-policy, and a host refusal surfaces as `AnalysisError::PoolUnavailable` from the
+policy, and a host refusal surfaces as `AnalysisError::PoolUnavailable` (now `AnalysisError::State`) from the
 session constructor rather than a panic. What a caller can do is *read* the size
 the geometry produced — `AnalysisSession::channel_pool_workers()`, the same kind
 of fact as the frame count on an encode result — and it tracks the geometry one

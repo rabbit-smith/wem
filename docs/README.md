@@ -32,6 +32,7 @@ at these documents instead of restating them.
 
 | Document | Open it when |
 | --- | --- |
+| [`changelog.md`](changelog.md) | Reviewing user-visible changes for a release |
 | [`reference/standards.md`](reference/standards.md) | You need a product norm — bit-exactness, the decode contract, determinism, bit-pattern transport, layers, errors, panics, caller state, profile ownership, the integration topology, the portability floor — or the test that establishes it |
 | [`reference/architecture.md`](reference/architecture.md) | Changing a layer boundary or the encoding or decoding flow |
 | [`reference/domain-model.md`](reference/domain-model.md) | Naming anything: the vocabulary is normative |
@@ -48,6 +49,7 @@ at these documents instead of restating them.
 | [`findings/internal-parallelism-practice.md`](findings/internal-parallelism-practice.md) | Asking what other libraries document about owning threads — rayon, BLAS and `threadpoolctl`, OpenMP, FFTW, the codec encoders, the Rust ecosystem and the platform limits — and which of it this repository matches or conflicts with |
 | [`findings/input-format-practice.md`](findings/input-format-practice.md) | Asking which input formats an encoder is expected to accept — what libx264, libvpx, libaom, LAME, libopus and Apple's converters document as their input, what Wwise's own authoring converter is handed, what the PCM containers standardise and what they leave open, and whether a byte-exact claim can survive a resampler |
 | [`findings/profile-as-code.md`](findings/profile-as-code.md) | Asking where the profile values live now, or what established that the move into the kernel is exact |
+| [`findings/evidence-audit.md`](findings/evidence-audit.md) | Input defects, live synthesis comparison and remaining external-evidence limits |
 | [`findings/browser-shell-toolchain-options.md`](findings/browser-shell-toolchain-options.md) | Asking whether the browser shell should stay Rust and what C, Zig or MoonBit would actually buy |
 | [`findings/encode-performance.md`](findings/encode-performance.md) | Needing the encode's measured stage split, its scaling in stream length, or the list of what is worth optimizing and what is not |
 | [`findings/decode-transform-feasibility.md`](findings/decode-transform-feasibility.md) | Asking whether a `decode` surface is bounded work, which chain segments already exist in the kernel, and why bit-exactness against libvorbis is not a shippable claim |

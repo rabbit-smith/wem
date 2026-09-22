@@ -17,12 +17,14 @@ cannot disagree about what a published surface is.
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
 import wwise_wem
 
 from pathlib import Path
 
 import scripts.check_provenance as provenance
+from scripts.check_documentation import check_document
 
 # --------------------------------------------------------------------------
 # merged from tests/parity/test_distribution.py
@@ -34,6 +36,42 @@ ROOT = provenance.ROOT
 PACKAGE = provenance.PACKAGE
 ALLOWLIST = Path(__file__).with_name("distribution_allowlist.json")
 TEXT_SUFFIXES = provenance.TEXT_SUFFIXES
+
+
+class DocumentationReferenceTests(unittest.TestCase):
+    def check_text(self, text: str, *, historical: bool = False) -> list[str]:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            parent = root / "docs" / ("findings" if historical else "reference")
+            parent.mkdir(parents=True)
+            document = parent / "example.md"
+            document.write_text(text, encoding="utf-8")
+            (parent / "existing file.md").write_text("# Present", encoding="utf-8")
+            return check_document(document, root)
+
+    def test_missing_local_link_reports_its_line(self) -> None:
+        failures = self.check_text("# Example\n\n[missing](missing.md)\n")
+        self.assertEqual(len(failures), 1)
+        self.assertIn("example.md:3: missing link target: missing.md", failures[0])
+
+    def test_existing_encoded_paths_and_external_links_are_accepted(self) -> None:
+        self.assertEqual(self.check_text(
+            "[file](existing%20file.md#present)\n"
+            "[external](https://example.com/missing.md)\n"
+            "[section](#present)\n"
+        ), [])
+
+    def test_current_source_reference_must_exist(self) -> None:
+        failures = self.check_text("See `crates/example/src/missing.rs`.\n")
+        self.assertEqual(len(failures), 1)
+        self.assertIn("missing source file", failures[0])
+
+    def test_historical_source_names_are_allowed_but_broken_links_are_not(self) -> None:
+        self.assertEqual(self.check_text("Retired `crates/example/src/old.rs`.", historical=True), [])
+        self.assertEqual(len(self.check_text("[retired](old.rs)", historical=True)), 1)
+
+    def test_fenced_examples_are_not_live_references(self) -> None:
+        self.assertEqual(self.check_text("```md\n[example](missing.md)\n```\n"), [])
 
 
 def _allowlist() -> dict[str, object]:

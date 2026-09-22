@@ -118,6 +118,7 @@ MATURIN ?= $(firstword $(wildcard $(VENV_BIN)maturin) maturin)
 # numbers and never fail on one. They have a single entry, `benchmark`, below.
 # -----------------------------------------------------------------------------
 test: native
+	$(PY) scripts/check_documentation.py
 	PYTHONPATH= $(PY) -m pytest --collect-only -q
 	$(RUFF) check src reference tests scripts
 	$(MYPY) --no-site-packages src reference

@@ -862,7 +862,7 @@ What the code does today:
   `rayon::ThreadPoolBuilder::new().num_threads(workers).build()` with
   `workers = channels`, **once per analysis session**; the session owns it and
   drops it (`crates/wem-analysis/src/session.rs`); a build failure becomes
-  `AnalysisError::PoolUnavailable`.
+  `AnalysisError::PoolUnavailable` (now `AnalysisError::State`).
 - The two channel waves spawn one job per channel into `pool.scope(...)` and
   collect by slot index, so results are in channel order at any pool size.
 - `wem-core`'s `parallel` feature is `default = ["parallel"]`; `wem-analysis`
