@@ -1,5 +1,5 @@
 # This repository verifies byte digests across machines (profile SHA-256
-# chain, reference WEM, stage-records hashes). Text files must therefore check
+# chain, reference WEM). Text files must therefore check
 # out with identical bytes on every platform: checkout line endings are
 # pinned to LF regardless of a machine's core.autocrlf (Windows runners
 # otherwise rewrite JSON to CRLF and every checksum verification fails).

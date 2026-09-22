@@ -29,6 +29,12 @@ pub fn wwise_float_log(value: f64) -> f64 {
 /// For an even `n` the layout is `[DC, Re(1), Im(1), ..., Re(n/2)]`. Every
 /// input and butterfly result is rounded to float32. `twiddles` must be
 /// provided (the frozen profile domain); the analytic path is not taken.
+///
+/// Each stage's twiddle factor sequence is derived once per call, by the same
+/// recurrence the butterfly loop would otherwise run, and read back by index.
+/// The recurrence depends on nothing but `(step_re, step_im, k)`, so the
+/// sequence is bit-identical at every `start` block of the stage; indexing it
+/// hands each butterfly exactly the pair it saw before.
 pub fn wwise_fft_packed(
     samples: &[f64],
     twiddles: &FrozenMathTables,
@@ -55,6 +61,14 @@ pub fn wwise_fft_packed(
         }
     }
 
+    // The twiddle sequence of one stage, at most `n / 2` pairs (the widest
+    // stage's `half`). It is scratch, not state: every stage refills the part
+    // it needs before reading it. It is allocated here, once per call, because
+    // the caller chain (`wwise_log_curve` from `psychoacoustics::pipeline`) has
+    // no session-owned buffer to borrow — the same per-call shape as the
+    // `real`/`imag`/`packed` buffers this function already allocates.
+    let mut twiddle: Vec<(f64, f64)> = vec![(0.0, 0.0); n / 2];
+
     let mut length = 2usize;
     while length <= n {
         let half = length >> 1;
@@ -65,10 +79,23 @@ pub fn wwise_fft_packed(
         )?;
         let step_re = f32_of(entry.0);
         let step_im = f32_of(entry.1);
+        // The stage's sequence, from `(1, 0)` up, by the identical recurrence
+        // with the identical f32 rounding points. The final step computes
+        // `w_half`, which no butterfly reads, exactly as before.
+        let stage = &mut twiddle[..half];
+        let mut wr = 1.0;
+        let mut wi = 0.0;
+        for slot in stage.iter_mut() {
+            *slot = (wr, wi);
+            let (new_wr, new_wi) = (
+                f32_of(wr * step_re - wi * step_im),
+                f32_of(wr * step_im + wi * step_re),
+            );
+            wr = new_wr;
+            wi = new_wi;
+        }
         for start in (0..n).step_by(length) {
-            let mut wr = 1.0;
-            let mut wi = 0.0;
-            for k in 0..half {
+            for (k, &(wr, wi)) in stage.iter().enumerate() {
                 let even = start + k;
                 let odd = even + half;
                 let tr = f32_of(wr * real[odd] - wi * imag[odd]);
@@ -79,12 +106,6 @@ pub fn wwise_fft_packed(
                 imag[even] = f32_of(ei + ti);
                 real[odd] = f32_of(er - tr);
                 imag[odd] = f32_of(ei - ti);
-                let (new_wr, new_wi) = (
-                    f32_of(wr * step_re - wi * step_im),
-                    f32_of(wr * step_im + wi * step_re),
-                );
-                wr = new_wr;
-                wi = new_wi;
             }
         }
         length <<= 1;

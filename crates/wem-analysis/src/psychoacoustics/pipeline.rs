@@ -134,7 +134,8 @@ pub fn analyze_long_frame(
     // cross-channel shared mutable state, `f32_of` is a pure, order-free
     // rounding, and rayon preserves channel order in collect, so the
     // results are bit-identical to the sequential loop. Guarded end-to-end
-    // by the complete_wem_bytes / stage_frames / vorbis_oracle_values byte-parity tests.
+    // by the complete_wem_bytes / frame_pipeline_parity / vorbis_oracle_values
+    // byte-parity tests.
     //
     // Without `parallel` (threadless targets such as wasm32), run the same
     // work sequentially.

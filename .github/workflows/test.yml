@@ -124,7 +124,8 @@ jobs:
             -o "${RUNNER_TEMP}/wem-c-example"
           "${RUNNER_TEMP}/wem-c-example" tests/fixtures/input.wav "${RUNNER_TEMP}/c-capi-out.wem"
           # Byte comparison, not a digest: the committed reference WEM is the
-          # recorded artifact, and `cmp` reports the first differing byte.
+          # paired build's output for this input, and `cmp` reports the first
+          # differing byte.
           if ! cmp -s tests/fixtures/reference.wem "${RUNNER_TEMP}/c-capi-out.wem"; then
             echo "reference byte mismatch: the C client output differs from tests/fixtures/reference.wem"
             echo "  expected (tests/fixtures/reference.wem): $(wc -c < tests/fixtures/reference.wem) bytes, sha256 $(sha256sum tests/fixtures/reference.wem | awk '{print $1}')"

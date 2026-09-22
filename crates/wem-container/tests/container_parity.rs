@@ -1,22 +1,24 @@
-//! Container bytes: rebuild the Wwise WEM from the real captured packet
-//! stream and verify the fmt/setup/data segment hashes and the full-file
-//! SHA-256 against `tests/data/stage-records/stages/index.json`.
+//! Container bytes: the native kernel's WEM against the pure-Python oracle's,
+//! built at test time from the same captured packet stream.
 //!
 //! The packet stream (setup packet + 205 audio packets, seek table, fmt
-//! fields, extra chunks) is captured from the reference-oracle encode path
-//! via a subprocess: the stage-records dumps only carry 28 representative
-//! audio packets, so the full 206-packet stream is fetched on demand. The
-//! capture drives the reference oracle directly (a test asset, not an
-//! engine: the facade's single execution path is the native kernel and is
-//! never on this path), observes the arguments of the reference-tree
-//! `build_vorbis_wem` (`wwise_wem_reference.python_engine`). All
-//! assertions are against the committed index.json hashes.
+//! fields, extra chunks) is captured live from the reference-oracle encode
+//! path via a subprocess, which observes the arguments of the reference-tree
+//! `build_vorbis_wem` (`wwise_wem_reference.python_engine`). The capture drives
+//! the reference oracle directly (a test asset, not an engine: the facade's
+//! single execution path is the native kernel and is never on this path).
+//!
+//! Both container builders then run at test time on those arguments — the
+//! Python one inside the capture subprocess, the Rust `wem_container::
+//! build_vorbis_wem` here — and the two whole containers are compared byte for
+//! byte. Nothing is recorded and no side is compared against a stored
+//! expectation: a divergence is a divergence, and it names the first differing
+//! byte of the segment it falls in.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use wem_container::{build_vorbis_wem, load_wem_parts_bytes, Endian, VorbisFmtFields};
 
 fn repo_root() -> PathBuf {
@@ -30,30 +32,9 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn stages_dir() -> PathBuf {
-    repo_root().join("tests/data/stage-records/stages")
-}
-
-fn sha256_hex(payload: &[u8]) -> String {
-    let digest = Sha256::digest(payload);
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::new();
-    for &b in digest.as_slice() {
-        out.push(DIGITS[(b >> 4) as usize] as char);
-        out.push(DIGITS[(b & 0xF) as usize] as char);
-    }
-    out
-}
-
-fn load_index() -> Value {
-    let raw = std::fs::read_to_string(stages_dir().join("index.json"))
-        .expect("stage-records index.json exists");
-    serde_json::from_str(&raw).expect("index parses")
-}
-
 /// Python script: capture the reference-oracle encoder's build_vorbis_wem
-/// arguments (packets / seek table / fmt fields / extra chunks) as JSON.
-/// Mirrors tests/parity/stage_records_support.py's observing wrapper.
+/// arguments (packets / seek table / fmt fields / extra chunks) as JSON, plus
+/// the container bytes the oracle's own builder returns for them.
 const CAPTURE_SCRIPT: &str = r#"
 import base64, json, sys
 from pathlib import Path
@@ -80,7 +61,11 @@ def capture_build(fmt_fields, packets, **kw):
     ]
     captured["recompute_sizes"] = kw.get("recompute_sizes", True)
     captured["fmt_raw"] = kw.get("fmt_raw")
-    return original_build(fmt_fields, packets, **kw)
+    wem_bytes = original_build(fmt_fields, packets, **kw)
+    # The oracle builder's own output for exactly these arguments: the
+    # comparison target, produced at test time rather than recorded.
+    captured["wem_bytes"] = bytes(wem_bytes)
+    return wem_bytes
 
 python_engine.build_vorbis_wem = capture_build
 try:
@@ -90,11 +75,12 @@ try:
             wwise_wem.WwiseVersion.WWISE2013, pcm.channel_count, pcm.sample_rate
         )
     )
-    python_engine.encode_pcm_python(
+    result = python_engine.encode_pcm_python(
         profile=profile,
         container=ContainerPlan.from_profile(profile),
         pcm=pcm,
     )
+    captured["encode_data"] = bytes(result.data)
 finally:
     python_engine.build_vorbis_wem = original_build
 
@@ -109,6 +95,8 @@ print(json.dumps({
     "extra_chunks": [[b64(c), b64(p)] for c, p in captured["extra_chunks"]],
     "recompute_sizes": captured["recompute_sizes"],
     "fmt_raw": b64(captured["fmt_raw"]),
+    "wem_bytes": b64(captured["wem_bytes"]),
+    "encode_data": b64(captured["encode_data"]),
 }))
 "#;
 
@@ -184,11 +172,31 @@ fn base64_decode(text: &str) -> Vec<u8> {
     out
 }
 
-#[test]
-fn container_matches_stage_records() {
-    let index = load_index();
-    let container = &index["container"];
+/// Assert two byte strings are equal, naming the first differing offset.
+fn assert_bytes_equal(what: &str, kernel: &[u8], oracle: &[u8]) {
+    if kernel == oracle {
+        return;
+    }
+    let at = kernel
+        .iter()
+        .zip(oracle)
+        .position(|(kernel_byte, oracle_byte)| kernel_byte != oracle_byte)
+        .unwrap_or_else(|| kernel.len().min(oracle.len()));
+    let byte = |payload: &[u8]| match payload.get(at) {
+        Some(value) => format!("0x{value:02x}"),
+        None => "-- (past the end)".to_string(),
+    };
+    panic!(
+        "{what}: kernel {at} bytes in, oracle {}; first difference at byte {at}: \
+         kernel {} != oracle {}",
+        oracle.len(),
+        byte(kernel),
+        byte(oracle),
+    );
+}
 
+#[test]
+fn container_matches_the_python_oracle() {
     let captured = capture_packet_stream();
     let endian = if captured["endian"].as_str() == Some("be") {
         Endian::Big
@@ -252,14 +260,23 @@ fn container_matches_stage_records() {
         u_blocksize1_pow: i64f("uBlocksize1Pow") as u8,
     };
 
-    // Sanity: the captured setup packet is the reference setup packet.
+    // The oracle's own container for exactly these arguments, produced by the
+    // capture subprocess at test time.
+    let oracle_wem = b64_decode(&captured["wem_bytes"]);
+    let oracle_whole_file = b64_decode(&captured["encode_data"]);
+    assert_bytes_equal(
+        "the oracle's capture agrees with its own whole-file encode",
+        &oracle_wem,
+        &oracle_whole_file,
+    );
+    let oracle_parts = load_wem_parts_bytes(&oracle_wem).expect("the oracle container parses");
     assert_eq!(
-        sha256_hex(&packets[0]),
-        container["setup_sha256"].as_str().unwrap(),
-        "captured setup packet differs from index.json"
+        oracle_parts.setup_packet.as_deref(),
+        Some(packets[0].as_slice()),
+        "the captured setup packet is the oracle container's"
     );
 
-    // Rebuild the container with the Rust kernel.
+    // Build the same container with the Rust kernel, from the same arguments.
     let built = build_vorbis_wem(
         fields,
         &packets,
@@ -271,39 +288,10 @@ fn container_matches_stage_records() {
     )
     .expect("build_vorbis_wem succeeds");
 
-    // Segment hashes (fmt / data) and sizes against index.json.
-    assert_eq!(
-        sha256_hex(&built.fmt_raw),
-        container["fmt_sha256"].as_str().unwrap(),
-        "fmt segment hash differs"
-    );
-    assert_eq!(
-        built.fmt_raw.len(),
-        container["fmt_size"].as_u64().unwrap() as usize,
-        "fmt segment size differs"
-    );
-    assert_eq!(
-        sha256_hex(&built.data_raw),
-        container["data_sha256"].as_str().unwrap(),
-        "data segment hash differs"
-    );
-    assert_eq!(
-        built.data_raw.len(),
-        container["data_size"].as_u64().unwrap() as usize,
-        "data segment size differs"
-    );
-
-    // Whole-file hash.
-    assert_eq!(
-        sha256_hex(&built.wem_bytes),
-        container["wem_sha256"].as_str().unwrap(),
-        "full WEM SHA-256 differs"
-    );
-    assert_eq!(
-        built.wem_bytes.len(),
-        container["wem_size"].as_u64().unwrap() as usize,
-        "full WEM size differs"
-    );
+    // The whole claim: one container, built twice, byte for byte.
+    assert_bytes_equal("the built container", &built.wem_bytes, &oracle_wem);
+    assert_bytes_equal("the fmt segment", &built.fmt_raw, &oracle_parts.fmt_raw);
+    assert_bytes_equal("the data segment", &built.data_raw, &oracle_parts.data_raw);
 
     // Round-trip: the structural parser sees the expected layout.
     let parts = load_wem_parts_bytes(&built.wem_bytes).expect("parts parse");

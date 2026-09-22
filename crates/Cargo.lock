@@ -479,7 +479,6 @@ name = "wem-container"
 version = "0.1.0"
 dependencies = [
  "serde_json",
- "sha2",
 ]
 
 [[package]]
@@ -516,9 +515,6 @@ dependencies = [
 [[package]]
 name = "wem-scheduling"
 version = "0.1.0"
-dependencies = [
- "serde_json",
-]
 
 [[package]]
 name = "wem-vorbis"
