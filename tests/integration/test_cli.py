@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -50,6 +51,7 @@ class CliTests(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
+            env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("differs from WAV", result.stderr)
@@ -81,6 +83,7 @@ class CliTests(unittest.TestCase):
                 ],
                 capture_output=True,
                 text=True,
+                env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
             )
             self.assertEqual(result.returncode, 1, result.stderr)
             self.assertNotIn("Traceback", result.stderr, "a refusal is not a crash")

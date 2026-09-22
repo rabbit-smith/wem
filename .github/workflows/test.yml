@@ -145,6 +145,10 @@ jobs:
           PY
         env:
           CARGO_TERM_COLOR: always
+      - name: pytest discovery without a manual import path
+        run: python -m pytest --collect-only -q
+        env:
+          PYTHONPATH: ""
       - name: full suite on the native kernel
         run: python -m unittest discover -s tests -v
       - name: native binding smoke (streaming + one-shot, byte-exact)

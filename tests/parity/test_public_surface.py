@@ -119,6 +119,7 @@ class PublicCliTests(unittest.TestCase):
             cwd=ROOT,
             capture_output=True,
             text=True,
+            env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
         )
 
     def test_help_exposes_supported_options(self):

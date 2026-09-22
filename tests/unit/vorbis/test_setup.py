@@ -124,7 +124,7 @@ class SetupRuntimeTests(unittest.TestCase):
 # Pure Vorbis codebook core and legacy façade regressions.
 
 ROOT = Path(__file__).resolve().parents[3]
-PACKAGE = ROOT / "src" / "wwise_wem"
+PACKAGE = ROOT / "reference" / "wwise_wem_reference"
 
 
 class CodebookCoreTests(unittest.TestCase):
@@ -181,10 +181,10 @@ import os
 import sys
 import types
 
-package = types.ModuleType("wwise_wem")
+package = types.ModuleType("wwise_wem_reference")
 package.__path__ = [os.environ["WWISE_PACKAGE_DIR"]]
-package.__package__ = "wwise_wem"
-sys.modules["wwise_wem"] = package
+package.__package__ = "wwise_wem_reference"
+sys.modules["wwise_wem_reference"] = package
 core = importlib.import_module("wwise_wem_reference.vorbis.codebook")
 result = core.make_codewords([1, 1])
 banned = [name for name in (
