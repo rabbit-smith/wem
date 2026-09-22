@@ -23,6 +23,14 @@ idempotent, and offline. What their outputs must satisfy is in
   `docs/figures/concurrency-samples-*.json`, `plot_concurrency_curves.py` →
   `docs/figures/concurrency-curves.png`. Never write outside these trees
   as a side effect.
+- The duration-curve pair writes to gitignored measurement scratch and nowhere
+  else: `generate_duration_curve_inputs.py` → `crates/target/curves/inputs/*.wav`,
+  and `measure_duration_curves.py` → `crates/target/curves/*.json` (its raw
+  samples). The driver also builds and runs the ignored harnesses in
+  `crates/wem-core/tests/` and spawns one child process per measurement point;
+  it reads no committed asset and records no baseline, so a loaded machine
+  changes the numbers and never the exit status. Its evidence is written up in
+  [`../docs/findings/duration-curves.md`](../docs/findings/duration-curves.md).
 - **Cross-check before emit**: generators assert their output against what is
   already committed where a fixture is involved (the 2ch corpus generators
   compare their rendered input against the committed WAV byte for byte before
