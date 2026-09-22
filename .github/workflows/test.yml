@@ -79,10 +79,26 @@ jobs:
               env_file.write("CARGO_ENCODED_RUSTFLAGS=" + "\x1f".join(remaps) + "\n")
           print("neutral build paths: " + " | ".join(remaps))
           PY
-      # dev extras without the package itself (the package imports from
-      # PYTHONPATH; pip-installing it would run a second maturin build);
-      # the kernel build goes through the maturin develop step below
-      - run: python -m pip install "maturin>=1.7"
+      # The dev extra's dependencies, without the package itself: the package
+      # imports from PYTHONPATH here, and pip-installing it would run a second
+      # maturin build. They are read out of pyproject.toml rather than repeated
+      # here, because the one dependency this job was missing — numpy, imported
+      # by scripts/decode_wem.py and the two-channel end-to-end suite — was
+      # missing precisely because the comment above said "dev extras" while the
+      # command installed only maturin. The kernel build goes through the
+      # maturin build step below.
+      - name: dev dependencies without the package (pyproject is the source)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install "maturin>=1.7"
+          python - <<'PY' > "${RUNNER_TEMP}/dev-requirements.txt"
+          import pathlib, tomllib
+          project = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
+          print("\n".join(project["optional-dependencies"]["dev"]))
+          PY
+          cat "${RUNNER_TEMP}/dev-requirements.txt"
+          python -m pip install -r "${RUNNER_TEMP}/dev-requirements.txt"
       - name: in-package native kernel (maturin build + drop extension into src)
         shell: bash
         run: |
@@ -161,9 +177,14 @@ jobs:
         # could stop being C-consumable and nothing would notice.
         run: |
           set -euo pipefail
+          # The rpath is what lets the binary find libwem_capi.so at run time;
+          # `-L` alone only tells the linker where to look. Without it the
+          # loader fails with "cannot open shared object file" — which is how
+          # this step behaved on every platform until it was run.
           cc -std=c11 -Wall -Wextra -Werror -Iinclude \
             examples/c/encode_pcm16.c \
             -Lcrates/target/release -lwem_capi -lpthread -ldl -lm \
+            -Wl,-rpath,"${PWD}/crates/target/release" \
             -o "${RUNNER_TEMP}/wem-c-example"
           "${RUNNER_TEMP}/wem-c-example" tests/fixtures/input.wav "${RUNNER_TEMP}/c-capi-out.wem"
           # Byte comparison, not a digest: the committed reference WEM is the
@@ -187,6 +208,7 @@ jobs:
           cc -std=c11 -Wall -Wextra -Werror -Iinclude \
             examples/c/decode_wem.c \
             -Lcrates/target/release -lwem_capi -lpthread -ldl -lm \
+            -Wl,-rpath,"${PWD}/crates/target/release" \
             -o "${RUNNER_TEMP}/wem-c-decode"
           "${RUNNER_TEMP}/wem-c-decode" \
             tests/fixtures/reference.wem "${RUNNER_TEMP}/c-decode.f32"
