@@ -4,9 +4,9 @@ and the reconstruction it produces against the artifact it came from.
 ``tests/fixtures/reference.wem`` is real paired-build 6ch/44100 output and
 ``tests/fixtures/input.wav`` is the source it was produced from, so the
 comparison cases measure the decode against material this repository did not
-produce. That comparison is live and relative — the reconstruction's error
-against the source's own peak — and never a recorded threshold
-(docs/reference/standards.md, Bit-exactness).
+produce. Source geometry and magnitude checks are complemented by a live
+comparison with a separate NumPy synthesis on both carried geometries, using
+the explicit tolerances documented in docs/reference/decoding.md.
 
 Three angles, one object: the surface cases pin what the call returns and when
 it can fail, the source cases pin which inputs reach it, and the comparison
@@ -17,23 +17,105 @@ from __future__ import annotations
 
 import array
 import contextlib
+import importlib.util
 import inspect
+import io
 import struct
 import sys
 import unittest
 import wave
 import wwise_wem
+import numpy as np
+from wwise_wem_reference.profiles.artifact import resolve_selection
 
 from pathlib import Path
+from scripts.check_decode_external import compare_pcm
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "tests" / "fixtures"
 REFERENCE = FIXTURES / "reference.wem"
 INPUT = FIXTURES / "input.wav"
+STEREO_REFERENCE = ROOT / "tests" / "data" / "2ch-reference" / "stereo_noise.wem"
 
 # The delivery block size of the C ABI's PCM callback, which the decode shell
 # mirrors: no block a caller is handed is longer than this.
 MAX_BLOCK_FRAMES = 1024
+
+
+def _load_reference_decoder():
+    """Load the independent NumPy decoder without making it a package surface."""
+    spec = importlib.util.spec_from_file_location("decode_wem", ROOT / "scripts" / "decode_wem.py")
+    if spec is None or spec.loader is None:
+        raise ImportError("scripts/decode_wem.py is required for decode comparison")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+REFERENCE_DECODER = _load_reference_decoder()
+
+
+def _channel_major(samples: list[float], channels: int) -> np.ndarray:
+    """Turn the facade's interleaved samples into ``(channel, frame)`` PCM."""
+    pcm = np.asarray(samples, dtype=np.float64)
+    if pcm.size % channels:
+        raise AssertionError(f"{pcm.size} samples do not contain whole {channels}ch frames")
+    return pcm.reshape(-1, channels).T
+
+
+def _assert_decode_quality(
+    test: unittest.TestCase,
+    native: np.ndarray,
+    reference: np.ndarray,
+    *,
+    case: str,
+) -> None:
+    """Reject a non-finite, misaligned, gain/sign, or channel-broken decode.
+
+    The independent reference is a deterministic float64 NumPy synthesis.  Its
+    generic 6ch path evaluates the IMDCT definition and derives its hybrid
+    window from the mode geometry.  Against the live fixture its largest
+    normalized RMS difference is below 2e-7, so 1e-5 is a numerical margin,
+    not an exactness or "no worse" claim.  Correlation 0.999999 requires the
+    time-varying waveform to remain aligned. Together they reject zero output,
+    material gain/sign changes, channel permutation, and one-frame shifts.
+    """
+    test.assertEqual(native.shape, reference.shape, f"{case}: PCM shape")
+    test.assertTrue(np.isfinite(native).all(), f"{case}: native PCM is non-finite")
+    test.assertTrue(np.isfinite(reference).all(), f"{case}: reference PCM is non-finite")
+    for channel, (actual, expected) in enumerate(zip(native, reference)):
+        expected_rms = float(np.sqrt(np.mean(expected * expected)))
+        if expected_rms == 0.0:
+            test.assertTrue(
+                np.array_equal(actual, expected),
+                f"{case}: channel {channel} is silent in the reference but differs",
+            )
+            continue
+        difference = actual - expected
+        normalized_rms = float(np.sqrt(np.mean(difference * difference)) / expected_rms)
+        centered_actual = actual - np.mean(actual)
+        centered_expected = expected - np.mean(expected)
+        actual_energy = float(np.dot(centered_actual, centered_actual))
+        expected_energy = float(np.dot(centered_expected, centered_expected))
+        test.assertGreater(actual_energy, 0.0, f"{case}: channel {channel} has no variation")
+        test.assertGreater(
+            expected_energy, 0.0, f"{case}: reference channel {channel} has no variation"
+        )
+        correlation = float(
+            np.dot(centered_actual, centered_expected)
+            / np.sqrt(actual_energy * expected_energy)
+        )
+        test.assertLessEqual(
+            normalized_rms,
+            1.0e-5,
+            f"{case}: channel {channel} normalized RMS error {normalized_rms:.6g}",
+        )
+        test.assertGreaterEqual(
+            correlation,
+            0.999999,
+            f"{case}: channel {channel} correlation {correlation:.6g}",
+        )
 
 
 def _source_pcm() -> tuple[int, int, list[float]]:
@@ -275,9 +357,9 @@ class DecodeErrorTests(unittest.TestCase):
 
 
 class DecodeComparisonTests(unittest.TestCase):
-    """The reconstruction, compared live against the material it came from."""
+    """Source geometry, bounded output, and repeatability of the same decode."""
 
-    def test_the_real_wem_decodes_to_its_source(self) -> None:
+    def test_the_real_wem_preserves_source_geometry_and_has_bounded_output(self) -> None:
         channels, sample_rate, source = _source_pcm()
         with contextlib.closing(wwise_wem.decode(REFERENCE.read_bytes())) as result:
             self.assertEqual(result.channels, channels)
@@ -299,13 +381,12 @@ class DecodeComparisonTests(unittest.TestCase):
             f"source peak {baseline:.6}), rms {rms:.6e}"
         )
 
-        # A structural bound, not a quality threshold: the codec's own loss is
-        # far below the source's full scale, so a decoder that misread the
-        # bitstream or misaligned the output is caught here at once.
+        # This only rejects gross magnitudes; silence can pass. The separate
+        # NumPy comparison below checks the waveform and its alignment.
         self.assertLessEqual(
             peak,
             2.0 * baseline,
-            f"the decode is not a reconstruction of the source: max|error| "
+            f"the decode exceeds its magnitude bound: max|error| "
             f"{peak} against a source peak of {baseline}",
         )
 
@@ -336,6 +417,118 @@ class DecodeComparisonTests(unittest.TestCase):
             _flatten(_blocks(wwise_wem.decode(raw))),
             "two decodes of the same bytes must be identical",
         )
+
+
+class DecodeReferenceQualityTests(unittest.TestCase):
+    """Live native-versus-NumPy comparisons over both carried geometries."""
+
+    def _compare_paired_wem(
+        self, path: Path, channels: int, sample_rate: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        native_result = wwise_wem.decode(path.read_bytes())
+        with contextlib.closing(native_result):
+            self.assertEqual(native_result.channels, channels)
+            self.assertEqual(native_result.sample_rate, sample_rate)
+            native = _channel_major(_samples(native_result), channels)
+            frames = native_result.total_frames
+        selection = wwise_wem.WwiseProfile(
+            wwise_wem.WwiseVersion.WWISE2013, channels, sample_rate
+        )
+        profile = resolve_selection(selection)
+        context = REFERENCE_DECODER.build_context(profile, channels, sample_rate)
+        reference, diagnostics = REFERENCE_DECODER.decode_numpy_pcm(
+            context, path.read_bytes(), frames
+        )
+        self.assertTrue(diagnostics["bit_closure_ok"], f"{path.name}: packet bit closure")
+        self.assertTrue(diagnostics["strict_closure_ok"], f"{path.name}: strict packet closure")
+        _assert_decode_quality(self, native, reference, case=path.name)
+        return native, reference
+
+    def test_paired_build_wems_agree_with_the_independent_numpy_decoder(self) -> None:
+        # These are external paired-build containers, one for each registered
+        # geometry.  The 2ch signal has independent noise in both channels;
+        # together with the fixture it exercises channel order, sign, gain,
+        # origin alignment, finite samples, and both synthesis paths.
+        for path, channels, sample_rate in (
+            (REFERENCE, 6, 44_100),
+            (STEREO_REFERENCE, 2, 48_000),
+        ):
+            with self.subTest(wem=path.name):
+                self._compare_paired_wem(path, channels, sample_rate)
+
+    def test_quality_predicate_rejects_defective_pcm(self) -> None:
+        # This deterministic synthetic waveform keeps the mutation proof cheap:
+        # the live paired-build test above already proves the predicate accepts
+        # a real native/reference pair.  Each defect maps to a regression class
+        # that pairwise comparison must catch.
+        reference = np.random.default_rng(314159).standard_normal((2, 4096))
+        defects = {
+            "zero": np.zeros_like(reference),
+            "gain": reference * 2.0,
+            "sign": -reference,
+            "channel-order": reference[::-1].copy(),
+            "one-frame-offset": np.roll(reference, 1, axis=1),
+            "non-finite": np.full_like(reference, np.nan),
+            "missing-frame": reference[:, :-1],
+        }
+        for name, defective in defects.items():
+            with self.subTest(defect=name), self.assertRaises(AssertionError):
+                _assert_decode_quality(self, defective, reference, case=name)
+
+    def test_long_synthesis_window_uses_short_transition_spans(self) -> None:
+        # This small long/short/long seam guards the hybrid support geometry
+        # independently of a carried stream's packet schedule.
+        block = np.ones(2048, dtype=np.float64)
+        halves = {
+            256: np.linspace(0.01, 1.0, 128),
+            2048: np.linspace(0.001, 1.0, 1024),
+        }
+        actual = REFERENCE_DECODER.apply_hybrid_synthesis_window(
+            block, (256, 2048), 0, 1, 0, halves
+        )
+        expected = np.zeros(2048, dtype=np.float64)
+        expected[448:576] = halves[256]
+        expected[576:1472] = 1.0
+        expected[1472:1600] = halves[256][::-1]
+        self.assertTrue(np.array_equal(actual, expected))
+
+
+class ExternalDecodeComparisonTests(unittest.TestCase):
+    def compare(self, samples, payload=None, *, channels=2, rate=48000):
+        class Blocks(list):
+            channels = 2
+            sample_rate = 48000
+            total_frames = 2
+
+        if payload is None:
+            payload = struct.pack("<4f", 0.25, -0.5, 0.125, -0.25)
+        fmt = struct.pack("<HHIIHH", 3, channels, rate, rate * channels * 4, channels * 4, 32)
+        wav = (b"RIFF" + struct.pack("<I", 36 + len(payload)) + b"WAVEfmt "
+               + struct.pack("<I", 16) + fmt + b"data" + struct.pack("<I", 16) + payload)
+        return compare_pcm(Blocks(samples), io.BytesIO(wav), atol=1e-6, rtol=1e-6)
+
+    def test_external_pcm_comparison_accepts_different_delivery_block_sizes(self):
+        metrics = self.compare([[0.25, -0.5], [0.125, -0.25]])
+        self.assertEqual(metrics["frames"], 2)
+        self.assertEqual(metrics["maximum_error"], 0.0)
+        self.assertEqual(metrics["rms_error"], 0.0)
+
+    def test_external_pcm_comparison_refuses_bad_samples_and_framing(self):
+        correct = [[0.25, -0.5, 0.125, -0.25]]
+        payload = struct.pack("<4f", *correct[0])
+        for name, samples, overrides in (
+            ("geometry", correct, {"channels": 1}),
+            ("rate", correct, {"rate": 44100}),
+            ("truncated reference", correct, {"payload": payload[:-4]}),
+            ("extra reference", correct, {"payload": payload + b"x"}),
+            ("short native", [[0.25, -0.5]], {}),
+            ("native non-finite", [[0.25, float("nan"), 0.125, -0.25]], {}),
+            ("reference non-finite", correct, {"payload": struct.pack("<4f", float("inf"), 0, 0, 0)}),
+            ("sample mismatch", [[0.25, -0.5, 0.12502, -0.25]], {}),
+            ("silence", [[0.0] * 4], {}),
+        ):
+            with self.subTest(case=name), self.assertRaises(ValueError):
+                self.compare(samples, **overrides)
 
 
 if __name__ == "__main__":

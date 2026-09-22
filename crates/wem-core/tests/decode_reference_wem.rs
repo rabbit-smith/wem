@@ -7,30 +7,13 @@
 //! encode-side bit-exactness result first: this file is the one piece of
 //! evidence in the repository that does not rest on an assumption of ours.
 //!
-//! The comparison against the source is a **live, relative** one, never a
-//! recorded threshold (docs/reference/standards.md, Bit-exactness: "a recorded
-//! expectation is not a comparison"), and no correlation floor is introduced
-//! anywhere. The absolute numbers are printed by a run, not pinned: a change
-//! in them shows up in the output instead of hiding behind a re-record step.
-//! What the tests here assert are properties — the declared frame count, the
-//! geometry the WAV agrees on, chunk-boundary invariance, byte-identical bytes
-//! decoding identically, and the reference decoder's own per-packet bitstream
-//! closure — plus one structural bound on the reconstruction, which is what
-//! catches a decode that is not a reconstruction of the source at all.
-//!
-//! The bar the design proposal sets — *our* error against the source, on a
-//! given WEM, no worse than the *reference decoder's* on that same WEM — is
-//! not computable from a Rust test target: `scripts/decode_wem.py` is Python,
-//! needs numpy, and reads its profile carrier out of the compiled PyO3
-//! extension. It was run from a scratch harness instead (carrier read from
-//! `wem_core::profile_tables_blob()`, so no extension is needed), and the
-//! numbers are in the lane report: on the fixture, our `max|error|` equals the
-//! reference's to seven significant digits and our RMS error is 0.98x the
-//! reference's. What *is* pinned here, with no external implementation, is the
-//! half of that comparison a Rust test can establish independently — the
-//! bitstream closure the reference decoder's own diagnostics use
-//! (`every_real_packet_closes_the_way_the_reference_requires`) — plus the
-//! geometry, length and determinism contract the C ABI promises.
+//! The source comparisons below establish geometry, length, bounded output,
+//! chunk-boundary invariance, and determinism. The separate
+//! shipped-facade parity suite also compares this kernel live with the
+//! independent deterministic NumPy decoder on paired-build WEMs for both
+//! registered geometries.  This Rust target retains the reference decoder's
+//! packet-closure property (`every_real_packet_closes_the_way_the_reference_requires`)
+//! without introducing a Python runtime into the kernel test binary.
 
 use std::path::Path;
 
@@ -124,7 +107,7 @@ fn peak_amplitude(samples: &[f32]) -> f32 {
 /// f32 come out, and the reconstruction is compared against the WAV it was
 /// produced from — with no encode-side result assumed.
 #[test]
-fn the_real_wem_decodes_to_its_source() {
+fn the_real_wem_preserves_source_geometry_and_has_bounded_output() {
     let wem = read_fixture("reference.wem");
     let (header, pcm, _) = decode_chunked(&wem, wem.len());
     let (source, channels) = source_samples(
@@ -152,14 +135,12 @@ fn the_real_wem_decodes_to_its_source() {
         peak / baseline * 100.0
     );
 
-    // A decoded sample is never wildly off its source sample: the codec's own
-    // loss is bounded by the source's full scale, so a decoder that misread
-    // the bitstream (or misaligned the output) shows up immediately. This is a
-    // *structural* bound on the reconstruction, not a quality threshold — the
-    // quality claim is the live comparison below.
+    // This rejects gross magnitudes, not silence or misalignment. The separate
+    // NumPy comparison in test_decode_surface.py checks the waveform.
+    assert!(pcm.iter().all(|sample| sample.is_finite()));
     assert!(
         peak <= 2.0 * baseline,
-        "the decode is not a reconstruction of the source at all: \
+        "the decode exceeds its magnitude bound: \
          max|error| {peak} against a source peak of {baseline}"
     );
 }
@@ -171,7 +152,7 @@ fn the_real_wem_decodes_to_its_source() {
 /// measurement as angle A over a wider corpus — and comparing the two is what
 /// makes the two angles one statement rather than two independent claims.
 #[test]
-fn the_round_trip_reconstructs_the_source() {
+fn the_round_trip_preserves_source_geometry_and_has_bounded_output() {
     let cases: [(&str, WwiseProfile); 6] = [
         ("silence", stereo()),
         ("stereo_noise", stereo()),
@@ -213,9 +194,10 @@ fn the_round_trip_reconstructs_the_source() {
                 0.0
             }
         );
+        assert!(decoded.iter().all(|sample| sample.is_finite()), "{name}");
         assert!(
             peak <= 2.0 * baseline.max(1e-6),
-            "{name}: max|error| {peak} is not a reconstruction of a source whose \
+            "{name}: max|error| {peak} exceeds the magnitude bound for a source whose \
              peak is {baseline}"
         );
     }
@@ -225,12 +207,9 @@ fn the_round_trip_reconstructs_the_source() {
 /// repository's own re-encoding of the same source are the same bytes, and
 /// decoding either is the same decode.
 ///
-/// This is what keeps the fixture's decode from being a separate measurement
-/// with its own (necessarily recorded) expectation: the encoder is bit-exact
-/// against the paired build, so `decode(reference.wem)` and
-/// `decode(encode(input.wav))` must agree *exactly* — and the error each one
-/// leaves against the source is then the reference decoder's error on that WEM
-/// by the only route available in this tree.
+/// This checks determinism on byte-identical inputs. It does not independently
+/// establish reconstruction quality; that requires another synthesis or a
+/// source-domain acceptance test.
 #[test]
 fn the_fixture_is_byte_identical_to_our_own_encode_of_its_source() {
     let wem = read_fixture("reference.wem");

@@ -1,33 +1,32 @@
 #!/usr/bin/env python3
-"""Reference ground-truth decoder for Wwise 2ch/48k WEM.
+"""Independent decoder for carried Wwise WEMs, plus a local libvorbis probe.
 
 Traverses the full audio packet stream and decodes to PCM:
   container framing -> setup -> floor1 (unwrap) -> residue (coefficient
   returning) -> stereo coupling -> inverse MDCT -> window -> overlap-add.
 
-For the 2-channel stream (48 kHz) this module bit-exactly matches
-vgmstream's output by mirroring libvorbis 1.3.7's float32 DSP: f32
-codebook/floor/residue/coupling values, the system library's
-``mdct_backward`` via ctypes (falls back to a numerically derived kernel),
-the ``vorbis_synthesis_blockin`` OLA with its arm64 fma contraction
-executed by a tiny C helper compiled on first use, and vgmstream's
-``CONV_FLT_S16`` int16 conversion (``(int)(x * 32767.0f)``).  A float64
-kernel + numpy OLA path remains as a fallback when libvorbis/``cc`` are
-unavailable (approximate stream only).
+The deterministic default is a float64 NumPy synthesis with no system codec
+dependency.  ``tests/parity/test_decode_surface.py`` uses it live as an
+independent comparator for the committed paired-build 6ch/44.1k fixture and
+2ch/48k noise WEM.  It is a comparator, not a ground-truth decoder or a
+shipping engine.
 
-The authoritative format spec is this repository's own encoder
-(``reference/wwise_wem_reference``); this module is its decoder-side
-counterpart.  It is intentionally self-contained (no shared-code edits).
+``--libvorbis-exact`` is an optional local probe for the 2-channel stream. It
+mirrors libvorbis 1.3.7 float32 DSP: f32 codebook/floor/residue/coupling
+values, the system library's ``mdct_backward`` via ctypes, the
+``vorbis_synthesis_blockin`` OLA through a tiny C helper compiled on first use,
+and vgmstream's ``CONV_FLT_S16`` conversion (``(int)(x * 32767.0f)``). Its
+result depends on the local library and compiler, so tests never select it.
 
-Two synthesis paths:
-  * default (deterministic, pure numpy float64) — independently reproduces
-    the community oracle at correlation 1.000000, max int16 delta <= 2 LSB,
-    and strict packet closure on all 294,485 packets;
-  * ``--libvorbis-exact`` — mirrors libvorbis 1.3.7 float32 DSP
-    bit-for-bit (uses the system libvorbis for the inverse MDCT and
-    compiles a tiny C helper on first use).  Opt-in only, because it binds
-    the output to the local libvorbis build and is not byte-stable across
-    environments; results are cached under a mode-specific tag.
+This decoder shares profile values and bitstream primitives with
+``reference/wwise_wem_reference``. Its separate synthesis can expose
+implementation differences, but shared inputs limit its independence.
+
+Historical local observations over a 294,485-packet corpus found the default
+path correlated 1.000000 with a community decoder, with at most two int16 LSB
+of difference and strict packet closure.  Those observations are not committed
+reproducible coverage.  The optional libvorbis path matched its local build;
+that is likewise environment-specific evidence, not a repository assertion.
 
 Usage:
     python3 scripts/decode_wem.py --self-check
@@ -435,7 +434,11 @@ def parse_container(raw: bytes) -> tuple[bytes, list[bytes], int, dict]:
 class DecodeContext:
     setup: dict
     books: list[Codebook]
+    # The 2ch path uses the numerically fitted kernel; the
+    # generic path evaluates the IMDCT definition independently.
     kernel_map: dict[int, np.ndarray]
+    imdct_map: dict[int, np.ndarray]
+    window_halves: dict[int, np.ndarray]
     channels: int
     blocksizes: tuple[int, int]
     maps: list[dict]
@@ -449,7 +452,15 @@ def build_context(
     """Build the decoder context from the compiled carrier of one profile."""
     setup = parse_setup(profile.setup_packet, channels=channels)
     books, _tables = load_profile_codebooks(setup, profile)
-    kernel_map = {256: compute_kernel(256), 2048: compute_kernel(2048)}
+    block_sizes = (256, 2048)
+    # The stereo path uses its established fitted kernel. The
+    # generic path uses the IMDCT definition and derives each hybrid window
+    # from the packet modes, so it does not share that fitted approximation.
+    kernel_map = (
+        {size: compute_kernel(size) for size in block_sizes}
+        if channels == 2 and sample_rate == 48_000
+        else {}
+    )
     # The mapping coupling (used for stereo reconstruction).
     map0 = setup["maps"][0]
     coupling = map0.get("coupling") or []
@@ -457,12 +468,65 @@ def build_context(
         setup=setup,
         books=books,
         kernel_map=kernel_map,
+        imdct_map={size: imdct_matrix(size) for size in block_sizes},
+        window_halves={
+            size: np.asarray(vorbis_window(size)[: size // 2], dtype=np.float64)
+            for size in block_sizes
+        },
         channels=channels,
         blocksizes=(256, 2048),
         maps=setup["maps"],
         coupling=coupling,
         sample_rate=sample_rate,
     )
+
+
+def imdct_matrix(n: int) -> np.ndarray:
+    """The inverse MDCT definition, evaluated in float64 at unit scale.
+
+    With ``M = n / 2``, each output sample is
+    ``sum(X[k] * cos(pi/M * (i + 1/2 + M/2) * (k + 1/2)))``.  The carried
+    decoder uses a frozen fast transform; this independent matrix is kept for
+    the comparison path so it cannot inherit the fast implementation's errors.
+    """
+    m = n // 2
+    sample = np.arange(n, dtype=np.float64)[:, None]
+    bin_ = np.arange(m, dtype=np.float64)[None, :]
+    return np.cos(np.pi / m * (sample + 0.5 + m / 2.0) * (bin_ + 0.5))
+
+
+def apply_hybrid_synthesis_window(
+    block: np.ndarray,
+    blocksizes: tuple[int, int],
+    previous: int,
+    current: int,
+    following: int,
+    halves: dict[int, np.ndarray],
+) -> np.ndarray:
+    """Window one IMDCT block from its adjacent block geometry.
+
+    A short block is wholly short-windowed: it cannot use a long neighbour's
+    half.  A long block uses its predecessor and follower sizes to derive the
+    two support spans.  The derivation is the Vorbis block geometry, rather
+    than a fitted reconstruction kernel.
+    """
+    if current == 0:
+        previous = following = 0
+    n = blocksizes[current]
+    left_n = blocksizes[previous]
+    right_n = blocksizes[following]
+    left_begin = n // 4 - left_n // 4
+    left_end = left_begin + left_n // 2
+    right_begin = n // 2 + n // 4 - right_n // 4
+    right_end = right_begin + right_n // 2
+    if not (0 <= left_begin <= left_end <= right_begin <= right_end <= n):
+        raise ValueError("incompatible hybrid synthesis window geometry")
+    out = block.copy()
+    out[:left_begin] = 0.0
+    out[left_begin:left_end] *= halves[left_n]
+    out[right_begin:right_end] *= halves[right_n][::-1]
+    out[right_end:] = 0.0
+    return out
 
 
 def decode_packet_spectra(
@@ -1278,8 +1342,9 @@ def libv_chunk_layout(
     frame emits no chunk; from the second frame on the stream advances by
     (previous_blocksize/4 + current_blocksize/4) per frame.  This exact
     layout (including the block-size transition steps and the stream-start
-    convention) is what a libvorbis-based decoder emits, and it was
-    verified 1:1 against the vgmstream oracle (108,504,384 frames, exact).
+    convention) is the layout this optional libvorbis-compatible path models.
+    A historical local comparison covered 108,504,384 frames exactly; it is
+    evidence for the layout, not committed test coverage.
 
     Returns (chunk_starts, chunk_lens) indexed by frame.
     """
@@ -1301,16 +1366,17 @@ def run_decode_2ch(
 ) -> dict[str, Any]:
     """Full decode of the 2ch/48k paired-build stream (default: deterministic numpy f64).
 
-    The default path is pure numpy float64: no ambient dependencies, offline,
-    byte-stable across environments.  It independently reproduces the
-    community oracle (vgmstream) at correlation 1.000000 with max int16
-    delta <= 2 LSB and strict packet closure on all 294,485 packets.
+    The default path is pure NumPy float64: no ambient codec dependency and a
+    stable operation order.  A historical local corpus comparison saw
+    correlation 1.000000, max int16 delta <= 2 LSB, and strict closure on
+    294,485 packets; the carried-WEM parity test is the current automated
+    coverage.
 
     With ``--libvorbis-exact`` the libvorbis 1.3.7 float32 clone
     is used instead: f32 codebook values, f32 residue/coupling/floor, the
     system libvorbis mdct_backward (ctypes), the vorbis_synthesis_blockin
-    OLA, and vgmstream's (int)(x*32767.0f) int16 conversion — byte-exact
-    against that local build, at the cost of environment sensitivity.
+    OLA, and vgmstream's (int)(x*32767.0f) int16 conversion.  It is a local
+    compatibility probe, at the cost of environment sensitivity.
     Falls back to the numpy path when libvorbis or a C compiler is missing.
     """
     if not _LIBVORBIS_EXACT:
@@ -1504,13 +1570,47 @@ def run_decode_2ch(
     }
 
 
+def decode_numpy_pcm(
+    ctx: DecodeContext, wem_bytes: bytes, declared_frames: int
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Decode one carried WEM with the deterministic NumPy synthesis path.
+
+    The returned array is channel-major and contains exactly ``declared_frames``
+    samples per channel.  The generic overlap-add path exposes its synthesis
+    lead-in through ``offset``; the stereo libvorbis-layout path begins at PCM
+    sample zero.  Keeping that container-origin handling here makes callers
+    compare PCM positions rather than independently fitting an alignment.
+    """
+    if _LIBVORBIS_EXACT:
+        raise RuntimeError("decode_numpy_pcm requires the deterministic NumPy path")
+    _data, packets, _seek, _fmt = parse_container(wem_bytes)
+    if len(packets) < 2:
+        raise ValueError("WEM has no audio packets")
+    audio_packets = packets[1:]
+    if ctx.channels == 2 and ctx.sample_rate == 48_000:
+        result = run_decode_2ch(ctx, audio_packets)
+        offset = 0
+    else:
+        result = run_decode(ctx, audio_packets)
+        offset = int(result["offset"])
+    pcm = np.asarray(result["out_buf"], dtype=np.float64)
+    if pcm.ndim != 2 or pcm.shape[0] != ctx.channels:
+        raise ValueError(f"decoder returned {pcm.shape}, expected {ctx.channels} channels")
+    stop = offset + declared_frames
+    if pcm.shape[1] < stop:
+        raise ValueError(
+            f"decoder returned {pcm.shape[1] - offset} PCM frames, need {declared_frames}"
+        )
+    return pcm[:, offset:stop], result
+
+
 def run_decode_2ch_kernel_f64(
     ctx: DecodeContext, audio_packets: list[bytes]
 ) -> dict[str, Any]:
     """Fallback: float64 numerically-derived kernel + libv blockin OLA.
 
-    Geometry is libvorbis-exact; values match the oracle to float32 rounding
-    precision (not bit-exact).  Only used when libvorbis cannot be loaded.
+    Geometry follows the libvorbis-compatible layout; values are a numerical
+    approximation (not bit-exact).  Only used when libvorbis cannot be loaded.
     """
     # Pass 1: decode modes to know positions and window bits.
     mode_history: list[int] = []
@@ -1760,10 +1860,21 @@ def run_decode(ctx: DecodeContext, audio_packets: list[bytes]) -> dict[str, Any]
                 }
             )
         coupled = apply_coupling(spectra, ctx)
-        kernel = ctx.kernel_map[block_size]
+        previous = mode_history[pi - 1] if pi else 0
+        following = mode_history[pi + 1] if pi + 1 < len(mode_history) else 1
+        current = 1 if block_size == ctx.blocksizes[1] else 0
+        imdct = ctx.imdct_map[block_size]
         pos = positions[pi] + offset
         for ch in range(ctx.channels):
-            out_buf[ch][pos : pos + block_size] += kernel @ coupled[ch]
+            block = imdct @ coupled[ch]
+            out_buf[ch][pos : pos + block_size] += apply_hybrid_synthesis_window(
+                block,
+                ctx.blocksizes,
+                previous,
+                current,
+                following,
+                ctx.window_halves,
+            )
     return {
         "out_buf": out_buf,
         "offset": offset,
@@ -1780,7 +1891,7 @@ def run_decode(ctx: DecodeContext, audio_packets: list[bytes]) -> dict[str, Any]
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Reference ground-truth WEM decoder (2ch/48k paired-build probe)."
+        description="Research WEM decoder (2ch/48k paired-build probe)."
     )
     parser.add_argument(
         "--wem",
