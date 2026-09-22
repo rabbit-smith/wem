@@ -139,6 +139,20 @@ jobs:
             exit 1
           fi
           echo "reference bytes OK: C client output == tests/fixtures/reference.wem"
+      - name: Build + run the C decode client
+        # Same reason as the encode step above, for the decode half of the
+        # header: `include/wem.h` section 5 declares wem_decoder_* and the two
+        # required callbacks, and this is the only place a C compiler reads it.
+        # The output is kept for the Go step to compare against.
+        run: |
+          set -euo pipefail
+          cc -std=c11 -Wall -Wextra -Werror -Iinclude \
+            examples/c/decode_wem.c \
+            -Lcrates/target/release -lwem_capi -lpthread -ldl -lm \
+            -o "${RUNNER_TEMP}/wem-c-decode"
+          "${RUNNER_TEMP}/wem-c-decode" \
+            tests/fixtures/reference.wem "${RUNNER_TEMP}/c-decode.f32"
+          echo "C decode OK: $(wc -c < "${RUNNER_TEMP}/c-decode.f32") bytes of raw f32"
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
@@ -158,4 +172,25 @@ jobs:
             exit 1
           fi
           echo "reference bytes OK: Go binding output == tests/fixtures/reference.wem"
+      - name: Run the Go cgo decode binding against the C client's output
+        # A live comparison, not a recorded digest: the two bindings reach the
+        # same kernel through the same C ABI from different languages, so a
+        # binding that mistranslates a callback or mis-packs a sample shows up
+        # as a difference. Byte-exactness itself is established in-tree, where
+        # crates/wem-core/tests/decode_reference_wem.rs decodes
+        # tests/fixtures/reference.wem and compares it against the WAV it was
+        # produced from -- the decoder's whole claim is that round trip, and a
+        # 3.3 MB f32 reference committed here would only duplicate it.
+        run: |
+          set -euo pipefail
+          cd examples/go-cgo
+          go run ./decode \
+            -wem ../../tests/fixtures/reference.wem -out "${RUNNER_TEMP}/go-decode.f32"
+          if ! cmp -s "${RUNNER_TEMP}/c-decode.f32" "${RUNNER_TEMP}/go-decode.f32"; then
+            echo "decode mismatch: the Go binding's samples differ from the C client's"
+            echo "  C  (${RUNNER_TEMP}/c-decode.f32): $(wc -c < "${RUNNER_TEMP}/c-decode.f32") bytes"
+            echo "  Go (${RUNNER_TEMP}/go-decode.f32): $(wc -c < "${RUNNER_TEMP}/go-decode.f32") bytes"
+            exit 1
+          fi
+          echo "decode OK: Go and C clients agree byte for byte"
 

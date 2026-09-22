@@ -1,7 +1,7 @@
 {
   "name": "wwise-wem-wasm",
   "version": "0.1.0",
-  "description": "Browser encoding for the WEM encoder kernel: wasm-bindgen shell (crates/wem-wasm) + typed JS wrapper. One-shot and streaming WAV/PCM->WEM, profile bundle compiled in, structured profile selection (Wwise generation + PCM geometry), WEM bytes out.",
+  "description": "Browser encoding and decoding for the WEM kernel: wasm-bindgen shell (crates/wem-wasm) + typed JS wrapper. One-shot and streaming WAV/PCM->WEM (structured profile selection: Wwise generation + PCM geometry) and WEM->interleaved f32 PCM (self-describing: no selection), with the profile bundle compiled in.",
   "type": "module",
   "main": "./src/index.ts",
   "module": "./src/index.ts",
@@ -30,7 +30,8 @@
     "the target title",
     "wasm",
     "audio",
-    "encoder"
+    "encoder",
+    "decoder"
   ],
   "license": "MIT",
   "engines": {

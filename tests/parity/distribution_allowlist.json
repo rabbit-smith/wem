@@ -18,6 +18,7 @@
     "wwise_wem/adapters/raw.py",
     "wwise_wem/adapters/sample_conversion.py",
     "wwise_wem/adapters/wav.py",
+    "wwise_wem/adapters/wav_writer.py",
     "wwise_wem/api.py",
     "wwise_wem/application/__init__.py",
     "wwise_wem/application/decode.py",
