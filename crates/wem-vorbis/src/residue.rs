@@ -1,8 +1,14 @@
-//! Vorbis residue type 0/1 packing for Wwise 2013.2
-//! (Python: `wwise_wem/vorbis/residue.py`).
+//! Vorbis residue type 0/1/2 packing and decoding for Wwise 2013.2
+//! (Python: `wwise_wem/vorbis/residue.py`; the decode direction also mirrors
+//! `scripts/decode_wem.py::decode_residue_coeffs`, the only place the
+//! coefficient-producing residue inverse exists).
+//!
+//! The encoder may stop mid-residue; a decoder treats end-of-packet as
+//! end-of-residue and reports it as [`ResidueStatus::EndOfPacket`] rather than
+//! as a failure.
 
-use crate::bitio::OggPack;
-use crate::codebook::Codebook;
+use crate::bitio::{BitReader, OggPack};
+use crate::codebook::{Codebook, CodebookError};
 use crate::setup::ResidueSetup;
 
 mod sealed {
@@ -122,6 +128,160 @@ impl std::fmt::Display for ResidueError {
 }
 
 impl std::error::Error for ResidueError {}
+
+/// How far a residue decode got (Python `decode_residue_coeffs` status
+/// strings).
+///
+/// `EndOfPacket` is the format's own early stop, not a failure: the Wwise
+/// encoder may end a packet inside its residue, and the decoder keeps what it
+/// decoded. It is returned rather than thrown, so a caller can never mistake a
+/// truncated residue for a complete one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResidueStatus {
+    /// Nothing to read: no partitions, or no channel carries a floor.
+    Empty,
+    /// Every coded partition was read.
+    Complete,
+    /// The packet ended inside the residue.
+    EndOfPacket,
+}
+
+/// Residue decode-direction errors.
+///
+/// Structural defects the setup itself declares are reported instead of
+/// indexing past a table, and a failed codeword is reported instead of being
+/// folded into [`ResidueStatus::EndOfPacket`] — that status is reserved for
+/// the bitstream actually ending. Wrapped causes stay reachable through
+/// [`std::error::Error::source`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResidueDecodeError {
+    /// Only residue types 0, 1 and 2 are defined.
+    UnsupportedResidueType { residue_type: u64 },
+    /// Partitions must contain at least one scalar.
+    InvalidPartitionSize,
+    /// The type-2 flat domain needs at least one channel.
+    InvalidChannelCount,
+    /// The setup's per-class tables do not cover every declared class.
+    ClassTablesTooShort {
+        classifications: usize,
+        cascades: usize,
+        stage_books: usize,
+    },
+    /// A phrasebook entry unpacked to a class the setup does not declare.
+    ClassOutOfRange {
+        partition_class: i64,
+        classifications: usize,
+    },
+    /// `classifications^(classwords-1)` is not representable.
+    MixedRadixOverflow {
+        classifications: u64,
+        classwords: usize,
+    },
+    /// A cascade declares more than the eight stages a residue row holds.
+    CascadeOutOfRange { cascade: u64 },
+    /// A residue book id is absent from `books`.
+    BookIndexOutOfRange { book_id: i64, books: usize },
+    /// A stage codebook cannot tile the partition (a zero dimension would
+    /// step forever).
+    IncompatibleBookDimension {
+        partition_size: usize,
+        dimension: i64,
+    },
+    /// A type-2 partition-group's classword was not recorded before it was
+    /// read (the group walk and the classword walk disagree).
+    PartwordMissing { group: usize, groups: usize },
+    /// `n_spectrum * channels` overflows the flat domain's index type.
+    SpectrumTooLarge { n_spectrum: usize, channels: usize },
+    /// A flat-domain write would land outside the vector it targets.
+    FlatDomainOutOfRange { index: usize, flat_len: usize },
+    /// A stage book could not hand back the vector its codeword named (a book
+    /// that is not maptype 1, or an entry with no vector). A codeword the book
+    /// simply cannot decode is *not* reported here: it ends the residue, as it
+    /// does in the reference and in libvorbis.
+    Codebook(CodebookError),
+}
+
+impl std::fmt::Display for ResidueDecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ResidueDecodeError::UnsupportedResidueType { residue_type } => {
+                write!(f, "unsupported residue type {residue_type}")
+            }
+            ResidueDecodeError::InvalidPartitionSize => {
+                write!(f, "residue partition size must be positive")
+            }
+            ResidueDecodeError::InvalidChannelCount => {
+                write!(f, "type-2 residue channel count must be positive")
+            }
+            ResidueDecodeError::ClassTablesTooShort {
+                classifications,
+                cascades,
+                stage_books,
+            } => write!(
+                f,
+                "residue setup declares {classifications} classes but has {cascades} cascades and {stage_books} stage-book rows"
+            ),
+            ResidueDecodeError::ClassOutOfRange {
+                partition_class,
+                classifications,
+            } => write!(
+                f,
+                "residue phrasebook entry unpacked to class {partition_class} outside 0..{classifications}"
+            ),
+            ResidueDecodeError::MixedRadixOverflow {
+                classifications,
+                classwords,
+            } => write!(
+                f,
+                "residue mixed radix {classifications}^{} is not representable",
+                classwords.saturating_sub(1)
+            ),
+            ResidueDecodeError::CascadeOutOfRange { cascade } => {
+                write!(f, "residue cascade {cascade} exceeds eight stages")
+            }
+            ResidueDecodeError::BookIndexOutOfRange { book_id, books } => {
+                write!(f, "residue book id {book_id} out of range 0..{books}")
+            }
+            ResidueDecodeError::IncompatibleBookDimension {
+                partition_size,
+                dimension,
+            } => write!(
+                f,
+                "residue partition size {partition_size} cannot be tiled by codebook dimension {dimension}"
+            ),
+            ResidueDecodeError::PartwordMissing { group, groups } => write!(
+                f,
+                "type-2 partition group {group} was read before it was recorded ({groups} recorded)"
+            ),
+            ResidueDecodeError::SpectrumTooLarge {
+                n_spectrum,
+                channels,
+            } => write!(
+                f,
+                "type-2 flat domain {n_spectrum} x {channels} overflows this target"
+            ),
+            ResidueDecodeError::FlatDomainOutOfRange { index, flat_len } => {
+                write!(f, "residue flat index {index} out of range 0..{flat_len}")
+            }
+            ResidueDecodeError::Codebook(err) => write!(f, "residue codebook: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for ResidueDecodeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ResidueDecodeError::Codebook(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl From<CodebookError> for ResidueDecodeError {
+    fn from(err: CodebookError) -> Self {
+        ResidueDecodeError::Codebook(err)
+    }
+}
 
 /// Encoder-only maximum-coefficient thresholds for the 44.1-kHz uncoupled
 /// low-residue template (Python `WWISE_RESIDUE_44_LOW_UN_METRICS`).
@@ -723,6 +883,439 @@ pub(crate) fn pack_residue_type2_quantized(
     Ok(())
 }
 
+/// One decoded value, or the packet ending before it could be read.
+enum Decoded<T> {
+    Value(T),
+    EndOfPacket,
+}
+
+/// Decode one Huffman entry, mapping a codeword the book cannot decode to the
+/// end-of-residue marker (Python `_decode_eop`; libvorbis
+/// `vorbis_book_decode`).
+///
+/// Both the reference's `_decode_eop` and libvorbis treat *every* codeword
+/// failure as end-of-residue, and this mirrors that deliberately: a bit pattern
+/// the book does not assign (an incomplete code) stops the residue, and the
+/// decoded prefix is returned with [`ResidueStatus::EndOfPacket`], exactly as
+/// the reference decoder — this crate's comparison target — does. The stop is
+/// still visible to the caller: the status says the residue ended early and the
+/// bit position says where. What is *not* separable from exhaustion by the
+/// return value is *why* it ended; that is the reference's semantics.
+fn decode_entry_eop(
+    book: &Codebook,
+    br: &mut BitReader<'_>,
+) -> Result<Decoded<i64>, ResidueDecodeError> {
+    if br.bits_left() == 0 {
+        return Ok(Decoded::EndOfPacket);
+    }
+    match book.decode(br) {
+        Ok(entry) => Ok(Decoded::Value(entry)),
+        Err(CodebookError::InvalidHuffmanCode) | Err(CodebookError::EmptyCodebook) => {
+            Ok(Decoded::EndOfPacket)
+        }
+        Err(err) => Err(ResidueDecodeError::Codebook(err)),
+    }
+}
+
+/// Decode one VQ vector, mapping bit exhaustion to end-of-residue (Python
+/// `_decode_vq_eop`).
+fn decode_vq_eop<'a>(
+    book: &'a Codebook,
+    br: &mut BitReader<'_>,
+) -> Result<Decoded<&'a [f64]>, ResidueDecodeError> {
+    match decode_entry_eop(book, br)? {
+        Decoded::EndOfPacket => Ok(Decoded::EndOfPacket),
+        Decoded::Value(entry) => Ok(Decoded::Value(book.borrow_vq(entry)?)),
+    }
+}
+
+fn decode_book_or_err(books: &[Codebook], book_id: i64) -> Result<&Codebook, ResidueDecodeError> {
+    books
+        .get(book_id as usize)
+        .ok_or(ResidueDecodeError::BookIndexOutOfRange {
+            book_id,
+            books: books.len(),
+        })
+}
+
+fn decode_class_tables(residue: &ResidueSetup) -> Result<usize, ResidueDecodeError> {
+    let classifications = residue.classifications as usize;
+    if classifications == 0
+        || residue.cascades.len() < classifications
+        || residue.books.len() < classifications
+    {
+        return Err(ResidueDecodeError::ClassTablesTooShort {
+            classifications,
+            cascades: residue.cascades.len(),
+            stage_books: residue.books.len(),
+        });
+    }
+    Ok(classifications)
+}
+
+/// Decode residue type 0/1 into per-channel coefficient rows (Python
+/// `decode_residue_coeffs`'s per-channel branch; libvorbis `_01inverse`).
+///
+/// `coeffs[ch][bin]` starts at zero and accumulates the multi-stage VQ
+/// vectors, exactly as `pack_residue_vq` consumed them. Only bins
+/// `[begin, min(end, n_spectrum))` are coded; a channel whose `ch_used` flag is
+/// false contributes nothing and consumes no bits.
+///
+/// `EndOfPacket` is returned with the partial rows the packet did carry.
+pub fn decode_residue_vq(
+    br: &mut BitReader<'_>,
+    residue: &ResidueSetup,
+    books: &[Codebook],
+    ch_used: &[bool],
+    n_spectrum: usize,
+) -> Result<(Vec<Vec<f64>>, ResidueStatus), ResidueDecodeError> {
+    let nch = ch_used.len();
+    let mut coeffs = vec![vec![0.0f64; n_spectrum]; nch];
+    let part = residue.partition_size;
+    if part == 0 {
+        return Err(ResidueDecodeError::InvalidPartitionSize);
+    }
+    let end = residue.end.min(n_spectrum as u64);
+    let span = end.saturating_sub(residue.begin);
+    let npart = if span > 0 { span / part } else { 0 };
+    if npart == 0 || !ch_used.iter().any(|&used| used) {
+        return Ok((coeffs, ResidueStatus::Empty));
+    }
+    // npart <= span / 1 <= n_spectrum, so the conversion is exact.
+    let npart = npart as usize;
+    let classifications = decode_class_tables(residue)?;
+    let nclass = residue.classifications;
+    let classbook = decode_book_or_err(books, residue.classbook as i64)?;
+    let classwords = classbook.dim() as usize;
+    if classwords == 0 {
+        return Err(ResidueDecodeError::IncompatibleBookDimension {
+            partition_size: part as usize,
+            dimension: 0,
+        });
+    }
+    let exponent = u32::try_from(classwords.saturating_sub(1)).map_err(|_| {
+        ResidueDecodeError::MixedRadixOverflow {
+            classifications: nclass,
+            classwords,
+        }
+    })?;
+    let top_radix =
+        (nclass as i128)
+            .checked_pow(exponent)
+            .ok_or(ResidueDecodeError::MixedRadixOverflow {
+                classifications: nclass,
+                classwords,
+            })?;
+
+    let mut partword = vec![vec![0i64; npart]; nch];
+    let stage_books = &residue.books;
+    let mut status = ResidueStatus::Complete;
+    // The stage index is a slot of whichever class row a partition selected,
+    // so it indexes into a different row per partition and there is no single
+    // collection to iterate: a range loop is intentional here.
+    #[allow(clippy::needless_range_loop)]
+    'stages: for s in 0..8usize {
+        for i in (0..npart).step_by(classwords) {
+            if s == 0 {
+                for (j, &used) in ch_used.iter().enumerate() {
+                    if !used {
+                        continue;
+                    }
+                    let entry = match decode_entry_eop(classbook, br)? {
+                        Decoded::EndOfPacket => {
+                            status = ResidueStatus::EndOfPacket;
+                            break 'stages;
+                        }
+                        Decoded::Value(entry) => entry,
+                    };
+                    // libvorbis phrasebook values are most-significant-first:
+                    // the highest radix digit is the earliest partition.
+                    let mut temp = entry as i128;
+                    let mut radix = top_radix;
+                    for k in 0..classwords {
+                        if i + k < npart {
+                            let class = temp / radix;
+                            if class >= nclass as i128 {
+                                return Err(ResidueDecodeError::ClassOutOfRange {
+                                    partition_class: class as i64,
+                                    classifications,
+                                });
+                            }
+                            partword[j][i + k] = class as i64;
+                        }
+                        temp %= radix;
+                        radix /= nclass as i128;
+                    }
+                }
+            }
+            for k in 0..classwords {
+                let partition = i + k;
+                if partition >= npart {
+                    break;
+                }
+                for (j, &used) in ch_used.iter().enumerate() {
+                    if !used {
+                        continue;
+                    }
+                    let pclass = partword[j][partition] as usize;
+                    let book_id = stage_books[pclass][s];
+                    if book_id < 0 {
+                        continue;
+                    }
+                    let book = decode_book_or_err(books, book_id)?;
+                    let dimension = book.dim();
+                    if dimension <= 0 {
+                        return Err(ResidueDecodeError::IncompatibleBookDimension {
+                            partition_size: part as usize,
+                            dimension,
+                        });
+                    }
+                    let dimension = dimension as usize;
+                    // begin + partition*part < end <= n_spectrum and the walk
+                    // stops at that partition's own end, so offsets stay
+                    // inside the row (elements past n_spectrum are clipped
+                    // below, exactly as the reference clips them).
+                    let mut v = residue.begin + partition as u64 * part;
+                    let stop = v + part;
+                    while v < stop {
+                        let vector = match decode_vq_eop(book, br)? {
+                            Decoded::EndOfPacket => {
+                                status = ResidueStatus::EndOfPacket;
+                                break 'stages;
+                            }
+                            Decoded::Value(vector) => vector,
+                        };
+                        for (d, &value) in vector.iter().enumerate() {
+                            let index = v + d as u64;
+                            if index < n_spectrum as u64 {
+                                coeffs[j][index as usize] += value;
+                            }
+                        }
+                        v += dimension as u64;
+                    }
+                }
+            }
+        }
+    }
+    Ok((coeffs, status))
+}
+
+/// libvorbis `vorbis_book_decodevv_add` into the flat `bin * channels +
+/// channel` domain (script `_decodevv_add`).
+///
+/// Returns `Ok(false)` when the packet ended inside the vector stream; the
+/// vectors written before that stay, which is what libvorbis leaves behind.
+fn decode_vv_add(
+    book: &Codebook,
+    flat: &mut [f64],
+    offset: u64,
+    part: u64,
+    channels: usize,
+    br: &mut BitReader<'_>,
+) -> Result<bool, ResidueDecodeError> {
+    let dimension = book.dim();
+    if dimension <= 0 {
+        // The reference returns success for a book with no dimension: it
+        // codes nothing and consumes nothing.
+        return Ok(true);
+    }
+    let dimension = dimension as usize;
+    let channels = channels as u64;
+    let end_bin = (offset + part) / channels;
+    let mut bin = offset / channels;
+    let mut chptr = 0usize;
+    while bin < end_bin {
+        let vector = match decode_vq_eop(book, br)? {
+            Decoded::EndOfPacket => return Ok(false),
+            Decoded::Value(vector) => vector,
+        };
+        for &value in vector.iter().take(dimension) {
+            if bin >= end_bin {
+                break;
+            }
+            let index = bin * channels + chptr as u64;
+            // index < end_bin * channels <= offset + part <= end <= max_flat,
+            // so the cast is exact and the lookup cannot be out of range; it
+            // is still checked so no input can reach a panic.
+            let index = index as usize;
+            let flat_len = flat.len();
+            let slot = flat
+                .get_mut(index)
+                .ok_or(ResidueDecodeError::FlatDomainOutOfRange { index, flat_len })?;
+            *slot += value;
+            chptr += 1;
+            if chptr as u64 == channels {
+                chptr = 0;
+                bin += 1;
+            }
+        }
+    }
+    Ok(true)
+}
+
+/// Decode residue type 2 on the flat `bin * channels + channel` domain
+/// (libvorbis `res2_inverse`; script `decode_residue_type2`).
+///
+/// `max_flat` is the caller-supplied flat extent (`n_spectrum * channels`);
+/// `end` is clamped to it. One classword per partition-group is read once for
+/// all channels, and each VQ vector's values are added in bin-major,
+/// channel-round-robin order.
+pub fn decode_residue_type2(
+    br: &mut BitReader<'_>,
+    residue: &ResidueSetup,
+    books: &[Codebook],
+    ch_used: &[bool],
+    max_flat: usize,
+) -> Result<(Vec<f64>, ResidueStatus), ResidueDecodeError> {
+    let channels = ch_used.len();
+    if channels == 0 {
+        return Err(ResidueDecodeError::InvalidChannelCount);
+    }
+    let part = residue.partition_size;
+    if part == 0 {
+        return Err(ResidueDecodeError::InvalidPartitionSize);
+    }
+    let end = residue.end.min(max_flat as u64);
+    let mut flat = vec![0.0f64; max_flat];
+    let any_used = ch_used.iter().any(|&used| used);
+    let span = end.saturating_sub(residue.begin);
+    if span == 0 || !any_used {
+        return Ok((
+            flat,
+            if any_used {
+                ResidueStatus::Complete
+            } else {
+                ResidueStatus::Empty
+            },
+        ));
+    }
+    let partvals = span / part;
+    if partvals == 0 {
+        return Ok((flat, ResidueStatus::Complete));
+    }
+    // partvals <= span / 1 <= max_flat, so the conversion is exact.
+    let partvals = partvals as usize;
+    let classifications = decode_class_tables(residue)?;
+    let nclass = residue.classifications;
+    let classbook = decode_book_or_err(books, residue.classbook as i64)?;
+    let ppw = classbook.dim().max(1) as usize;
+    let mut stages = 0u32;
+    for &cascade in &residue.cascades {
+        if cascade > u8::MAX as u64 {
+            return Err(ResidueDecodeError::CascadeOutOfRange { cascade });
+        }
+        stages = stages.max(u64::BITS - cascade.leading_zeros());
+    }
+
+    let mut partword: Vec<Vec<i64>> = Vec::with_capacity(partvals.div_ceil(ppw));
+    let mut status = ResidueStatus::Complete;
+    'stages: for s in 0..stages as usize {
+        let mut i = 0usize;
+        let mut lg = 0usize;
+        while i < partvals {
+            if s == 0 {
+                let entry = match decode_entry_eop(classbook, br)? {
+                    Decoded::EndOfPacket => {
+                        status = ResidueStatus::EndOfPacket;
+                        break 'stages;
+                    }
+                    Decoded::Value(entry) => entry,
+                };
+                if entry >= classbook.entries() {
+                    // libvorbis: an entry outside the phrasebook ends the
+                    // residue.
+                    status = ResidueStatus::EndOfPacket;
+                    break 'stages;
+                }
+                let mut pword = vec![0i64; ppw];
+                let mut temp = entry;
+                for slot in pword.iter_mut().rev() {
+                    *slot = temp % nclass as i64;
+                    temp /= nclass as i64;
+                }
+                partword.push(pword);
+            }
+            let word = partword
+                .get(lg)
+                .ok_or(ResidueDecodeError::PartwordMissing {
+                    group: lg,
+                    groups: partword.len(),
+                })?;
+            for &raw in word.iter() {
+                if i >= partvals {
+                    break;
+                }
+                // A class outside the declared set reads as class 0, exactly
+                // as the reference's clamp does.
+                let pclass = if raw < nclass as i64 { raw } else { 0 };
+                let row = residue.books.get(pclass as usize).ok_or(
+                    ResidueDecodeError::ClassTablesTooShort {
+                        classifications,
+                        cascades: residue.cascades.len(),
+                        stage_books: residue.books.len(),
+                    },
+                )?;
+                let book_id = row[s];
+                if book_id >= 0 {
+                    let book = decode_book_or_err(books, book_id)?;
+                    let offset = residue.begin + i as u64 * part;
+                    if !decode_vv_add(book, &mut flat, offset, part, channels, br)? {
+                        status = ResidueStatus::EndOfPacket;
+                        break 'stages;
+                    }
+                }
+                i += 1;
+            }
+            lg += 1;
+        }
+    }
+    Ok((flat, status))
+}
+
+/// Decode residue type 0/1/2 and return per-channel coefficient rows
+/// (script `decode_residue_coeffs`).
+///
+/// This is the coefficient-producing counterpart of the reference tree's
+/// `consume_residue`: same bit schedule, but the VQ vectors are accumulated
+/// into the rows instead of discarded. Type 2 codes the flat
+/// `bin * channels + channel` domain and is split back into per-channel rows
+/// here, so every residue type leaves through the same shape.
+pub fn decode_residue_coeffs(
+    br: &mut BitReader<'_>,
+    residue: &ResidueSetup,
+    books: &[Codebook],
+    ch_used: &[bool],
+    n_spectrum: usize,
+) -> Result<(Vec<Vec<f64>>, ResidueStatus), ResidueDecodeError> {
+    match residue.residue_type {
+        0 | 1 => decode_residue_vq(br, residue, books, ch_used, n_spectrum),
+        2 => {
+            let channels = ch_used.len();
+            let max_flat =
+                n_spectrum
+                    .checked_mul(channels)
+                    .ok_or(ResidueDecodeError::SpectrumTooLarge {
+                        n_spectrum,
+                        channels,
+                    })?;
+            let (flat, status) = decode_residue_type2(br, residue, books, ch_used, max_flat)?;
+            // coeffs[j][b] = flat[b * channels + j]; the flat extent is
+            // exactly n_spectrum * channels, so every index exists.
+            let rows = (0..channels)
+                .map(|j| {
+                    (0..n_spectrum)
+                        .map(|b| flat[b * channels + j])
+                        .collect::<Vec<f64>>()
+                })
+                .collect();
+            Ok((rows, status))
+        }
+        other => Err(ResidueDecodeError::UnsupportedResidueType {
+            residue_type: other,
+        }),
+    }
+}
+
 /// Multiplicative floor: residue = mdct / floor_amp (vorbis convention)
 /// (Python `mdct_to_residue`).
 pub fn mdct_to_residue<S: F32Sample>(mdct: &[S], floor_amp: &[f64], floor_eps: f64) -> Vec<f64> {
@@ -800,7 +1393,7 @@ mod tests {
     }
 
     #[test]
-    fn malformed_residue_inputs_return_errors() {
+    fn malformed_pack_residue_inputs_return_errors() {
         let mut residue = ResidueSetup {
             residue_type: 1,
             begin: 0,
@@ -848,5 +1441,356 @@ mod tests {
             classify_partition_type2(&[f64::NEG_INFINITY, 0.0], 10, 2, false),
             9
         );
+    }
+
+    // ---- decode direction (segment 7) ----
+
+    use crate::bitio::{BitReader, OggPack};
+    use crate::codebook::{float32_unpack, StaticCodebook};
+
+    /// `float32_unpack` word for exactly 1.0: mantissa `1 << 20` with
+    /// exponent 768 (`value = mant * 2^(exp - 20 - 768)`), so a maptype-1
+    /// book's unquantized values are its quantlist entries.
+    const ONE_FLOAT32_WORD: i64 = 0x6010_0000;
+
+    fn maptype0_book(dim: i64, entries: i64, length: i64) -> Codebook {
+        Codebook::from_static(
+            StaticCodebook {
+                dim,
+                entries,
+                lengthlist: vec![length; entries as usize],
+                maptype: 0,
+                q_min: 0,
+                q_delta: 0,
+                q_quant: 0,
+                q_sequencep: 0,
+                quantlist: None,
+            },
+            None,
+            None,
+            None,
+        )
+        .expect("synthetic maptype-0 book must build")
+    }
+
+    /// A maptype-1 book whose dim-1 vectors are exactly `0..entries`, so the
+    /// greedy VQ of an integer residual in that range is exact and a pack →
+    /// decode round trip must be the identity.
+    fn exact_vq_book(entries: i64) -> Codebook {
+        Codebook::from_static(
+            StaticCodebook {
+                dim: 1,
+                entries,
+                lengthlist: vec![3; entries as usize],
+                maptype: 1,
+                q_min: 0,
+                q_delta: ONE_FLOAT32_WORD,
+                q_quant: 0,
+                q_sequencep: 0,
+                quantlist: Some((0..entries).collect()),
+            },
+            None,
+            None,
+            None,
+        )
+        .expect("synthetic maptype-1 book must build")
+    }
+
+    fn type01_residue() -> ResidueSetup {
+        ResidueSetup {
+            residue_type: 0,
+            begin: 0,
+            end: 16,
+            partition_size: 4,
+            classifications: 8,
+            classbook: 0,
+            cascades: vec![1; 8],
+            books: vec![[1, -1, -1, -1, -1, -1, -1, -1]; 8],
+            bit_start: 0,
+            bit_end: 0,
+        }
+    }
+
+    fn type2_residue() -> ResidueSetup {
+        ResidueSetup {
+            residue_type: 2,
+            begin: 0,
+            end: 16,
+            partition_size: 4,
+            classifications: 10,
+            classbook: 0,
+            cascades: vec![1; 10],
+            books: vec![[1, -1, -1, -1, -1, -1, -1, -1]; 10],
+            bit_start: 0,
+            bit_end: 0,
+        }
+    }
+
+    fn integer_rows() -> Vec<Vec<i64>> {
+        vec![
+            vec![0, 1, 2, 3, 4, 3, 2, 1, 0, 0, 0, 0, 1, 1, 1, 1],
+            vec![4, 4, 0, 0, 1, 2, 3, 4, 2, 2, 2, 2, 0, 3, 3, 0],
+        ]
+    }
+
+    fn as_f64(rows: &[Vec<i64>]) -> Vec<Vec<f64>> {
+        rows.iter()
+            .map(|row| row.iter().map(|&value| value as f64).collect())
+            .collect()
+    }
+
+    #[test]
+    fn exact_vq_book_unquantizes_to_its_quantlist() {
+        // Guards the fixture: without exact integer vectors the round trips
+        // below would compare VQ reconstructions, not the bit schedule.
+        assert_eq!(float32_unpack(ONE_FLOAT32_WORD as u32), 1.0);
+        let book = exact_vq_book(5);
+        for entry in 0..5 {
+            assert_eq!(book.vq_values(entry).unwrap(), vec![entry as f64]);
+        }
+    }
+
+    #[test]
+    fn residue_type01_round_trips_pack_then_decode() {
+        let residue = type01_residue();
+        let books = vec![maptype0_book(2, 64, 6), exact_vq_book(5)];
+        let rows = integer_rows();
+        let expected = as_f64(&rows);
+
+        let mut op = OggPack::new(64);
+        pack_residue_vq(&mut op, &residue, &books, &rows, &[true, true], Some(16)).unwrap();
+        let bytes = op.into_buffer();
+
+        let mut br = BitReader::new(&bytes);
+        let (decoded, status) =
+            decode_residue_vq(&mut br, &residue, &books, &[true, true], 16).unwrap();
+        assert_eq!(status, ResidueStatus::Complete);
+        assert_eq!(decoded, expected);
+        // The decoder consumed exactly the schedule the packer wrote.
+        assert!(br.bits_left() < 8);
+    }
+
+    #[test]
+    fn residue_type01_skips_unused_channels_on_both_sides() {
+        let residue = type01_residue();
+        let books = vec![maptype0_book(2, 64, 6), exact_vq_book(5)];
+        let rows = integer_rows();
+
+        let mut op = OggPack::new(64);
+        pack_residue_vq(&mut op, &residue, &books, &rows, &[true, false], Some(16)).unwrap();
+        let bytes = op.into_buffer();
+
+        let mut br = BitReader::new(&bytes);
+        let (decoded, status) =
+            decode_residue_vq(&mut br, &residue, &books, &[true, false], 16).unwrap();
+        assert_eq!(status, ResidueStatus::Complete);
+        assert_eq!(decoded[0], as_f64(&rows)[0]);
+        assert_eq!(decoded[1], vec![0.0; 16]);
+        assert!(br.bits_left() < 8);
+    }
+
+    #[test]
+    fn residue_type2_round_trips_pack_then_decode() {
+        let residue = type2_residue();
+        // dim 2 phrasebook: one classword per partition-group, shared by both
+        // channels; 10 classes ⇒ 100 combinations the packer can code.
+        let books = vec![maptype0_book(2, 100, 7), exact_vq_book(5)];
+        let rows = integer_rows();
+        let n_spectrum = 8usize;
+        let channels = 2usize;
+        let coded: Vec<Vec<i64>> = rows.iter().map(|row| row[..n_spectrum].to_vec()).collect();
+        let mut flat_source = vec![0i64; n_spectrum * channels];
+        for (ch, row) in coded.iter().enumerate() {
+            for (bin, &value) in row.iter().enumerate() {
+                flat_source[bin * channels + ch] = value;
+            }
+        }
+
+        let mut op = OggPack::new(64);
+        pack_residue_type2_quantized(
+            &mut op,
+            &residue,
+            &books,
+            &coded,
+            &[true, true],
+            n_spectrum,
+            channels,
+            false,
+        )
+        .unwrap();
+        let bytes = op.into_buffer();
+
+        let mut br = BitReader::new(&bytes);
+        let (flat, status) =
+            decode_residue_type2(&mut br, &residue, &books, &[true, true], 16).unwrap();
+        assert_eq!(status, ResidueStatus::Complete);
+        assert_eq!(
+            flat,
+            flat_source.iter().map(|&v| v as f64).collect::<Vec<_>>()
+        );
+        assert!(br.bits_left() < 8);
+
+        // The composite entry point splits the flat domain back into rows.
+        let mut br = BitReader::new(&bytes);
+        let (decoded, status) =
+            decode_residue_coeffs(&mut br, &residue, &books, &[true, true], n_spectrum).unwrap();
+        assert_eq!(status, ResidueStatus::Complete);
+        assert_eq!(decoded, as_f64(&coded));
+    }
+
+    #[test]
+    fn truncated_residue_streams_report_end_of_packet_without_panicking() {
+        // Every prefix of a packed residue is a legal truncated packet: the
+        // decode must keep what it read and report the early stop, never
+        // panic and never fail.
+        let residue = type01_residue();
+        let books = vec![maptype0_book(2, 64, 6), exact_vq_book(5)];
+        let rows = integer_rows();
+        let mut op = OggPack::new(64);
+        pack_residue_vq(&mut op, &residue, &books, &rows, &[true, true], Some(16)).unwrap();
+        let bytes = op.into_buffer();
+        assert!(bytes.len() > 2);
+
+        for cut in 0..bytes.len() {
+            let mut br = BitReader::new(&bytes[..cut]);
+            let (_, status) = decode_residue_vq(&mut br, &residue, &books, &[true, true], 16)
+                .unwrap_or_else(|err| panic!("prefix {cut} reported {err}"));
+            assert!(
+                matches!(status, ResidueStatus::Complete | ResidueStatus::EndOfPacket),
+                "prefix {cut} reported {status:?}"
+            );
+        }
+
+        let residue2 = type2_residue();
+        let books2 = vec![maptype0_book(2, 100, 7), exact_vq_book(5)];
+        let coded: Vec<Vec<i64>> = integer_rows().iter().map(|row| row[..8].to_vec()).collect();
+        let mut op = OggPack::new(64);
+        pack_residue_type2_quantized(
+            &mut op,
+            &residue2,
+            &books2,
+            &coded,
+            &[true, true],
+            8,
+            2,
+            false,
+        )
+        .unwrap();
+        let bytes = op.into_buffer();
+        for cut in 0..bytes.len() {
+            let mut br = BitReader::new(&bytes[..cut]);
+            let (flat, status) =
+                decode_residue_type2(&mut br, &residue2, &books2, &[true, true], 16)
+                    .unwrap_or_else(|err| panic!("prefix {cut} reported {err}"));
+            assert_eq!(flat.len(), 16);
+            assert!(
+                matches!(status, ResidueStatus::Complete | ResidueStatus::EndOfPacket),
+                "prefix {cut} reported {status:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_residue_inputs_return_errors() {
+        let books = vec![maptype0_book(2, 64, 6), exact_vq_book(5)];
+        let mut br = BitReader::new(&[0xFF, 0xFF, 0xFF, 0xFF]);
+
+        // A residue type outside 0/1/2 is reported, not guessed at.
+        let mut residue = type01_residue();
+        residue.residue_type = 3;
+        assert_eq!(
+            decode_residue_coeffs(&mut br, &residue, &books, &[true, true], 16).unwrap_err(),
+            ResidueDecodeError::UnsupportedResidueType { residue_type: 3 }
+        );
+
+        // A zero partition size cannot be walked.
+        let mut residue = type01_residue();
+        residue.partition_size = 0;
+        assert_eq!(
+            decode_residue_vq(&mut br, &residue, &books, &[true, true], 16).unwrap_err(),
+            ResidueDecodeError::InvalidPartitionSize
+        );
+
+        // Class tables shorter than the declared class count.
+        let mut residue = type01_residue();
+        residue.cascades.truncate(2);
+        assert_eq!(
+            decode_residue_vq(&mut br, &residue, &books, &[true, true], 16).unwrap_err(),
+            ResidueDecodeError::ClassTablesTooShort {
+                classifications: 8,
+                cascades: 2,
+                stage_books: 8,
+            }
+        );
+
+        // A classbook id the caller did not supply.
+        let mut residue = type01_residue();
+        residue.classbook = 9;
+        assert_eq!(
+            decode_residue_vq(&mut br, &residue, &books, &[true, true], 16).unwrap_err(),
+            ResidueDecodeError::BookIndexOutOfRange {
+                book_id: 9,
+                books: 2
+            }
+        );
+
+        // A stage book id the caller did not supply.
+        let mut residue = type01_residue();
+        residue.books = vec![[5, -1, -1, -1, -1, -1, -1, -1]; 8];
+        assert_eq!(
+            decode_residue_vq(&mut br, &residue, &books, &[true, true], 16).unwrap_err(),
+            ResidueDecodeError::BookIndexOutOfRange {
+                book_id: 5,
+                books: 2
+            }
+        );
+
+        // Type 2 needs at least one channel.
+        let residue2 = type2_residue();
+        assert_eq!(
+            decode_residue_type2(&mut br, &residue2, &books, &[], 0).unwrap_err(),
+            ResidueDecodeError::InvalidChannelCount
+        );
+
+        // A flat extent that overflows the index type.
+        assert_eq!(
+            decode_residue_coeffs(&mut br, &residue2, &books, &[true, true], usize::MAX)
+                .unwrap_err(),
+            ResidueDecodeError::SpectrumTooLarge {
+                n_spectrum: usize::MAX,
+                channels: 2
+            }
+        );
+    }
+
+    #[test]
+    fn a_phrasebook_entry_outside_the_class_domain_is_reported() {
+        // 2 classes with a dim-2 phrasebook: entries 0..8 unpack to radix
+        // digits 0..7, and a digit at or above the class count is a malformed
+        // classword rather than a table index.
+        let mut residue = type01_residue();
+        residue.classifications = 2;
+        residue.cascades = vec![1, 1];
+        residue.books = vec![[1, -1, -1, -1, -1, -1, -1, -1]; 2];
+        let books = vec![maptype0_book(2, 8, 3), exact_vq_book(5)];
+        let mut op = OggPack::new(8);
+        books[0].encode(&mut op, 5).unwrap();
+        let bytes = op.into_buffer();
+        let mut br = BitReader::new(&bytes);
+        assert_eq!(
+            decode_residue_vq(&mut br, &residue, &books, &[true, true], 16).unwrap_err(),
+            ResidueDecodeError::ClassOutOfRange {
+                partition_class: 2,
+                classifications: 2
+            }
+        );
+    }
+
+    #[test]
+    fn decode_errors_expose_their_cause() {
+        use std::error::Error;
+        let err = ResidueDecodeError::Codebook(CodebookError::EmptyCodebook);
+        assert!(err.source().is_some());
+        assert!(ResidueDecodeError::InvalidPartitionSize.source().is_none());
     }
 }

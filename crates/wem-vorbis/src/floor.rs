@@ -1,11 +1,15 @@
-//! Pure Vorbis floor1 encoder-side algorithms (Python:
+//! Pure Vorbis floor1 algorithms in both directions (Python:
 //! `wwise_wem/vorbis/floor.py`; libvorbis `floor1.c`).
 //!
 //! Packet Y values are *residuals* (wrapped predictions), not absolute post
-//! heights. Call [`floor1_wrap`] before packing; the decoder inverse is
-//! `floor1_inverse1` (not ported: this crate owns the encode direction).
+//! heights. Call [`floor1_wrap`] before packing; the decode direction is
+//! [`decode_floor1_body`] (bits → residuals) followed by [`floor1_unwrap`]
+//! (residuals → absolute posts); [`floor1_curve_from_posts`] then renders the
+//! curve.
 
-use crate::setup::Floor1Setup;
+use crate::bitio::{BitError, BitReader};
+use crate::codebook::{Codebook, CodebookError};
+use crate::setup::{ilog, Floor1Setup};
 
 /// Floor1 errors (Python: `ValueError` family).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +39,90 @@ impl std::fmt::Display for Floor1Error {
 }
 
 impl std::error::Error for Floor1Error {}
+
+/// Floor1 decode-direction errors.
+///
+/// Mirrors the `EOFError`/`ValueError` family that the reference decoder's
+/// `decode_floor1_body` raises (and that its packet decoder wraps into an
+/// incomplete-packet report). Every failure mode carries the observed values;
+/// wrapped causes stay reachable through [`std::error::Error::source`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum Floor1DecodeError {
+    /// The packet ended before the floor body did.
+    Bit(BitError),
+    /// A classification or subclass book could not decode a codeword.
+    Codebook(CodebookError),
+    /// The floor's multiplier has no range table entry (valid: 1..=4).
+    InvalidMultiplier { multiplier: u64 },
+    /// A book id the floor body references is absent from `books`.
+    BookIndexOutOfRange { book_id: i64, books: usize },
+    /// A class named by `partition_classes` has no class record.
+    ClassTableIncomplete { class: usize },
+    /// A class declares `subs != 0` but carries no master book.
+    MasterBookMissing { class: usize },
+    /// A subclass book index falls outside the class's `2^subs` book table.
+    SubclassBookOutOfRange {
+        class: usize,
+        index: usize,
+        subclass_books: usize,
+    },
+    /// The decoded post count disagrees with `2 + x_list.len()`.
+    PostCountMismatch { decoded: usize, expected: usize },
+}
+
+impl std::fmt::Display for Floor1DecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Floor1DecodeError::Bit(err) => write!(f, "floor1 body bits: {err}"),
+            Floor1DecodeError::Codebook(err) => write!(f, "floor1 body codebook: {err}"),
+            Floor1DecodeError::InvalidMultiplier { multiplier } => {
+                write!(f, "floor1 multiplier {multiplier} has no range table")
+            }
+            Floor1DecodeError::BookIndexOutOfRange { book_id, books } => {
+                write!(f, "floor1 book id {book_id} out of range 0..{books}")
+            }
+            Floor1DecodeError::ClassTableIncomplete { class } => {
+                write!(f, "floor1 class {class} has no class record")
+            }
+            Floor1DecodeError::MasterBookMissing { class } => {
+                write!(f, "floor1 class {class} has subclasses but no master book")
+            }
+            Floor1DecodeError::SubclassBookOutOfRange {
+                class,
+                index,
+                subclass_books,
+            } => write!(
+                f,
+                "floor1 class {class} subclass index {index} out of range 0..{subclass_books}"
+            ),
+            Floor1DecodeError::PostCountMismatch { decoded, expected } => {
+                write!(f, "floor1 Y count {decoded} != {expected}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for Floor1DecodeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Floor1DecodeError::Bit(err) => Some(err),
+            Floor1DecodeError::Codebook(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl From<BitError> for Floor1DecodeError {
+    fn from(err: BitError) -> Self {
+        Floor1DecodeError::Bit(err)
+    }
+}
+
+impl From<CodebookError> for Floor1DecodeError {
+    fn from(err: CodebookError) -> Self {
+        Floor1DecodeError::Codebook(err)
+    }
+}
 
 /// multiplier (1..=4) → quant range (libvorbis `look->quant_q`).
 /// Index 0 is unused; valid multipliers are 1..=4.
@@ -369,6 +457,170 @@ pub fn render_point(x0: i64, x1: i64, y0: i64, y1: i64, x: i64) -> i64 {
     }
 }
 
+/// Inverse of [`floor1_wrap`]: packet residuals → absolute posts
+/// (libvorbis `floor1_inverse1`'s second half, Python `floor1_unwrap`).
+///
+/// `fit_value[i] == 0` for `i >= 2` means "use the prediction": the result
+/// carries the predicted value flagged with `0x8000`. Endpoints
+/// `fit_value[0]`/`fit_value[1]` are absolute quant values.
+///
+/// The arithmetic mirrors Python's unbounded integers, so it is total over
+/// the whole `i64` input domain: an adversarially large residual selects a
+/// branch but never traps or wraps.
+pub fn floor1_unwrap(
+    fit_value: &[i64],
+    postlist: &[i64],
+    range_: i64,
+) -> Result<Vec<i64>, Floor1Error> {
+    let posts = fit_value.len();
+    if posts != postlist.len() {
+        return Err(Floor1Error::LengthMismatch {
+            posts,
+            postlist: postlist.len(),
+        });
+    }
+    let (loneighbor, hineighbor) = floor1_neighbor_tables(postlist);
+    let mut out = fit_value.to_vec();
+    for i in 2..posts {
+        let lo = loneighbor[i - 2] as usize;
+        let hi = hineighbor[i - 2] as usize;
+        let predicted = render_point(postlist[lo], postlist[hi], out[lo], out[hi], postlist[i]);
+        // i128 keeps the reference's unbounded-integer branches exact for
+        // every i64 residual instead of overflowing.
+        let hiroom = range_ as i128 - predicted as i128;
+        let loroom = predicted as i128;
+        let room = hiroom.min(loroom) << 1;
+        let val = out[i] as i128;
+        if val != 0 {
+            let val = if val >= room {
+                if hiroom > loroom {
+                    val - loroom
+                } else {
+                    -1 - (val - hiroom)
+                }
+            } else if val & 1 != 0 {
+                -((val + 1) >> 1)
+            } else {
+                val >> 1
+            };
+            out[i] = ((val + predicted as i128) & 0x7FFF) as i64;
+            out[lo] &= 0x7FFF;
+            out[hi] &= 0x7FFF;
+        } else {
+            out[i] = predicted | 0x8000;
+        }
+    }
+    Ok(out)
+}
+
+/// Decode one channel's floor1 Y posts from the packet (Python
+/// `decode_floor1_body`; libvorbis `floor1_inverse1`'s first half).
+///
+/// The returned row is *wrapped residuals*, not absolute posts: pass it to
+/// [`floor1_unwrap`] with the floor's [`postlist_from_floor`] and range to
+/// recover absolute posts (the caller reads the per-channel nonzero flag
+/// before calling; `nonzero != 0` is already true here).
+pub fn decode_floor1_body(
+    br: &mut BitReader<'_>,
+    floor: &Floor1Setup,
+    books: &[Codebook],
+) -> Result<Vec<i64>, Floor1DecodeError> {
+    if !(1..=4).contains(&floor.multiplier) {
+        return Err(Floor1DecodeError::InvalidMultiplier {
+            multiplier: floor.multiplier,
+        });
+    }
+    let rng = FLOOR1_RANGES[floor.multiplier as usize];
+    let ybits = ilog(rng - 1);
+    let nvals = 2 + floor.x_list.len();
+    let mut y = vec![0i64; nvals];
+    y[0] = br.read(ybits)? as i64;
+    y[1] = br.read(ybits)? as i64;
+    let mut ppos = 2usize;
+    for &class in &floor.partition_classes {
+        let class = class as usize;
+        let cdim = *floor
+            .class_dims
+            .get(class)
+            .ok_or(Floor1DecodeError::ClassTableIncomplete { class })?;
+        let cbits = *floor
+            .class_subs
+            .get(class)
+            .ok_or(Floor1DecodeError::ClassTableIncomplete { class })?;
+        let subclass_books = floor
+            .subclass_books
+            .get(class)
+            .ok_or(Floor1DecodeError::ClassTableIncomplete { class })?;
+        let csub = (1u64 << cbits) - 1;
+        let mut cval = if cbits != 0 {
+            let master_id = floor
+                .class_masterbooks
+                .get(class)
+                .copied()
+                .flatten()
+                .ok_or(Floor1DecodeError::MasterBookMissing { class })?;
+            let master =
+                books
+                    .get(master_id as usize)
+                    .ok_or(Floor1DecodeError::BookIndexOutOfRange {
+                        book_id: master_id as i64,
+                        books: books.len(),
+                    })?;
+            master.decode(br)? as u64
+        } else {
+            0
+        };
+        for _ in 0..cdim {
+            let index = (cval & csub) as usize;
+            // `cval & csub` lies inside the class's declared subclass domain;
+            // a hand-built setup whose row is shorter is reported, not read
+            // past.
+            let book_id =
+                *subclass_books
+                    .get(index)
+                    .ok_or(Floor1DecodeError::SubclassBookOutOfRange {
+                        class,
+                        index,
+                        subclass_books: subclass_books.len(),
+                    })?;
+            cval >>= cbits;
+            // The reference decodes the codeword before indexing the post
+            // row, so an over-long partition list is reported after the bits
+            // that codeword consumed rather than before them.
+            let entry = if book_id >= 0 {
+                let book =
+                    books
+                        .get(book_id as usize)
+                        .ok_or(Floor1DecodeError::BookIndexOutOfRange {
+                            book_id,
+                            books: books.len(),
+                        })?;
+                Some(book.decode(br)?)
+            } else {
+                None
+            };
+            if ppos >= nvals {
+                // Every further post, coded or not, consumes a slot.
+                return Err(Floor1DecodeError::PostCountMismatch {
+                    decoded: ppos + 1,
+                    expected: nvals,
+                });
+            }
+            if let Some(entry) = entry {
+                y[ppos] = entry;
+            }
+            ppos += 1;
+        }
+    }
+    if ppos != nvals {
+        return Err(Floor1DecodeError::PostCountMismatch {
+            decoded: ppos,
+            expected: nvals,
+        });
+    }
+    Ok(y)
+}
+
 /// Encode residual wrap: absolute posts → packet Y (libvorbis
 /// `floor1_encode`, Python `floor1_wrap`).
 pub fn floor1_wrap(posts: &[i64], postlist: &[i64], range_: i64) -> Result<Vec<i64>, Floor1Error> {
@@ -627,5 +879,384 @@ mod tests {
         assert_eq!(y[1], 10);
         assert_eq!(raster[2] & 0x8000, 0x8000);
         assert_eq!(y[2], 0);
+    }
+
+    // ---- decode direction (segment 6) ----
+
+    use crate::bitio::OggPack;
+    use crate::codebook::StaticCodebook;
+    use crate::packet_encoder::pack_floor1_body;
+    use crate::setup::{BitPositions, SetupInfo};
+
+    /// A maptype-0 book whose `entries` codewords all have the same length:
+    /// a complete code, so `decode` returns exactly the entry the packer
+    /// chose for any value inside `0..entries`.
+    fn maptype0_book(entries: i64, length: i64) -> Codebook {
+        Codebook::from_static(
+            StaticCodebook {
+                dim: 1,
+                entries,
+                lengthlist: vec![length; entries as usize],
+                maptype: 0,
+                q_min: 0,
+                q_delta: 0,
+                q_quant: 0,
+                q_sequencep: 0,
+                quantlist: None,
+            },
+            None,
+            None,
+            None,
+        )
+        .expect("synthetic maptype-0 book must build")
+    }
+
+    /// One floor with `partitions` partitions, all class 0, plus the book list
+    /// the packer and the decoder both index.
+    #[allow(clippy::too_many_arguments)] // one parameter per Floor1Setup field group
+    fn floor_with_subclass_book(
+        partition_classes: Vec<u64>,
+        x_list: Vec<u64>,
+        class_dims: Vec<u64>,
+        class_subs: Vec<u64>,
+        class_masterbooks: Vec<Option<u64>>,
+        subclass_books: Vec<Vec<i64>>,
+        multiplier: u64,
+        rangebits: u64,
+    ) -> Floor1Setup {
+        Floor1Setup {
+            partitions: partition_classes.len() as u64,
+            partition_classes,
+            max_class: 0,
+            class_dims,
+            class_subs,
+            class_masterbooks,
+            subclass_books,
+            multiplier,
+            rangebits,
+            x_list,
+            bit_start: 0,
+            bit_end: 0,
+        }
+    }
+
+    fn setup_with_floor(floor: Floor1Setup) -> SetupInfo {
+        SetupInfo {
+            setup_size: 0,
+            bits_total: 0,
+            channels: 2,
+            nbooks: 1,
+            book_ids: vec![0],
+            unique_book_ids: vec![0],
+            nfloors: 1,
+            floors: vec![floor],
+            nresidues: 1,
+            residues: Vec::new(),
+            nmaps: 1,
+            maps: Vec::new(),
+            nmodes: 1,
+            modes: Vec::new(),
+            bit_positions: BitPositions {
+                after_books: 0,
+                after_floor_count: 0,
+                after_floors: 0,
+                after_residues: 0,
+                after_maps: 0,
+                after_modes: 0,
+                end: 0,
+            },
+            trailing_pad_bits: 0,
+            trailing_pad_value: 0,
+            parse_complete: true,
+            book_id_assignment: "",
+        }
+    }
+
+    #[test]
+    fn unwrap_round_trips_the_wrap_direction() {
+        // Two interior posts, one of them equal to its own prediction (so the
+        // wrap codes it as "use predicted"), one flagged unused by the fit.
+        let pl = vec![0, 128, 32, 64, 96];
+        for posts in [
+            vec![6, 10, 20, 8, 4],
+            vec![6, 10, 20, 0x8000, 4],
+            vec![0, 0, 0, 0, 0],
+            vec![255, 255, 255, 255, 255],
+        ] {
+            let (raster, y) = floor1_wrap_with_posts(&posts, &pl, 256).unwrap();
+            let recovered = floor1_unwrap(&y, &pl, 256).unwrap();
+            assert_eq!(
+                recovered, raster,
+                "unwrap must invert wrap for posts {posts:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unwrap_flags_predicted_posts_with_0x8000() {
+        // Y[2] == 0 and Y[3] == 0 mean "use the prediction": post 2 comes
+        // back flagged with its predicted height (render_point of the
+        // endpoints at x=32 is 7), and post 3 — used as a neighbour by the
+        // coded post 4 — has the flag cleared again, exactly as the wrap
+        // direction clears the neighbours it codes against.
+        let pl = vec![0, 128, 32, 64, 96];
+        let y = vec![6, 10, 0, 0, 4];
+        let out = floor1_unwrap(&y, &pl, 256).unwrap();
+        assert_eq!(out[2], 7 | 0x8000);
+        assert_eq!(out[3] & 0x8000, 0, "a coded neighbour clears the flag");
+        assert_eq!(out[3], 8);
+        assert_eq!(out[4], 11);
+        assert_eq!(out[0], 6);
+        assert_eq!(out[1], 10);
+    }
+
+    #[test]
+    fn unwrap_is_total_over_extreme_residuals() {
+        // Python's unbounded integers never trap; neither may this path. A
+        // residual at the i64 boundary must select a branch, not overflow.
+        let pl = vec![0, 128, 32, 64, 96];
+        let y = vec![i64::MIN, i64::MAX, i64::MIN, i64::MAX, i64::MIN];
+        let out = floor1_unwrap(&y, &pl, i64::MIN).unwrap();
+        for value in &out {
+            assert!(*value >= 0, "masked post must be non-negative: {value}");
+        }
+        // Endpoints are masked absolute values.
+        assert_eq!(out[0], 0);
+        assert_eq!(out[1], 0x7FFF);
+    }
+
+    #[test]
+    fn unwrap_rejects_a_postlist_length_mismatch() {
+        let err = floor1_unwrap(&[1, 2, 3], &[0, 128], 256).unwrap_err();
+        assert_eq!(
+            err,
+            Floor1Error::LengthMismatch {
+                posts: 3,
+                postlist: 2
+            }
+        );
+    }
+
+    #[test]
+    fn floor1_body_bitstream_round_trips_through_the_packer() {
+        // 4 x values ⇒ 6 posts; two class-0 partitions of dim 2.
+        let x_list = vec![32, 64, 96, 16];
+        let floor = floor_with_subclass_book(
+            vec![0, 0],
+            x_list,
+            vec![2],
+            vec![0],
+            vec![None],
+            vec![vec![0]],
+            1,
+            7,
+        );
+        let setup = setup_with_floor(floor.clone());
+        let books = vec![maptype0_book(256, 8)];
+        let pl = postlist_from_floor(&floor);
+        assert_eq!(pl, vec![0, 128, 32, 64, 96, 16]);
+        let posts = vec![7, 200, 31, 64, 96, 250];
+        let (_, y) = floor1_wrap_with_posts(&posts, &pl, 256).unwrap();
+
+        let mut op = OggPack::new(64);
+        pack_floor1_body(&mut op, &setup, 0, &books, &y).unwrap();
+        let bytes = op.into_buffer();
+
+        let mut br = BitReader::new(&bytes);
+        let decoded = decode_floor1_body(&mut br, &floor, &books).unwrap();
+        assert_eq!(decoded, y);
+        // The body is the whole payload; the reader consumed it all.
+        assert!(br.bits_left() < 8);
+    }
+
+    #[test]
+    fn floor1_body_round_trips_through_a_master_and_subclass_books() {
+        // Class 0 has subs = 1: a 4-entry master book selects the subclass
+        // book of each dim of the partition.
+        let x_list = vec![16, 48, 80, 112];
+        let floor = floor_with_subclass_book(
+            vec![0, 0],
+            x_list,
+            vec![2],
+            vec![1],
+            vec![Some(1)],
+            vec![vec![0, 0]],
+            1,
+            7,
+        );
+        let setup = setup_with_floor(floor.clone());
+        let books = vec![maptype0_book(256, 8), maptype0_book(4, 2)];
+        let pl = postlist_from_floor(&floor);
+        let posts = vec![3, 250, 40, 60, 0x8000, 90];
+        let (_, y) = floor1_wrap_with_posts(&posts, &pl, 256).unwrap();
+
+        let mut op = OggPack::new(64);
+        pack_floor1_body(&mut op, &setup, 0, &books, &y).unwrap();
+        let bytes = op.into_buffer();
+
+        let mut br = BitReader::new(&bytes);
+        let decoded = decode_floor1_body(&mut br, &floor, &books).unwrap();
+        assert_eq!(decoded, y);
+    }
+
+    #[test]
+    fn floor1_body_handles_a_no_bits_subclass_entry() {
+        // Class 0, subs = 1: subclass index 0 is coded by book 0, index 1
+        // writes no bits and decodes as residual 0 (libvorbis's `book < 0`).
+        let floor = floor_with_subclass_book(
+            vec![0, 0],
+            vec![16, 48, 80, 112],
+            vec![2],
+            vec![1],
+            vec![Some(1)],
+            vec![vec![0, -1]],
+            1,
+            7,
+        );
+        let books = vec![maptype0_book(256, 8), maptype0_book(4, 2)];
+        // Hand-built schedule: endpoints, then per partition a master entry
+        // selecting cval = 2 (bit 0 set: dim 0 coded, dim 1 no-bits).
+        let mut op = OggPack::new(32);
+        op.write(7, 8).unwrap();
+        op.write(200, 8).unwrap();
+        for residual in [55u64, 77] {
+            books[1].encode(&mut op, 2).unwrap();
+            books[0].encode(&mut op, residual as i64).unwrap();
+        }
+        let bytes = op.into_buffer();
+
+        let mut br = BitReader::new(&bytes);
+        let decoded = decode_floor1_body(&mut br, &floor, &books).unwrap();
+        assert_eq!(decoded, vec![7, 200, 55, 0, 77, 0]);
+        assert!(br.bits_left() < 8);
+    }
+
+    #[test]
+    fn malformed_floor1_body_inputs_return_errors() {
+        let floor = floor_with_subclass_book(
+            vec![0],
+            vec![32, 64],
+            vec![2],
+            vec![0],
+            vec![None],
+            vec![vec![0]],
+            1,
+            7,
+        );
+        let books = vec![maptype0_book(256, 8)];
+
+        // Empty payload: the endpoint read runs out of bits.
+        let mut br = BitReader::new(&[]);
+        assert_eq!(
+            decode_floor1_body(&mut br, &floor, &books).unwrap_err(),
+            Floor1DecodeError::Bit(BitError::OutOfBits)
+        );
+
+        // Truncated after the endpoints.
+        let mut br = BitReader::new(&[0u8]);
+        assert!(matches!(
+            decode_floor1_body(&mut br, &floor, &books).unwrap_err(),
+            Floor1DecodeError::Bit(BitError::OutOfBits)
+        ));
+
+        // Multiplier outside 1..=4 (the reference's range table KeyError).
+        let mut bad = floor.clone();
+        bad.multiplier = 0;
+        let mut br = BitReader::new(&[0xFF, 0xFF]);
+        assert_eq!(
+            decode_floor1_body(&mut br, &bad, &books).unwrap_err(),
+            Floor1DecodeError::InvalidMultiplier { multiplier: 0 }
+        );
+
+        // A class record the partition list names but does not carry.
+        let mut bad = floor.clone();
+        bad.class_dims.clear();
+        let mut br = BitReader::new(&[0xFF, 0xFF]);
+        assert_eq!(
+            decode_floor1_body(&mut br, &bad, &books).unwrap_err(),
+            Floor1DecodeError::ClassTableIncomplete { class: 0 }
+        );
+
+        // subs != 0 requires a master book.
+        let mut bad = floor.clone();
+        bad.class_subs = vec![1];
+        bad.subclass_books = vec![vec![0, 0]];
+        let mut br = BitReader::new(&[0xFF, 0xFF]);
+        assert_eq!(
+            decode_floor1_body(&mut br, &bad, &books).unwrap_err(),
+            Floor1DecodeError::MasterBookMissing { class: 0 }
+        );
+
+        // A subclass book id the caller did not supply.
+        let bad = floor_with_subclass_book(
+            vec![0],
+            vec![32, 64],
+            vec![2],
+            vec![0],
+            vec![None],
+            vec![vec![7]],
+            1,
+            7,
+        );
+        let mut br = BitReader::new(&[0xFF, 0xFF]);
+        assert_eq!(
+            decode_floor1_body(&mut br, &bad, &books).unwrap_err(),
+            Floor1DecodeError::BookIndexOutOfRange {
+                book_id: 7,
+                books: 1
+            }
+        );
+
+        // The partition list codes more posts than x_list declares.
+        let over = floor_with_subclass_book(
+            vec![0, 0],
+            vec![32, 64],
+            vec![2],
+            vec![0],
+            vec![None],
+            vec![vec![0]],
+            1,
+            7,
+        );
+        let mut br = BitReader::new(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+        assert_eq!(
+            decode_floor1_body(&mut br, &over, &books).unwrap_err(),
+            Floor1DecodeError::PostCountMismatch {
+                decoded: 5,
+                expected: 4
+            }
+        );
+
+        // The partition list codes fewer posts than x_list declares.
+        let under = floor_with_subclass_book(
+            vec![0],
+            vec![32, 64, 96],
+            vec![1],
+            vec![0],
+            vec![None],
+            vec![vec![0]],
+            1,
+            7,
+        );
+        let mut br = BitReader::new(&[0xFF, 0xFF, 0xFF]);
+        assert_eq!(
+            decode_floor1_body(&mut br, &under, &books).unwrap_err(),
+            Floor1DecodeError::PostCountMismatch {
+                decoded: 3,
+                expected: 5
+            }
+        );
+    }
+
+    #[test]
+    fn decode_errors_expose_their_cause() {
+        use std::error::Error;
+        let err = Floor1DecodeError::Bit(BitError::OutOfBits);
+        assert!(err.source().is_some());
+        let err = Floor1DecodeError::Codebook(CodebookError::EmptyCodebook);
+        assert!(err.source().is_some());
+        assert!(Floor1DecodeError::MasterBookMissing { class: 0 }
+            .source()
+            .is_none());
     }
 }
