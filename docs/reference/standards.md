@@ -40,12 +40,12 @@ words; a stage is not done until it comes back zero.
 
 | Claim | Established by |
 |---|---|
-| The reference WEM for `tests/fixtures/input.wav`, byte for byte — the committed `tests/fixtures/reference.wem`, compared as the bytes it is | `make wem-bytes` (`tests/whole_file/test_whole_file.py`); `crates/wem-core/tests/complete_wem_bytes.rs` |
+| The reference WEM for `tests/fixtures/input.wav`, byte for byte — the committed `tests/fixtures/reference.wem`, compared as the bytes it is | `make wem-bytes` (`tests/whole_file/test_whole_file.py`); `crates/wem-core/tests/encoder.rs` |
 | Per-frame values: scheduling fields, eight analysis stages, floor posts, residue rows, packet bytes, all 205 frames | `crates/wem-core/tests/frame_pipeline_parity.rs`, `tests/parity/test_frame_pipeline_parity.py` |
-| The package-root public exports and the wheel inventory | `tests/parity/test_public_api.py`, `tests/parity/test_distribution.py`, `make wheel-smoke`; the export list is in [`public-interface.md`](public-interface.md) |
+| The package-root public exports and the wheel inventory | `tests/parity/test_public_surface.py`, `tests/parity/test_distribution.py`, `make wheel-smoke`; the export list is in [`public-interface.md`](public-interface.md) |
 | Geometry-materializer parity: the ported builder == the carrier's registered words == the kernel's `psy_geom*` surfaces | `tests/parity/test_geometry_materializer_parity.py`; `cargo test -p wem-analysis` |
 | The compiled profile carrier: the kernel's tables equal the recorded material, table by table | `crates/wem-profiles/src/carrier_tests.rs` (stage 1, retired with the recorded tree), `tests/parity/test_geometry_materializer_parity.py`, `cargo test -p wem-profiles` |
-| The 2ch/48 kHz result, its corpora, and the limits of that evidence | `tests/parity/test_2ch_reference_corpus.py`, `tests/parity/test_2ch_stress_corpus.py`, [`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md) |
+| The 2ch/48 kHz result, its corpora, and the limits of that evidence | `tests/parity/test_2ch_corpus.py`, [`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md) |
 
 Running those suites is what establishes each claim. The local targets that run
 them are listed in
@@ -153,18 +153,19 @@ so the cause is reachable from the value the caller holds, and the message
 carries the observed values rather than a category name. A panic means an
 invariant broke, not that the caller passed something bad.
 
-`crates/wem-core/tests/error_source_chain.rs` walks `EncoderError` →
+`crates/wem-core/tests/errors.rs` (`source_chain`) walks `EncoderError` →
 `InternalError` → the stage error (`ProfileError`, `AnalysisError`,
 `PacketError`, `ContainerError`) through `source()` and pins that the innermost
 cause is reachable. At the Python boundary,
-`tests/parity/test_error_surface.py` pins that `WwiseWemError.code` is the
+`tests/parity/test_public_surface.py` (`FacadeErrorCodeTests`) pins that
+`WwiseWemError.code` is the
 kernel's own class, that `str(error)` is the kernel's diagnostic unchanged, and
 that the kernel error stays reachable as `__cause__`.
 
 **Error types are exhaustively matchable.** A public error enum carries no
 `#[non_exhaustive]`, on purpose: adding a variant is a breaking change, and the
 compiler must tell every caller that a new failure mode exists.
-`crates/wem-core/tests/error_variants.rs` matches every public error enum with
+`crates/wem-core/tests/errors.rs` (`variants`) matches every public error enum with
 no `_` arm, from a caller's position, so the rule is compiler-enforced: a new
 variant fails that build until the caller's arm is written. Adding an error
 *code* on the C ABI, or a code string in Python, is not a breaking change —
@@ -187,7 +188,7 @@ wasm shell builds with `panic = "abort"`, where an invariant violation
 terminates the instance instead of unwinding. A handle that carries state across
 calls is terminal after a failure: `push` and `finish` on a finished or failed
 session are rejected, never silently resumed, while a one-shot call may be
-retried (`crates/wem-capi/tests/capi_e2e.rs` covers the finished-session
+retried (`crates/wem-capi/tests/capi_surface.rs` covers the finished-session
 rejection and two encodes through one shared handle).
 
 ## Caller streams and ambient state
@@ -265,7 +266,7 @@ Shells mirror that interface 1:1, map errors 1:1 without inventing variants, and
 own no numerics and no profile logic; a new language integrates by writing a
 shim over the C ABI, never by changing the kernel for it, and a shell that needs
 something the others do not gets a new stable C ABI entry point rather than a
-kernel fork. `crates/wem-capi/tests/capi_e2e.rs` runs the C surface against the
+kernel fork. `crates/wem-capi/tests/capi_surface.rs` runs the C surface against the
 kernel — reference bytes through the FFI, error-code mapping, lifecycle
 violations, shareable handles.
 
@@ -275,8 +276,8 @@ parallel with the C ABI.
 
 Streaming chunk boundaries must not affect the output bytes: any chunking of the
 input yields the same container.
-`crates/wem-core/tests/stream_session.rs` and
-`tests/parity/test_2ch_stress_corpus.py` compare the batch, one-chunk and uneven
+`crates/wem-core/tests/streaming.rs` and
+`tests/parity/test_2ch_corpus.py` compare the batch, one-chunk and uneven
 chunking paths, and `make fuzz-parity` (`scripts/fuzz_diff_parity.py`) runs the
 oracle against the native kernel over a fixed seed set of random PCM streams and
 random frame-aligned chunk splits.

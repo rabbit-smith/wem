@@ -58,4 +58,4 @@ name, no profile directory, and no environment variable.
 - The sample is single-shot by design; the streaming API
   (`wem_session_new` over the same `WemProfile *`, then `push` /
   `finish`) is exercised by the Rust integration tests
-  (`crates/wem-capi/tests/capi_e2e.rs`).
+  (`crates/wem-capi/tests/capi_surface.rs`).

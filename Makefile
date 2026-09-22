@@ -14,7 +14,7 @@ fuzz-parity:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) scripts/fuzz_diff_parity.py --pr
 
 2ch-stress:
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest tests.parity.test_2ch_stress_corpus -v
+	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest tests.parity.test_2ch_corpus.TwoChannelStressCorpusTests -v
 
 2ch-long:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest tests.parity.two_channel_long_run -v

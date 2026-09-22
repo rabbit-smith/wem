@@ -15,7 +15,7 @@ edition.workspace = true
 
 # cdylib: dynamic library for Go cgo / C consumers;
 # staticlib: static archive for embedded builds;
-# rlib: in-workspace integration tests (tests/capi_e2e.rs) link it as Rust.
+# rlib: in-workspace integration tests (tests/capi_surface.rs) link it as Rust.
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
 

@@ -115,7 +115,7 @@ item by item.
 
 | | |
 | --- | --- |
-| Instrument | `crates/wem-core/tests/duration_curves.rs` (test-only, `#[ignore]`d): one `#[ignore]`d worker per path in a freshly spawned child, plus a parent reporter that reaps it with `wait4` and prints `ru_maxrss` / `ru_utime` / `ru_stime` — the child-process pattern `stream_session.rs` already uses, extended from RSS to RSS+CPU |
+| Instrument | `crates/wem-core/tests/duration_curves.rs` (test-only, `#[ignore]`d): one `#[ignore]`d worker per path in a freshly spawned child, plus a parent reporter that reaps it with `wait4` and prints `ru_maxrss` / `ru_utime` / `ru_stime` — the child-process pattern `streaming.rs` already uses, extended from RSS to RSS+CPU |
 | Driver | `scripts/measure_duration_curves.py`: owns the matrix, the round ordering, the contamination re-runs and the statistics |
 | Stage split | `crates/wem-core/tests/stage_timings.rs`, taken verbatim from `codex/measure-and-investigate` with one additive `#[ignore]`d driver (`stage_timings_duration_report`) that replays a generated input through the same `staged_run`; the fixture report is untouched |
 | Inputs | `scripts/generate_duration_curve_inputs.py`: integer fixed-point, no platform math, byte-stable; it **cross-checks itself against `scripts/generate_2ch_long_program.render_pcm16le`** at 2 ch/48000/20 s and refuses to emit if the general renderer stops reducing to it (it did not: `89b916a151ad1d42d313efdc2ae970a2671fee9b5c5b979aeb9982f7b1f85554`) |
@@ -527,7 +527,7 @@ arithmetic:
    container — 7.3 MB measured, 15.6 MB bounded — is the session's own
    `cloned()` copy at `stream.rs:616-618`.**
 3. The repository's own bounded-memory check asserts a **150 MiB (= 157.3 MB)
-   ceiling** on one streaming encode (`crates/wem-core/tests/stream_session.rs`,
+   ceiling** on one streaming encode (`crates/wem-core/tests/streaming.rs`,
    `RSS_CEILING_BYTES`). This program sits at **123.6 MB at five minutes
    (inside, 21% under)** and **230.7 MB at ten (47% over)**; the check passes
    because its own signal is far more compressible and produces a ~3.7x
