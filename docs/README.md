@@ -38,6 +38,7 @@ at these documents instead of restating them.
 | [`guides/development.md`](guides/development.md) | Building, running the tests, and the rules the work is held to |
 | [`findings/2ch-byte-exactness.md`](findings/2ch-byte-exactness.md) | Needing the 2ch evidence, its root causes, its retractions, or its trust boundary |
 | [`findings/concurrency-curves.md`](findings/concurrency-curves.md) | Asking how many encodes this machine runs at once, whether the kernel's internal parallelism pays for itself, or how to size a worker pool |
+| [`findings/pool-sizing.md`](findings/pool-sizing.md) | Asking what the long-frame channel pool is sized to, why it is not the process-global pool, or what the parallel feature's CPU actually goes on |
 | [`findings/browser-shell-toolchain-options.md`](findings/browser-shell-toolchain-options.md) | Asking whether the browser shell should stay Rust and what C, Zig or MoonBit would actually buy |
 | [`findings/decode-transform-feasibility.md`](findings/decode-transform-feasibility.md) | Asking whether a `decode` surface is bounded work, which chain segments already exist in the kernel, and why bit-exactness against libvorbis is not a shippable claim |
 | [`methodology/byte-exact-diagnosis.md`](methodology/byte-exact-diagnosis.md) | Chasing any byte difference against an external build |
