@@ -285,7 +285,7 @@ for 3.8%; leave it alone.
 - The twiddle cost model replays the recurrence standalone; it prices the
   redundancy, it does not prove what removing it would save (the removed
   multiplies also shorten the dependency chain, which this model does not
-  capture).
+  account for).
 - No file under `crates/*/src/` was changed for this investigation, so every
   number describes the tree as committed, and every byte-exactness suite ran
   unchanged.
