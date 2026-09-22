@@ -40,7 +40,7 @@ def detector_pcm_streams(
         wwise_lpc_from_data,
         wwise_lpc_predict,
     )
-    from ..dsp.transform import _f32
+    from ..._f32 import _f32
 
     if tail_training is None:
         tail_training = max(int(size) for size in blocksizes)

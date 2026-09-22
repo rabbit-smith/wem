@@ -18,15 +18,30 @@ pub const SPECTRUM_PEAK_DECAY_DB_PER_SECOND: f32 = 6.0;
 /// instead of one hard-coded rate.
 pub const CALIBRATION_SAMPLE_RATES: [i64; 2] = [44100, 48000];
 
-/// Round an f64 to its f32-representable value (Python `_f32`).
+/// Round an f64 to its f32-representable value (Python `_f32`), keeping the
+/// f32: the spelling for statements whose result is stored as an f32 word
+/// (the materialized `WwisePsyLook` fields).
 #[inline]
 pub fn f32_round(value: f64) -> f32 {
     value as f32
 }
 
 /// Python `_f32` returning f64: round to the f32-representable value and
-/// promote back to f64. This is the normative float boundary in the
-/// bit-exact kernel; every Python `_f32(...)` maps to one call here.
+/// promote back to f64.
+///
+/// The boundary has three spellings in this crate, and a Python `_f32(...)`
+/// maps to the one that matches how the value is stored — not always to this
+/// one:
+///
+/// - this function, where the rounded value flows on as an f64 (analysis,
+///   transient and psychoacoustic statements);
+/// - [`crate::dsp::x87::f32_round`], on the bit-exact geometry port
+///   (`dsp/psy_geom.rs`), which spells the same rounding with the name of the
+///   `fstps` site it reproduces;
+/// - [`f32_round`], where the result is stored as an f32.
+///
+/// They are one rounding under three names, not three definitions of the
+/// boundary's value.
 #[inline]
 pub fn f32_of(value: f64) -> f64 {
     value as f32 as f64

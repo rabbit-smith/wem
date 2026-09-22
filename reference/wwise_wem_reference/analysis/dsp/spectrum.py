@@ -5,16 +5,13 @@ import math
 import struct
 from typing import Mapping, Sequence
 
+from ..._f32 import _f32
 from ..._tmath import cos_f64, sin_f64
 
 
 WWISE_LOG_SCALE = 0.0000007177114298428933
 WWISE_LOG_BIAS = 764.6162109375
 WWISE_LOG_ADD = 0.345
-
-
-def _f32(value: float) -> float:
-    return struct.unpack("<f", struct.pack("<f", float(value)))[0]
 
 
 def _float_abs_bits(value: float) -> int:
