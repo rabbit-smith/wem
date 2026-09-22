@@ -23,11 +23,22 @@
 //!   `wem_session_new` — carry no state across calls: the failing call is
 //!   rejected and the caller may call again.
 //! * Handle-carrying entries — `wem_encoder_encode`, `wem_session_push`,
-//!   `wem_session_finish` — run inside a handle whose state the panic leaves
-//!   unknown, so the handle is dead and every later call on it returns
-//!   `WEM_ERR_STATE_ERROR` until it is freed. A rejection carrying any other
-//!   code (`WEM_ERR_GEOMETRY_MISMATCH`, ...) says nothing about the handle:
-//!   it stays usable, exactly as the kernel's own session survives it.
+//!   `wem_session_finish`, `wem_decoder_push`, `wem_decoder_finish` — run
+//!   inside a handle whose state the panic leaves unknown, so the handle is
+//!   dead and every later call on it returns `WEM_ERR_STATE_ERROR` until it is
+//!   freed. A rejection carrying any other code (`WEM_ERR_GEOMETRY_MISMATCH`,
+//!   `WEM_ERR_INPUT_MALFORMED`, ...) says nothing about the handle: it stays
+//!   usable, exactly as the kernel's own session survives it.
+//!
+//! The decode surface (include/wem.h section 5) mirrors the encode surface
+//! with the data direction reversed: `wem_decoder_new` is one-shot like
+//! `wem_session_new`, and `wem_decoder_push` / `wem_decoder_finish` carry the
+//! handle. `wem_decoder_finish` is terminal whatever it returns, and a
+//! callback that returns non-`WEM_OK` aborts the decode — the same two
+//! terminal-by-their-own-rule outcomes the encode surface has. What is *not*
+//! the same is which kernel call owns the PCM: the kernel session hands back
+//! a step's samples and this layer delivers them, so a rejection can deliver
+//! the frames the earlier packets completed and still report its code.
 //!
 //! `catch_unwind` only catches while panics unwind, so this crate must be
 //! built with the default `panic = "unwind"` (include/wem.h, "Panics"; the
@@ -61,8 +72,9 @@ use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, UnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use wem_core::decoder::{DecodeSession, DecodeStep};
 use wem_core::encoder::{Encoder, Pcm16};
-use wem_core::error::EncoderError;
+use wem_core::error::{DecoderError, EncoderError};
 use wem_core::stream::StreamSession;
 use wem_core::{WwiseProfile, WwiseVersion};
 
@@ -110,6 +122,8 @@ pub enum WemError {
     FormatUnsupported = 5,
     /// An internal fault (including a caught kernel panic).
     Internal = 6,
+    /// The decode input's own bytes do not parse (decode surface only).
+    InputMalformed = 7,
 }
 
 impl WemError {
@@ -122,6 +136,33 @@ impl WemError {
             EncoderError::InputTooShort { .. } => Self::InputTooShort,
             EncoderError::FormatUnsupported { .. } => Self::FormatUnsupported,
             EncoderError::Internal(_) => Self::Internal,
+        }
+    }
+
+    /// The stable error code of one decode failure (include/wem.h section 5).
+    ///
+    /// Four classes, one per row of that section: the input's own bytes do not
+    /// parse; the container parses but names a configuration this build does
+    /// not carry; the call was made outside the lifecycle; or this library
+    /// broke an invariant. A variant added to `DecoderError` fails to compile
+    /// here until its class is written, which is the point of the exhaustive
+    /// match.
+    fn from_decoder(error: &DecoderError) -> Self {
+        match error {
+            DecoderError::Container(_)
+            | DecoderError::Setup { .. }
+            | DecoderError::SetupPadding { .. }
+            | DecoderError::Truncated { .. }
+            | DecoderError::MissingSetup { .. }
+            | DecoderError::BlockSizeMismatch { .. }
+            | DecoderError::Packet { .. }
+            | DecoderError::ResidueBitstreamDefect { .. }
+            | DecoderError::FrameCountMismatch { .. } => Self::InputMalformed,
+            DecoderError::NotWwiseVorbis { .. }
+            | DecoderError::ConfigurationUnsupported { .. }
+            | DecoderError::SetupNotCarried { .. } => Self::FormatUnsupported,
+            DecoderError::StateError { .. } => Self::StateError,
+            DecoderError::Floor1 { .. } | DecoderError::Internal(_) => Self::Internal,
         }
     }
 }
@@ -814,6 +855,283 @@ pub unsafe extern "C" fn wem_session_free(session: *mut WemSession) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Decode surface (include/wem.h section 5)
+// ---------------------------------------------------------------------------
+
+/// Callback that receives the one-time header announcement: the PCM geometry
+/// and the setup packet this revision parsed. The pointers are valid only
+/// during the call. A non-`WEM_OK` return aborts the decode.
+pub type WemHeaderFn = unsafe extern "C" fn(
+    channels: u32,
+    sample_rate: u32,
+    setup: *const u8,
+    setup_len: usize,
+    user_data: *mut c_void,
+) -> WemError;
+
+/// Callback that receives interleaved f32 PCM at ±1.0 full scale, in bounded
+/// blocks. The pointer is valid only during the call. A non-`WEM_OK` return
+/// aborts the decode.
+pub type WemPcmFn = unsafe extern "C" fn(
+    interleaved: *const f32,
+    frames: usize,
+    user_data: *mut c_void,
+) -> WemError;
+
+/// Frames per PCM callback block. The kernel hands back everything a push
+/// completed — bounded by the input that push carried, not by the stream —
+/// and this layer delivers it in fixed-size blocks so a caller never sees a
+/// block whose size depends on how it chunked its input.
+const PCM_BLOCK_FRAMES: usize = 1024;
+
+/// Streaming decode session (include/wem.h `WemDecoder`):
+/// single-threaded ownership; `failed` marks the terminal state.
+pub struct WemDecoder {
+    session: DecodeSession,
+    header_cb: WemHeaderFn,
+    pcm_cb: WemPcmFn,
+    user_data: *mut c_void,
+    /// Terminal state: set by `finish` (success or error), by a callback that
+    /// aborts the decode, and by a call that reported `WEM_ERR_INTERNAL`.
+    failed: bool,
+}
+
+/// Deliver one decode step's output and turn its outcome into the entry's
+/// return code.
+///
+/// What a step produced is delivered even when the step was refused: the
+/// kernel keeps the bytes it could not read and hands back the frames the
+/// packets before them completed, and dropping them here would be the silent
+/// truncation the decode contract forbids. The one exception is a *defect*
+/// (`WEM_ERR_INTERNAL`): it means this library broke an invariant, the state
+/// it left behind is not something a caller may build on, so its output is
+/// not delivered and the handle is terminal.
+fn deliver_decode_step(state: &mut WemDecoder, step: DecodeStep) -> WemError {
+    let defect = matches!(&step.outcome, Err(DecoderError::Internal(_)));
+    if !defect {
+        if let Some(header) = step.header.as_ref() {
+            let code = unsafe {
+                (state.header_cb)(
+                    header.channels,
+                    header.sample_rate,
+                    header.setup_packet.as_ptr(),
+                    header.setup_packet.len(),
+                    state.user_data,
+                )
+            };
+            if code != WemError::Ok {
+                state.failed = true;
+                return code;
+            }
+        }
+        if !step.pcm.is_empty() {
+            if step.channels == 0 {
+                // PCM without a geometry cannot be delivered, and delivering
+                // it wrongly would be worse than reporting the invariant.
+                state.failed = true;
+                return WemError::Internal;
+            }
+            let channels = step.channels as usize;
+            let frames = step.pcm.len() / channels;
+            let mut offset = 0usize;
+            while offset < frames {
+                let block = (frames - offset).min(PCM_BLOCK_FRAMES);
+                let code = unsafe {
+                    (state.pcm_cb)(
+                        step.pcm[offset * channels..].as_ptr(),
+                        block,
+                        state.user_data,
+                    )
+                };
+                if code != WemError::Ok {
+                    state.failed = true;
+                    return code;
+                }
+                offset += block;
+            }
+        }
+    }
+    match step.outcome {
+        Ok(()) => WemError::Ok,
+        Err(error) => {
+            let code = WemError::from_decoder(&error);
+            if code == WemError::Internal {
+                state.failed = true;
+            }
+            code
+        }
+    }
+}
+
+/// Open a streaming decode session (include/wem.h `wem_decoder_new`).
+///
+/// Lifecycle: `wem_decoder_new` (Init) -> `wem_decoder_push`* ->
+/// `wem_decoder_finish` (Finish) -> `wem_decoder_free`. There is no profile
+/// argument: a WEM is self-describing, and the geometry arrives through
+/// `header_cb` before any PCM. One-shot like `wem_session_new`: a caught panic
+/// here hands out no handle, so the caller may call again.
+///
+/// Both callbacks are required, and a NULL for either is a malformed call
+/// (include/wem.h section 5): the PCM cannot be interpreted without the
+/// geometry, and the geometry is available nowhere else in the output.
+///
+/// `*out_decoder` is written on every exit: the handle on `WEM_OK`, NULL on
+/// every failure (include/wem.h, "MEMORY OWNERSHIP"). The one call that
+/// cannot write is a NULL `out_decoder` itself, which is rejected.
+///
+/// # Safety
+///
+/// - `header_cb` and `pcm_cb` must be live callbacks (or NULL: rejected);
+/// - `out_decoder` must not be NULL;
+/// - the returned decoder is owned by the calling thread (single-threaded
+///   lifetime; never share it).
+#[no_mangle]
+pub unsafe extern "C" fn wem_decoder_new(
+    header_cb: Option<WemHeaderFn>,
+    pcm_cb: Option<WemPcmFn>,
+    user_data: *mut c_void,
+    out_decoder: *mut *mut WemDecoder,
+) -> WemError {
+    if out_decoder.is_null() {
+        return WemError::StateError;
+    }
+    unsafe {
+        *out_decoder = std::ptr::null_mut();
+    }
+    let (Some(header_cb), Some(pcm_cb)) = (header_cb, pcm_cb) else {
+        return WemError::StateError;
+    };
+    let outcome = guard(PanicScope::OneShot, move || {
+        Ok(WemDecoder {
+            session: DecodeSession::new(),
+            header_cb,
+            pcm_cb,
+            user_data,
+            failed: false,
+        })
+    });
+    match outcome.outcome {
+        Ok(decoder) => {
+            unsafe {
+                *out_decoder = Box::into_raw(Box::new(decoder));
+            }
+            WemError::Ok
+        }
+        Err(code) => code,
+    }
+}
+
+/// Push one chunk of WEM bytes (include/wem.h `wem_decoder_push`) and deliver
+/// the header announcement (at most once per session) and the PCM the packets
+/// in this chunk completed.
+///
+/// Chunk boundaries never affect the emitted samples; an empty chunk is a
+/// no-op. Terminal on `WEM_ERR_INTERNAL`; any other rejection leaves the
+/// decoder usable, with the bytes it could not read still pending, so the
+/// next call reports the same rejection again rather than skipping them.
+///
+/// # Safety
+///
+/// - `decoder` must be NULL or a live handle owned by this thread (rejected
+///   when NULL or terminal);
+/// - `data` must hold at least `len` bytes for the duration of the call (a
+///   NULL `data` with `len > 0` is rejected, not dereferenced);
+/// - the callbacks must be callable from this thread.
+#[no_mangle]
+pub unsafe extern "C" fn wem_decoder_push(
+    decoder: *mut WemDecoder,
+    data: *const u8,
+    len: usize,
+) -> WemError {
+    if decoder.is_null() {
+        return WemError::StateError;
+    }
+    if len > 0 && data.is_null() {
+        return WemError::StateError;
+    }
+    let bytes = if len > 0 {
+        unsafe { std::slice::from_raw_parts(data, len) }
+    } else {
+        &[] as &[u8]
+    };
+    let guarded = {
+        let state = unsafe { &mut *decoder };
+        if state.failed {
+            return WemError::StateError;
+        }
+        guard(
+            PanicScope::Handle,
+            AssertUnwindSafe(move || Ok(state.session.push_bytes(bytes))),
+        )
+    };
+    match guarded.outcome {
+        Ok(step) => deliver_decode_step(unsafe { &mut *decoder }, step),
+        Err(code) => {
+            if guarded.handle_dead {
+                unsafe {
+                    (*decoder).failed = true;
+                }
+            }
+            code
+        }
+    }
+}
+
+/// Mark the end of the WEM bytes and complete the decode (include/wem.h
+/// `wem_decoder_finish`), delivering the last frames through `pcm_cb`.
+/// Terminal: after this call (regardless of outcome) the decoder must be
+/// released, not used. On `WEM_OK` the session has delivered exactly the
+/// container's `dw_total_pcm_frames` frames. There is no terminal summary and
+/// no out-parameter: the frame count is the container's own declaration.
+///
+/// # Safety
+///
+/// - `decoder` must be NULL or a live handle owned by this thread;
+/// - the callbacks must be callable from this thread.
+#[no_mangle]
+pub unsafe extern "C" fn wem_decoder_finish(decoder: *mut WemDecoder) -> WemError {
+    if decoder.is_null() {
+        return WemError::StateError;
+    }
+    let guarded = {
+        let state = unsafe { &mut *decoder };
+        if state.failed {
+            return WemError::StateError;
+        }
+        guard(
+            PanicScope::Handle,
+            AssertUnwindSafe(move || Ok(state.session.finish())),
+        )
+    };
+    let code = match guarded.outcome {
+        Ok(step) => deliver_decode_step(unsafe { &mut *decoder }, step),
+        Err(code) => code,
+    };
+    // Terminal whatever it returns, like the encoder's `finish`.
+    unsafe {
+        (*decoder).failed = true;
+    }
+    code
+}
+
+/// Release one decode session (include/wem.h `wem_decoder_free`); NULL is a
+/// no-op, safe before or after `finish`, and safe on a decoder a defect has
+/// marked dead.
+///
+/// # Safety
+///
+/// `decoder` must be NULL or a live handle owned by this thread; it must not
+/// have been released.
+#[no_mangle]
+pub unsafe extern "C" fn wem_decoder_free(decoder: *mut WemDecoder) {
+    if !decoder.is_null() {
+        unsafe {
+            drop(Box::from_raw(decoder));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -827,6 +1145,140 @@ mod tests {
         assert_eq!(WemError::InputTooShort as u32, 4);
         assert_eq!(WemError::FormatUnsupported as u32, 5);
         assert_eq!(WemError::Internal as u32, 6);
+        assert_eq!(WemError::InputMalformed as u32, 7);
+    }
+
+    /// Every `DecoderError` class maps to the code include/wem.h section 5
+    /// documents for it. `WemError::from_decoder` matches without a `_` arm,
+    /// so a new variant cannot be added without deciding its class; this test
+    /// pins the decision for every variant this crate can construct.
+    ///
+    /// `DecoderError::Floor1` and the `Setup`/`Packet` variants that wrap a
+    /// `wem-vorbis` type are not constructible here — `wem-vorbis` is not a
+    /// dependency of this crate, and adding one is a manifest change this lane
+    /// does not own. `Setup` is still covered, produced by the kernel below;
+    /// `Floor1`'s class rests on the exhaustive match.
+    #[test]
+    fn decoder_errors_map_to_the_documented_classes() {
+        use wem_container::error::ContainerError;
+        use wem_core::error::InternalError;
+        use wem_profiles::error::ProfileError;
+
+        let cases = [
+            (
+                DecoderError::Container(ContainerError::NotRiff),
+                WemError::InputMalformed,
+            ),
+            (
+                DecoderError::SetupPadding {
+                    end_bit: 1,
+                    total_bits: 2,
+                    pad_bits: 1,
+                    pad_value: 1,
+                },
+                WemError::InputMalformed,
+            ),
+            (
+                DecoderError::Truncated {
+                    stream_offset: 4,
+                    need: "a packet payload",
+                },
+                WemError::InputMalformed,
+            ),
+            (
+                DecoderError::MissingSetup { data_size: 0 },
+                WemError::InputMalformed,
+            ),
+            (
+                DecoderError::BlockSizeMismatch {
+                    container: [256, 2048],
+                    profile: [256, 1024],
+                },
+                WemError::InputMalformed,
+            ),
+            (
+                DecoderError::FrameCountMismatch {
+                    declared: 10,
+                    synthesized: 9,
+                },
+                WemError::InputMalformed,
+            ),
+            (
+                DecoderError::ResidueBitstreamDefect {
+                    index: 0,
+                    submap: 0,
+                    bit_position: 8,
+                    packet_bits: 16,
+                },
+                WemError::InputMalformed,
+            ),
+            (
+                DecoderError::NotWwiseVorbis { format_tag: 1 },
+                WemError::FormatUnsupported,
+            ),
+            (
+                DecoderError::ConfigurationUnsupported {
+                    channels: 3,
+                    sample_rate: 44_100,
+                    source: ProfileError::SelectionGeometryNonPositive,
+                },
+                WemError::FormatUnsupported,
+            ),
+            (
+                DecoderError::SetupNotCarried {
+                    container_len: 1,
+                    carried_len: 2,
+                    first_difference: Some(0),
+                },
+                WemError::FormatUnsupported,
+            ),
+            (
+                DecoderError::StateError {
+                    message: "x".into(),
+                },
+                WemError::StateError,
+            ),
+            (
+                DecoderError::Internal(InternalError::Invariant { message: "x" }),
+                WemError::Internal,
+            ),
+        ];
+        for (error, expected) in cases {
+            assert_eq!(
+                WemError::from_decoder(&error),
+                expected,
+                "{error} must map to {expected:?}"
+            );
+        }
+
+        // The `Setup` class, produced by the kernel rather than constructed
+        // here: a container whose setup packet is empty parses its framing and
+        // then fails inside the setup packet.
+        let encoder = Encoder::new(
+            WwiseProfile::new(WwiseVersion::Wwise2013, 6, 44_100).expect("installed geometry"),
+        )
+        .expect("the profile resolves");
+        let mut fields = *encoder.container_plan().fmt();
+        fields.dw_seek_table_size = 0;
+        let container = wem_container::riff::build_riff(
+            &[
+                (b"fmt " as &[u8], fields.pack().as_slice()),
+                (b"data" as &[u8], [0u8, 0u8].as_slice()),
+            ],
+            wem_container::riff::Endian::Little,
+            false,
+        )
+        .expect("the container assembles");
+        let mut session = DecodeSession::new();
+        let error = session
+            .push_bytes(&container)
+            .outcome
+            .expect_err("an empty setup packet is refused");
+        assert!(
+            matches!(error, DecoderError::Setup { .. }),
+            "expected a setup parse failure, got {error}"
+        );
+        assert_eq!(WemError::from_decoder(&error), WemError::InputMalformed);
     }
 
     #[test]

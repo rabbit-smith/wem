@@ -14,6 +14,7 @@
  *   2. ERROR CODES
  *   3. MEMORY OWNERSHIP
  *   4. CROSS-LANGUAGE INTEGRATION RULES
+ *   5. DECODE
  *
  * Evolution: WemError values are stable across all revisions — new
  * codes are appended, never renumbered or reused. Lifecycle semantics
@@ -37,6 +38,13 @@
  * bytes it already holds; neither is a fact the library observes. A
  * conforming revision 2 client must be recompiled against this header;
  * WemError values were not renumbered and remain stable.
+ *
+ * The decode surface (section 5) is an *additive* extension, and the ABI
+ * revision is unchanged: it introduces four new symbols, two new callback
+ * types and one new WemError value, renumbers and removes nothing, and leaves
+ * every existing declaration and lifecycle rule exactly as it was. A
+ * conforming client of revision 3 keeps working without recompilation, which
+ * is the test for whether a revision is needed at all.
  */
 #ifndef WEM_H
 #define WEM_H
@@ -137,6 +145,7 @@ typedef struct WemProfile {
 /* Opaque handles (never dereferenced by clients). */
 typedef struct WemEncoder WemEncoder;
 typedef struct WemSession WemSession;
+typedef struct WemDecoder WemDecoder;
 
 /*
  * 2. ERROR CODES
@@ -157,6 +166,19 @@ typedef struct WemSession WemSession;
  *                                 caller's input (a kernel panic can
  *                                 never unwind across this boundary; it
  *                                 surfaces as this code — see "Panics")
+ *   WEM_ERR_INPUT_MALFORMED     — the input's own bytes do not parse: the
+ *                                 container framing, the setup packet or an
+ *                                 audio packet, a block-size pair that
+ *                                 disagrees with the resolved
+ *                                 configuration, or a packet stream that
+ *                                 does not cover the frame count the
+ *                                 container declares (section 5)
+ *
+ * WEM_ERR_INPUT_MALFORMED is the decode surface's malformed-input class and
+ * is never returned by an encode entry. It is the counterpart of the split
+ * section 5 states: whether the *parsing* succeeded decides this code, while
+ * a container that parses but names a configuration this build does not carry
+ * is WEM_ERR_FORMAT_UNSUPPORTED.
  *
  * One code, three situations: WEM_ERR_STATE_ERROR covers
  *
@@ -197,7 +219,8 @@ typedef enum WemError {
   WEM_ERR_GEOMETRY_MISMATCH = 3,
   WEM_ERR_INPUT_TOO_SHORT = 4,
   WEM_ERR_FORMAT_UNSUPPORTED = 5,
-  WEM_ERR_INTERNAL = 6
+  WEM_ERR_INTERNAL = 6,
+  WEM_ERR_INPUT_MALFORMED = 7
 } WemError;
 
 /*
@@ -342,6 +365,103 @@ void wem_session_free(WemSession *session);
  *  - Shells must not embed numerics or profile logic: byte-exactness is
  *    defined by the kernel and checked by the parity suites.
  */
+
+/*
+ * 5. DECODE
+ *
+ * The mirror of section 1 with the data direction reversed: the kernel is
+ * handed the bytes of a WEM and hands back PCM through a second callback.
+ *
+ *  (c) DECODING:
+ *      wem_decoder_new(...)    — Init: open on the caller's two callbacks
+ *      wem_decoder_push(...)   — chunk*: zero or more WEM byte chunks
+ *      wem_decoder_finish(...) — Finish: complete the decode
+ *      wem_decoder_free(...)   — release the handle
+ *
+ *  Streaming rules (the encoder's, with the direction reversed):
+ *   - Exactly one Init, zero or more chunks, exactly one Finish. There is no
+ *     profile argument and no selection: the WEM is self-describing, and the
+ *     configuration is resolved from the container's own geometry. A
+ *     container whose setup packet is not the one this build carries for that
+ *     geometry is rejected — a WEM from another Wwise generation is one of
+ *     those, which is what "Wwise 2013.2" means on this surface. There is no
+ *     version field in the container to test.
+ *   - header_cb fires exactly once per session, before any pcm_cb call, and
+ *     carries the geometry (channels, sample rate) plus the setup packet this
+ *     revision parsed. Both callbacks are required: the PCM cannot be
+ *     interpreted without the geometry, and the geometry is available nowhere
+ *     else in the output, so a NULL header callback could only ever hide the
+ *     caller's mistake — unlike the encoder's `packet_cb`, which may be NULL
+ *     because the container `write_cb` delivers is a superset of it.
+ *   - pcm_cb receives interleaved f32 samples at +-1.0 full scale, in bounded
+ *     blocks. Output sample i is the encoder's input sample i, and a session
+ *     that finishes with WEM_OK has delivered exactly `dw_total_pcm_frames`
+ *     frames — never more, and never a short decode reported as a complete
+ *     one. A session that is refused part way through has delivered a prefix
+ *     of them, and says so with its code.
+ *   - Chunk boundaries never affect the emitted samples: any chunking of the
+ *     same WEM bytes emits the same samples. An empty chunk is a no-op.
+ *   - A push that reports any code but WEM_ERR_INTERNAL leaves the handle
+ *     usable, exactly as a rejection does for the encoder: the bytes it could
+ *     not read stay pending, the frames the packets before them completed are
+ *     delivered through the callbacks, and the same rejection is reported
+ *     again by the next call. Nothing is skipped and nothing is silently
+ *     truncated.
+ *   - WEM_ERR_INTERNAL is terminal for the handle it ran in, as in section 1.
+ *   - A callback returning anything other than WEM_OK aborts the decode: the
+ *     call returns that code and the handle is terminal.
+ *   - finish() is terminal regardless of its outcome: after it (success or
+ *     error) the decoder must be freed, not reused. On WEM_OK the session has
+ *     delivered exactly `dw_total_pcm_frames` frames.
+ *   - A decode session has single-threaded ownership, like WemSession.
+ *
+ *  What is rejected, and with which code:
+ *   - bytes that are not a WEM this revision's container reader parses, a
+ *     setup packet that does not parse, an audio packet that does not parse,
+ *     a container whose block sizes disagree with the resolved profile's, a
+ *     packet stream that does not cover `dw_total_pcm_frames`, and a residue
+ *     that stops on a codeword its codebook does not assign (a bitstream
+ *     defect, never an early end accepted in silence) —
+ *     WEM_ERR_INPUT_MALFORMED;
+ *   - a container that parses cleanly but is not a Wwise Vorbis container,
+ *     names a geometry this build does not hold, or carries a setup packet
+ *     that is not the one this build holds — WEM_ERR_FORMAT_UNSUPPORTED;
+ *   - a call outside the lifecycle — WEM_ERR_STATE_ERROR;
+ *   - a defect in this library — WEM_ERR_INTERNAL.
+ *
+ *  The two callbacks are the only output path; `*out_decoder` follows
+ *  section 3 exactly (the handle on WEM_OK, NULL on every failure).
+ */
+
+/* One-time header announcement: the geometry, plus the setup packet this
+ * revision parsed (the mirror of encode's seq-0 setup delivery). Required:
+ * without it the caller cannot interpret the PCM. */
+typedef WemError (*WemHeaderCb)(uint32_t channels, uint32_t sample_rate,
+                                const uint8_t *setup, size_t setup_len,
+                                void *user_data);
+
+/* PCM delivery: interleaved f32, +-1.0 full scale, in bounded blocks. The
+ * pointer is valid only during the call; returning non-WEM_OK aborts the
+ * decode and the caller receives that code. */
+typedef WemError (*WemPcmCb)(const float *interleaved, size_t frames,
+                             void *user_data);
+
+/* Streaming decode: Init -> push* -> Finish -> free. Both callbacks are
+ * required. `*out_decoder` is written on every exit: the handle on WEM_OK,
+ * NULL on every failure (section 3). */
+WemError wem_decoder_new(WemHeaderCb header_cb, WemPcmCb pcm_cb,
+                         void *user_data, WemDecoder **out_decoder);
+/* Push one chunk of WEM bytes and deliver the header announcement (at most
+ * once) and the PCM the packets in this chunk completed. An empty chunk is a
+ * no-op. */
+WemError wem_decoder_push(WemDecoder *decoder, const uint8_t *data, size_t len);
+/* Finish: complete the decode and deliver the last frames. The return code is
+ * the whole result — no summary is handed back, because the frame count is
+ * the container's own `dw_total_pcm_frames` and what the callbacks received
+ * is what the caller counted. A success delivers exactly that many frames.
+ * Terminal: whatever it returns, the decoder is then released, not reused. */
+WemError wem_decoder_finish(WemDecoder *decoder);
+void wem_decoder_free(WemDecoder *decoder);
 
 /*
  * APPENDIX: MIGRATING FROM REVISION 2 (AND REVISION 1)
