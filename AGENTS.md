@@ -82,10 +82,12 @@ registration duties.
 Repository surfaces are phrased in project vocabulary: they say what was
 observed, never the coordinates it was observed at. The pattern sets and the
 surfaces they cover are defined once, in
-[`tests/parity/test_distribution.py`](tests/parity/test_distribution.py), and
-that suite is what enforces them. Documents under `docs/` are held to the same
-patterns but may discuss the development method, which is why a method note
-belongs there rather than in a source comment.
+[`scripts/provenance_check.py`](scripts/provenance_check.py). That module is the
+single definition: the suite at `tests/parity/test_distribution.py` consumes it,
+and the pre-commit hook runs its `--staged` audit over the staged content.
+Documents under `docs/` are held to the same patterns but may discuss the
+development method, which is why a method note belongs there rather than in a
+source comment.
 
 `corpus/` and `local/` are untracked and are never published: `corpus/` holds
 unverified extraction and development material, `local/` holds working material

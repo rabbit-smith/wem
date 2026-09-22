@@ -39,7 +39,8 @@ disassembler symbol names, absolute addresses, module or section names, tool
 names, or internal report references — not in comments, test names, docstrings,
 commit messages or documents. Say what a value is and how it was established,
 not where it was seen. The cleanliness suite enforces the machine-checkable part
-of this (`tests/parity/test_distribution.py`); the rest is the author's
+of this (`scripts/provenance_check.py`, which the pre-commit hook runs over the
+staged content); the rest is the author's
 responsibility.
 
 ## 5. Mechanics

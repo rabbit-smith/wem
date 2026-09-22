@@ -53,8 +53,8 @@ Package text carries no development-process provenance: no disassembler symbol
 names or image addresses, no binary module or section labels, no machine-local
 absolute paths, no internal lane or report references. The patterns are defined
 once, in
-[`../../tests/parity/test_distribution.py`](../../tests/parity/test_distribution.py);
-read them there rather than restating the list here, because a restated list is
+[`../../scripts/provenance_check.py`](../../scripts/provenance_check.py); read
+them there rather than restating the list here, because a restated list is
 itself a record of what was removed.
 
 Use `recording`/`record`, `representative`, `sample`, `site`, `reference`, and
