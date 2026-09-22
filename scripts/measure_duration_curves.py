@@ -46,13 +46,13 @@ Honesty rules this script implements
 
 Usage::
 
-    # the whole matrix on the default (parallel) release build
+    # the whole matrix on the opt-in (parallel) release build
     PATH="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH" \\
         PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference \\
         .venv/bin/python scripts/measure_duration_curves.py
 
-    # the scalar split at the longest duration
-    ... scripts/measure_duration_curves.py --no-default-features --tag scalar \\
+    # the scalar split at the longest duration: the default build is scalar
+    ... scripts/measure_duration_curves.py --tag scalar \\
         --durations 300 --paths batch,stream --reps 3
 
     # re-render this report from an existing JSON result
@@ -124,8 +124,12 @@ def cargo_env() -> dict[str, str]:
     return env
 
 
-def build_test_binary(cargo: str, test_name: str, no_default_features: bool) -> Path:
-    """Build one release test target and return its executable path."""
+def build_test_binary(cargo: str, test_name: str, parallel: bool) -> Path:
+    """Build one release test target and return its executable path.
+
+    ``parallel`` opts into the kernel's internal parallelism; the default build
+    is scalar, so leaving it false measures the library's own configuration.
+    """
     command = [
         cargo,
         "test",
@@ -137,8 +141,8 @@ def build_test_binary(cargo: str, test_name: str, no_default_features: bool) -> 
         "--no-run",
         "--message-format=json",
     ]
-    if no_default_features:
-        command.append("--no-default-features")
+    if parallel:
+        command += ["--features", "parallel"]
     result = subprocess.run(
         command, cwd=CRATES, env=cargo_env(), capture_output=True, text=True
     )
@@ -1109,7 +1113,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--output-samples", type=int, default=2, help="children per output-split column"
     )
-    parser.add_argument("--no-default-features", action="store_true")
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        help="build the opt-in `parallel` configuration (the default build is scalar)",
+    )
     parser.add_argument("--tag", default=None, help="output label (default: parallel|scalar)")
     parser.add_argument("--json", type=Path, default=None, help="result JSON path")
     parser.add_argument(
@@ -1131,7 +1139,7 @@ def main(argv: list[str] | None = None) -> int:
         int(value) for value in args.reference_durations.split(",") if value
     ]
     output_durations = [int(value) for value in args.output_durations.split(",") if value]
-    tag = args.tag or ("scalar" if args.no_default_features else "parallel")
+    tag = args.tag or ("parallel" if args.parallel else "scalar")
     json_path = args.json or (args.scratch / f"duration-curves-{tag}.json")
 
     if args.report_only:
@@ -1165,10 +1173,10 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(2)
 
     print("building the release measurement harnesses", file=sys.stderr, flush=True)
-    binary = build_test_binary(args.cargo, "duration_curves", args.no_default_features)
+    binary = build_test_binary(args.cargo, "duration_curves", args.parallel)
     stage_binary = None
-    if not args.skip_stages and not args.no_default_features:
-        stage_binary = build_test_binary(args.cargo, "stage_timings", False)
+    if not args.skip_stages and args.parallel:
+        stage_binary = build_test_binary(args.cargo, "stage_timings", True)
 
     identity = machine_identity()
     print("machine identity:", file=sys.stderr, flush=True)
@@ -1203,7 +1211,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
 
     output_splits: list[dict[str, object]] = []
-    if output_durations and not args.no_default_features:
+    if output_durations and args.parallel:
         output_splits = run_output_split(
             binary,
             args.inputs,
@@ -1215,7 +1223,7 @@ def main(argv: list[str] | None = None) -> int:
 
     payload = {
         "tag": tag,
-        "no_default_features": args.no_default_features,
+        "parallel": args.parallel,
         "identity": identity,
         "durations": durations,
         "geometries": [list(entry) for entry in geometries],

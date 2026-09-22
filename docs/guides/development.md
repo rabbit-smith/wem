@@ -76,7 +76,8 @@ to fix the code or the test rather than to re-record the expectation.
 | `cargo test -p wem-container --test container_codec` | The native container builder against the oracle's, byte for byte, from one live packet stream, plus the degenerate payloads it must refuse with a typed error |
 | `make 2ch-stress`, `make 2ch-long` | The 2ch stress corpus and the long-run cross-implementation comparison |
 | `make fuzz-parity` | Native vs oracle parity under randomized chunking and quality; Python unit, integration and cross-implementation suites run in `make test-fast` |
-| `cargo test --workspace` | Rust kernel, C ABI and shell suites, including the geometry-materializer parity suites |
+| `cargo test --workspace` | Rust kernel, C ABI and shell suites, including the geometry-materializer parity suites — in the default (scalar) configuration |
+| `make rust-test` | The same suites, then a second leg with `--features parallel`: the kernel's internal parallelism is opt-in, so the default run alone would leave that configuration unexercised |
 | `make wheel-smoke` | Installed-wheel inventory (facade + native engine, no profile data) and one real encode |
 | `make wasm-build` | wasm-pack builds both shell packages: `js/pkg` (web) and `js/pkg-node` (nodejs) |
 | `make wasm-test` | Builds both packages, then runs `js/test-node.mjs`: the shell's bytes against `tests/fixtures/reference.wem` (one-shot, three chunkings) plus the selection and error-code mapping; with no package built it fails and prints the build command |

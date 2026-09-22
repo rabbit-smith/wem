@@ -41,7 +41,11 @@ to be; the *script* is deterministic in its matrix, its order and its output
 path.
 
 Usage:
-  cargo build --release -p wem-core
+  # the opt-in configuration: the CLI requires the feature, because it encodes
+  # one file at a time (crates/wem-core/Cargo.toml)
+  cargo build --release -p wem-core --features parallel
+  # the scalar configuration is the library default and has no CLI of its own
+  # any more: build a library-default binary and pass it with --scalar-bin
   cargo build --release -p wem-core --no-default-features \\
       --target-dir target/no-parallel
   python3 scripts/measure_concurrency.py                 # writes the JSON
@@ -97,7 +101,10 @@ DEFAULT_SCALAR_BIN = (
     REPO / "crates" / "target" / "no-parallel" / "release" / "wwise-wem"
 )
 
-# `parallel` on is the shipping default; `scalar` is `--no-default-features`.
+# `parallel` on is the configuration our CLI requires (`--features parallel`);
+# `scalar` is the library default, which no longer has a CLI of its own — the
+# binary for it is built with `--no-default-features` from a library-default
+# source (the CLI target requires the feature, so cargo will not emit it).
 CONFIGS = ("parallel", "scalar")
 
 DEFAULT_N_VALUES = (1, 2, 3, 4, 6, 8, 16)
@@ -390,10 +397,14 @@ def run_matrix(args: argparse.Namespace) -> dict[str, object]:
         if not path.is_file():
             raise SystemExit(
                 f"missing {config} binary {path}\n"
-                "build it with:\n"
-                "  cargo build --release -p wem-core\n"
+                "the parallel arm is the CLI, which requires the opt-in "
+                "feature:\n"
+                "  cargo build --release -p wem-core --features parallel\n"
+                "the scalar arm is the library default and has no CLI; build "
+                "the source you measure with\n"
                 "  cargo build --release -p wem-core --no-default-features "
-                "--target-dir target/no-parallel"
+                "--target-dir target/no-parallel\n"
+                "and pass it with --scalar-bin"
             )
 
     divisor = maxrss_unit_divisor()

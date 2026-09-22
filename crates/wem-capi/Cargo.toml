@@ -20,6 +20,10 @@ edition.workspace = true
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
+# Default features: like the wheel, this is a library loaded into a host
+# application's process, and a host that links a prebuilt archive cannot change
+# a compile-time feature — so it takes the scalar configuration and imposes no
+# threads (docs/reference/standards.md, "Portability floor").
 wem-core = { workspace = true }
 wem-profiles = { workspace = true }
 

@@ -29,6 +29,19 @@ environment, about 12 s for the install including the Rust build, and about a
 second to encode the 1.7 MB fixture — 15–20 s end to end. A build against an
 empty cargo cache also downloads and compiles the dependencies.
 
+**That encode is the scalar configuration, and the numbers below are the encode
+stage only.** The package and the wheel impose no threads — the kernel's
+`parallel` feature is opt-in, because a wheel's user cannot change a compile-time
+feature — so the fixture's 3.2 s of audio take 0.13–0.14 s of encode time on this
+machine against 0.11 s with the feature on (both measured under a load average
+between 60 and 85, where CPU carries the comparison: the threaded build spends
+about 1.5× the CPU on this fixture to finish sooner). Our own Rust CLI is the
+binary that enables the feature explicitly, because it encodes one file at a
+time — `cargo build --release -p wem-core --features parallel`. The
+configuration, the cap on the workers and the deviation from the ecosystem's
+environment-variable lever are in
+[`docs/reference/standards.md`](docs/reference/standards.md#portability-floor).
+
 A built wheel is the fast route and needs no toolchain at all: the kernel is
 compiled into the package, so installing the wheel in a fresh virtual
 environment and running the same command takes about three seconds in total

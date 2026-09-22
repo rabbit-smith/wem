@@ -34,6 +34,12 @@ pyo3 = { version = "0.25.1", features = ["abi3-py310", "auto-initialize"] }
 # wem-core for Encoder / StreamSession / error classes. Profile selection is
 # the structured one, resolved against the bundle compiled into the kernel.
 wem-core = { path = "../wem-core" }
+# ^ Default features, deliberately: the wheel is the library, and a wheel's user
+#   cannot change a compile-time feature — so the wheel ships the scalar
+#   configuration and this binding takes no threads it cannot hand back. The
+#   caller's cap (`encoder::EncoderOptions::max_channel_pool_workers`) is a Rust
+#   surface because a scalar build has no pool to cap. See
+#   docs/reference/standards.md ("Portability floor").
 
 [dev-dependencies]
 # Kernel container reader, used by tests to derive expected packet
