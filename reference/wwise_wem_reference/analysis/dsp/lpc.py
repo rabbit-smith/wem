@@ -2,12 +2,9 @@
 """Linear-prediction helpers for analysis-stream boundary synthesis."""
 from __future__ import annotations
 
-import struct
 from typing import Sequence
 
-
-def _f32(value: float) -> float:
-    return struct.unpack("<f", struct.pack("<f", float(value)))[0]
+from ..._f32 import _f32
 
 
 def wwise_lpc_from_data(

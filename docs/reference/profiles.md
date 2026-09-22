@@ -119,12 +119,15 @@ the frozen domain fails loudly instead of consulting the host libm.
 Two named entries (`floor_fit` dB quantization and the `residue` classification
 fallback) do not fire for the installed exact profiles. Should a future geometry
 activate them, ports must pin a reference double `log`/`log10` implementation and
-verify bit equality against the per-site records under
-`tests/data/stage-records/transcendental/`.
+verify bit equality at the call site the way
+`tests/unit/profiles/test_frozen_tables.py` does it for today's four enumerable
+sites: drive a real encode with the site recorder on and assert what the live
+path actually calls. That is also what makes the frozen domain the encoder's
+only source — the sites fire zero times at run time.
 
-Regenerate the recorded payload with `scripts/generate_frozen_tables.py` (it
-writes into the untracked `corpus/profiles/` tree), which cross-checks the live
-domain recorded by `scripts/record_tmath.py`, then recompile it into the
-carrier with `scripts/generate_profile_code.py`. Run `make wem-bytes` and the
-per-frame parity suites afterwards: the reference WEM bytes and every per-frame
-value must come out unchanged.
+Regenerate the payload with `scripts/generate_frozen_tables.py` (it derives the
+domain from the recorded profile manifest and writes into the untracked
+`corpus/profiles/` tree), then recompile it into the carrier with
+`scripts/generate_profile_code.py`. Run `make wem-bytes` and the per-frame
+parity suites afterwards: the reference WEM bytes and every per-frame value must
+come out unchanged.

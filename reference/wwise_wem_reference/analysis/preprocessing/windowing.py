@@ -117,7 +117,8 @@ def iter_planned_pcm_windows(
         wwise_lpc_from_data,
         wwise_lpc_predict,
     )
-    from ..dsp.transform import _f32, apply_vorbis_window
+    from ..._f32 import _f32
+    from ..dsp.transform import apply_vorbis_window
 
     channels = [[_f32(value) for value in channel] for channel in pcm]
     primes = [wwise_first_frame_lpc_prime(channel) for channel in channels]

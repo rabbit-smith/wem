@@ -4,7 +4,7 @@
 //! orchestration that ties the transform, remap, seed, and envelope stages into
 //! the per-frame surfaces used by the recorded stage dump.
 
-use crate::config::{AnalysisError, AnalysisProfileResources, FrozenMathTables, MdctLook};
+use crate::config::{f32_of, AnalysisError, AnalysisProfileResources, FrozenMathTables, MdctLook};
 
 use crate::dsp::spectrum::{wwise_log_curve, wwise_mdct_log_curve};
 use crate::dsp::transform::mdct_forward;
@@ -134,7 +134,8 @@ pub fn analyze_long_frame(
     // cross-channel shared mutable state, `f32_of` is a pure, order-free
     // rounding, and rayon preserves channel order in collect, so the
     // results are bit-identical to the sequential loop. Guarded end-to-end
-    // by the complete_wem_bytes / stage_frames / vorbis_oracle_values byte-parity tests.
+    // by the complete_wem_bytes / frame_pipeline_parity / vorbis_oracle_values
+    // byte-parity tests.
     //
     // Without `parallel` (threadless targets such as wasm32), run the same
     // work sequentially.
@@ -350,7 +351,7 @@ pub fn analyze_short_frame(
     let mut raw_mdct: Vec<Vec<f64>> = Vec::with_capacity(windowed_frames.len());
     let mut fft: Vec<Vec<f64>> = Vec::with_capacity(windowed_frames.len());
     for frame in windowed_frames {
-        let f32_frame: Vec<f64> = frame.iter().map(|value| f32_of_local(*value)).collect();
+        let f32_frame: Vec<f64> = frame.iter().map(|value| f32_of(*value)).collect();
         let coeffs = mdct_forward(mdct_look, &f32_frame)?;
         let raw = wwise_mdct_log_curve(&coeffs);
         let spectrum = wwise_log_curve(&f32_frame, frozen)?;
@@ -467,7 +468,7 @@ fn transform_one_channel(
 ) -> Result<LongChannelTransform, AnalysisError> {
     // Single f32-rounded copy reused by MDCT and FFT; rounding is idempotent,
     // so this is bit-identical to rounding twice.
-    let f32_frame: Vec<f64> = frame.iter().map(|value| f32_of_local(*value)).collect();
+    let f32_frame: Vec<f64> = frame.iter().map(|value| f32_of(*value)).collect();
     let coeffs = mdct_forward(mdct_look, &f32_frame)?;
     let raw = wwise_mdct_log_curve(&coeffs);
     let spectrum = wwise_log_curve(&f32_frame, frozen)?;
@@ -495,18 +496,13 @@ where
     }
 }
 
-/// Round at the algorithm's float32 storage boundary.
-fn f32_of_local(value: f64) -> f64 {
-    crate::config::f32_of(value)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn f32_of_roundtrip_is_identity_for_representable() {
-        assert_eq!(f32_of_local(1.5), 1.5);
-        assert_eq!(f32_of_local(0.0), 0.0);
+        assert_eq!(f32_of(1.5), 1.5);
+        assert_eq!(f32_of(0.0), 0.0);
     }
 }

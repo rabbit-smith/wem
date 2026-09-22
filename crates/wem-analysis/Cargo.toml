@@ -11,7 +11,8 @@ edition.workspace = true
 # threadless target (e.g. wasm32-unknown-unknown) stays pure-scalar unless a
 # consumer explicitly opts in. Safe: each channel reads only its own slice +
 # immutable looks; cross-frame state updates stay strictly sequential. Bit-
-# exact parity is backed by the complete_wem_bytes / stage_frames / vorbis_oracle_values tests.
+# exact parity is backed by the complete_wem_bytes / frame_pipeline_parity /
+# vorbis_oracle_values tests.
 parallel = ["dep:rayon"]
 
 [dependencies]

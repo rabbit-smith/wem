@@ -17,8 +17,8 @@ registration duties.
 ## Verification ladder (reuse before rerunning)
 
 1. Smallest executable target first: one `unittest`/`cargo test` case or module.
-2. Then the affected suite (`tests/parity/test_stage_pipeline.py` / one crate test /
-   `tests/parity/test_frame_pipeline_parity.py`).
+2. Then the affected suite (one crate test, `tests/parity/` module, or
+   `crates/wem-core/tests/frame_pipeline_parity.rs`).
 3. Full `make test` / `cargo test --workspace` only at phase boundaries or when
    the change touches shared state, configuration, lockfiles, or generated assets.
 4. A passing suite is reused — do not re-run it per task or per agent; rerun only

@@ -19,25 +19,29 @@ the reverse.
 
 A comparison runs two implementations against each other (the oracle against the
 kernel, the C ABI against the kernel, the built wheel against its allowlist), or
-a run against a checked asset. A recorded expectation is not a comparison: when
-it disagrees with a run it hides the change behind a re-record step.
+a run against an external reference (the paired build's WEM for the fixture and
+for each corpus case). A recorded expectation is not a comparison: when it
+disagrees with a run it hides the change behind a re-record step.
 
 When a comparison reports a difference, the difference says what moved: either
 the code is wrong, or the expected bytes have changed as part of the work. Those
 are two different changes, and a case is never satisfied by re-recording it.
 
-Every stage lands with its comparison against the checked per-frame records
-(`tests/data/stage-records/`): a SHA-256 per frame and stage for all 205 frames,
-and raw little-endian dumps for the 28 representative frames. The diff names the
-first mismatching frame index, stage, channel and bin and prints both words; a
-stage is not done until it comes back zero.
+Every stage lands with its comparison against the oracle's live per-frame
+values (`crates/wem-core/tests/frame_pipeline_parity.rs` for the crate surfaces,
+`tests/parity/test_frame_pipeline_parity.py` through the shipped binding): both
+implementations run at test time over all 205 frames of the fixture, and every
+float32 word of the eight analysis stages, every floor post, every quantized
+residue integer and every packet byte is compared value against value. The diff
+names the first mismatching frame index, stage, channel and bin and prints both
+words; a stage is not done until it comes back zero.
 
 ## What is established
 
 | Claim | Established by |
 |---|---|
 | The reference WEM for `tests/fixtures/input.wav`, byte for byte — SHA-256 `17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247` | `make wem-bytes` (`tests/whole_file/test_whole_file.py`); `crates/wem-core/tests/complete_wem_bytes.rs` |
-| Per-frame values, and per-frame × per-stage hashes with the raw dumps of the 28 representative frames | `tests/parity/test_frame_pipeline_parity.py`, `tests/parity/test_stage_pipeline.py`, `cargo test -p wem-core` |
+| Per-frame values: scheduling fields, eight analysis stages, floor posts, residue rows, packet bytes, all 205 frames | `crates/wem-core/tests/frame_pipeline_parity.rs`, `tests/parity/test_frame_pipeline_parity.py` |
 | The package-root public exports and the wheel inventory | `tests/parity/test_public_api.py`, `tests/parity/test_distribution.py`, `make wheel-smoke`; the export list is in [`public-interface.md`](public-interface.md) |
 | Geometry-materializer parity: the ported builder == the carrier's registered words == the kernel's `psy_geom*` surfaces | `tests/parity/test_geometry_materializer_parity.py`; `cargo test -p wem-analysis` |
 | The compiled profile carrier: the kernel's tables equal the recorded material, table by table | `crates/wem-profiles/src/carrier_tests.rs` (stage 1, retired with the recorded tree), `tests/parity/test_geometry_materializer_parity.py`, `cargo test -p wem-profiles` |
@@ -51,16 +55,16 @@ them are listed in
 
 - No runtime transcendental (`sin`, `cos`, `log`, `log10`, `pow`, `exp`) in an
   encoder path — in Python (`math.sin/cos/log/log10/pow/exp` outside the
-  recorder in `reference/wwise_wem_reference/_tmath.py`) or in Rust
+  site recorder in `reference/wwise_wem_reference/_tmath.py`) or in Rust
   (`f32::sin/cos/ln/log/exp/powf`). Every such value comes from profile data
   (`FrozenMathTables`, the MDCT trig bank, the static trig banks); a ported
   function that would need one is a design error, not a TODO. A new geometry
-  that needs a new transcendental input extends `scripts/record_tmath.py` →
-  `scripts/generate_frozen_tables.py` and ships it as a checksummed profile
+  that needs a new transcendental input is derived by
+  `scripts/generate_frozen_tables.py` and ships as a checksummed profile
   resource; encoder code may only table-read it.
-  `tests/unit/profiles/test_frozen_tables.py` checks the frozen domain and that
-  an encode through the installed profile fires zero live calls at the four
-  enumerable sites.
+  `tests/unit/profiles/test_frozen_tables.py` checks the frozen domain against a
+  fresh derivation and that an encode through the installed profile fires zero
+  live calls at the four enumerable sites.
 - Float semantics: values are float32 at every assignment point. The Python
   `_f32` call sites mark those points, and Rust rounds at the same statements —
   an intermediate Python keeps as float64-wrapped-float32 is not promoted or
@@ -71,11 +75,11 @@ them are listed in
   rounding.
 - Cross-frame mutable state lives in exactly one analysis session (domain model:
   *Analysis session*); everything else stays immutable.
-- Generated assets (`tests/data/stage-records/`, the frozen tables) come out
-  byte-identical when regenerated: deterministic ordering (`sort_keys`, sorted
-  file walks), explicit little-endian packing, no timestamps, absolute paths or
-  other ambient values in an artifact, and every emit/record script safe to run
-  twice with an empty diff.
+- Generated artifacts (the frozen-table payloads, the generated profile code,
+  the 2ch corpus inputs) come out byte-identical when regenerated: deterministic
+  ordering (`sort_keys`, sorted file walks), explicit little-endian packing, no
+  timestamps, absolute paths or other ambient values in an artifact, and every
+  generator script safe to run twice with an empty diff.
 
 ## Bit patterns
 
@@ -84,10 +88,12 @@ A float crosses a boundary through `to_bits`/`from_bits` or its little-endian
 bytes; a digest or a word is carried as a value or as bytes, not as text to be
 re-parsed. This includes code that carries profile data.
 
-The assets follow the same rule: values are compared as 8-hex-digit words
-(`tests/parity/oracle_frame_values.py`), and byte-level dumps are raw or
-little-endian numeric with the endianness in the file suffix (`.f32le`, `.u16le`,
-`.u8`, `.u64le`) — never text floats, never `repr`.
+The live comparison follows the same rule: the oracle's value stream carries
+every row as 8-hex-digit bit-pattern words
+(`tests/parity/oracle_frame_values.py`), so a consumer compares value against
+value and can name the first differing channel and bin — never text floats,
+never `repr`. A file that has to carry raw words names the endianness in its
+suffix.
 
 ## Layers and dependency direction
 

@@ -6,10 +6,13 @@ every value below is read from it and reshaped, never decoded from a document.
 from __future__ import annotations
 
 import dataclasses
-import struct
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
+
+# The interpolated quality-curve override is rounded through the shared float32
+# store; the local name says what is being rounded at that boundary.
+from .._f32 import _f32 as _f32_override
 
 from ..analysis.config import (
     AnalysisProfileResources,
@@ -138,11 +141,6 @@ def _apply_short_quality_overrides(
     # verify this through a dynamically-keyed **kwargs expansion on
     # dataclasses.replace.
     return dataclasses.replace(surface, **overrides)  # type: ignore[arg-type]
-
-
-def _f32_override(value: float) -> float:
-    """Round an interpolated f64 override through the f32 storage boundary."""
-    return struct.unpack("<f", struct.pack("<f", float(value)))[0]
 
 
 def _load_input_conditioner(profile: CompiledProfile) -> InputConditionerConfig | None:

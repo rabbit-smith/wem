@@ -29,7 +29,7 @@ Two consequences follow and are the whole of the change:
 | The assembled codec inputs are identical from either source | same file, `assembled_resources_are_identical_from_both_sources` |
 | The kernel's dump equals the recorded documents | `tests/parity/test_profile_artifact_bridge.py` — retired in stage 2 for the same reason; the reader itself is covered by `tests/unit/profiles/test_profile_artifact.py` |
 | Whole-file output is unchanged | `make wem-bytes`, `cargo test -p wem-core --test complete_wem_bytes` |
-| Every stage and frame is unchanged | `frame_pipeline_parity`, `stage_parity`, `vorbis_oracle_values`, `tests/parity/` |
+| Every stage and frame is unchanged | `frame_pipeline_parity`, `stage_parity` (retired later with the recorded stage assets it read; `frame_pipeline_parity` covers its frames word for word), `vorbis_oracle_values`, `tests/parity/` |
 | Regeneration is byte-stable | `python3 scripts/generate_profile_code.py` twice, empty diff; `--check` exits 0 |
 
 ## The one thing that was not a rename
@@ -179,7 +179,8 @@ rewiring, in four groups:
   `EncoderProfile` and the generation label;
 * tooling — `scripts/{decode_wem,fuzz_diff_parity,generate_frozen_tables,native_smoke,wheel_smoke}.py`;
 * test support and suites — `tests/{analysis_resource_support,codebook_resource_support,two_channel_corpus_support}.py`,
-  `tests/parity/{oracle_frame_values,stage_records_support}.py`, and about
+  `tests/parity/{oracle_frame_values,stage_records_support}.py` (`stage_records_support.py`
+  was later deleted with the recorded stage-records assets it wrote), and about
   twenty test modules, of which `tests/unit/profiles/*` (nine modules) test the
   loader itself and are the ones that must be rewritten against the artifact
   rather than merely repointed.

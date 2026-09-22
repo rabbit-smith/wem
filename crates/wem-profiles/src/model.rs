@@ -102,7 +102,7 @@ impl EncoderProfile {
             // The key names the packet: its setup identity is the digest of
             // exactly these bytes. Only the packet is stored, so the digest
             // is computed from it here rather than carried beside it.
-            if key.quality_setup_identity() != format!("sha256:{}", hex(sha256_hex(packet))) {
+            if key.quality_setup_identity() != format!("sha256:{}", hex(sha256_digest(packet))) {
                 return Err(ProfileError::ProfileSetupIdentityMismatch);
             }
         }
@@ -228,7 +228,9 @@ fn hex(digest: [u8; 32]) -> String {
         })
 }
 
-fn sha256_hex(payload: &[u8]) -> [u8; 32] {
+/// The raw 32 digest bytes. Not hex text: the four test-local `sha256_hex`
+/// helpers return the hex string, so the name says which one this is.
+fn sha256_digest(payload: &[u8]) -> [u8; 32] {
     use sha2::{Digest, Sha256};
     Sha256::digest(payload)
         .as_slice()
