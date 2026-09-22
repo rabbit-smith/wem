@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import Any
 
 import wwise_wem._core as _core
-from ..model import PcmBuffer
+from ..model import PcmBuffer, WwiseWemError
 from .models import EncodeResult, EncodeStats
 
 
@@ -127,7 +127,9 @@ class Encoder:
                 data,
             )
         except _core.WemEncoderError as error:
-            raise ValueError(str(error)) from error
+            # The kernel's stable code class travels with the rejection; the
+            # message stays the kernel's own diagnostic text.
+            raise WwiseWemError(error.code, str(error)) from error
         return self._result_from_core(result)
 
     def _encode_pcm_core(self, pcm: PcmBuffer, rows: list[list[int]]) -> EncodeResult:
@@ -141,14 +143,15 @@ class Encoder:
         try:
             result = self._backend().encode_pcm(pcm.sample_rate, rows)
         except _core.WemEncoderError as error:
-            # The public API surfaces input/configuration errors as
-            # ValueError; kernel rejections reach the user only after all
-            # Python-side validation passed, so the mapping preserves the
-            # kernel's error surface (message text is not part of it).
+            # A kernel rejection reaches the caller with its error class: the
+            # code is the stable part of the kernel's surface (the same codes
+            # every cross-language shell maps), the message is the kernel's
+            # diagnostic text, and the original error stays reachable as
+            # __cause__.  Nothing here reinterprets either of them.
             # (Backend construction can raise the same kernel error, e.g.
             # a quality request on a profile without quality-curves, or a
             # selection no installed profile satisfies.)
-            raise ValueError(str(error)) from error
+            raise WwiseWemError(error.code, str(error)) from error
         return self._result_from_core(result)
 
     def _result_from_core(self, result: Any) -> EncodeResult:

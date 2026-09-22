@@ -353,6 +353,543 @@ pub enum AnalysisError {
     StreamFeederWindowNotReady { want_from: i64, want_to: i64 },
 }
 
+impl std::fmt::Display for AnalysisError {
+    /// One message per variant: the normative rejection condition this
+    /// variant stands for, with the observed values that make it actionable.
+    /// A caller reads this text; it is never the `Debug` rendering of the
+    /// error value.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use AnalysisError::*;
+        match self {
+            UnsupportedGeometry { reason } => {
+                write!(f, "unsupported analysis geometry: {reason}")
+            }
+            MalformedField { reason } => write!(f, "malformed analysis field: {reason}"),
+            IncompleteResources { reason } => {
+                write!(f, "incomplete analysis resources: {reason}")
+            }
+            PsyLookGeometry { n, sample_rate } => write!(
+                f,
+                "psychoacoustic look geometry is unsupported for n={n} at {sample_rate}Hz"
+            ),
+            PsyLookRowLength { got, want } => write!(
+                f,
+                "psychoacoustic look row has {got} values, expected {want}"
+            ),
+            FrozenLnDomainMiss { frequency_bits } => write!(
+                f,
+                "frequency bits {frequency_bits:#010x} have no frozen ln entry"
+            ),
+            LongSeedGeometry => {
+                write!(f, "long seed table geometry disagrees with the analysis geometry")
+            }
+            LongSeedOctaveGeometry => write!(f, "long seed table octave geometry is invalid"),
+            LongSeedLabelsMalformed => write!(f, "long seed group labels are malformed"),
+            LongSeedToneBanksMalformed => {
+                write!(f, "long seed tone-bank geometry is malformed")
+            }
+            LongFloorGeometry => write!(f, "long floor-envelope table geometry is unsupported"),
+            LongFloorScalars { len, value } => write!(
+                f,
+                "long floor-envelope scalar fields are invalid (length {len}, value {value})"
+            ),
+            FftSizeInvalid { n } => {
+                write!(f, "FFT size must be an even power of two >= 2, got {n}")
+            }
+            SamplesShort { need, got } => write!(f, "need {need} samples, got {got}"),
+            FrozenTwiddlesMissing { length } => write!(
+                f,
+                "FFT stage fell outside the frozen twiddle domain (length {length})"
+            ),
+            FrozenWindowHalfMismatch { size, want, got } => write!(
+                f,
+                "frozen window half differs from the requested size: size={size}, want={want}, got={got}"
+            ),
+            WindowSizeInvalid { n } => {
+                write!(f, "window size must be a positive even number, got {n}")
+            }
+            FrozenWindowDomainMiss { size } => write!(
+                f,
+                "block window fell outside the frozen window domain (size {size})"
+            ),
+            PsyWindowSize { n } => {
+                write!(f, "psycho window needs at least two samples, got {n}")
+            }
+            TransientWindowGeometry { tables_n, n } => write!(
+                f,
+                "transient window geometry differs from the MDCT size: tables_n={tables_n}, n={n}"
+            ),
+            TransientMdctGeometry { look_n, n } => write!(
+                f,
+                "transient MDCT look geometry differs from the samples: look_n={look_n}, n={n}"
+            ),
+            BlockSizeInvalid { n } => write!(
+                f,
+                "current block size must be a positive even number, got {n}"
+            ),
+            BufferBlockOutOfRange => {
+                write!(f, "buffer does not contain the requested analysis block")
+            }
+            WindowBlockSizeInvalid => write!(f, "block sizes must be positive even numbers"),
+            WindowStateIndexOutOfRange { index } => {
+                write!(f, "window state index out of range: {index}")
+            }
+            WindowIntervalsIncompatible => write!(f, "incompatible block/window sizes"),
+            LpcOrderInvalid { order } => write!(f, "LPC order must be positive, got {order}"),
+            LpcSamplesShort { order, got } => write!(
+                f,
+                "LPC input must be longer than its order {order}, got {got} samples"
+            ),
+            LpcCoefficientsEmpty => write!(f, "LPC coefficients must not be empty"),
+            LpcPrimeLengthMismatch { want, got } => write!(
+                f,
+                "LPC prime length must equal the coefficient order {want}, got {got}"
+            ),
+            LpcCountNegative { count } => write!(
+                f,
+                "LPC prediction count must not be negative, got {count}"
+            ),
+            LpcPrefillInvalid { prefill } => {
+                write!(f, "priming prefill must be positive, got {prefill}")
+            }
+            LpcBatchInvalid { batch, order } => write!(
+                f,
+                "priming batch must be longer than the LPC order {order}, got {batch}"
+            ),
+            LpcSourceShort { want, got } => write!(
+                f,
+                "source does not contain the first priming batch: want {want}, got {got}"
+            ),
+            DetectorPcmEmpty => {
+                write!(f, "transient detector needs at least one PCM channel")
+            }
+            DetectorPcmShort { frames } => write!(
+                f,
+                "transient detector PCM must be equal-length and at least 4096 samples, got {frames}"
+            ),
+            DetectorTerminalNegative { terminal } => write!(
+                f,
+                "transient-detector terminal prediction count must be non-negative, got {terminal}"
+            ),
+            DetectorPrefixNonPositive { prefix } => write!(
+                f,
+                "transient-detector prefix length must be positive, got {prefix}"
+            ),
+            DetectorHopWindowInvalid { hop, window } => write!(
+                f,
+                "transient-detector hop/window must be positive: hop={hop}, window={window}"
+            ),
+            DetectorQuantaOutOfRange {
+                requested,
+                available,
+            } => write!(
+                f,
+                "requested {requested} transient quanta; only {available} available"
+            ),
+            FramePlansNotContiguous => write!(f, "frame plans must be contiguous and zero-based"),
+            FramePlanIntervalMismatch => {
+                write!(f, "frame plan interval differs from its block mode")
+            }
+            FramePlanTransitionsDiffer => write!(f, "adjacent frame plan transitions differ"),
+            PcmFeederEmpty => write!(f, "PCM feeder needs at least one channel"),
+            InputConditionerChannelCountMismatch { want, got } => write!(
+                f,
+                "input conditioner channel count differs: want {want}, got {got}"
+            ),
+            PcmFeederShort { frames } => write!(
+                f,
+                "PCM feeder needs 4096 samples for Wwise LPC priming, got {frames}"
+            ),
+            PcmChannelsUnequal { want, got } => write!(
+                f,
+                "all PCM channels must have the same frame count: want {want}, got {got}"
+            ),
+            DetectorChannelCountMismatch { want } => write!(
+                f,
+                "transient quantum channel count differs from the detector: want {want}"
+            ),
+            DetectorQuantumSamplesMismatch { want } => write!(
+                f,
+                "transient quantum must contain {want} samples per channel"
+            ),
+            PsyEnergyRingSlots { want, got } => write!(
+                f,
+                "psycho energy ring must contain {want} slots, got {got}"
+            ),
+            PsyBandStateRings { want } => {
+                write!(f, "psycho band state must contain {want} bands")
+            }
+            PsyConfigRowShort { want } => {
+                write!(f, "psycho config row must contain fields 0..{want}")
+            }
+            PsyMaskShortForBands { want, got } => write!(
+                f,
+                "psycho mask is shorter than the band table: want {want}, got {got}"
+            ),
+            TransientMaskSamples { want, got } => write!(
+                f,
+                "transient mask requires {want} samples, got {got}"
+            ),
+            PsySpectrumBinsOdd { bins } => write!(
+                f,
+                "psycho spectrum must contain an even number of bins, got {bins}"
+            ),
+            SessionChannelsNonPositive { channels } => {
+                write!(f, "stream needs at least one channel, got {channels}")
+            }
+            SessionSampleRateNonPositive { sample_rate } => {
+                write!(f, "sample rate must be positive, got {sample_rate}")
+            }
+            SessionBlockSizeMismatch { got } => write!(
+                f,
+                "the checked stream state expects 256/2048 blocks, got {got:?}"
+            ),
+            AnalysisFrameNotContiguous { expected, got } => write!(
+                f,
+                "analysis frames must be contiguous: expected index {expected}, got {got}"
+            ),
+            AdjacentAnalysisFrameModesDiffer => {
+                write!(f, "adjacent analysis frame modes differ")
+            }
+            ShortAnalysisWindowGeometry { want } => write!(
+                f,
+                "short analysis expects a {want}-sample scheduled window"
+            ),
+            LongAnalysisWindowGeometry { want } => write!(
+                f,
+                "long analysis expects a {want}-sample scheduled window"
+            ),
+            AnalysisWindowSamplesMismatch => {
+                write!(f, "analysis window samples differ from its scheduled mode")
+            }
+            ManualIngestionMixed => write!(
+                f,
+                "manual transient ingestion cannot be mixed with mode generation"
+            ),
+            ModeSelectionNotFresh => {
+                write!(f, "mode selection requires a fresh stream selector")
+            }
+            ModeSelectionPcmInvalid { frames } => write!(
+                f,
+                "mode selection PCM must be equal-length and at least 4096 samples, got {frames}"
+            ),
+            TransitionCodeMissing { index, recorded } => write!(
+                f,
+                "no transition code was captured at mode-scan time for frame {index} (recorded {recorded})"
+            ),
+            ShortVectorsLength { want } => write!(
+                f,
+                "short psychoacoustic vectors must each contain {want} values"
+            ),
+            ShortModeOutOfRange { mode, curves } => write!(
+                f,
+                "short psychoacoustic mode {mode} is outside the curve table ({curves} curves)"
+            ),
+            ShortModeBiasOutOfRange { mode } => write!(
+                f,
+                "short psychoacoustic mode {mode} is outside the bias table"
+            ),
+            ShortGroupWorkLength { want, got } => write!(
+                f,
+                "short psychoacoustic group work has the wrong length: want {want}, got {got}"
+            ),
+            ShortFrameChannelCountMismatch => {
+                write!(f, "short psychoacoustic frame channel count differs")
+            }
+            ShortVariantInvalid { variant } => write!(
+                f,
+                "short psychoacoustic variant must be 0 or 1, got {variant}"
+            ),
+            ShortFollowingModeInvalid { following } => write!(
+                f,
+                "short psychoacoustic following mode must be 0 or 1, got {following}"
+            ),
+            ShortChannelStateGeometry => write!(
+                f,
+                "short psychoacoustic channel state has the wrong geometry"
+            ),
+            ShortAnalyzerChannelsNonPositive { channels } => write!(
+                f,
+                "short psychoacoustic analyzer needs at least one channel, got {channels}"
+            ),
+            ShortAnalyzerProfiles { want, got } => write!(
+                f,
+                "short psychoacoustic analyzer needs exactly {want} profiles, got {got}"
+            ),
+            ShortAnalyzerChannelStateCount { want } => write!(
+                f,
+                "short psychoacoustic channel-state count differs: want {want}"
+            ),
+            LongVariantInvalid { variant } => write!(
+                f,
+                "long psychoacoustic variant must be 0 or 1, got {variant}"
+            ),
+            LongAnalysisEmpty => write!(f, "long analysis needs at least one channel frame"),
+            LongAnalysisFrameSize { want } => {
+                write!(f, "long analysis expects {want}-sample windowed frames")
+            }
+            LongAnalysisTableBins { want } => {
+                write!(f, "long analysis table must have {want} output bins")
+            }
+            LongAnalysisScratchCount { want } => write!(
+                f,
+                "long analysis scratch count must equal the channel count ({want})"
+            ),
+            LongAnalysisStreamChannels { want } => write!(
+                f,
+                "long analysis stream channel count differs from the frames: want {want}"
+            ),
+            LongMdctLookGeometry { want } => write!(
+                f,
+                "long MDCT look differs from the analysis geometry: want {want}"
+            ),
+            LongAnalysisBothScratchAndStream => write!(
+                f,
+                "long analysis accepts either scratch or a shared stream, not both"
+            ),
+            ShortAnalysisEmpty => write!(f, "short analysis needs at least one channel frame"),
+            ShortAnalysisChannelCount { want } => write!(
+                f,
+                "short analysis channel count differs from its state owner: want {want}"
+            ),
+            ShortAnalysisFrameSize { want } => {
+                write!(f, "short analysis expects {want}-sample windowed frames")
+            }
+            ShortAnalysisGroupWorkCount { want } => write!(
+                f,
+                "short analysis group-work count differs from the channels: want {want}"
+            ),
+            ShortMdctLookGeometry { want } => write!(
+                f,
+                "short MDCT look differs from the analysis geometry: want {want}"
+            ),
+            LongStateBridgeGeometry => write!(
+                f,
+                "long state bridge needs one 1024-bin raw curve per channel"
+            ),
+            LongStateBridgeCount { want } => write!(
+                f,
+                "long state bridge needs {want} 1024-bin raw curves"
+            ),
+            LongToShortHistoryLength {
+                want_raw,
+                want_state,
+            } => write!(
+                f,
+                "long-to-short floor reduction expects {want_raw} raw and {want_state} state bins"
+            ),
+            ShortToLongHistoryLength { want } => {
+                write!(f, "short-to-long floor expansion expects {want} bins")
+            }
+            FloorEnvelopeScratchNonPositive { n } => write!(
+                f,
+                "floor-envelope stage scratch length must be positive, got {n}"
+            ),
+            FloorEnvelopeCurveLengthMismatch { n } => write!(
+                f,
+                "floor-envelope stage curves must have equal lengths ({n})"
+            ),
+            FloorEnvelopeSourceLengthMismatch { n } => write!(
+                f,
+                "floor-envelope stage source curve must have the same length ({n})"
+            ),
+            FloorEnvelopeModeUnsupported { mode } => write!(
+                f,
+                "floor-envelope stage regular port targets the regular branch only, got mode {mode}"
+            ),
+            FirstFloorEnvelopeBufferMismatch { n } => write!(
+                f,
+                "first regular floor-envelope stage buffers must share one length ({n})"
+            ),
+            FirstFloorEnvelopePeakBranch => write!(
+                f,
+                "first regular floor-envelope stage call entered the peak branch"
+            ),
+            LongFloorEnvelopeGeometry { n } => write!(
+                f,
+                "long regular floor-envelope stage needs 1024 state bins and 128-or-1024 history bins (n={n})"
+            ),
+            LongFloorEnvelopePeakBranch => write!(
+                f,
+                "fresh long regular floor-envelope stage call entered the peak branch"
+            ),
+            FirstLongFloorEnvelopePeakBranch => write!(
+                f,
+                "cleared first long regular floor-envelope stage call entered the peak branch"
+            ),
+            LongFloorEnvelopeNoLook => {
+                write!(f, "floor-envelope stage requires a look or a table")
+            }
+            QualityExtrapolationWithoutValue => {
+                write!(f, "quality extrapolation requires a quality value")
+            }
+            PsyCurveLengthMismatch { want, got } => write!(
+                f,
+                "psycho curves must have the same length: want {want}, got {got}"
+            ),
+            PsyLookCurveLengthMismatch { look_n, got } => write!(
+                f,
+                "psycho look and curve length differ: look_n={look_n}, got {got}"
+            ),
+            PsyIntervalTableShort { want, got } => write!(
+                f,
+                "psycho interval table is shorter than the curve: want {want}, got {got}"
+            ),
+            PsyIntervalEndpointOutOfRange { start, end, n } => write!(
+                f,
+                "psycho interval endpoint out of range: {start}..{end} of {n}"
+            ),
+            PsyBaseSelectorLengthMismatch { want, got } => write!(
+                f,
+                "psycho base and selector curves must have the same length: want {want}, got {got}"
+            ),
+            PsyLookMissingAth { n } => {
+                write!(f, "psycho look of {n} bins is missing its ATH state")
+            }
+            PsySeedSpectrumLength { want, got } => write!(
+                f,
+                "psycho seed spectrum and look length differ: want {want}, got {got}"
+            ),
+            PsyLookMissingToneCurves => {
+                write!(f, "psycho look is missing ATH or tone-curve state")
+            }
+            ToneCurveBankShort { want, got } => write!(
+                f,
+                "tone-curve level bank is shorter than the reference bank: want {want}, got {got}"
+            ),
+            ToneCurvePostArrayShort => {
+                write!(f, "tone-curve post array needs a start and an end")
+            }
+            ToneCurvePostsShort => write!(f, "tone-curve posts are shorter than their end"),
+            ToneCurveBandBankShort { want, got } => write!(
+                f,
+                "tone-curve band bank is shorter than {want}: got {got}"
+            ),
+            SeedLoopInputLengthMismatch { want } => write!(
+                f,
+                "seed-loop inputs must have equal bin counts ({want})"
+            ),
+            SeedPositionOutOfRange { pos, total } => write!(
+                f,
+                "seed position {pos} falls outside {total} total octave lines"
+            ),
+            SeedSurfaceShort { want } => {
+                write!(f, "seed surface is shorter than {want} total octave lines")
+            }
+            OctaveFloorLengthMismatch => {
+                write!(f, "octave and floor curves must have equal bin counts")
+            }
+            RelaxWidthNonPositive => {
+                write!(f, "history width table contains a nonpositive value")
+            }
+            RelaxLengthMismatch => write!(f, "history/raw/widths must have equal length"),
+            RebaseLengthMismatch { want } => {
+                write!(f, "state/history length must equal {want}")
+            }
+            ShortTemporalBins { want } => {
+                write!(f, "short temporal history expects {want} bins")
+            }
+            ShortTemporalLength { want } => {
+                write!(f, "short temporal history curves must have {want} bins")
+            }
+            LongSeedLogFftLength { want, got } => write!(
+                f,
+                "long floor-seed stage logFFT geometry differs from the seed look: want {want}, got {got}"
+            ),
+            LongRemapBins { want } => {
+                write!(f, "long psychoacoustic remap expects {want} bins")
+            }
+            LongRemapMode2Bins { want } => {
+                write!(f, "long psychoacoustic remap mode 2 expects {want} bins")
+            }
+            LongActiveSpanInvalid { active } => write!(
+                f,
+                "long psycho table has an invalid mode-2 active span ({active})"
+            ),
+            LongRemapLutShort { got } => write!(
+                f,
+                "long psycho table has no 40-entry remap LUT, got {got}"
+            ),
+            LongRemapVariantBins { want } => write!(
+                f,
+                "long psychoacoustic remap variant expects {want} bins"
+            ),
+            LongFrameVariantInvalid { variant } => write!(
+                f,
+                "long analysis variant must be 0 or 1, got {variant}"
+            ),
+            FftCurveEmpty => write!(f, "FFT curve must contain at least one bin"),
+            SeedTotalLinesNonPositive { total } => {
+                write!(f, "total octave lines must be positive, got {total}")
+            }
+            SpecmaxGeometry {
+                block_bins,
+                sample_rate,
+            } => write!(
+                f,
+                "spectrum peak decay geometry is invalid: block_bins={block_bins}, sample_rate={sample_rate}"
+            ),
+            SeedCursorOutOfRange { cursor, total } => write!(
+                f,
+                "seed cursor {cursor} left the seeded surface of {total} lines"
+            ),
+            EnvelopeScratchLengthNonPositive { n } => write!(
+                f,
+                "floor-envelope scratch length must be positive, got {n}"
+            ),
+            EnvelopeStageLengthMismatch { want } => write!(
+                f,
+                "floor-envelope stage curves must have equal lengths ({want})"
+            ),
+            EnvelopeStageModeUnsupported { mode } => write!(
+                f,
+                "floor-envelope stage regular port targets the regular branch only, got mode {mode}"
+            ),
+            FloorTransitionBins { want, got } => write!(
+                f,
+                "floor-envelope transition history expects {want} bins, got {got}"
+            ),
+            FirstEnvelopeBuffersMismatch { want } => write!(
+                f,
+                "first regular floor-envelope stage buffers must share one length ({want})"
+            ),
+            FirstEnvelopeEnteredPeakBranch => write!(
+                f,
+                "cleared first regular floor-envelope stage call entered the peak branch"
+            ),
+            LongEnvelopeStateBins => write!(
+                f,
+                "long regular floor-envelope stage needs 1024 state bins and 128-or-1024 history bins"
+            ),
+            ShortKernelWords { got } => write!(
+                f,
+                "short psychoacoustic kernel must contain six words, got {got}"
+            ),
+            ShortAnalysisCannotApplyLongTransition { transition } => write!(
+                f,
+                "short analysis cannot apply a long transition code ({transition})"
+            ),
+            StreamFeederChannelsMismatch { want, got } => write!(
+                f,
+                "stream feeder push channels differ from the profile: want {want}, got {got}"
+            ),
+            StreamFeederSourceShort { frames } => write!(
+                f,
+                "stream feeder source is shorter than the LPC boundary batch ({frames})"
+            ),
+            StreamFeederWindowNotReady {
+                want_from,
+                want_to,
+            } => write!(
+                f,
+                "stream frame window references samples not yet retained: want {want_from}..{want_to}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for AnalysisError {}
+
 // ---------------------------------------------------------------------------
 // MDCT and transient typed models
 // ---------------------------------------------------------------------------

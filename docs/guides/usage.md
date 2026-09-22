@@ -128,6 +128,13 @@ python -m wwise_wem INPUT.wav --output OUTPUT.wem [OPTIONS]
 values, unsupported geometry, profile mismatch, or kernel configuration errors;
 standard `OSError` subclasses such as `FileNotFoundError` for file access.
 
+A rejection made by the kernel arrives as `WwiseWemError`, a `ValueError`
+subclass whose `.code` is the kernel's stable error class
+(`PROFILE_NOT_FOUND`, `GEOMETRY_MISMATCH`, `INPUT_TOO_SHORT`,
+`FORMAT_UNSUPPORTED`, `STATE_ERROR`, `INTERNAL`) and whose `.message` — also
+`str(error)` — is the kernel's diagnostic text. `except ValueError` callers are
+unaffected; the original kernel error stays reachable as `__cause__`.
+
 ## Other languages
 
 The Rust kernel is the single integration point. Its C ABI core surface

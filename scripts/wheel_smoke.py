@@ -163,12 +163,21 @@ def _clean_venv_core_smoke() -> str:
     return (
         "import hashlib\n"
         "import sys\n"
-        "from wwise_wem import encode\n"
+        "from wwise_wem import RawPcm, WwiseWemError, encode\n"
         "import wwise_wem._core as core\n"
         "assert hasattr(core, 'Encoder'), core\n"
         "result = encode(sys.argv[1])\n"
         "ref = hashlib.sha256(open(sys.argv[2], 'rb').read()).hexdigest()\n"
         "assert result.sha256 == ref, (result.sha256, ref)\n"
+        # The shipped entry point carries the kernel's stable error code:
+        # 2ch/44100 is not an installed configuration, so the kernel rejects
+        # the selection and the facade must hand the code to the caller.
+        "try:\n"
+        "    encode(RawPcm(b'\\x00' * (2 * 2 * 4096), 44100, 2, 's16le'))\n"
+        "except WwiseWemError as error:\n"
+        "    assert error.code == 'PROFILE_NOT_FOUND', error.code\n"
+        "else:\n"
+        "    raise SystemExit('uninstalled 2ch/44100 selection was accepted')\n"
         "try:\n"
         "    import wwise_wem_reference\n"
         "except ImportError:\n"

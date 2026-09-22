@@ -1,4 +1,9 @@
-"""Immutable value models for encoder inputs and profile metadata."""
+"""Immutable value models for encoder inputs and profile metadata.
+
+Also holds the package's public error type, which crosses the same boundary
+as these values: a kernel rejection reaches the caller as a value carrying
+the kernel's stable error code, not as a rewritten message.
+"""
 
 from __future__ import annotations
 
@@ -129,3 +134,27 @@ class ContainerMetadata:
             "uBlocksize0Pow": self.uBlocksize0Pow,
             "uBlocksize1Pow": self.uBlocksize1Pow,
         }
+
+
+class WwiseWemError(ValueError):
+    """One kernel rejection, carrying the kernel's stable error code.
+
+    The kernel's error classes are stable across the cross-language shells,
+    and this type is where they reach a Python caller: ``code`` is the
+    class (``PROFILE_NOT_FOUND``, ``GEOMETRY_MISMATCH``, ``INPUT_TOO_SHORT``,
+    ``FORMAT_UNSUPPORTED``, ``STATE_ERROR``, ``INTERNAL``) and ``message``
+    is the kernel's own diagnostic text, which ``str(error)`` returns
+    unchanged. Nothing here reinterprets or rewrites the kernel's surface.
+
+    Subclassing :class:`ValueError` keeps ``except ValueError`` working for
+    callers written against the message-only error, and the native
+    ``WemEncoderError`` that caused it stays reachable as ``__cause__``.
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(code, message)
+        self.code = code
+        self.message = message
+
+    def __str__(self) -> str:
+        return self.message

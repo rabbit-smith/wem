@@ -14,7 +14,7 @@ the reference implementation's byte-for-byte output, never the reverse.
 ```text
 wwise_wem/                      # distribution facade (wheel)
 ├── __init__.py, __main__.py, api.py, cli.py   # root API shell + CLI
-├── model.py                     # root DTOs
+├── model.py                     # root DTOs and the public error type
 ├── adapters/                    # external PCM/WAV inputs (facade duty)
 ├── application/                 # native-core orchestration and result DTOs
 ├── profiles/                    # profile identity, registry, and resource loaders

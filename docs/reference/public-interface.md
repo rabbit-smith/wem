@@ -1,6 +1,7 @@
 # Public interface
 
-The Python package has one encoding function and six public value types:
+The Python package has one encoding function, six public value types, and one
+public error type:
 
 ```python
 from wwise_wem import (
@@ -10,6 +11,7 @@ from wwise_wem import (
     RawPcm,
     WwiseProfile,
     WwiseVersion,
+    WwiseWemError,
     encode,
 )
 ```
@@ -44,6 +46,29 @@ All inputs require at least 4096 frames. Unsupported source or field types raise
 `TypeError`; invalid values, unsupported geometry, profile mismatches, and kernel
 configuration errors raise `ValueError`. File access errors retain their standard
 `OSError` subclasses, such as `FileNotFoundError`.
+
+## Errors
+
+A rejection made by the kernel reaches the caller as `WwiseWemError`, a
+`ValueError` subclass carrying the kernel's stable error class in `.code`, the
+kernel's diagnostic text in `.message` (and in `str(error)`), and the original
+kernel error as `__cause__`:
+
+| `code` | Meaning |
+|---|---|
+| `PROFILE_NOT_FOUND` | no installed configuration satisfies the selection (or more than one does) |
+| `GEOMETRY_MISMATCH` | PCM channels/sample rate differ from the selected profile |
+| `INPUT_TOO_SHORT` | fewer PCM frames than the kernel's 4096-frame minimum |
+| `FORMAT_UNSUPPORTED` | the selection names a generation this revision does not support |
+| `STATE_ERROR` | a request outside the lifecycle, or input outside the accepted domain |
+| `INTERNAL` | a kernel configuration or assembly fault |
+
+These are the same classes every cross-language shell maps from the kernel, and
+the codes are stable. Because `WwiseWemError` subclasses `ValueError`, a caller
+that only tests `except ValueError` keeps working unchanged. The facade's own
+input checks (a source of the wrong type, a buffer the selection does not
+describe, fewer than 4096 frames) raise their own `ValueError` before the kernel
+is reached.
 
 ## Profile selection
 
