@@ -45,6 +45,8 @@ at these documents instead of restating them.
 | [`findings/browser-shell-toolchain-options.md`](findings/browser-shell-toolchain-options.md) | Asking whether the browser shell should stay Rust and what C, Zig or MoonBit would actually buy |
 | [`findings/encode-performance.md`](findings/encode-performance.md) | Needing the encode's measured stage split, its scaling in stream length, or the list of what is worth optimizing and what is not |
 | [`findings/decode-transform-feasibility.md`](findings/decode-transform-feasibility.md) | Asking whether a `decode` surface is bounded work, which chain segments already exist in the kernel, and why bit-exactness against libvorbis is not a shippable claim |
+| [`findings/decode-performance.md`](findings/decode-performance.md) | Needing the decode's measured stage split, how peak RSS behaves as the stream grows, or which state a live decode session retains |
+| [`findings/decode-concurrency-curves.md`](findings/decode-concurrency-curves.md) | Asking how many decodes this machine runs at once, where decode scaling stops, or what one concurrent decode costs in CPU and resident memory |
 | [`methodology/byte-exact-diagnosis.md`](methodology/byte-exact-diagnosis.md) | Chasing any byte difference against an external build |
 | [`roadmap.md`](roadmap.md) | Asking what is still open |
 

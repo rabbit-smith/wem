@@ -21,8 +21,16 @@ idempotent, and offline. What their outputs must satisfy is in
   → `tests/data/2ch-{reference,stress}/*.wav`, `measure_concurrency.py` →
   `docs/figures/concurrency-samples.json` and, for a comparison run, a second
   `docs/figures/concurrency-samples-*.json`, `plot_concurrency_curves.py` →
-  `docs/figures/concurrency-curves.png`. Never write outside these trees
-  as a side effect.
+  `docs/figures/concurrency-curves.png`, `measure_decode_concurrency.py` →
+  `docs/figures/decode-concurrency-samples.json`,
+  `plot_decode_concurrency_curves.py` → `docs/figures/decode-concurrency-curves.png`.
+  Never write outside these trees as a side effect.
+- The decode measurement writes only generated measurement inputs, and only to
+  gitignored scratch: `measure_decode_perf.py` →
+  `crates/target/decode-perf/inputs/*.wav` and
+  `crates/target/decode-perf/wems/*.wem` (its longer streams, built from the
+  tracked fixture by the release encoder). It prints its numbers, records no
+  baseline, and reads nothing under `corpus/`.
 - The duration-curve pair writes to gitignored measurement scratch and nowhere
   else: `generate_duration_curve_inputs.py` → `crates/target/curves/inputs/*.wav`,
   and `measure_duration_curves.py` → `crates/target/curves/*.json` (its raw
