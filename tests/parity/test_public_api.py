@@ -105,7 +105,6 @@ class PublicCliTests(unittest.TestCase):
             "--channels",
             "--sample-rate",
             "--output",
-            "--expect-sha256",
         ):
             self.assertIn(option, result.stdout)
         self.assertNotIn("--profile", result.stdout)

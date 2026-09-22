@@ -18,17 +18,14 @@ SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
 
 
 def _result() -> EncodeResult:
-    data = b"WEM!"
     return EncodeResult(
-        data,
+        b"WEM!",
         EncodeStats(
             pcm_frames=16,
             channels=6,
             audio_packets=2,
             short_packets=1,
             long_packets=1,
-            bytes=len(data),
-            metadata_source="profile:6ch/44100Hz/2013",
         ),
     )
 
@@ -73,8 +70,6 @@ class CliTests(unittest.TestCase):
                 "44100",
                 "--output",
                 str(output),
-                "--expect-sha256",
-                result.sha256.upper(),
             ]
             with (
                 patch("sys.argv", argv),
@@ -95,9 +90,12 @@ class CliTests(unittest.TestCase):
         printed.assert_called_once()
         label, values = printed.call_args.args
         self.assertEqual(label, "WAV to WEM OK")
-        self.assertEqual(values["sha256"], result.sha256)
+        # The byte count in the report is the CLI's own count of the bytes it
+        # holds — the library returns no length of bytes the caller has.
+        self.assertEqual(values["bytes"], len(result))
         self.assertEqual(values["output"], str(output))
         self.assertEqual(values["audio_packets"], 2)
+        self.assertNotIn("sha256", values)
 
     def test_cli_quality_is_passed_through(self) -> None:
         result = _result()
@@ -150,7 +148,11 @@ class CliTests(unittest.TestCase):
         self.assertEqual(exit_status.exception.code, 2)
         read.assert_not_called()
 
-    def test_hash_failure_does_not_create_output(self) -> None:
+    def test_there_is_no_digest_flag_to_assert(self) -> None:
+        # A digest is the caller's to compute from the bytes it received, so
+        # the CLI carries no flag that would make the library produce one:
+        # the removed option is now an ordinary unknown-argument error, and
+        # nothing is written.
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "unused.wem"
             with (
@@ -166,12 +168,14 @@ class CliTests(unittest.TestCase):
                     ],
                 ),
                 patch("wwise_wem.cli.read_pcm_wav", return_value=_pcm()),
-                patch("wwise_wem.cli.encode", return_value=_result()),
+                patch("wwise_wem.cli.encode") as encode,
             ):
                 from wwise_wem.cli import main
 
-                with self.assertRaisesRegex(AssertionError, "SHA-256 differs"):
+                with self.assertRaises(SystemExit) as exit_status:
                     main()
+            self.assertEqual(exit_status.exception.code, 2)
+            encode.assert_not_called()
             self.assertFalse(output.exists())
 
     def test_console_script_points_to_canonical_cli(self) -> None:

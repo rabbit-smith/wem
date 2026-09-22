@@ -120,16 +120,24 @@ deterministic and matches the repository's reference encoder after conversion.
 
 ## Result types
 
-`EncodeResult.data` contains the completed WEM bytes, `EncodeResult.stats`
-contains an immutable `EncodeStats`, and `EncodeResult.sha256` returns the
-lowercase SHA-256 digest. `len(result)` is the container's byte length and
-`result.write_to(path)` persists it, so a caller need not reach into `data` to
-save a result. `EncodeStats.to_dict()` returns the stable JSON-ready
-statistics fields.
+`EncodeResult.data` contains the completed WEM bytes and
+`EncodeResult.stats` contains an immutable `EncodeStats`; `len(result)` is the
+container's byte length and `result.write_to(path)` persists it, so a caller
+need not reach into `data` to save a result. `EncodeStats.to_dict()` returns
+the stable JSON-ready statistics fields: `pcm_frames`, `channels`,
+`audio_packets`, `short_packets`, `long_packets`.
+
+Every one of those is an observation the caller cannot recompose. The
+container's byte length is not among them — it is `len(result)` — and neither
+is a label naming the selected profile, which is the `WwiseProfile` the caller
+itself passed: selection is exactly one profile per geometry or a rejection,
+so the selected profile is a pure function of the geometry the caller already
+knows. No surface returns a digest of the container either; a caller that
+wants one computes it from the bytes it received.
 
 For `tests/fixtures/input.wav`, the output is 205 audio packets (77 short and
-128 long), 108,771 output bytes, and SHA-256
-`17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247`.
+128 long) and 108,771 output bytes, byte-identical to the committed reference
+container `tests/fixtures/reference.wem`.
 
 Both installed profiles are byte-exact against their paired builds. The 2ch
 result, its corpora, and the limits of that evidence are recorded in
@@ -173,7 +181,7 @@ python -m wwise_wem INPUT.wav --output OUTPUT.wem [OPTIONS]
 ```
 
 Supported options are `--quality`, `--wwise-version`, `--channels`,
-`--sample-rate`, `--expect-sha256`, and required `--output`.
+`--sample-rate`, and required `--output`.
 `--wwise-version` takes the short label `2013` or the full generation `2013.2`
 and defaults to `2013`; it forms the whole selection together with the WAV
 geometry, which the CLI reads from the input. An unrecognized value is rejected

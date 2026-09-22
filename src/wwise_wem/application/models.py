@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,13 +18,20 @@ def _require_int(value: int, label: str, *, positive: bool = False) -> int:
 
 @dataclass(frozen=True)
 class EncodeStats:
+    """What the encoder observed, and nothing the caller can recompose.
+
+    ``pcm_frames`` is here because a streaming caller may never have counted
+    the frames it pushed; the packet counts are here because they require
+    parsing the assembled container. The container's byte length is not — it
+    is ``len(result.data)`` — and neither is a label naming the selected
+    profile, which is the ``WwiseProfile`` the caller itself passed.
+    """
+
     pcm_frames: int
     channels: int
     audio_packets: int
     short_packets: int
     long_packets: int
-    bytes: int
-    metadata_source: str
 
     def __post_init__(self) -> None:
         _require_int(self.pcm_frames, "pcm_frames")
@@ -33,13 +39,10 @@ class EncodeStats:
         _require_int(self.audio_packets, "audio_packets")
         _require_int(self.short_packets, "short_packets")
         _require_int(self.long_packets, "long_packets")
-        _require_int(self.bytes, "bytes")
         if self.short_packets + self.long_packets != self.audio_packets:
             raise ValueError("short/long packet counts must equal audio_packets")
-        if not isinstance(self.metadata_source, str) or not self.metadata_source:
-            raise ValueError("metadata_source must be a non-empty string")
 
-    def to_dict(self) -> dict[str, int | str]:
+    def to_dict(self) -> dict[str, int]:
         """Return the stable, JSON-ready statistics fields."""
         return {
             "pcm_frames": self.pcm_frames,
@@ -47,13 +50,13 @@ class EncodeStats:
             "audio_packets": self.audio_packets,
             "short_packets": self.short_packets,
             "long_packets": self.long_packets,
-            "bytes": self.bytes,
-            "metadata_source": self.metadata_source,
         }
 
 
 @dataclass(frozen=True)
 class EncodeResult:
+    """The completed container and the statistics observed while producing it."""
+
     data: bytes
     stats: EncodeStats
 
@@ -61,13 +64,7 @@ class EncodeResult:
         data = bytes(self.data)
         if not isinstance(self.stats, EncodeStats):
             raise TypeError("stats must be EncodeStats")
-        if len(data) != self.stats.bytes:
-            raise ValueError("encoded byte count differs from stats")
         object.__setattr__(self, "data", data)
-
-    @property
-    def sha256(self) -> str:
-        return hashlib.sha256(self.data).hexdigest()
 
     def __len__(self) -> int:
         """Byte length of the completed container."""

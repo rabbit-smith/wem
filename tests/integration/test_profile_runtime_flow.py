@@ -30,7 +30,7 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
                 self.input = (data, sample_rate, channels)
                 return EncodeResult(
                     b"wem",
-                    EncodeStats(1, 6, 0, 0, 0, 3, "profile:6ch/44100Hz/2013"),
+                    EncodeStats(1, 6, 0, 0, 0),
                 )
 
         with (
@@ -46,7 +46,7 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
         resolve.assert_not_called()
         self.assertEqual(captured, [(SELECTION, 3.0)])
         self.assertEqual(result.data, b"wem")
-        self.assertEqual(result.stats.metadata_source, "profile:6ch/44100Hz/2013")
+        self.assertEqual(len(result), 3)
 
     def test_automatic_selection_is_the_input_geometry(self):
         # No explicit profile: the installed generation plus the geometry
@@ -62,7 +62,7 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
                 self.input = (data, sample_rate, channels)
                 return EncodeResult(
                     b"wem",
-                    EncodeStats(1, 6, 0, 0, 0, 3, "profile:6ch/44100Hz/2013"),
+                    EncodeStats(1, 6, 0, 0, 0),
                 )
 
         with (

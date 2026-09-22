@@ -9,7 +9,7 @@ to synthesize or approximate a configuration.
 
 The two types have one spelling per language and the same shape
 everywhere: Rust `WwiseVersion` / `WwiseProfile`, C `WemVersion` / `WemProfile`
-(see [`include/wem.h`](../../include/wem.h), ABI revision 2), Python
+(see [`include/wem.h`](../../include/wem.h), ABI revision 3), Python
 `WwiseVersion` / `WwiseProfile`. Version codes are stable and append-only, like
 the C ABI error values.
 

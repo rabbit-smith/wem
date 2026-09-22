@@ -10,8 +10,10 @@
 //!   name and no profile directory.
 //! * `--time` prints per-stage timings to stderr (bench/diagnostics).
 //!
-//! A one-line summary (bytes, sha256, stats) is written to stderr so the
-//! encoded bytes on stdout or in the output file stay pristine.
+//! A one-line summary (bytes, frames, audio packets) is written to stderr so
+//! the encoded bytes on stdout or in the output file stay pristine. The byte
+//! count is the length of what was written; for a digest of it, run the
+//! platform's tool over the output file.
 
 use std::path::Path;
 use std::time::Instant;
@@ -109,9 +111,8 @@ fn run() -> Result<(), String> {
         );
     }
     eprintln!(
-        "wem-core: {} bytes, sha256 {} ({} frames, {} audio packets)",
+        "wem-core: {} bytes ({} frames, {} audio packets)",
         result.len(),
-        result.sha256(),
         result.stats.pcm_frames,
         result.stats.audio_packets,
     );

@@ -4,7 +4,7 @@
 //! (through the rlib symbols, `unsafe` and all) and prove:
 //! * one-shot encode == reference WEM bytes (fixture PCM);
 //! * streaming with seven uneven chunks == the same bytes, seq-ordered
-//!   packets, correct terminal meta;
+//!   packets, a terminal finish that carries no summary of its own;
 //! * encoder-handle path matches the one-shot convenience entry;
 //! * one handle shared by several threads encodes concurrently and every
 //!   thread reproduces the reference bytes (the include/wem.h shareability
@@ -13,15 +13,14 @@
 //!   return the expected stable codes;
 //! * an out-of-table `WemVersion` code is a revision mismatch
 //!   (FORMAT_UNSUPPORTED), never a silent fallback;
-//! * the error-code table and the `WemProfile` / `WemMeta` layouts stay in
-//!   sync with include/wem.h.
+//! * the error-code table and the `WemProfile` layout stay in sync with
+//!   include/wem.h.
 
 use std::ffi::c_void;
 use std::sync::Barrier;
 use std::thread;
 
-use sha2::{Digest, Sha256};
-use wem_capi::{WemEncoder, WemError, WemMeta, WemProfile, WemVersion};
+use wem_capi::{WemEncoder, WemError, WemProfile, WemVersion};
 
 mod common;
 
@@ -117,13 +116,6 @@ unsafe extern "C" fn sink_packet(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
 
 /// The setup packet inside one assembled WEM container (seq 0).
 fn setup_packet_of(wem_bytes: &[u8]) -> Vec<u8> {
@@ -300,28 +292,20 @@ fn streaming_seven_uneven_chunks_match_one_shot() {
         assert_eq!(code, WemError::Ok, "push {index} rejected");
     }
 
-    let mut meta: WemMeta = unsafe { std::mem::zeroed() };
-    let code = unsafe { wem_capi::wem_session_finish(session, &mut meta) };
+    let code = unsafe { wem_capi::wem_session_finish(session) };
     assert_eq!(code, WemError::Ok, "finish rejected");
     unsafe {
         wem_capi::wem_session_free(session);
     }
 
-    // Container bytes: the reference.
+    // Container bytes: the reference. The container length a client needs is
+    // the sum of the `len` values its own write callback just received;
+    // finish returns a code and nothing else.
     let out = &sinks.out;
     assert_eq!(
         out,
         reference_wem().as_slice(),
         "streaming bytes differ from reference.wem"
-    );
-
-    // Terminal meta: length + lowercase-hex digest of the container the sink
-    // just received, whose bytes the assertion above pins to reference.wem.
-    assert_eq!(meta.total_len as usize, out.len());
-    assert_eq!(
-        std::str::from_utf8(&meta.sha256_hex).expect("hex is ascii"),
-        sha256_hex(out),
-        "the terminal meta digest must describe the delivered container"
     );
 
     // Reply stream: seq starts at 0 (the setup packet) and increases by
@@ -351,15 +335,13 @@ fn streaming_null_packet_cb_still_streams_bytes() {
     assert_eq!(code, WemError::Ok);
     let code = unsafe { wem_capi::wem_session_push(session, pcm.as_ptr(), pcm.len()) };
     assert_eq!(code, WemError::Ok);
-    let mut meta: WemMeta = unsafe { std::mem::zeroed() };
-    let code = unsafe { wem_capi::wem_session_finish(session, &mut meta) };
+    let code = unsafe { wem_capi::wem_session_finish(session) };
     assert_eq!(code, WemError::Ok);
     unsafe {
         wem_capi::wem_session_free(session);
     }
     let out = &sinks.out;
     assert_eq!(out, reference_wem().as_slice());
-    assert_eq!(meta.total_len as usize, out.len());
 }
 
 // ---------------------------------------------------------------------------
@@ -448,7 +430,7 @@ fn null_arguments_reject_with_state_error() {
         "NULL session push must reject"
     );
     assert_eq!(
-        unsafe { wem_capi::wem_session_finish(std::ptr::null_mut(), &mut std::mem::zeroed()) },
+        unsafe { wem_capi::wem_session_finish(std::ptr::null_mut()) },
         WemError::StateError,
         "NULL session finish must reject"
     );
@@ -623,9 +605,8 @@ fn lifecycle_violations_reject_with_state_error() {
     );
 
     // A second finish (after a successful one) is a lifecycle violation.
-    let mut meta: WemMeta = unsafe { std::mem::zeroed() };
     assert_eq!(
-        unsafe { wem_capi::wem_session_finish(session, &mut meta) },
+        unsafe { wem_capi::wem_session_finish(session) },
         WemError::Ok,
         "finish on a full stream"
     );
@@ -635,7 +616,7 @@ fn lifecycle_violations_reject_with_state_error() {
         "push after finish must reject"
     );
     assert_eq!(
-        unsafe { wem_capi::wem_session_finish(session, &mut meta) },
+        unsafe { wem_capi::wem_session_finish(session) },
         WemError::StateError,
         "double finish must reject"
     );
@@ -665,9 +646,8 @@ fn short_stream_rejects_with_input_too_short() {
         WemError::Ok,
         "pushing a short stream is legal until finish"
     );
-    let mut meta: WemMeta = unsafe { std::mem::zeroed() };
     assert_eq!(
-        unsafe { wem_capi::wem_session_finish(session, &mut meta) },
+        unsafe { wem_capi::wem_session_finish(session) },
         WemError::InputTooShort,
         "a stream under 4096 frames must reject at finish"
     );
@@ -680,9 +660,11 @@ fn short_stream_rejects_with_input_too_short() {
 // 7. Out-parameters on every exit (include/wem.h, "MEMORY OWNERSHIP")
 //
 // A C caller cannot tell an unwritten out-parameter from one holding
-// garbage, so each one is driven here on the exits that do *not* write the
-// interesting value: the handle out-pointers on every failure, and the meta
-// struct on every failure of `wem_session_finish`.
+// garbage, so the ones that remain are driven here on the exits that do
+// *not* write the interesting value: the handle out-pointers on every
+// failure. `wem_session_finish` has no out-parameter to drive (ABI
+// revision 3), so what is left of it — the return code as the whole result,
+// and the bytes the write callback did or did not receive — is driven below.
 // ---------------------------------------------------------------------------
 
 /// A non-NULL out-pointer a failing call must overwrite with NULL. Never
@@ -694,28 +676,6 @@ fn sentinel_session() -> *mut wem_capi::WemSession {
 
 fn sentinel_encoder() -> *mut WemEncoder {
     std::ptr::without_provenance_mut::<WemEncoder>(0x5E55_10A2)
-}
-
-/// The bytes of one `WemMeta`, for a whole-struct "untouched" comparison.
-fn meta_bytes(meta: &WemMeta) -> Vec<u8> {
-    // SAFETY: `WemMeta` is `repr(C)` plain data (a u64 and a [u8; 64]) with
-    // no padding, so every byte of it is initialized and readable.
-    unsafe {
-        std::slice::from_raw_parts(
-            std::ptr::from_ref(meta).cast::<u8>(),
-            std::mem::size_of::<WemMeta>(),
-        )
-        .to_vec()
-    }
-}
-
-/// A meta a caller left in its frame before the call: nothing in it is a
-/// value the library could have written.
-fn sentinel_meta() -> WemMeta {
-    WemMeta {
-        total_len: 0xDEAD_BEEF_DEAD_BEEF,
-        sha256_hex: [0xAB; 64],
-    }
 }
 
 #[test]
@@ -804,11 +764,15 @@ fn session_new_writes_its_out_pointer_on_every_failure() {
     }
 }
 
+/// `wem_session_finish` returns a code and nothing else (ABI revision 3):
+/// the whole outcome is that code plus what the client's own write callback
+/// already received, and a rejected finish delivers no bytes at all.
 #[test]
-fn finish_leaves_out_meta_untouched_on_every_failure() {
+fn finish_reports_its_outcome_and_delivers_bytes_only_on_success() {
     let (pcm, _frames, channels) = read_fixture_pcm();
 
-    // 1. A stream under the 4096-frame minimum: the kernel's own rejection.
+    // 1. A stream under the 4096-frame minimum: the kernel's own rejection,
+    //    and no container bytes reach the sink.
     let mut sinks = Sinks::new();
     let ud = sinks.user_data();
     let mut session = std::ptr::null_mut();
@@ -823,30 +787,26 @@ fn finish_leaves_out_meta_untouched_on_every_failure() {
         unsafe { wem_capi::wem_session_push(session, pcm.as_ptr(), short_len) },
         WemError::Ok
     );
-    let before = sentinel_meta();
-    let mut meta = sentinel_meta();
     assert_eq!(
-        unsafe { wem_capi::wem_session_finish(session, &mut meta) },
+        unsafe { wem_capi::wem_session_finish(session) },
         WemError::InputTooShort
     );
-    assert_eq!(
-        meta_bytes(&meta),
-        meta_bytes(&before),
-        "a rejected finish must not write a summary of a container it did not produce"
+    assert!(
+        sinks.out.is_empty(),
+        "a rejected finish must not deliver a container it did not produce"
     );
 
-    // 2. A second finish: the session is terminal, so this is a refusal, and
-    //    the caller's struct is still its own.
+    // 2. A second finish: the session is terminal, so this is a refusal.
     assert_eq!(
-        unsafe { wem_capi::wem_session_finish(session, &mut meta) },
+        unsafe { wem_capi::wem_session_finish(session) },
         WemError::StateError,
         "finish is terminal whatever it returned"
     );
-    assert_eq!(meta_bytes(&meta), meta_bytes(&before));
+    assert!(sinks.out.is_empty());
     unsafe { wem_capi::wem_session_free(session) };
 
-    // 3. A write callback that aborts the encode: the bytes never left, so
-    //    neither does the summary.
+    // 3. A write callback that aborts the encode: its own code comes back and
+    //    the bytes never left.
     let mut refusing = Sinks::new();
     let refusing_ud = refusing.user_data();
     let mut session = std::ptr::null_mut();
@@ -866,17 +826,16 @@ fn finish_leaves_out_meta_untouched_on_every_failure() {
         unsafe { wem_capi::wem_session_push(session, pcm.as_ptr(), pcm.len()) },
         WemError::Ok
     );
-    let mut meta = sentinel_meta();
     assert_eq!(
-        unsafe { wem_capi::wem_session_finish(session, &mut meta) },
+        unsafe { wem_capi::wem_session_finish(session) },
         WemError::StateError,
         "the callback's own code comes back"
     );
-    assert_eq!(meta_bytes(&meta), meta_bytes(&before));
+    assert!(refusing.out.is_empty());
     unsafe { wem_capi::wem_session_free(session) };
 
-    // 4. And the success path does write it: the same struct is filled with
-    //    the terminal summary (total_len is the container length).
+    // 4. The success path: WEM_OK, and the sink holds the reference container
+    //    — the length it needs is what its own callback counted.
     let mut sinks = Sinks::new();
     let ud = sinks.user_data();
     let mut session = std::ptr::null_mut();
@@ -890,19 +849,16 @@ fn finish_leaves_out_meta_untouched_on_every_failure() {
         unsafe { wem_capi::wem_session_push(session, pcm.as_ptr(), pcm.len()) },
         WemError::Ok
     );
-    let mut meta = sentinel_meta();
     assert_eq!(
-        unsafe { wem_capi::wem_session_finish(session, &mut meta) },
+        unsafe { wem_capi::wem_session_finish(session) },
         WemError::Ok
     );
-    assert_ne!(meta_bytes(&meta), meta_bytes(&before));
-    assert_eq!(meta.total_len as usize, sinks.out.len());
-    assert!(meta.sha256_hex.iter().all(|byte| byte.is_ascii_hexdigit()));
+    assert_eq!(sinks.out, reference_wem());
     unsafe { wem_capi::wem_session_free(session) };
 }
 
 /// A write callback that refuses the first block with the kernel's own
-/// "malformed call" code, so the finish path returns before the summary.
+/// "malformed call" code, so the finish path returns before delivering.
 unsafe extern "C" fn sink_write_refuses(
     _data: *const u8,
     _len: usize,

@@ -33,18 +33,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let channels = channels.parse::<i64>()?;
     let selection = WwiseProfile::new(version, channels, sample_rate)?;
 
+    // `impl Into<Vec<u8>>`: the buffer is owned here, so it moves in without
+    // a copy (a caller holding only a borrow passes `&pcm[..]` instead).
     let pcm = fs::read(input)?;
-    let pcm = Pcm16::from_interleaved_le(sample_rate, usize::try_from(channels)?, &pcm)?;
+    let pcm = Pcm16::from_interleaved_le(sample_rate, usize::try_from(channels)?, pcm)?;
 
     let encoder = Encoder::new(selection)?;
     let result = encoder.encode_pcm(&pcm)?;
     result.write_to(&output)?;
 
     println!(
-        "wrote {} bytes to {output} ({} audio packets, sha256={})",
+        "wrote {} bytes to {output} ({} audio packets)",
         result.len(),
-        result.stats.audio_packets,
-        result.sha256()
+        result.stats.audio_packets
     );
     Ok(())
 }

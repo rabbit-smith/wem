@@ -40,7 +40,7 @@ words; a stage is not done until it comes back zero.
 
 | Claim | Established by |
 |---|---|
-| The reference WEM for `tests/fixtures/input.wav`, byte for byte — SHA-256 `17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247` | `make wem-bytes` (`tests/whole_file/test_whole_file.py`); `crates/wem-core/tests/complete_wem_bytes.rs` |
+| The reference WEM for `tests/fixtures/input.wav`, byte for byte — the committed `tests/fixtures/reference.wem`, compared as the bytes it is | `make wem-bytes` (`tests/whole_file/test_whole_file.py`); `crates/wem-core/tests/complete_wem_bytes.rs` |
 | Per-frame values: scheduling fields, eight analysis stages, floor posts, residue rows, packet bytes, all 205 frames | `crates/wem-core/tests/frame_pipeline_parity.rs`, `tests/parity/test_frame_pipeline_parity.py` |
 | The package-root public exports and the wheel inventory | `tests/parity/test_public_api.py`, `tests/parity/test_distribution.py`, `make wheel-smoke`; the export list is in [`public-interface.md`](public-interface.md) |
 | Geometry-materializer parity: the ported builder == the carrier's registered words == the kernel's `psy_geom*` surfaces | `tests/parity/test_geometry_materializer_parity.py`; `cargo test -p wem-analysis` |
@@ -228,18 +228,29 @@ layout is in [`architecture.md`](architecture.md#profile-ownership), and
 provenance — no profile value is fitted to an output — is in
 [`profiles.md`](profiles.md).
 
-A hash exists only as a property of a produced artifact: the digest of the
-container the encoder produced, handed to the caller as `EncodeResult::sha256`
-in Rust, `sha256_hex` on the C ABI surface, `.sha256` in Python and `sha256Hex`
-in the browser shell. Nothing else is hashed. A profile's identity is its key —
-generation, channels, sample rate, channel layout — so no digest names a packet
-or a table; a setup packet, a record or a fixture travels as the bytes
+**No result carries a digest.** A caller that wants one computes it from the
+bytes it received — the container the write callback delivered, or the file it
+wrote — with whatever tool and encoding it prefers, and compares it as it
+likes; the library picks no algorithm, no encoding and no buffer size for it,
+and charges no caller for one it did not ask for. A profile's identity is its
+key — generation, channels, sample rate, channel layout — so no digest names a
+packet or a table; a setup packet, a record or a fixture travels as the bytes
 themselves, so nothing is compared against a digest of what is already at hand
 and nothing is derived from bytes only to be checked against those same bytes;
 a comparison is made against the bytes it is about (the committed reference
 container, the fixture assets, the oracle's live value stream), and a failure
 prints the first differing byte and the two lengths instead of a digest of two
 whole files.
+
+**A result carries observations, not recompositions.** The library returns what
+it observed and what the caller cannot cheaply get. Anything the caller can
+compute from bytes it already holds, or compose from arguments it already
+passed, stays out of the result: a container's byte length is what the caller's
+own write callback counts, and a label naming the selected profile is the
+selection the caller itself passed. What remains is what the caller genuinely
+cannot recompose — the PCM frame count (a streaming caller may never have
+counted the frames it pushed) and the packet counts with their short/long split
+(they require parsing the assembled container).
 
 ## Integration topology
 

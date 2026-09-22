@@ -70,7 +70,7 @@ to fix the code or the test rather than to re-record the expectation.
 
 | Target | Checks |
 | --- | --- |
-| `make wem-bytes` | Whole-file reference WEM identity: `SHA-256 17851d26…d35247`, 205 audio packets |
+| `make wem-bytes` | Whole-file reference WEM parity: the encoder's bytes equal the committed `tests/fixtures/reference.wem`, byte for byte (205 audio packets) |
 | `tests/parity/test_frame_pipeline_parity.py`, `cargo test -p wem-core --test frame_pipeline_parity` | Per-frame values (scheduling fields, eight analysis stages, floor posts, residue rows, audio packet) against the pure-Python oracle, all 205 frames |
 | `cargo test -p wem-container --test container_parity` | The native container builder against the oracle's, byte for byte, from one live packet stream |
 | `make 2ch-stress`, `make 2ch-long` | The 2ch stress corpus and the long-run cross-implementation comparison |

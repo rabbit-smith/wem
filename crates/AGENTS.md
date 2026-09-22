@@ -20,8 +20,8 @@ and the shell-mapping rules. `crates/wem-capi` implements the header 1:1.
 
 - A crate may not `use` a sibling crate outside the direction declared there;
   the edges are held by the crate manifests and by review, not by runtime checks.
-- External dependencies are locked at workspace level (`sha2`, `serde`,
-  `serde_json`). Adding any dependency requires an approved task, not a lane fix.
+- External dependencies are locked at workspace level (`serde`, `serde_json`).
+  Adding any dependency requires an approved task, not a lane fix.
 - `make rust-fmt` (`cargo fmt --all --check`) and `make rust-lint`
   (`cargo clippy --workspace --all-targets -- -D warnings`) must both come back
   clean.

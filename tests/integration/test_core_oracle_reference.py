@@ -36,7 +36,6 @@ INPUT = FIXTURES / "input.wav"
 REFERENCE = FIXTURES / "reference.wem"
 SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
 PROFILE = resolve_selection(SELECTION)
-KERNEL_METADATA_SOURCE = "profile:6ch/44100Hz/2013"
 
 STEREO_SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 2, 48000)
 STEREO_PROFILE = resolve_selection(STEREO_SELECTION)
@@ -124,16 +123,14 @@ class CoreOracleReferenceTests(unittest.TestCase):
         self.assertEqual(facade.data, reference)
         self.assertEqual(bytes(oracle_result.data), reference)
         self.assertEqual(bytes(direct_core.data), reference)
-        self.assertEqual(facade.sha256, direct_core.sha256())
         # One execution path: the stats surface carries no provenance tag.
         self.assertNotIn("engine", facade.stats.to_dict())
-        # The whole stats surface agrees, provenance label included: the
-        # oracle and the kernel name the same selection the same way.
+        # The whole stats surface agrees: the oracle and the kernel observe
+        # the same things about the same encode.
         self.assertEqual(
             facade.stats.to_dict(),
             oracle_result.stats.to_dict(),
         )
-        self.assertEqual(facade.stats.metadata_source, KERNEL_METADATA_SOURCE)
 
 
     def test_memoryview_pcm_is_the_same_container_as_the_list_form(self):
@@ -159,8 +156,6 @@ class CoreOracleReferenceTests(unittest.TestCase):
             "audio_packets",
             "short_packets",
             "long_packets",
-            "bytes_out",
-            "metadata_source",
         ):
             self.assertEqual(
                 getattr(from_view, field), getattr(from_list, field), field
@@ -199,15 +194,11 @@ class CoreOracleReferenceTests(unittest.TestCase):
                 native = Encoder(SELECTION).encode_pcm(pcm)
 
                 self.assertEqual(oracle.data, native.data)
-                self.assertEqual(oracle.sha256, native.sha256)
                 self.assertGreater(len(oracle.data), 0)
                 self.assertEqual(oracle.stats.pcm_frames, frames)
                 self.assertEqual(
                     oracle.stats.to_dict(),
                     native.stats.to_dict(),
-                )
-                self.assertEqual(
-                    native.stats.metadata_source, KERNEL_METADATA_SOURCE
                 )
 
     def test_stereo_profile_has_a_pinned_native_oracle_byte_identity(self):
@@ -225,8 +216,6 @@ class CoreOracleReferenceTests(unittest.TestCase):
 
         self.assertEqual(bytes(native.data), bytes(oracle.data))
         self.assertEqual(bytes(direct_core.data), bytes(oracle.data))
-        self.assertEqual(native.sha256, oracle.sha256)
-        self.assertEqual(direct_core.sha256(), oracle.sha256)
         self.assertEqual(native.stats.audio_packets, 26)
         self.assertEqual(native.stats.short_packets, 10)
         self.assertEqual(native.stats.long_packets, 16)

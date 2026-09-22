@@ -35,7 +35,7 @@ toolchain on `PATH`:
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e .          # or: make native
-wwise-wem input.wav --output output.wem --expect-sha256 <hex>
+wwise-wem input.wav --output output.wem
 ```
 
 ```python
@@ -44,7 +44,7 @@ from wwise_wem import encode
 
 result = encode("input.wav")          # or PcmBuffer / RawPcm
 Path("output.wem").write_bytes(result.data)
-print(result.stats.audio_packets, result.stats.bytes, result.sha256)
+print(len(result), result.stats.audio_packets)
 ```
 
 The profile is chosen from the input geometry and can be asserted explicitly;
@@ -64,15 +64,11 @@ Rust, C, Go and the browser live in [`examples/`](examples/README.md).
 ## Acceptance
 
 The bundled sample encodes to 205 audio packets (77 short, 128 long) and
-108,771 bytes:
-
-```text
-SHA-256 17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247
-```
-
-It is byte-identical to the Wwise reference, as are the paired 2ch/48 kHz input
-(37,658 B, 142/142 packets, SHA-256 `41fe43e2…ef629`) and its representative and
-stress corpora. The full list of test targets is in
+108,771 bytes. It is byte-identical to the Wwise reference, as are the paired
+2ch/48 kHz input (37,658 B, 142/142 packets) and its representative and stress
+corpora. Every claim of that kind is made against the bytes themselves — the
+committed reference container or the paired build's output — never against a
+recorded digest of them. The full list of test targets is in
 [`docs/guides/development.md`](docs/guides/development.md#verification-ladder).
 
 ## Documentation

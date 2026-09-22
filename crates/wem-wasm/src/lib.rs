@@ -5,7 +5,7 @@
 //! "C ABI surface"): same lifecycle, same error classes, same bytes; this
 //! shell owns no numerics and no profile logic.
 //!
-//! # Profile selection (ABI revision 2)
+//! # Profile selection (ABI revision 3)
 //!
 //! Every constructor takes the structured selection of `include/wem.h`
 //! ("PROFILE SELECTION"): one Wwise generation plus the PCM geometry. The
@@ -41,8 +41,9 @@
 //!   setup packet, then audio packets in encoding order) as a returned array
 //!   instead of a C callback — the JS wrapper can translate that into
 //!   callbacks; the kernel reply framing is unchanged. `finish` returns the
-//!   terminal container bytes plus the `WemMeta` summary (`totalLen`,
-//!   `sha256Hex`).
+//!   terminal container bytes and the statistics observed while assembling
+//!   them — a JS `Uint8Array` carries its own length, so no length and no
+//!   digest of it are handed back beside it.
 //! * **Error codes**: every fallible export throws a JS `Error` whose
 //!   `code` property (and message prefix) is the stable `WEM_ERR_*` string
 //!   of the C ABI error table — append-only, never renumbered.
@@ -314,7 +315,7 @@ fn read_session(
 /// One resolved profile selection as a JS object
 /// (`{ versionCode, version, generation, channels, sampleRate, description }`).
 ///
-/// This is the whole caller-facing profile selection of ABI revision 2: how
+/// This is the whole caller-facing profile selection of ABI revision 3: how
 /// the kernel stores and addresses the configuration behind it (profile
 /// name, resource paths, digests) is internal and stays on the kernel side.
 fn selection_object(selection: &WwiseProfile) -> JsValue {
@@ -391,27 +392,18 @@ fn stats_object(stats: &wem_core::EncodeStats) -> JsValue {
         "longPackets",
         JsValue::from_f64(stats.long_packets as f64),
     );
-    set(&obj, "bytes", JsValue::from_f64(stats.bytes as f64));
-    set(
-        &obj,
-        "metadataSource",
-        JsValue::from_str(&stats.metadata_source),
-    );
     JsValue::from(obj)
 }
 
 /// One encoded container (one-shot or terminal streaming) as a JS object:
-/// the WEM bytes plus the terminal summary.
+/// the WEM bytes and the statistics observed while assembling them.
+///
+/// Nothing derived from the bytes travels beside them: a `Uint8Array` knows
+/// its own `byteLength`, and a digest is the caller's to compute from it.
 fn encode_result_object(result: &wem_core::EncodeResult) -> JsValue {
     let obj = js_sys::Object::new();
     let data: Vec<u8> = result.data.clone();
     set(&obj, "data", JsValue::from(data));
-    set(
-        &obj,
-        "totalLen",
-        JsValue::from_f64(result.data.len() as f64),
-    );
-    set(&obj, "sha256Hex", JsValue::from_str(&result.sha256()));
     set(&obj, "stats", stats_object(&result.stats));
     JsValue::from(obj)
 }
@@ -490,7 +482,7 @@ impl WemEncoder {
 
     /// Encode one interleaved signed-16 PCM buffer (the wasm mirror of
     /// `wem_encoder_encode`; the container bytes come back inline as
-    /// `{ data, totalLen, sha256Hex, stats }` instead of via the write
+    /// `{ data, stats }` instead of via the write
     /// callback — callback-style output is the C ABI's way of dodging
     /// container size limits; a wasm memory transfer is the equivalent).
     ///
@@ -583,7 +575,7 @@ impl WemSession {
     }
 
     /// Finish the stream: complete the encode and return the terminal
-    /// container (`{ data, totalLen, sha256Hex, stats }`).
+    /// container (`{ data, stats }`).
     ///
     /// Terminal: after this call (success or error) the session must be
     /// released, not reused.

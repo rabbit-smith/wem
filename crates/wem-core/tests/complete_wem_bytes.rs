@@ -42,16 +42,24 @@ fn encode_is_byte_identical_to_reference_wem() {
         result.data, reference,
         "rust WEM differs from reference.wem at file level"
     );
-    // Stats mirror the Python reference expectations.
+    // Stats mirror the Python reference expectations: the observations the
+    // kernel made, plus the container length read off the bytes above.
     let stats = &result.stats;
     assert_eq!(stats.pcm_frames, 139398);
     assert_eq!(stats.channels, 6);
     assert_eq!(stats.audio_packets, 205);
     assert_eq!(stats.short_packets, 77);
     assert_eq!(stats.long_packets, 128);
-    assert_eq!(stats.bytes, 108771);
-    // The provenance label is the name-free selection description.
-    assert_eq!(stats.metadata_source, "profile:6ch/44100Hz/2013");
+    assert_eq!(
+        result.len(),
+        108771,
+        "the container length is the reference's"
+    );
+    // Which profile produced those bytes needs no label: selection is exactly
+    // one profile per geometry or a rejection, so `fixture_selection()` (the
+    // selection this test itself passed to `Encoder::new`) denotes the one
+    // installed 6ch/44100 configuration, and the byte equality above is what
+    // pins that those are the bytes it produces.
 }
 
 // ---------------------------------------------------------------------------

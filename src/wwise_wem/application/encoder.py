@@ -135,10 +135,9 @@ class Encoder:
     def _encode_pcm_core(self, pcm: PcmBuffer, rows: list[list[int]]) -> EncodeResult:
         """Run one encode on the native kernel and fill the Python DTOs.
 
-        The quality factor owned by the encoder is forwarded to the kernel;
-        the profile identity in the result is the kernel's, so the reported
-        metadata source always names the configuration that actually produced
-        the bytes.
+        The quality factor owned by the encoder is forwarded to the kernel.
+        Only what the kernel observed travels back: the container bytes and
+        the statistics the caller cannot recompose from them.
         """
         try:
             result = self._backend().encode_pcm(pcm.sample_rate, rows)
@@ -161,8 +160,6 @@ class Encoder:
             audio_packets=int(result.audio_packets),
             short_packets=int(result.short_packets),
             long_packets=int(result.long_packets),
-            bytes=int(result.bytes_out),
-            metadata_source=str(result.metadata_source),
         )
         return EncodeResult(bytes(result.data), stats)
 

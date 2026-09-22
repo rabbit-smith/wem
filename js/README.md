@@ -4,7 +4,7 @@ Browser encoding for the WEM encoder kernel — the wasm-bindgen shell
 (`crates/wem-wasm`) plus a typed JS wrapper. WAV/PCM in, WEM bytes out. The
 profile data is **compiled into the wasm module**: nothing is fetched,
 indexed, or passed in, and no entry touches the filesystem. One-shot and
-streaming APIs mirror the C ABI (`include/wem.h`, ABI revision 2):
+streaming APIs mirror the C ABI (`include/wem.h`, ABI revision 3):
 same lifecycle, same error codes, same bytes, selected by the structured
 profile selection (one Wwise generation plus the PCM geometry).
 
@@ -66,7 +66,7 @@ await listVersions();                   // [{ code: 0, label: "2013", generation
 
 // one-shot: WAV bytes → WEM. No selection → auto-selected from the WAV geometry.
 const wav = /* ArrayBuffer | Uint8Array */;
-const out = await encodeWav(wav);       // { data, totalLen, sha256Hex, stats }
+const out = await encodeWav(wav);       // { data, stats }
 
 // …or name the selection explicitly ({ version?, channels, sampleRate });
 // version: code (0 = Wwise 2013), label ("2013"), generation ("2013.2"), or omit to auto-select
@@ -84,7 +84,7 @@ const session = await createStreamSession(parsed);   // auto-selected from parse
 for (const chunk of chunksOf(parsed.pcm)) {
   session.push(chunk, (packets) => { /* seq 0 = setup packet, then audio */ });
 }
-const result = session.finish();        // { data, totalLen, sha256Hex, stats }
+const result = session.finish();        // { data, stats }
 session.destroy();
 ```
 
@@ -109,10 +109,8 @@ argument), `WEM_ERR_GEOMETRY_MISMATCH`, `WEM_ERR_INPUT_TOO_SHORT`,
 
 `test-node.mjs` pins byte-exactness: the representative 6ch/44.1kHz recording
 encoded through the wasm package must be byte-identical to the committed
-kernel reference `tests/fixtures/reference.wem` (SHA-256
-`17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247` — the
-test compares that file's bytes, so this digest documents the expected value
-rather than being restated by the test),
+kernel reference `tests/fixtures/reference.wem` — the test compares that
+file's bytes, so it restates neither a digest nor a length of it —
 across one-shot (auto-selected, explicit, and raw-PCM paths) and three
 chunking schemes; the compiled-in version table, the resolved selection of
 every constructor, and the selection/error code mapping must hold.

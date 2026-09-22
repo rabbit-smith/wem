@@ -38,9 +38,10 @@ EXPECTED_STATS = {
     "audio_packets": 205,
     "short_packets": 77,
     "long_packets": 128,
-    "bytes": 108771,
-    "metadata_source": "profile:6ch/44100Hz/2013",
 }
+#: The container length, counted by the caller from the bytes it holds — the
+#: library returns observations, not a length of bytes the caller already has.
+EXPECTED_CONTAINER_BYTES = 108771
 
 
 def _rows_from_pcm(pcm: PcmBuffer) -> list[list[int]]:
@@ -62,10 +63,11 @@ class FacadeIsCoreTests(unittest.TestCase):
 
         self.assertEqual(result.data, reference)
         self.assertEqual(result.stats.to_dict(), EXPECTED_STATS)
+        self.assertEqual(len(result), EXPECTED_CONTAINER_BYTES)
         self.assertEqual(bytes(direct.data), reference)
         # The facade output is what the in-package core binding produces:
         # there is no second path that could diverge.
-        self.assertEqual(result.sha256, direct.sha256())
+        self.assertEqual(len(bytes(direct.data)), len(result.data))
 
     def test_facade_binds_the_in_package_core_module(self):
         # The facade's execution-path import IS the in-package extension;

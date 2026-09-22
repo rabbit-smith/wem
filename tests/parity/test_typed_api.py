@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def _result() -> EncodeResult:
     return EncodeResult(
         b"RIFF",
-        EncodeStats(16, 6, 2, 1, 1, 4, "profile:6ch/44100Hz/2013"),
+        EncodeStats(16, 6, 2, 1, 1),
     )
 
 

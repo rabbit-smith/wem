@@ -24,5 +24,4 @@ wem-core = { workspace = true }
 wem-profiles = { workspace = true }
 
 [dev-dependencies]
-sha2 = { workspace = true }
 wem-container = { workspace = true }

@@ -12,8 +12,6 @@
 //!   -> build_vorbis_wem container assembly
 //! ```
 
-use sha2::{Digest, Sha256};
-
 use std::path::Path;
 
 use wem_analysis::config::AnalysisProfileResources;
@@ -28,7 +26,7 @@ use wem_profiles::carrier::{compiled_profile_for_selection, CompiledProfile};
 use wem_profiles::error::ProfileError;
 use wem_profiles::model::ContainerMetadata;
 use wem_profiles::model::EncoderProfile;
-use wem_profiles::selection::{WwiseProfile, WwiseVersion};
+use wem_profiles::selection::WwiseProfile;
 use wem_vorbis::codebook::Codebook;
 use wem_vorbis::setup::SetupInfo;
 
@@ -310,28 +308,25 @@ fn validate_sample_rate(sample_rate: i64) -> Result<(), EncoderError> {
 
 /// Per-output container metadata, kept separate from codec identity
 /// (Python `_ContainerPlan`).
+///
+/// The plan carries the profile's own container metadata and nothing that
+/// describes *which* profile it came from: the selection is exactly the one
+/// the caller passed, so a label naming it back to the caller would be the
+/// caller's own argument returned to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContainerPlan {
     fmt: VorbisFmtFields,
     endian: Endian,
     seek_table: Vec<u8>,
     extra_chunks: Vec<([u8; 4], Vec<u8>)>,
-    metadata_source: String,
 }
 
 impl ContainerPlan {
     /// Fresh plan from one installed profile
     /// (Python `_ContainerPlan.from_profile`).
-    ///
-    /// The plan carries the profile's own container metadata; the provenance
-    /// label is the name-free selection description (geometry plus Wwise
-    /// generation), never the internal profile name.
     pub fn from_profile(profile: &EncoderProfile) -> Self {
         let meta = profile.container_metadata();
         let fmt = from_container_metadata(meta);
-        let version = WwiseVersion::from_generation(profile.key().generation())
-            .map(|version| version.label().to_string())
-            .unwrap_or_else(|_| profile.key().generation().to_string());
         Self {
             fmt,
             endian: if profile.endian() == "be" {
@@ -352,12 +347,6 @@ impl ContainerPlan {
                     Some((chunk_id, payload.clone()))
                 })
                 .collect(),
-            metadata_source: format!(
-                "profile:{}ch/{}Hz/{}",
-                profile.channels(),
-                profile.sample_rate(),
-                version
-            ),
         }
     }
 
@@ -375,12 +364,6 @@ impl ContainerPlan {
 
     pub fn extra_chunks(&self) -> &[([u8; 4], Vec<u8>)] {
         &self.extra_chunks
-    }
-
-    /// Provenance label reported in stats
-    /// (Python `metadata_source`; must be non-empty).
-    pub fn metadata_source(&self) -> &str {
-        &self.metadata_source
     }
 }
 
@@ -416,6 +399,13 @@ fn from_container_metadata(meta: &ContainerMetadata) -> VorbisFmtFields {
 // ---------------------------------------------------------------------------
 
 /// Immutable encode statistics (Python `EncodeStats`).
+///
+/// Every field here is an observation the caller cannot recompose: `pcm_frames`
+/// because a streaming caller may never have counted the frames it pushed, and
+/// the packet counts because they require parsing the assembled container. The
+/// container's byte length is *not* among them — that is `data.len()` on bytes
+/// the caller already holds — and neither is a label naming the selected
+/// profile, which is the selection the caller itself passed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EncodeStats {
     pub pcm_frames: i64,
@@ -423,11 +413,13 @@ pub struct EncodeStats {
     pub audio_packets: i64,
     pub short_packets: i64,
     pub long_packets: i64,
-    pub bytes: i64,
-    pub metadata_source: String,
 }
 
 /// Immutable encode result (Python `EncodeResult`).
+///
+/// The container bytes and the statistics observed while assembling them;
+/// nothing derived from either. A caller that wants a digest of `data`
+/// computes one from the bytes it received.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EncodeResult {
     pub data: Vec<u8>,
@@ -435,13 +427,6 @@ pub struct EncodeResult {
 }
 
 impl EncodeResult {
-    /// SHA-256 of the encoded bytes, lowercase hex
-    /// (Python `EncodeResult.sha256`).
-    pub fn sha256(&self) -> String {
-        let digest = Sha256::digest(&self.data);
-        hex(digest.as_slice())
-    }
-
     /// Byte length of the assembled container.
     pub fn len(&self) -> usize {
         self.data.len()
@@ -499,7 +484,6 @@ impl std::fmt::Debug for Encoder {
             .field("sample_rate", &self.profile.sample_rate())
             .field("block_sizes", &self.profile.block_sizes())
             .field("quality", &self.profile.quality())
-            .field("metadata_source", &self.container.metadata_source())
             .field("setup_packet_len", &self.resources.setup_packet.len())
             .field("codebooks", &self.resources.codebooks.len())
             .finish()
@@ -710,7 +694,6 @@ impl Encoder {
 
         let short_packets = modes.iter().filter(|&&m| m == 0).count() as i64;
         let long_packets = modes.iter().filter(|&&m| m == 1).count() as i64;
-        let bytes = built.wem_bytes.len() as i64;
         Ok(EncodeResult {
             data: built.wem_bytes,
             stats: EncodeStats {
@@ -719,22 +702,9 @@ impl Encoder {
                 audio_packets: short_packets + long_packets,
                 short_packets,
                 long_packets,
-                bytes,
-                metadata_source: self.container.metadata_source.clone(),
             },
         })
     }
-}
-
-/// Lowercase hex of a digest (Python `hex()` over the digest bytes).
-fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write;
-    bytes
-        .iter()
-        .fold(String::with_capacity(bytes.len() * 2), |mut out, byte| {
-            let _ = write!(out, "{byte:02x}");
-            out
-        })
 }
 
 /// The clear pending-corpus error for a draft profile encode attempt.

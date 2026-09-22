@@ -39,17 +39,22 @@ from wwise_wem import encode
 
 result = encode("input.wav")
 Path("output.wem").write_bytes(result.data)
-print(result.stats.audio_packets, result.stats.bytes, result.sha256)
+print(len(result), result.stats.audio_packets)
 ```
 
 The configuration is selected from the WAV geometry for the installed Wwise
-generation. To assert that geometry instead of trusting it, and to pin the
-expected result:
+generation. To assert that geometry instead of trusting it:
 
 ```bash
 wwise-wem tests/fixtures/input.wav --output output.wem \
-  --channels 6 --sample-rate 44100 \
-  --expect-sha256 17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247
+  --channels 6 --sample-rate 44100
+```
+
+To check the result against the reference container, compare the bytes —
+`cmp` says exactly where two files first differ, which a digest of each cannot:
+
+```bash
+cmp output.wem tests/fixtures/reference.wem && echo "byte-identical"
 ```
 
 ## Inputs
@@ -116,14 +121,18 @@ python -m wwise_wem INPUT.wav --output OUTPUT.wem [OPTIONS]
 | `--wwise-version GENERATION` | Wwise generation (`2013` or `2013.2`, default `2013`); with the WAV geometry this is the whole selection |
 | `--channels N` | Assert the WAV channel count |
 | `--sample-rate HZ` | Assert the WAV sample rate |
-| `--expect-sha256 HEX` | Fail unless the encoded WEM matches this digest |
 | `--output PATH` | Required; parent directories are created |
 
 ## Results and errors
 
-`EncodeResult.data` is the completed WEM, `EncodeResult.stats` is an immutable
-`EncodeStats` (`to_dict()` returns the stable JSON-ready fields), and
-`EncodeResult.sha256` is the lowercase digest.
+`EncodeResult.data` is the completed WEM and `EncodeResult.stats` is an
+immutable `EncodeStats` (`to_dict()` returns the stable JSON-ready fields).
+The statistics are what the encoder observed and the caller cannot recompose —
+`pcm_frames` (a streaming caller may never have counted the frames it pushed)
+and the packet counts (they require parsing the container). The container's
+byte length is `len(result)`, and a digest of it is the caller's to compute
+from `result.data` with whatever tool and encoding it prefers; the library
+picks neither and returns neither.
 
 `TypeError` for unsupported source or field types; `ValueError` for invalid
 values, unsupported geometry, profile mismatch, or kernel configuration errors;
@@ -161,11 +170,12 @@ See [`../../examples/README.md`](../../examples/README.md) for the runnable set.
 ## Check an install
 
 The bundled sample is a complete acceptance case: 205 audio packets (77 short,
-128 long) and 108,771 bytes.
+128 long) and 108,771 bytes, byte-identical to the committed reference
+container.
 
 ```bash
-wwise-wem tests/fixtures/input.wav --output out.wem \
-  --expect-sha256 17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247
+wwise-wem tests/fixtures/input.wav --output out.wem
+cmp out.wem tests/fixtures/reference.wem && echo "byte-identical"
 ```
 
 More cases — the six real-build 2ch reference inputs, the two stress inputs, and

@@ -2,13 +2,13 @@
  * wwise-wem-wasm — typed wrapper over the wem-wasm kernel shell.
  *
  * The Rust side (crates/wem-wasm) is a parallel language shell over the
- * WEM encoder kernel (`include/wem.h`, ABI revision 2): one-shot
+ * WEM encoder kernel (`include/wem.h`, ABI revision 3): one-shot
  * and streaming WAV/PCM -> WEM, errors as `WEM_ERR_*` codes. This module
  * adds a small ergonomic, promise-shaped API on top and NOTHING else: no
  * numerics, no profile logic, no WAV parsing of its own — the kernel owns
  * all of that.
  *
- * # Profile selection (ABI revision 2)
+ * # Profile selection (ABI revision 3)
  *
  * The encoder configurations are compiled into the wasm module: nothing is
  * fetched, downloaded, indexed, or passed in. A selection is one Wwise
@@ -32,7 +32,7 @@
  * await initWasm();
  *
  * // one-shot, auto-selected from the WAV's own geometry
- * const out = await encodeWav(wavBytes);            // { data, totalLen, sha256Hex, stats }
+ * const out = await encodeWav(wavBytes);            // { data, stats }
  *
  * // one-shot, explicit selection
  * const same = await encodeWav(wavBytes, { version: 0, channels: 6, sampleRate: 44100 });
@@ -119,8 +119,6 @@ interface ParsedWavRaw {
 
 interface WemResultRaw {
   data: Uint8Array;
-  totalLen: number;
-  sha256Hex: string;
   stats: WemStats;
 }
 
@@ -189,26 +187,32 @@ export interface ParsedWav {
  */
 export type GeometrySource = ProfileSelection | ParsedWav;
 
-/** Terminal container summary (mirrors the kernel's WemMeta + stats). */
+/**
+ * One encoded container (the kernel's `EncodeResult`): the WEM bytes plus
+ * the statistics observed while assembling them.
+ *
+ * Nothing derived from those bytes travels beside them — a `Uint8Array`
+ * knows its own `byteLength`, and a digest is the caller's to compute from
+ * the bytes it received.
+ */
 export interface WemResult {
   /** The assembled WEM container bytes. */
   data: Uint8Array;
-  /** Byte length of `data`. */
-  totalLen: number;
-  /** SHA-256 of `data` (lowercase hex, 64 chars). */
-  sha256Hex: string;
   stats: WemStats;
 }
 
-/** One encode's statistics (kernel EncodeStats, camelCase). */
+/**
+ * One encode's statistics (kernel EncodeStats, camelCase): what the library
+ * observed and the caller cannot recompose. `pcmFrames` because a streaming
+ * caller may never have counted the frames it pushed; the packet counts
+ * because they require parsing the assembled container.
+ */
 export interface WemStats {
   pcmFrames: number;
   channels: number;
   audioPackets: number;
   shortPackets: number;
   longPackets: number;
-  bytes: number;
-  metadataSource: string;
 }
 
 /**
@@ -354,8 +358,6 @@ function asBytes(value: Uint8Array | ArrayBuffer, what: string): Uint8Array {
 function toResult(raw: WemResultRaw): WemResult {
   return {
     data: raw.data,
-    totalLen: raw.totalLen,
-    sha256Hex: raw.sha256Hex,
     stats: raw.stats,
   };
 }

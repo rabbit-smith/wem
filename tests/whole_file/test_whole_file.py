@@ -20,8 +20,10 @@ class WholeFileEncoderTests(unittest.TestCase):
         self.assertEqual(stats.audio_packets, 205)
         self.assertEqual(stats.short_packets, 77)
         self.assertEqual(stats.long_packets, 128)
-        self.assertEqual(stats.bytes, 108771)
-        self.assertEqual(stats.metadata_source, "profile:6ch/44100Hz/2013")
+        # The container length is the caller's own count of the bytes it
+        # holds; the library returns it nowhere.
+        self.assertEqual(len(result), len(reference))
+        self.assertEqual(len(result), 108771)
 
 
 if __name__ == "__main__":

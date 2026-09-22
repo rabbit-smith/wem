@@ -39,7 +39,6 @@ INPUT = FIXTURES / "input.wav"
 REFERENCE = FIXTURES / "reference.wem"
 SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
 PROFILE = resolve_selection(SELECTION)
-KERNEL_METADATA_SOURCE = "profile:6ch/44100Hz/2013"
 
 
 def _synthetic_int16(frames: int, channels: int = 6) -> list[int]:
@@ -135,7 +134,6 @@ class ExtendedInputDomainTests(unittest.TestCase):
         packed = W.encode(INPUT)
         typed = W.encode(read_pcm_wav(INPUT))
         self.assertEqual(packed.data, typed.data)
-        self.assertEqual(packed.sha256, typed.sha256)
 
     def test_encoding_is_deterministic_across_runs_and_forms(self):
         import tempfile
@@ -220,7 +218,7 @@ class ExtendedInputConsistencyTests(unittest.TestCase):
         self.assertEqual(bytes(oracle.data), reference)
         self.assertEqual(bytes(direct_core.data), reference)
         self.assertEqual(facade.data, oracle.data)
-        self.assertEqual(facade.sha256, direct_core.sha256())
+        self.assertEqual(bytes(facade.data), bytes(direct_core.data))
 
     def test_converted_inputs_are_byte_identical_between_facade_and_oracle(self):
         import tempfile
@@ -265,11 +263,6 @@ class ExtendedInputConsistencyTests(unittest.TestCase):
                     self.assertEqual(
                         facade_result.stats.to_dict(),
                         oracle_result.stats.to_dict(),
-                        label,
-                    )
-                    self.assertEqual(
-                        facade_result.stats.metadata_source,
-                        KERNEL_METADATA_SOURCE,
                         label,
                     )
 
