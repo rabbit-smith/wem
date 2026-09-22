@@ -3,10 +3,11 @@
  *
  * The Rust side (crates/wem-wasm) is a parallel language shell over the
  * WEM encoder kernel (`include/wem.h`, ABI revision 3): one-shot
- * and streaming WAV/PCM -> WEM, errors as `WEM_ERR_*` codes. This module
- * adds a small ergonomic, promise-shaped API on top and NOTHING else: no
- * numerics, no profile logic, no WAV parsing of its own — the kernel owns
- * all of that.
+ * and streaming WAV/PCM -> WEM, plus the decode direction (`WemDecoder`,
+ * section 5) WEM -> interleaved f32 PCM, errors as `WEM_ERR_*` codes. This
+ * module adds a small ergonomic, promise-shaped API on top of both
+ * directions and NOTHING else: no numerics, no profile logic, no WAV or WEM
+ * parsing of its own — the kernel owns all of that.
  *
  * # Profile selection (ABI revision 3)
  *
@@ -44,6 +45,37 @@
  * const result = session.finish();
  * session.destroy();
  * ```
+ *
+ * # Decoding (include/wem.h section 5)
+ *
+ * The mirror of the encode direction with the data reversed, and the same
+ * shape: a WEM is self-describing, so there is no selection argument, and the
+ * geometry arrives on the step that parses the container's setup packet.
+ *
+ * ```ts
+ * import { initWasm, createDecoder, decodeWem } from "wwise-wem-wasm";
+ *
+ * await initWasm();
+ *
+ * // one-shot: WEM bytes -> the whole decode result
+ * const decoded = await decodeWem(wemBytes);        // { channels, sampleRate, setup, frames, pcm }
+ * decoded.pcm;                                      // Float32Array, interleaved, ±1.0 full scale
+ *
+ * // streaming (Init -> push* -> Finish); chunk boundaries never move a sample
+ * const decoder = await createDecoder();
+ * for (const chunk of chunksOf(wemBytes)) {
+ *   const step = decoder.push(chunk);               // step.header, step.pcm, step.error
+ * }
+ * const last = decoder.finish();
+ * decoder.destroy();
+ * ```
+ *
+ * A refusal that is not a defect travels on the step beside the samples that
+ * step completed — the order the C ABI delivers them in (`pcm_cb`, then the
+ * return code) — so a caller that stops at `step.error` still sees every frame
+ * the packets before the refusal produced. `WEM_ERR_INTERNAL` is the exception:
+ * it is a defect, its output is not delivered, and it throws (a wasm trap
+ * cannot be a value — see crates/wem-wasm's panic note).
  *
  * # Environments (all first-class, no DOM used here)
  *
@@ -83,6 +115,12 @@ interface CoreSession {
   free(): void;
 }
 
+interface CoreDecoder {
+  push(data: Uint8Array): DecodeStepRaw;
+  finish(): DecodeStepRaw;
+  free(): void;
+}
+
 interface CoreModule {
   WemEncoder: new (
     version: CoreVersionArg,
@@ -94,6 +132,8 @@ interface CoreModule {
     channels: number,
     sampleRate: number,
   ) => CoreSession;
+  /** The decode session: Init takes no selection (include/wem.h section 5). */
+  WemDecoder: new () => CoreDecoder;
   wem_parse_wav(wav: Uint8Array): ParsedWavRaw;
   /** The compiled-in `WemVersion` table (include/wem.h). */
   wem_versions(): WwiseVersionInfo[];
@@ -120,6 +160,25 @@ interface ParsedWavRaw {
 interface WemResultRaw {
   data: Uint8Array;
   stats: WemStats;
+}
+
+/**
+ * One decode step as the wasm shell returns it. The shell's own shape: the
+ * header announcement on the one step that resolved it, this step's samples,
+ * and the refusal that stopped it (`null` when it consumed everything).
+ */
+interface DecodeStepRaw {
+  header: DecodedHeaderRaw | null;
+  channels: number;
+  frames: number;
+  pcm: Float32Array;
+  error: DecodeRefusal | null;
+}
+
+interface DecodedHeaderRaw {
+  channels: number;
+  sampleRate: number;
+  setup: Uint8Array;
 }
 
 // ---------------------------------------------------------------------------
@@ -270,6 +329,104 @@ export interface StreamSession {
   destroy(): void;
 }
 
+/**
+ * The decoder's one-time header announcement (the mirror of the C ABI's
+ * `header_cb`): what the container itself declares, resolved on the step that
+ * parsed its setup packet.
+ *
+ * It carries no frame count: the wasm shell's step object does not announce
+ * the container's declared `dw_total_pcm_frames`, so this surface does not
+ * invent one. What a caller can always count is what it received — see
+ * {@link DecodeStep.frames} and {@link DecodeResult.frames}.
+ */
+export interface DecodedHeader {
+  /** PCM channel count the container declares. */
+  channels: number;
+  /** PCM sample rate the container declares. */
+  sampleRate: number;
+  /** The setup packet this build parsed, exactly as the container carried it. */
+  setup: Uint8Array;
+}
+
+/** One refusal, as the stable `WEM_ERR_*` code plus the kernel's diagnostic. */
+export interface DecodeRefusal {
+  code: string;
+  message: string;
+}
+
+/**
+ * What one decode step produced, and how it ended (`wem_decoder_push` /
+ * `wem_decoder_finish`).
+ *
+ * The step reports its output whether or not it was refused: a rejection stops
+ * the step at the packet it could not read, and the samples the earlier packets
+ * completed are still real, so they are handed over rather than dropped.
+ * Nothing was advanced past the failure, and the same rejection is reported
+ * again by the next call.
+ */
+export interface DecodeStep {
+  /** The header announcement, on the one step that resolved it. */
+  header: DecodedHeader | null;
+  /** Channel count `pcm` is interleaved over (`0` before the header is known). */
+  channels: number;
+  /** Frames in `pcm` (`0` when the step produced none). */
+  frames: number;
+  /** This step's samples: interleaved f32 at ±1.0 full scale. */
+  pcm: Float32Array;
+  /** The refusal that stopped this step, or `null` when it consumed its input. */
+  error: DecodeRefusal | null;
+}
+
+/**
+ * One streaming decode session (Init -> push* -> Finish -> destroy): the
+ * mirror of the encode session with the data direction reversed.
+ *
+ * There is no selection argument — a WEM is self-describing and the geometry
+ * arrives on the step that parses its setup packet. Single-threaded ownership,
+ * as the C ABI requires. All methods are synchronous: the decode work is
+ * synchronous CPU work, so a Promise wrapper would only obscure error
+ * handling. Chunk boundaries never affect the emitted samples, and an empty
+ * chunk is a no-op.
+ */
+export interface Decoder {
+  /**
+   * Push one chunk of WEM bytes and return what it completed.
+   *
+   * @param wemChunk chunk bytes (any split; the samples do not depend on it)
+   * @returns the header announcement (at most once) and the frames this chunk
+   *   completed, plus the refusal that stopped it if there was one
+   */
+  push(wemChunk: Uint8Array | ArrayBuffer): DecodeStep;
+  /**
+   * Finish the decode and return the last frames. Terminal — the decoder must
+   * be destroyed afterwards. On success the session has delivered exactly the
+   * frame count the container declares.
+   */
+  finish(): DecodeStep;
+  /** Release the decoder (safe before or after finish). */
+  destroy(): void;
+}
+
+/**
+ * One one-shot decode: the container's header announcement (geometry and setup
+ * packet) plus every frame the session delivered as one interleaved f32 buffer.
+ */
+export interface DecodeResult {
+  /** PCM channel count the container declares. */
+  channels: number;
+  /** PCM sample rate the container declares. */
+  sampleRate: number;
+  /** The setup packet this build parsed. */
+  setup: Uint8Array;
+  /**
+   * Frames delivered — counted from the steps, which for a session that
+   * finished with `WEM_OK` is exactly the container's declared count.
+   */
+  frames: number;
+  /** Interleaved f32 samples at ±1.0 full scale. */
+  pcm: Float32Array;
+}
+
 /** Kernel error shape: a JS Error with the stable WEM_ERR_* code. */
 export interface WemError extends Error {
   /** One of WEM_ERR_PROFILE_NOT_FOUND / WEM_ERR_STATE_ERROR / ... */
@@ -284,6 +441,7 @@ export const WEM_ERROR_CODES = [
   "WEM_ERR_INPUT_TOO_SHORT",
   "WEM_ERR_FORMAT_UNSUPPORTED",
   "WEM_ERR_INTERNAL",
+  "WEM_ERR_INPUT_MALFORMED",
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -506,5 +664,106 @@ export async function createStreamSession(source: GeometrySource): Promise<Strea
     destroy() {
       session.free();
     },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Decoding (include/wem.h section 5)
+// ---------------------------------------------------------------------------
+
+/** The shell's step object as the public shape (a copy of the flat fields). */
+function toStep(raw: DecodeStepRaw): DecodeStep {
+  return {
+    header:
+      raw.header === null
+        ? null
+        : {
+            channels: raw.header.channels,
+            sampleRate: raw.header.sampleRate,
+            setup: raw.header.setup,
+          },
+    channels: raw.channels,
+    frames: raw.frames,
+    pcm: raw.pcm,
+    error:
+      raw.error === null ? null : { code: raw.error.code, message: raw.error.message },
+  };
+}
+
+/**
+ * Open one streaming decode session (`wem_decoder_new`): Init -> push* ->
+ * Finish -> destroy. There is no selection argument, and nothing is resolved
+ * until the container's own header region arrives.
+ */
+export async function createDecoder(): Promise<Decoder> {
+  const coreModule = await core();
+  const decoder = new coreModule.WemDecoder();
+  return {
+    push(wemChunk) {
+      return toStep(decoder.push(asBytes(wemChunk, "WEM chunk")));
+    },
+    finish() {
+      return toStep(decoder.finish());
+    },
+    destroy() {
+      decoder.free();
+    },
+  };
+}
+
+/**
+ * One-shot decode: WEM bytes -> the container's geometry, its setup packet, and
+ * every frame it delivered as one interleaved f32 buffer.
+ *
+ * The whole WEM is pushed as a single chunk, so the session's reply carries
+ * the whole PCM at once; a caller that wants bounded pushes (and the frames
+ * each one completed) drives {@link createDecoder} instead. Chunking never
+ * changes the samples either way. `frames` is what the session delivered —
+ * for a decode that finishes with `WEM_OK` that is exactly the frame count the
+ * container declares, but this surface reads no declared count (the wasm
+ * shell's header announcement does not carry one).
+ *
+ * Throws the stable `WEM_ERR_*` error of the refusal that stopped the decode
+ * (including `WEM_ERR_INPUT_MALFORMED` for bytes that are not a container
+ * this revision parses, and `WEM_ERR_FORMAT_UNSUPPORTED` for a container whose
+ * setup packet this build does not carry). The prefix a refusal completed is
+ * still available — from a streaming {@link Decoder}, whose step carries the
+ * samples and the refusal together.
+ */
+export async function decodeWem(wemBytes: Uint8Array | ArrayBuffer): Promise<DecodeResult> {
+  const decoder = await createDecoder();
+  const steps: DecodeStep[] = [];
+  try {
+    steps.push(decoder.push(asBytes(wemBytes, "WEM input")));
+    steps.push(decoder.finish());
+  } finally {
+    decoder.destroy();
+  }
+
+  let header: DecodedHeader | null = null;
+  let frames = 0;
+  let samples = 0;
+  for (const step of steps) {
+    // The announcement fires at most once, before any PCM.
+    if (step.header) header = step.header;
+    frames += step.frames;
+    samples += step.pcm.length;
+    if (step.error) throw wemError(`${step.error.code}: ${step.error.message}`);
+  }
+  if (header === null) {
+    throw wemError("WEM_ERR_INTERNAL: the decode session resolved no geometry");
+  }
+  const pcm = new Float32Array(samples);
+  let offset = 0;
+  for (const step of steps) {
+    pcm.set(step.pcm, offset);
+    offset += step.pcm.length;
+  }
+  return {
+    channels: header.channels,
+    sampleRate: header.sampleRate,
+    setup: header.setup,
+    frames,
+    pcm,
   };
 }

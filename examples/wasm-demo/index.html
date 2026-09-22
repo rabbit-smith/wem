@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>WEM encoder — browser demo</title>
+  <title>WEM codec — browser demo</title>
   <style>
     :root { color-scheme: light dark; }
     body { font-family: system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
@@ -23,17 +23,18 @@
   </style>
 </head>
 <body>
-  <h1>WEM encoder — browser demo</h1>
+  <h1>WEM codec — browser demo</h1>
   <p>
-    Drop a <code>.wav</code> (signed-16 PCM) below: it is parsed and encoded to
-    <code>WEM</code> <strong>in the browser</strong> (WebAssembly, wasm-bindgen shell
-    over the Rust kernel), then offered for download.
+    Drop a <code>.wav</code> (signed-16 PCM) to encode it to <code>WEM</code>, or
+    a <code>.wem</code> to decode it to raw <code>f32</code> PCM —
+    <strong>in the browser</strong> (WebAssembly, wasm-bindgen shell over the
+    Rust kernel), then download the result.
   </p>
 
   <div id="drop">
-    Drop a <code>.wav</code> here, or click to choose
-    <small>(the profile data is compiled into the wasm module; the configuration is auto-selected from the file's geometry)</small>
-    <input type="file" id="file" accept=".wav,audio/wav,audio/x-wav" hidden />
+    Drop a <code>.wav</code> or a <code>.wem</code> here, or click to choose
+    <small>(the profile data is compiled into the wasm module; an encode's configuration is auto-selected from the WAV's geometry, and a decode's geometry is announced by the container itself)</small>
+    <input type="file" id="file" accept=".wav,.wem,audio/wav,audio/x-wav" hidden />
   </div>
 
   <div class="bar"><div id="progress"></div></div>
@@ -41,18 +42,21 @@
 
   <div id="result" style="display:none">
     <p>
-      <a id="dl" download="output.wem"><button id="dlbtn">Download .wem</button></a>
-      <button id="again">Encode another</button>
+      <a id="dl" download="output"><button id="dlbtn">Download result</button></a>
+      <button id="again">Try another</button>
     </p>
     <pre id="summary"></pre>
   </div>
 
   <p class="note">
-    Memory: the kernel's streaming session keeps only a bounded input ring + the
-    emitted packets (output ≈ 8–12% of input PCM size). The limiting factor is the
-    WAV you decode — a 4-minute 6ch/44.1kHz WAV is ≈ 127&nbsp;MB; large files are
-    best streamed chunk-by-chunk (see README). Encoding runs on this tab's main
-    thread; move it into a Web Worker for long files.
+    Memory: an encode streams — the kernel's session keeps a bounded input ring
+    plus the emitted packets (output ≈ 8–12% of input PCM). A decode streams
+    too, but this page collects the whole decoded PCM to offer it as one
+    download: 4 bytes per sample, so a 4-minute 6ch/44.1kHz track is ≈ 250&nbsp;MB
+    of f32 against ≈ 127&nbsp;MB of source WAV. For large files decode
+    chunk-by-chunk and consume each block instead of accumulating it (see
+    README). Both directions run on this tab's main thread; move them into a Web
+    Worker for long files.
   </p>
 
   <script type="module" src="./demo.mjs"></script>

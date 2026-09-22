@@ -22,6 +22,15 @@
  *      pinned; the profile bundle is compiled in, so nothing is fetched.
  *   4. ERROR MAPPING: kernel failures surface as JS Errors whose `code` is
  *      the stable WEM_ERR_* string.
+ *   5. DECODING: the wrapper's decode surface (createDecoder / decodeWem, the
+ *      wasm `WemDecoder` of include/wem.h section 5) decodes the committed
+ *      reference WEM at run time — the declared geometry and frame count, a
+ *      reconstruction of the WAV the container was produced from, chunk
+ *      invariance, one header announcement, and the refusal/lifecycle codes.
+ *
+ * The decode half needs no oracle from outside this checkout: the WEM and the
+ * WAV it was produced from are both committed, and the comparison against the
+ * source is live (a relative bound), never a recorded number.
  *
  * Run: make wasm-build   (both packages: js/pkg, js/pkg-node)
  *      node js/test-node.mjs   — needs a built js/pkg-node.
@@ -40,6 +49,8 @@ import {
   encodeWav,
   createEncoder,
   createStreamSession,
+  createDecoder,
+  decodeWem,
   WEM_ERROR_CODES,
 } from "./src/index.ts";
 
@@ -345,9 +356,10 @@ await expectWemError(
 
 check(
   "WEM_ERROR_CODES mirrors the include/wem.h table",
-  WEM_ERROR_CODES.length === 7 &&
+  WEM_ERROR_CODES.length === 8 &&
     WEM_ERROR_CODES[0] === "WEM_OK" &&
-    WEM_ERROR_CODES[6] === "WEM_ERR_INTERNAL",
+    WEM_ERROR_CODES[6] === "WEM_ERR_INTERNAL" &&
+    WEM_ERROR_CODES[7] === "WEM_ERR_INPUT_MALFORMED",
   WEM_ERROR_CODES.join(", "),
 );
 
@@ -415,6 +427,221 @@ if (twoChannelEncoder) {
   twoChannelEncoder.destroy();
 }
 
+// --- 6) decoding: WEM -> interleaved f32, through the wrapper ---------------
+// The runtime check the compile-only shell lane could not write: the committed
+// paired-build container goes in through the wrapper's decode surface
+// (createDecoder / decodeWem over the wasm `WemDecoder`), and what comes out is
+// compared against the WAV that container was produced from. Both files are
+// committed, so the comparison is live and nothing here is a recorded number.
+
+// The source PCM as f32 at the kernel's own normalization (i16 / 32768.0).
+const sourceView = new DataView(
+  parsed.pcm.buffer,
+  parsed.pcm.byteOffset,
+  parsed.pcm.byteLength,
+);
+const sourceSamples = new Float32Array(parsed.pcm.byteLength / 2);
+let sourcePeak = 0;
+for (let i = 0; i < sourceSamples.length; i++) {
+  const sample = sourceView.getInt16(i * 2, true) / 32768;
+  sourceSamples[i] = sample;
+  sourcePeak = Math.max(sourcePeak, Math.abs(sample));
+}
+
+/** `max |decoded - source|` over the samples both sides have. */
+function reconstructionError(decodedPcm) {
+  const shared = Math.min(decodedPcm.length, sourceSamples.length);
+  let peak = 0;
+  for (let i = 0; i < shared; i++) {
+    peak = Math.max(peak, Math.abs(decodedPcm[i] - sourceSamples[i]));
+  }
+  return { peak, shared };
+}
+
+/** One streaming decode through the wrapper, collecting steps as it goes. */
+async function streamDecode(chunks) {
+  const decoder = await createDecoder();
+  const steps = [];
+  try {
+    for (const chunk of chunks) steps.push(decoder.push(chunk));
+    steps.push(decoder.finish());
+  } finally {
+    decoder.destroy();
+  }
+  let announcements = 0;
+  let samples = 0;
+  let pcmBeforeHeader = 0;
+  for (const step of steps) {
+    if (step.header) announcements += 1;
+    if (step.error) throw new Error(`decode refused: ${step.error.code}: ${step.error.message}`);
+    if (samples === 0 && step.pcm.length > 0 && step.header === null) pcmBeforeHeader += 1;
+    samples += step.pcm.length;
+  }
+  const total = new Float32Array(samples);
+  let offset = 0;
+  for (const step of steps) {
+    total.set(step.pcm, offset);
+    offset += step.pcm.length;
+  }
+  return { steps, total, announcements, pcmBeforeHeader };
+}
+
+const oneShot = await decodeWem(referenceWem);
+const declaredFrames = oneShot.frames;
+check(
+  "decode(reference.wem): declared geometry and frame count",
+  oneShot.channels === 6 &&
+    oneShot.sampleRate === 44100 &&
+    declaredFrames === RECORDING_FRAMES &&
+    oneShot.pcm.length === declaredFrames * 6 &&
+    oneShot.setup instanceof Uint8Array &&
+    oneShot.setup.byteLength === 201,
+  `channels=${oneShot.channels}, sampleRate=${oneShot.sampleRate}, frames=${declaredFrames}, ` +
+    `samples=${oneShot.pcm.length}, setup=${oneShot.setup.byteLength} bytes`,
+);
+
+const oneShotError = reconstructionError(oneShot.pcm);
+check(
+  "decode(reference.wem) reconstructs tests/fixtures/input.wav",
+  oneShotError.shared === sourceSamples.length &&
+    oneShotError.peak <= 2 * sourcePeak,
+  `max|error|=${oneShotError.peak.toExponential(3)} against a source peak of ` +
+    `${sourcePeak.toFixed(6)} (${((oneShotError.peak / sourcePeak) * 100).toFixed(3)}%), ` +
+    `${oneShotError.shared} samples compared`,
+);
+
+// Streaming, as the C ABI frames it: Init -> push* -> Finish. The announced
+// header is the only place the geometry appears, and it arrives before PCM.
+const wemChunkPlans = {
+  "single-chunk": [referenceWem],
+  "fixed-8192-bytes": (() => {
+    const out = [];
+    for (let off = 0; off < referenceWem.byteLength; off += 8192) {
+      out.push(referenceWem.slice(off, Math.min(off + 8192, referenceWem.byteLength)));
+    }
+    return out;
+  })(),
+  "irregular": (() => {
+    const sizes = [1, 40960, 3, 4096, 648];
+    const out = [];
+    let cursor = 0;
+    while (cursor < referenceWem.byteLength) {
+      const end = Math.min(cursor + sizes[out.length % sizes.length], referenceWem.byteLength);
+      out.push(referenceWem.slice(cursor, end));
+      cursor = end;
+    }
+    return out;
+  })(),
+};
+
+const decodedStreams = [];
+for (const [label, chunks] of Object.entries(wemChunkPlans)) {
+  const { total, announcements, pcmBeforeHeader } = await streamDecode(chunks);
+  decodedStreams.push(total);
+  check(
+    `streaming decode (${label}, ${chunks.length} chunk(s)) delivers the declared frames`,
+    total.length === RECORDING_FRAMES * 6,
+    `samples=${total.length}, frames=${total.length / 6}`,
+  );
+  check(
+    `streaming decode (${label}) announces the header exactly once, before any PCM`,
+    announcements === 1 && pcmBeforeHeader === 0,
+    `announcements=${announcements}, PCM-before-header steps=${pcmBeforeHeader}`,
+  );
+  check(
+    `streaming decode (${label}) samples == one-shot decode samples`,
+    equal(new Uint8Array(total.buffer, total.byteOffset, total.byteLength), new Uint8Array(oneShot.pcm.buffer, oneShot.pcm.byteOffset, oneShot.pcm.byteLength)),
+  );
+}
+
+check(
+  "streaming decode outputs identical across all chunkings",
+  equal(
+    new Uint8Array(decodedStreams[0].buffer, decodedStreams[0].byteOffset, decodedStreams[0].byteLength),
+    new Uint8Array(decodedStreams[1].buffer, decodedStreams[1].byteOffset, decodedStreams[1].byteLength),
+  ) &&
+    equal(
+      new Uint8Array(decodedStreams[0].buffer, decodedStreams[0].byteOffset, decodedStreams[0].byteLength),
+      new Uint8Array(decodedStreams[2].buffer, decodedStreams[2].byteOffset, decodedStreams[2].byteLength),
+    ),
+);
+
+// Identical bytes decode identically: an empty chunk is a no-op, and a second
+// decode of the same container is the same samples.
+const emptyChunkDecode = await streamDecode([new Uint8Array(0), referenceWem, new Uint8Array(0)]);
+check(
+  "an empty chunk is a no-op for the decode (include/wem.h section 5)",
+  equal(
+    new Uint8Array(emptyChunkDecode.total.buffer, emptyChunkDecode.total.byteOffset, emptyChunkDecode.total.byteLength),
+    new Uint8Array(oneShot.pcm.buffer, oneShot.pcm.byteOffset, oneShot.pcm.byteLength),
+  ),
+);
+
+// Refusals travel on the step (the C ABI's order: pcm_cb, then the code), and
+// the class is the one include/wem.h section 5 names for the input's own bytes.
+await expectWemError(
+  "bytes that are not a container this revision parses -> WEM_ERR_INPUT_MALFORMED",
+  () => decodeWem(new Uint8Array([1, 2, 3, 4])),
+  "WEM_ERR_INPUT_MALFORMED",
+);
+
+await expectWemError(
+  "a container truncated before its declared frame count -> WEM_ERR_INPUT_MALFORMED",
+  () => decodeWem(referenceWem.slice(0, 8192)),
+  "WEM_ERR_INPUT_MALFORMED",
+);
+
+{
+  // A refusal is *returned on the step*, not thrown. The wasm shell reports a
+  // decode refusal the way the C ABI does — the samples this step completed,
+  // then the code — and only WEM_ERR_INTERNAL throws. `w_format_tag` (offset
+  // 20, 0xFFFF in every Wwise container) is cleared here, which is a container
+  // that parses but is not Wwise Vorbis.
+  const foreign = referenceWem.slice();
+  foreign[20] = 0x00;
+  foreign[21] = 0x00;
+  const decoder = await createDecoder();
+  const step = decoder.push(foreign);
+  check(
+    "a refusal is returned on the step, not thrown (the kernel's delivery order)",
+    step.error !== null &&
+      step.error.code === "WEM_ERR_FORMAT_UNSUPPORTED" &&
+      step.pcm.length === 0 &&
+      step.header === null,
+    `code=${step.error?.code ?? "<null>"}, message="${step.error?.message ?? ""}"`,
+  );
+  const repeated = decoder.push(foreign);
+  check(
+    "a refused push leaves the handle usable: nothing is skipped, the same refusal repeats",
+    repeated.error !== null && repeated.error.code === "WEM_ERR_FORMAT_UNSUPPORTED",
+    `code=${repeated.error?.code ?? "<null>"}, message="${repeated.error?.message ?? ""}"`,
+  );
+  decoder.destroy();
+}
+
+{
+  const decoder = await createDecoder();
+  decoder.push(referenceWem);
+  decoder.finish();
+  await expectWemError(
+    "push after Finish -> WEM_ERR_STATE_ERROR (Finish is terminal)",
+    () => decoder.push(referenceWem),
+    "WEM_ERR_STATE_ERROR",
+  );
+  await expectWemError(
+    "Finish twice -> WEM_ERR_STATE_ERROR",
+    () => decoder.finish(),
+    "WEM_ERR_STATE_ERROR",
+  );
+  decoder.destroy();
+}
+
+await expectWemError(
+  "a WEM chunk of the wrong type -> WEM_ERR_STATE_ERROR",
+  () => decodeWem("not bytes"),
+  "WEM_ERR_STATE_ERROR",
+);
+
 // --- summary ------------------------------------------------------------------
 if (failures > 0) {
   console.error(`\n${failures} check(s) FAILED`);
@@ -423,4 +650,9 @@ if (failures > 0) {
 console.log("\nALL NODE PARITY CHECKS PASSED");
 console.log(
   `reference: ${referenceWem.byteLength} bytes identical to tests/fixtures/reference.wem`,
+);
+console.log(
+  `decode: reference.wem -> ${declaredFrames} frames x 6ch, max|error| against ` +
+    `tests/fixtures/input.wav ${oneShotError.peak.toExponential(3)} ` +
+    `(source peak ${sourcePeak.toFixed(6)})`,
 );

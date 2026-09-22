@@ -1,3 +1,6 @@
-# Build artifacts (the reference WEM output and the compiled binary).
+# Build artifacts (the container/sample outputs and the compiled binaries).
 out.wem
+out.f32
 wem-go-cgo
+wem-go-cgo-decode
+decode/decode

@@ -1,12 +1,13 @@
 # wwise-wem-wasm
 
-Browser encoding for the WEM encoder kernel — the wasm-bindgen shell
-(`crates/wem-wasm`) plus a typed JS wrapper. WAV/PCM in, WEM bytes out. The
-profile data is **compiled into the wasm module**: nothing is fetched,
-indexed, or passed in, and no entry touches the filesystem. One-shot and
-streaming APIs mirror the C ABI (`include/wem.h`, ABI revision 3):
+Browser encoding and decoding for the WEM kernel — the wasm-bindgen shell
+(`crates/wem-wasm`) plus a typed JS wrapper. WAV/PCM in, WEM bytes out; WEM in,
+interleaved f32 PCM out. The profile data is **compiled into the wasm module**:
+nothing is fetched, indexed, or passed in, and no entry touches the filesystem.
+One-shot and streaming APIs mirror the C ABI (`include/wem.h`, ABI revision 3):
 same lifecycle, same error codes, same bytes, selected by the structured
-profile selection (one Wwise generation plus the PCM geometry).
+profile selection (one Wwise generation plus the PCM geometry) for encoding —
+and, for decoding, no selection at all, because a WEM is self-describing.
 
 ## Layout
 
@@ -16,7 +17,8 @@ js/
   src/index.ts     the wrapper (typed entry; erasable-TS only, no build step)
   pkg/             wasm-pack --target web      (browser/worker; .wasm fetched by URL)   — built
   pkg-node/        wasm-pack --target nodejs   (Node; .wasm read from disk on import)   — built
-  test-node.mjs    Node parity test (reference bytes + chunking consistency + selection/error codes)
+  test-node.mjs    Node parity test (reference bytes + chunking consistency + selection/error
+                   codes + the decode direction against the committed reference WEM)
 ```
 
 `pkg/` and `pkg-node/` are `wasm-pack --out-dir` output and are not committed
@@ -88,12 +90,45 @@ const result = session.finish();        // { data, stats }
 session.destroy();
 ```
 
+Decoding is the same shape with the data reversed (`include/wem.h` section 5) —
+`WemDecoder`, reached through `createDecoder()` (streaming) or `decodeWem()`
+(one-shot). There is no selection argument on this side:
+
+```ts
+import { initWasm, createDecoder, decodeWem } from "wwise-wem-wasm";
+
+await initWasm();
+
+// one-shot: WEM bytes → { channels, sampleRate, setup, frames, pcm }
+const decoded = await decodeWem(wem);
+decoded.pcm;                            // Float32Array, interleaved, ±1.0 full scale
+
+// streaming: Init → push* → Finish; a step carries the header announcement
+// (at most once, before any PCM), this step's samples, and a refusal if one
+// stopped it — the C ABI's pcm_cb-then-code order.
+const decoder = await createDecoder();
+for (const chunk of chunksOf(wem)) {
+  const step = decoder.push(chunk);      // { header, channels, frames, pcm, error }
+}
+const last = decoder.finish();           // terminal whatever it returns
+decoder.destroy();
+```
+
 Errors: kernel failures throw a JS `Error` with a stable `code` —
 `WEM_ERR_PROFILE_NOT_FOUND` (no compiled configuration satisfies the
 selection), `WEM_ERR_STATE_ERROR` (non-positive geometry, malformed
-argument), `WEM_ERR_GEOMETRY_MISMATCH`, `WEM_ERR_INPUT_TOO_SHORT`,
-`WEM_ERR_FORMAT_UNSUPPORTED` (unknown version code, non-PCM WAV),
+argument, a call outside a handle's lifecycle), `WEM_ERR_GEOMETRY_MISMATCH`,
+`WEM_ERR_INPUT_TOO_SHORT`, `WEM_ERR_FORMAT_UNSUPPORTED` (unknown version code,
+non-PCM WAV, or a WEM whose setup packet this build does not carry),
 `WEM_ERR_INTERNAL` (1:1 with `include/wem.h`, append-only).
+
+On the decode side one refusal class is *returned on the step* instead of
+thrown — `WEM_ERR_INPUT_MALFORMED` (bytes that are not a container this
+revision parses, a container truncated before its declared frame count, an
+audio packet that does not parse), together with the frames that step
+completed. `WEM_ERR_INTERNAL` is the exception: it is a defect, its output is
+not delivered, and it throws. `WEM_ERROR_CODES` lists the table in ABI order,
+`WEM_OK` first and `WEM_ERR_INPUT_MALFORMED` last.
 
 ## Environments
 
@@ -114,6 +149,21 @@ file's bytes, so it restates neither a digest nor a length of it —
 across one-shot (auto-selected, explicit, and raw-PCM paths) and three
 chunking schemes; the compiled-in version table, the resolved selection of
 every constructor, and the selection/error code mapping must hold.
+
+The same file checks the **decode** direction at run time, against the
+committed paired-build container and the committed WAV it was produced from:
+the wrapper's `decodeWem` and `createDecoder` must report 6ch/44100 and
+139 398 frames, deliver a 201-byte setup packet, reconstruct the source within
+the source's own peak (`max|error| ≤ 2 × peak`, the structural bound the Rust
+suite uses — the numbers are printed by the run, never pinned), announce the
+header exactly once before any PCM, deliver identical samples across three
+chunkings and for empty chunks, and map the refusals
+(`WEM_ERR_INPUT_MALFORMED` for foreign/truncated bytes and
+`WEM_ERR_FORMAT_UNSUPPORTED` for a container this build does not carry, returned
+on the step; `WEM_ERR_STATE_ERROR` for a call outside the lifecycle, thrown).
+This is the check the browser/Node path did not have while the shell could only
+be compiled: the wasm module and the wrapper now run a real decode here.
+
 `make wasm-build` builds both packages and `node js/test-node.mjs` then runs the
 test; CI's `web` job runs those two steps and publishes the built packages as a
 distribution artifact
