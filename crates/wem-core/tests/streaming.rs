@@ -11,7 +11,7 @@ mod common;
 mod session {
     //! StreamSession tests (the core streaming lifecycle).
     //!
-    //! Two checks live here:
+    //! Three checks live here:
     //!
     //! 1. **Chunking invariance** — `StreamSession` output bytes equal
     //!    `Encoder::encode_pcm` for any chunk splitting (six+ strategies),
@@ -30,6 +30,10 @@ mod session {
     //!    the one-shot analysis input: it holds the caller's PCM (by
     //!    definition) but must not additionally materialize the frame sequence
     //!    before analysing any frame.
+    //! 3. **The caller's cap** — the pool a session builds is the smaller of the
+    //!    caller's cap and its channel count, and no cap moves a byte: every one
+    //!    of them, including one worker and one above the channel count,
+    //!    assembles the committed reference container.
     //!
     //! **No timing lives here.** This module used to assert `encode_pcm`'s
     //! release-mode median against a 150 ms budget; that assertion is gone,
@@ -45,12 +49,14 @@ mod session {
     //! module still compares the streaming output against `encode_pcm` byte for
     //! byte.
 
+    use std::num::NonZeroUsize;
+
     use wem_container::load_wem_parts_bytes;
-    use wem_core::encoder::{Encoder, Pcm16};
+    use wem_core::encoder::{Encoder, EncoderOptions, Pcm16};
     use wem_core::stream::StreamSession;
     use wem_core::usecases::wav::read_pcm16;
 
-    use crate::common::{fixture_selection, fixtures_dir};
+    use crate::common::{fixture_selection, fixtures_dir, read_fixture};
 
     // ---------------------------------------------------------------------------
     // 1. Chunking invariance
@@ -541,6 +547,88 @@ mod session {
             expected.data.len(),
             actual.data.len(),
         );
+    }
+    // ---------------------------------------------------------------------------
+    // 3. The caller's cap on the internal channel pool
+    // ---------------------------------------------------------------------------
+
+    /// The workers a session must hold for one cap in **this** configuration:
+    /// the smaller of the cap and the channel count with the `parallel` feature
+    /// on — the cap is a bound, not a target, so one above the channel count and
+    /// no cap at all both leave the encode's own size — and the calling thread
+    /// alone without it, where there is no pool and the option is inert.
+    #[cfg(feature = "parallel")]
+    fn expected_workers(cap: Option<usize>, channels: usize) -> usize {
+        cap.unwrap_or(channels).min(channels)
+    }
+
+    #[cfg(not(feature = "parallel"))]
+    fn expected_workers(_cap: Option<usize>, _channels: usize) -> usize {
+        1
+    }
+
+    /// Push the whole fixture through one session opened with `cap` and return
+    /// the container it assembled plus the pool size the session reported. One
+    /// chunk, because chunk boundaries cannot matter here and the claim under
+    /// test is the pool, not the splitting.
+    fn encode_with_cap(le_bytes: &[u8], cap: Option<NonZeroUsize>) -> (Vec<u8>, usize) {
+        let mut session = StreamSession::for_selection_with_options(
+            fixture_selection(),
+            EncoderOptions {
+                quality: None,
+                max_channel_pool_workers: cap,
+            },
+        )
+        .expect("session opens");
+        let workers = session.channel_pool_workers();
+        session
+            .push_pcm_chunk(le_bytes)
+            .expect("the fixture is accepted as one chunk");
+        let result = session.finish().expect("the stream finishes");
+        (result.data, workers)
+    }
+
+    /// The cap selects the pool and nothing else: every cap — the encode's own
+    /// size, one worker, two caps below the channel count and one above it —
+    /// reports the pool it got and assembles the committed reference container
+    /// byte for byte. This is the caller-facing form of "pool size cannot change
+    /// a byte at any size" (`docs/findings/pool-sizing.md`), and it runs in both
+    /// configurations: with the feature off the reading is one worker and the
+    /// bytes are the same, which is what makes the option inert rather than
+    /// merely ignored.
+    #[test]
+    fn the_caller_cap_sizes_the_pool_and_never_the_bytes() {
+        let wav = read_pcm16(&fixtures_dir().join("input.wav")).expect("input.wav reads");
+        let le_bytes: &[u8] = wav.interleaved_le_bytes();
+        let channels = wav.channels() as usize;
+        let reference = read_fixture("reference.wem");
+
+        // `None` first: the uncapped container is what every capped one is also
+        // compared against, so a cap that changed the bytes would be reported
+        // against the same run's own uncapped output and not only against the
+        // committed file.
+        let mut uncapped: Option<Vec<u8>> = None;
+        for cap in [None, Some(1), Some(2), Some(3), Some(6), Some(16)] {
+            let requested = cap.map(|n| NonZeroUsize::new(n).expect("a positive cap"));
+            let (data, workers) = encode_with_cap(le_bytes, requested);
+
+            assert_eq!(
+                workers,
+                expected_workers(cap, channels),
+                "cap {cap:?} must leave the session with the pool this configuration builds"
+            );
+            assert_eq!(
+                data, reference,
+                "cap {cap:?} must assemble the committed reference container byte for byte"
+            );
+            match &uncapped {
+                Some(uncapped) => assert_eq!(
+                    &data, uncapped,
+                    "cap {cap:?} must assemble the same container as the uncapped encode"
+                ),
+                None => uncapped = Some(data),
+            }
+        }
     }
 }
 

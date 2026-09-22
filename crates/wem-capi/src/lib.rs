@@ -103,7 +103,7 @@ pub type WemPacketFn =
 
 /// Stable error codes (include/wem.h): 1:1 with `EncoderError` variants,
 /// append-only, never renumbered. The discriminants are part of the
-/// cross-language interface (see the capi_e2e stability test).
+/// cross-language interface (see the capi_surface stability test).
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WemError {

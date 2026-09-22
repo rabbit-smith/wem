@@ -837,6 +837,18 @@ harmonising:
 
 ## 4. Where this repository stands
 
+**Later change.** The change this survey's section argues for has landed:
+`parallel` is opt-in rather than `default = ["parallel"]`, and the caller's cap is
+an explicit construction option (`EncoderOptions::max_channel_pool_workers`, with
+`StreamSession::channel_pool_workers()` as the reading), so N2 no longer conflicts
+and N1 is satisfied by the option rather than left to the pool's derived size. The
+two texts this section corrected — the standards sentence's scope and the
+`build_global` attribution in `pool.rs` — were corrected with it, and the
+environment-variable deviation it predicted is recorded in
+[`../reference/standards.md`](../reference/standards.md#portability-floor)
+("Portability floor"). The bullets and table below describe the tree the survey
+read; they are kept as the record of what that change had to answer.
+
 The checkout moved during this survey: `main` now carries the pool-sizing change
 (the commit that gives the channel waves a pool sized to the job count), so the
 shape below was re-read from the merged tree rather than from the tree the
