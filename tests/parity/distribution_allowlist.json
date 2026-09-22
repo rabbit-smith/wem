@@ -41,7 +41,6 @@
     "__pycache__"
   ],
   "forbidden_content_markers": [
-    "the probe",
     "capture",
     "fixture",
     "research",

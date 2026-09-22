@@ -79,11 +79,17 @@ registration duties.
 
 ## Provenance hygiene
 
-Repository surfaces are clean-room phrased. The marker substrings the
-distribution and cleanliness suites reject anywhere in package text, and the
-vocabulary to use instead, are listed in
-[`src/wwise_wem/AGENTS.md`](src/wwise_wem/AGENTS.md#provenance-vocabulary-checked-by-tests)
-(docs and README are exempt from the marker rule).
+Repository surfaces are phrased in project vocabulary: they say what was
+observed, never the coordinates it was observed at. The pattern sets and the
+surfaces they cover are defined once, in
+[`tests/parity/test_distribution.py`](tests/parity/test_distribution.py), and
+that suite is what enforces them. Documents under `docs/` are held to the same
+patterns but may discuss the development method, which is why a method note
+belongs there rather than in a source comment.
+
+`corpus/` and `local/` are untracked and are never published: `corpus/` holds
+unverified extraction and development material, `local/` holds working material
+that is never a packaged asset.
 
 ## New-file registration checklist
 

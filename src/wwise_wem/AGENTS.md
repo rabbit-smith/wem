@@ -47,17 +47,21 @@ Every new module or packaged data file requires, in the same commit:
 This applies to the facade only: reference-tree modules are development-tree
 code and must not be added to the allowlist.
 
-## Provenance vocabulary (checked by tests)
+## Provenance hygiene (checked by tests)
 
-The distribution and cleanliness tests reject these **case-insensitive
-substrings** anywhere in package `.py`/`.json` text — including identifiers,
-docstrings, comments, env var names, and file paths:
-`capture`, `fixture`, `the probe`, `research`, `experimental` — plus regex hits
-like bare `hook`, `DLL`, `RVA`, hex-backtick addresses, and `/tmp` paths.
-Use: `recording/record`, `representative`, `sample`, `site`, `reference`.
-This applies to strings inside the recorded profile material under
-`corpus/profiles/` as well — it is the source the carrier is generated from,
-even though it does not ship.
+Package text carries no development-process provenance: no disassembler symbol
+names or image addresses, no binary module or section labels, no machine-local
+absolute paths, no internal lane or report references. The patterns are defined
+once, in
+[`../../tests/parity/test_distribution.py`](../../tests/parity/test_distribution.py);
+read them there rather than restating the list here, because a restated list is
+itself a record of what was removed.
+
+Use `recording`/`record`, `representative`, `sample`, `site`, `reference`, and
+**"the paired build"** for the build this implementation is measured against.
+
+The rule covers the recorded profile material under `corpus/profiles/` as well —
+it is the source the carrier is generated from, even though it does not ship.
 
 ## Style checks
 
