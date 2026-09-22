@@ -98,8 +98,8 @@ resolved before the first block.
   completed and then reports its code — and the result is exhausted afterwards.
 - `decode` takes no `profile` and no `quality`: a WEM is self-describing and the
   decoder reads whatever the bitstream says.
-- `decode` is deliberately **not on the CLI**: the command writes a container,
-  and a decode there would have to choose a PCM output format first.
+- `decode` is also reachable from the command line: `--decode` writes the PCM it
+  returns as an uncompressed signed-16 WAV. See [CLI](#cli).
 
 ## Errors
 
@@ -247,11 +247,13 @@ with closing(decode("output.wem")) as result:
 
 ```text
 wwise-wem INPUT.wav --output OUTPUT.wem [OPTIONS]
+wwise-wem INPUT.wem --decode --output OUTPUT.wav
 python -m wwise_wem INPUT.wav --output OUTPUT.wem [OPTIONS]
+python -m wwise_wem INPUT.wem --decode --output OUTPUT.wav
 ```
 
-Supported options are `--quality`, `--wwise-version`, `--channels`,
-`--sample-rate`, and required `--output`.
+Encoding is the default direction. Supported options are `--quality`,
+`--wwise-version`, `--channels`, `--sample-rate`, and required `--output`.
 `--wwise-version` takes the short label `2013` or the full generation `2013.2`
 and defaults to `2013`; it forms the whole selection together with the WAV
 geometry, which the CLI reads from the input. An unrecognized value is rejected
@@ -259,11 +261,25 @@ as an argument error, without reading the WAV. The CLI parses the WAV once,
 applies optional geometry assertions to that `PcmBuffer`, and passes the same
 buffer and the selection to `encode`.
 
-Decoding is not a CLI subcommand: the command's contract is a WAV in and a
-container out, and exposing the decode direction there would have to choose a
-PCM output container and sample format — a new surface rather than a mirror of
-an existing one. `wwise_wem.decode` is the whole caller-facing decode surface
-today.
+`--decode` reverses the direction: the positional argument is then a WEM and the
+output is a PCM WAV. It is a flag rather than a subcommand because this command
+line is positional — a `decode` subcommand would take the argv slot a file named
+`decode` already occupies, and would change invocations that work today. Every
+encode invocation is unchanged, including one naming such a file, and both front
+ends take the same flag with the same meaning (the Rust binary
+`crates/wem-core/src/bin/wwise-wem.rs` mirrors it). The encoder's options are
+refused in decode mode rather than ignored: a WEM is self-describing, so there is
+nothing for them to select or assert.
+
+The WAV is uncompressed signed-16 PCM: signed-16 is the form the encode
+direction reads, so a decoded file goes straight back into the same command line.
+The samples are `decode`'s own output, mapped by the package's
+float-to-signed-16 rule (`adapters/sample_conversion.float_to_int16`), which the
+Rust command line applies too — the two write the same bytes for the same WEM.
+The file is written only once the session has finished: a session the decoder
+refuses part way through has delivered a *prefix* of the declared frame count, so
+the command line reports the refusal, naming how much of the stream it left
+behind, and creates no output at all.
 
 ## Execution path
 

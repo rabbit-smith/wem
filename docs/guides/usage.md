@@ -130,22 +130,59 @@ above) releases it deterministically.
 
 `samples = [sample for block in result for sample in block]` is the whole
 stream, interleaved at `result.channels`. Writing it to a WAV is the caller's
-step — the package decodes to f32 samples and nothing else.
+step in Python — the package decodes to f32 samples and nothing else. The
+command line does that step for you, and writes the same samples as an
+uncompressed signed-16 PCM WAV:
+
+```bash
+wwise-wem output.wem --decode --output output.wav
+```
+
+`--decode` is a flag rather than a subcommand, because the command line is
+positional: a `decode` subcommand would take the argument slot a file named
+`decode` already occupies. Every encode invocation is unchanged, and the Rust
+binary (`crates/wem-core/src/bin/wwise-wem.rs`) takes the same flag with the
+same meaning.
+
+The output is signed-16 because that is the form the encode direction reads, so
+a decoded file goes straight back into `wwise-wem`. The samples are `decode`'s
+own output mapped by the package's float-to-signed-16 rule
+(`adapters/sample_conversion.py`), saturated rather than wrapped, which is also
+what the Rust command line applies: the two write the same bytes for the same
+WEM. The WAV is written only after the decode completes — a session refused part
+way through has delivered a prefix of the declared frame count, so the command
+line reports the refusal and creates no output, rather than presenting that
+prefix as a whole file.
 
 ## CLI reference
 
 ```text
-wwise-wem INPUT.wav --output OUTPUT.wem [OPTIONS]
-python -m wwise_wem INPUT.wav --output OUTPUT.wem [OPTIONS]
+wwise-wem INPUT.wav --output OUTPUT.wem [OPTIONS]   # encode (the default)
+wwise-wem INPUT.wem --decode --output OUTPUT.wav    # decode
+python -m wwise_wem ...                             # either direction, the same way
 ```
 
 | Option | Meaning |
 | --- | --- |
-| `--quality FLOAT` | Profile quality interpolation |
-| `--wwise-version GENERATION` | Wwise generation (`2013` or `2013.2`, default `2013`); with the WAV geometry this is the whole selection |
-| `--channels N` | Assert the WAV channel count |
-| `--sample-rate HZ` | Assert the WAV sample rate |
+| `--quality FLOAT` | Profile quality interpolation (encode) |
+| `--wwise-version GENERATION` | Wwise generation (`2013` or `2013.2`, default `2013`); with the WAV geometry this is the whole selection (encode) |
+| `--channels N` | Assert the WAV channel count (encode) |
+| `--sample-rate HZ` | Assert the WAV sample rate (encode) |
 | `--output PATH` | Required; parent directories are created |
+| `--decode` | Decode INPUT, a WEM, to a signed-16 PCM WAV instead of encoding |
+
+`--decode` is a flag rather than a subcommand: the command line is positional,
+so a `decode` subcommand would take the argument slot a file named `decode`
+already occupies. Every encode invocation — including one naming such a file —
+is unchanged, and both front ends take the same flag with the same meaning. The
+encoder's options are refused in decode mode rather than ignored: a WEM is
+self-describing, so there is nothing for them to select or assert.
+
+Decoded output is an uncompressed signed-16 PCM WAV (format tag 1, interleaved,
+little-endian), with the channel count and sample rate the container's header
+announces. A refusal — a container the decoder will not read, or a packet stream
+that stops short — exits non-zero, writes nothing at all, and names how much of
+the declared stream had been decoded before it.
 
 ## Results and errors
 
@@ -194,8 +231,9 @@ self-describing header. The selection rules are in
 The decode direction exists in the same shells and takes no selection — a WEM is
 self-describing: `wwise_wem.decode` (Python), `wem_core::decoder::DecodeSession`
 (Rust), `wem_decoder_*` (`include/wem.h` section 5, C) and `WemDecoder` (wasm).
-The runnable examples under `examples/` cover encoding today.
-See [`../../examples/README.md`](../../examples/README.md) for the runnable set.
+The runnable examples under `examples/` cover both directions in every language
+those shells ship; see [`../../examples/README.md`](../../examples/README.md) for
+the set.
 
 ## Check an install
 
@@ -207,6 +245,19 @@ container.
 wwise-wem tests/fixtures/input.wav --output out.wem
 cmp out.wem tests/fixtures/reference.wem && echo "byte-identical"
 ```
+
+The same container is the decode direction's case: 139,398 frames of 6-channel
+44.1 kHz audio, written as 1,672,820 bytes of WAV — a 44-byte header and
+1,672,776 bytes of signed-16 samples.
+
+```bash
+wwise-wem tests/fixtures/reference.wem --decode --output out.wav
+```
+
+That WAV is a reconstruction of `tests/fixtures/input.wav`, not a copy of it:
+Vorbis is lossy, so the two are compared as audio rather than with `cmp`. What
+the command line promises is that every sample of `decode`'s output reached the
+file unchanged, and that a container it refuses leaves no file behind.
 
 More cases — the six real-build 2ch reference inputs, the two stress inputs, and
 the differential fuzz test — are described in
