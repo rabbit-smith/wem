@@ -193,15 +193,39 @@ pub struct WemProfile {
     pub sample_rate: i32,
 }
 
-impl WemProfile {
+/// The ABI's own view of a caller's `WemProfile` (include/wem.h `WemProfile`):
+/// the same three fields, with the version code as a plain integer.
+///
+/// `WemProfile` carries a `WemVersion`, and a Rust enum has a validity
+/// invariant a C caller cannot be held to. A client built against a newer
+/// header passes a code this revision does not implement, and the header
+/// requires that code to be *rejected* — it may not be undefined behaviour.
+/// Reading the caller's bytes through this type keeps such a code a value to
+/// compare.
+///
+/// The distinction is not theoretical: read as the enum, the out-of-table case
+/// passed in a debug build and was optimised away under `--release`, because
+/// the compiler is entitled to assume the discriminant is one it knows.
+///
+/// The two views have the same layout — `WemVersion` is `#[repr(u32)]` and the
+/// geometry fields are `i32` — which `profile_layout_matches_wem_h` asserts.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct WemProfileWire {
+    version: u32,
+    channels: i32,
+    sample_rate: i32,
+}
+
+impl WemProfileWire {
     /// Decode one C selection into the kernel's structured selector.
     ///
     /// An unrecognized version code is a value this revision does not
     /// support; a non-positive geometry is a malformed argument. Neither is
     /// silently replaced by a default.
-    fn selection(&self) -> Result<WwiseProfile, WemError> {
-        let version = WwiseVersion::from_code(self.version as u32)
-            .map_err(|_| WemError::FormatUnsupported)?;
+    fn selection(self) -> Result<WwiseProfile, WemError> {
+        let version =
+            WwiseVersion::from_code(self.version).map_err(|_| WemError::FormatUnsupported)?;
         WwiseProfile::new(
             version,
             i64::from(self.channels),
@@ -221,8 +245,10 @@ unsafe fn read_profile(profile: *const WemProfile) -> Result<WwiseProfile, WemEr
     if profile.is_null() {
         return Err(WemError::StateError);
     }
-    let profile = unsafe { &*profile };
-    profile.selection()
+    // The caller's bytes, read through the wire view: the version code is not
+    // necessarily a discriminant this revision knows (see `WemProfileWire`).
+    let wire = unsafe { *profile.cast::<WemProfileWire>() };
+    wire.selection()
 }
 
 /// Shareable profile-resolved encoder (include/wem.h `WemEncoder`).
@@ -1398,12 +1424,23 @@ mod tests {
             std::mem::size_of::<WemProfile>(),
             3 * std::mem::size_of::<u32>()
         );
+        // The wire view the C boundary reads through must be the same bytes.
+        assert_eq!(
+            std::mem::size_of::<WemProfileWire>(),
+            std::mem::size_of::<WemProfile>()
+        );
+        assert_eq!(
+            std::mem::align_of::<WemProfileWire>(),
+            std::mem::align_of::<WemProfile>()
+        );
     }
 
     #[test]
     fn profile_selection_decodes_and_rejects_bad_geometry() {
-        let supported = WemProfile {
-            version: WemVersion::Wwise2013,
+        // The wire view is what the C boundary reads, so it is what a decode
+        // test should exercise.
+        let supported = WemProfileWire {
+            version: WemVersion::Wwise2013 as u32,
             channels: 2,
             sample_rate: 48_000,
         };
@@ -1414,8 +1451,8 @@ mod tests {
         assert_eq!(selection.sample_rate(), 48_000);
 
         for (channels, sample_rate) in [(0, 48_000), (2, 0), (-2, 48_000)] {
-            let malformed = WemProfile {
-                version: WemVersion::Wwise2013,
+            let malformed = WemProfileWire {
+                version: WemVersion::Wwise2013 as u32,
                 channels,
                 sample_rate,
             };
