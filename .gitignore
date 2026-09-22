@@ -21,8 +21,12 @@ js/node_modules/
 *.pyd
 *.whl
 native-wheel/
-js/pkg/.gitignore
-js/pkg-node/.gitignore
+
+# wasm-pack --out-dir output (web target -> js/pkg, nodejs target -> js/pkg-node).
+# Build output like target/ and the wheels above: `make wasm-build` before the
+# Node parity test (`make wasm-test`) or the browser demo.
+js/pkg/
+js/pkg-node/
 
 # Unverified extraction/derived data (the analysis tool dumps, corpus candidates).
 # Nothing under corpus/ is a trusted reference asset until verified and moved.

@@ -12,16 +12,20 @@ generation + PCM geometry) and auto-selected from the WAV's own geometry.
 ## Run
 
 ```sh
+make wasm-build                              # writes js/pkg (wasm-pack web build)
 node examples/wasm-demo/serve.mjs            # port 8090 (or: [port])
 # open http://localhost:8090/examples/wasm-demo/
 ```
 
 The server (zero dependencies) serves the repo root so the demo can reach
-`../../js/pkg/wem_wasm.js` + `wem_wasm_bg.wasm` (the committed wasm-pack
-**web** build; rebuild with `cd js && npm run build:web`) via a relative URL.
+`../../js/pkg/wem_wasm.js` + `wem_wasm_bg.wasm` (the wasm-pack **web** build;
+the same build from `js/` is `npm run build:web`) via a relative URL.
 No query parameters are used.
 
-No build step is needed: the wasm artifacts are committed under `js/`.
+The page itself has no build step, but there is nothing to load until
+`make wasm-build` has written `js/pkg`: the packages are wasm-pack output and
+are not committed (`.gitignore`), so a fresh checkout serves the demo only
+after that build.
 
 ## How it encodes
 
@@ -63,5 +67,7 @@ const labelled = new WemSession("2013", 2, 48000);   // label or "2013.2"
 - **Host** `wem_wasm_bg.wasm` with `Content-Type: application/wasm`
   (enables `instantiateStreaming`). That binary plus the WAV is the whole
   deployment: there are no profile files to mirror or cache.
-- Pin the wasm bytes in git or a CDN, and add a `Content-SHA256` check in
-  your loader if the host is untrusted.
+- Pin the built module in your own deployment — a vendored copy in your app's
+  repository or a CDN — and add a `Content-SHA256` check in your loader if the
+  host is untrusted. What you ship is a copy of what `make wasm-build` produced;
+  this repository keeps no wasm module of its own.

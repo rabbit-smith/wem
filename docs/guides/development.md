@@ -33,10 +33,15 @@ and [`../reference/architecture.md`](../reference/architecture.md).
 make native          # maturin develop: build the in-package kernel extension
 make build           # wheel into dist/
 make wheel-smoke     # install the wheel in a clean venv and encode once
+make wasm-build      # wasm-pack: both shell packages (js/pkg, js/pkg-node)
 ```
 
 `pip install -e .` is equivalent to `make native`. Python-only tooling:
 `make lint` (ruff + mypy), `make rust-lint` (clippy, warnings denied).
+
+The wasm packages are build output and are not committed, so `make wasm-build`
+runs before the Node test and before the browser demo
+([`../../examples/wasm-demo/`](../../examples/wasm-demo/)).
 
 ## Verification ladder
 
@@ -72,7 +77,9 @@ to fix the code or the test rather than to re-record the expectation.
 | `make fuzz-parity` | Native vs oracle parity under randomized chunking and quality; Python unit, integration and cross-implementation suites run in `make test-fast` |
 | `cargo test --workspace` | Rust kernel, C ABI and shell suites, including the geometry-materializer parity suites |
 | `make wheel-smoke` | Installed-wheel inventory (facade + native engine, no profile data) and one real encode |
-| `make check` | All of the above plus `ruff`, `mypy` and `clippy` |
+| `make wasm-build` | wasm-pack builds both shell packages: `js/pkg` (web) and `js/pkg-node` (nodejs) |
+| `make wasm-test` | Builds both packages, then runs `js/test-node.mjs`: the shell's bytes against `tests/fixtures/reference.wem` (one-shot, three chunkings) plus the selection and error-code mapping; with no package built it fails and prints the build command |
+| `make check` | `lint`, `rust-fmt`, `rust-lint`, the full Python ladder and the wheel smoke |
 
 The same targets from the test tree's point of view — layer, command and run
 order — are in [`../../tests/AGENTS.md`](../../tests/AGENTS.md).

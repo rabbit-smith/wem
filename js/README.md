@@ -14,23 +14,31 @@ profile selection (one Wwise generation plus the PCM geometry).
 js/
   package.json     name: wwise-wem-wasm (type: module)
   src/index.ts     the wrapper (typed entry; erasable-TS only, no build step)
-  pkg/             wasm-pack --target web      (browser/worker; .wasm fetched by URL)
-  pkg-node/        wasm-pack --target nodejs   (Node; .wasm read from disk on import)
-  test-node.mjs    Node parity test (reference sha256 + chunking consistency + selection/error codes)
+  pkg/             wasm-pack --target web      (browser/worker; .wasm fetched by URL)   — built
+  pkg-node/        wasm-pack --target nodejs   (Node; .wasm read from disk on import)   — built
+  test-node.mjs    Node parity test (reference bytes + chunking consistency + selection/error codes)
 ```
+
+`pkg/` and `pkg-node/` are `wasm-pack --out-dir` output and are not committed
+(`.gitignore`): nothing in the checkout is a wasm module, so build before
+testing or serving.
 
 Rebuilds (need wasm-pack + a wasm32 toolchain):
 
 ```sh
+make wasm-build      # repo root: builds both packages (js/pkg, js/pkg-node)
+make wasm-test       # repo root: builds both, then runs test-node.mjs
+
+cd js
 npm run build:web    # → pkg/
 npm run build:node   # → pkg-node/
-npm test             # → node test-node.mjs (requires pkg-node)
+npm test             # → node test-node.mjs (needs a built pkg-node)
 ```
 
 > **Build-tool note (wasm-pack 0.15+):** `--out-dir` is resolved relative to
 > the crate (`crates/wem-wasm`), not the current directory, so a relative
-> `--out-dir pkg` would write `crates/wem-wasm/pkg` and leave the committed
-> artifacts stale. The npm scripts therefore pass an absolute out-dir
+> `--out-dir pkg` would write `crates/wem-wasm/pkg` and leave whatever is in
+> `js/pkg` stale. The npm scripts therefore pass an absolute out-dir
 > (`--out-dir "$(pwd)/pkg"`); the equivalent from `crates/` is:
 >
 > ```sh
@@ -38,10 +46,11 @@ npm test             # → node test-node.mjs (requires pkg-node)
 > wasm-pack build wem-wasm --target nodejs --release --out-dir "$(pwd)/../js/pkg-node"
 > ```
 >
-> The committed `pkg/` and `pkg-node/` artifacts are refreshed that way and
-> must track the kernel source: the reference-sha check in `test-node.mjs` fails
-> against stale kernel bytes, and its 2ch/48k positive check fails against a
-> kernel that still refuses the 2ch configuration.
+> The built packages must track the kernel source: the reference-bytes check in
+> `test-node.mjs` fails against stale kernel bytes, and its 2ch/48k positive
+> check fails against a kernel that still refuses the 2ch configuration. The
+> test builds nothing itself: with no package present it stops and prints the
+> build command rather than reporting a comparison it did not run.
 
 ## API (sketch)
 
@@ -106,5 +115,7 @@ test compares that file's bytes, so this digest documents the expected value
 rather than being restated by the test),
 across one-shot (auto-selected, explicit, and raw-PCM paths) and three
 chunking schemes; the compiled-in version table, the resolved selection of
-every constructor, and the selection/error code mapping must hold. Wired into
-CI (`.github/workflows/web.yml`).
+every constructor, and the selection/error code mapping must hold.
+`make wasm-test` builds both packages and then runs it; CI's `web` job runs that
+one target and publishes the built packages as a distribution artifact
+(`.github/workflows/web.yml`).

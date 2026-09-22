@@ -16,6 +16,7 @@ how a failing comparison is read is in the same document, under
 | whole-file | `make wem-bytes` | whole-file byte identity (the digest) |
 | capi | `cargo test -p wem-capi` | C ABI surface: reference byte identity via the FFI, error-code mapping, lifecycle violations |
 | wheel | `make wheel-smoke` | single-wheel (facade + native extension) inventory, clean-venv byte-exact encode |
+| wasm (Node) | `make wasm-test` | builds both wasm packages, then the shell's bytes against `tests/fixtures/reference.wem`: one-shot and three chunkings, plus the selection and error-code mapping |
 
 `tests/parity/` holds the cross-implementation suites. Each module sets two
 implementations side by side — the Python oracle against the native kernel, the
@@ -40,6 +41,12 @@ The native kernel (`wwise_wem._core`) is a **hard requirement** of every
 byte-producing test: build it with `make native` (or `pip install -e .`)
 before running the suite, and no test designs skip cases for
 native-absent environments — a missing kernel fails the suite, on purpose.
+
+The wasm packages (`js/pkg`, `js/pkg-node`) are wasm-pack output and are not in
+the checkout either. `make wasm-test` builds them and then runs the Node test
+(`js/test-node.mjs`), which reads the fixture and the reference bytes and
+compares them against the freshly built package; with no package built it
+fails, printing the build command, and never skips.
 
 ## Versioned assets (`tests/data/`, `tests/fixtures/`)
 
