@@ -489,7 +489,7 @@ fn apply_mapping_coupling(
 /// - `mag' <= 0` and `ang' > 0`: `mag = mag'`, `ang = mag' + ang'`
 /// - `mag' <= 0` and `ang' <= 0`: `ang = mag'`, `mag = mag' - ang'`
 ///
-/// [`apply_mapping_coupling`] stores the exact pre-image of this map, so the
+/// `apply_mapping_coupling` stores the exact pre-image of this map, so the
 /// two compose to the identity — the round-trip test below is that statement.
 pub fn decode_branches(mag_stored: f64, ang_stored: f64) -> (f64, f64) {
     if mag_stored > 0.0 {
@@ -514,7 +514,7 @@ pub fn decode_branches(mag_stored: f64, ang_stored: f64) -> (f64, f64) {
 ///
 /// Steps unwind in reverse order, mirroring libvorbis's `mapping0_inverse`,
 /// so a chain of coupling steps decodes to exactly the rows
-/// [`apply_mapping_coupling`] started from.
+/// `apply_mapping_coupling` started from.
 pub fn apply_mapping_coupling_inverse(
     rows: &mut [Vec<f64>],
     coupling: &[CouplingStep],
@@ -540,7 +540,7 @@ pub fn apply_mapping_coupling_inverse(
 /// `L = mid + side` and `R = mid - side`, in coupling order. This is **not**
 /// the map [`apply_mapping_coupling_inverse`] implements: the script carries
 /// both, and only the four-branch map is the inverse of this crate's forward
-/// [`apply_mapping_coupling`] (which the round-trip test pins). Provided
+/// `apply_mapping_coupling` (which the round-trip test pins). Provided
 /// because a lane mirroring that script's generic path needs the same
 /// convention it uses, with the discrepancy visible rather than implicit.
 pub fn apply_mid_side_coupling_inverse(

@@ -578,7 +578,7 @@ fn synthesis_window_spans(
 /// multiplied into the same offsets with the same rounding, which is what
 /// makes `w² + w'² = 1` cancel the two overlapping blocks' aliases. Only the
 /// mode reading differs, and it differs the same way in both directions: a
-/// short block always uses the short window (see [`effective_window_modes`]).
+/// short block always uses the short window (see `effective_window_modes`).
 pub fn apply_synthesis_window_in_place(
     out: &mut [f64],
     blocksizes: &[i64],
