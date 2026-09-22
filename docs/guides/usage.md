@@ -108,6 +108,30 @@ interpolation over the selected configuration's quality curves. A selection
 that matches no installed configuration — or more than one — is a
 `ValueError`, never an approximation and never a first match.
 
+## Decode
+
+```python
+from contextlib import closing
+from wwise_wem import decode
+
+with closing(decode("output.wem")) as result:
+    print(result.channels, result.sample_rate, result.total_frames)
+    for block in result:          # list of interleaved f32 samples, ±1.0
+        ...
+```
+
+`decode` takes the WEM itself (`bytes`, `bytearray` or `memoryview`) or a path,
+read whole at call time. It is a plain function returning an iterable result
+object, so the geometry is readable before iteration and a container the decoder
+refuses is refused by the call: a rejection the audio packets produce is raised
+while iterating, after the blocks the packets before it completed. The result
+owns one native decode session; `result.close()` (or `contextlib.closing`, as
+above) releases it deterministically.
+
+`samples = [sample for block in result for sample in block]` is the whole
+stream, interleaved at `result.channels`. Writing it to a WAV is the caller's
+step — the package decodes to f32 samples and nothing else.
+
 ## CLI reference
 
 ```text
@@ -141,7 +165,8 @@ standard `OSError` subclasses such as `FileNotFoundError` for file access.
 A rejection made by the kernel arrives as `WwiseWemError`, a `ValueError`
 subclass whose `.code` is the kernel's stable error class
 (`PROFILE_NOT_FOUND`, `GEOMETRY_MISMATCH`, `INPUT_TOO_SHORT`,
-`FORMAT_UNSUPPORTED`, `STATE_ERROR`, `INTERNAL`) and whose `.message` — also
+`FORMAT_UNSUPPORTED`, `STATE_ERROR`, `INPUT_MALFORMED` — the decode direction's
+malformed-input class — and `INTERNAL`) and whose `.message` — also
 `str(error)` — is the kernel's diagnostic text. `except ValueError` callers are
 unaffected; the original kernel error stays reachable as `__cause__`.
 
@@ -165,6 +190,11 @@ take the structured selection (Wwise generation plus PCM channel count and
 sample rate) alongside signed-16 PCM, because their inputs carry no
 self-describing header. The selection rules are in
 [`../reference/profiles.md`](../reference/profiles.md).
+
+The decode direction exists in the same shells and takes no selection — a WEM is
+self-describing: `wwise_wem.decode` (Python), `wem_core::decoder::DecodeSession`
+(Rust), `wem_decoder_*` (`include/wem.h` section 5, C) and `WemDecoder` (wasm).
+The runnable examples under `examples/` cover encoding today.
 See [`../../examples/README.md`](../../examples/README.md) for the runnable set.
 
 ## Check an install

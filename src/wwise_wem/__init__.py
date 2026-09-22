@@ -1,8 +1,8 @@
-"""Bit-exact Wwise Vorbis WEM encoder."""
+"""Bit-exact Wwise Vorbis WEM encoder, and a decoder for the containers it writes."""
 
 from typing import Any
 
-from .api import encode
+from .api import decode, encode
 from .application.models import EncodeResult, EncodeStats
 from .model import PcmBuffer, RawPcm, WwiseWemError
 
@@ -15,6 +15,7 @@ __all__ = [
     "WwiseProfile",
     "WwiseVersion",
     "WwiseWemError",
+    "decode",
     "encode",
 ]
 

@@ -1,4 +1,4 @@
-"""Single public encoding entry point."""
+"""The public entry points: one encoding function and one decoding function."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from .model import PcmBuffer, RawPcm
 
 if TYPE_CHECKING:
     from ._core import WwiseProfile
+    from .application.decode import DecodeResult
 
 
 def encode(
@@ -75,4 +76,35 @@ def encode(
     )
 
 
-__all__ = ["encode"]
+__all__ = ["decode", "encode"]
+
+
+def decode(
+    source: str | PathLike[str] | bytes | bytearray | memoryview,
+) -> DecodeResult:
+    """Decode a WEM into PCM.
+
+    ``source`` is the WEM itself — ``bytes``, ``bytearray`` or ``memoryview``
+    — or a path to one, read whole at call time (a file-access error surfaces
+    here with its standard ``OSError`` subclass). The call returns an iterable
+    result object, not a generator: the container's header region is consumed
+    here, so ``result.channels``, ``result.sample_rate`` and
+    ``result.total_frames`` are readable before the first block and a rejection
+    of the container framing or the setup packet is raised by the call itself.
+
+    Each iteration step yields interleaved f32 samples at ±1.0 full scale, in
+    bounded blocks; a sample outside ±1.0 is passed through rather than
+    clipped. A rejection only the audio packets can produce is raised while
+    iterating, after the frames the earlier packets completed have been handed
+    over. The result owns one native decode session: its release is
+    ``contextlib.closing(result)``, or collection.
+    """
+    from .application.decode import DecodeResult
+
+    if isinstance(source, (bytes, bytearray, memoryview)):
+        data = bytes(source)
+    elif isinstance(source, (str, PathLike)):
+        data = Path(source).read_bytes()
+    else:
+        raise TypeError("source must be a path or bytes-like")
+    return DecodeResult.open(data)

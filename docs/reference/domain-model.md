@@ -1,6 +1,7 @@
 # Domain context
 
-This glossary defines the domain language used by the standalone encoder.
+This glossary defines the domain language used by the standalone encoder and its
+decoder.
 
 ## PCM source
 
@@ -79,6 +80,49 @@ It has no RIFF framing.
 
 The RIFF/WAVE envelope containing Wwise fmt metadata, one setup packet and the
 framed audio packets.
+
+## Decode session
+
+The streaming decode lifecycle: Init with no selection, zero or more WEM byte
+chunks, exactly one Finish, then release. One session decodes one stream: it
+owns the container framing and the codec state, resolves its configuration from
+the WEM's own geometry rather than from a caller's selection, and delivers PCM
+through a one-time header announcement and decoded blocks. A decode session has
+single-threaded ownership, and nothing it holds is proportional to the stream
+length.
+
+## Header announcement
+
+The decode session's one-time delivery, before any PCM, of the PCM geometry the
+container declares — channel count and sample rate — together with the setup
+packet this revision parsed. It is the mirror of an encode session's
+setup-packet delivery, and it is the only place the geometry appears: without it
+the decoded blocks cannot be interpreted.
+
+## Decoded block
+
+The unit a decode session delivers PCM in: interleaved f32 samples at ±1.0 full
+scale for a bounded number of frames, so no block's size depends on how the
+caller chunked its input. A decoded sample outside ±1.0 is passed through,
+never clipped.
+
+## Declared frame count
+
+`dwTotalPCMFrames`: the frame count a WEM container declares, and the exact
+number of frames a decode session that finishes successfully delivers. It is the
+decode direction's length contract — a packet stream that does not cover it is
+malformed input, and a short decode is never reported as a complete one. Output
+sample *i* is the encoder's input sample *i*: the leading long half-block of the
+synthesis stream is lead-in, not output, and the samples past the declared count
+are the encoder's own tail look-ahead and are dropped.
+
+## Decode result
+
+The package's value for one decoded WEM: the geometry the header announcement
+carried and the container's declared frame count, readable before iteration,
+plus a one-shot iterator of decoded blocks. It owns one decode session, so
+iterating consumes the decode, and releasing it — by collection or by `close()`
+— releases the session.
 
 ## Frame regression record
 

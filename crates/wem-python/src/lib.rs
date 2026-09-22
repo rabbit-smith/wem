@@ -7,6 +7,13 @@
 //! * `Encoder` — one-shot PCM-to-WEM encode (`wem_core::encoder::Encoder`)
 //! * `StreamSession` — the core streaming lifecycle
 //!   (Init -> chunks* -> Finish; `wem_core::stream::StreamSession`)
+//! * `Decoder` — the streaming decode lifecycle with the data direction
+//!   reversed (Init -> chunks* -> Finish; `wem_core::decoder::DecodeSession`),
+//!   the mirror of `include/wem.h` section 5: WEM bytes in, the one-time
+//!   header announcement and interleaved f32 PCM out. There are no callbacks
+//!   here — each step *returns* what a C caller would receive through
+//!   `header_cb` / `pcm_cb` — and the geometry the C ABI announces through
+//!   `header_cb` arrives on the step that resolved it.
 //! * [`WwiseVersion`] / [`WwiseProfile`] — the structured profile selector
 //!   (`wem_core::{WwiseVersion, WwiseProfile}`; C ABI `WemVersion` /
 //!   `WemProfile`): one Wwise generation plus the PCM geometry
@@ -32,6 +39,11 @@
 //!   A panic inside a handle is terminal for that handle (include/wem.h,
 //!   "Panics"): the exception says so, and every later call on it raises
 //!   `STATE_ERROR` instead of touching the kernel again.
+//!
+//! [`WemEncoderError`] is the single terminal exception for both directions,
+//! exactly as `include/wem.h` declares one `WemError` table for both: the
+//! encode classes plus the decode surface's `INPUT_MALFORMED`. The name is
+//! the historical one; nothing about the class is encoder-specific.
 
 use std::panic::{AssertUnwindSafe, UnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -42,8 +54,11 @@ use pyo3::prelude::*;
 use pyo3::type_object::PyTypeInfo;
 use pyo3::types::{PyBytes, PyDict, PyList, PyTuple, PyType};
 
+use wem_core::decoder::{
+    DecodeSession as WemDecodeSession, DecodeStep as WemDecodeStep, DecodedHeader,
+};
 use wem_core::encoder::{EncodeResult as WemEncodeResult, Encoder as WemEncoder, Pcm16};
-use wem_core::error::EncoderError;
+use wem_core::error::{DecoderError, EncoderError};
 use wem_core::stream::StreamSession as WemStreamSession;
 use wem_core::{WwiseProfile, WwiseVersion};
 
@@ -80,6 +95,10 @@ const CODE_INPUT_TOO_SHORT: &str = "INPUT_TOO_SHORT";
 const CODE_FORMAT_UNSUPPORTED: &str = "FORMAT_UNSUPPORTED";
 const CODE_STATE_ERROR: &str = "STATE_ERROR";
 const CODE_INTERNAL: &str = "INTERNAL";
+/// The decode surface's malformed-input class (include/wem.h section 2). It is
+/// never reported by an encode call, exactly as `WEM_ERR_INPUT_MALFORMED` is
+/// never returned by an encode entry.
+const CODE_INPUT_MALFORMED: &str = "INPUT_MALFORMED";
 
 /// The single place a `.code` is attached to the raised exception: the stable
 /// cross-language class plus a message, exactly as the caller will read both.
@@ -104,11 +123,67 @@ fn code_of(err: &EncoderError) -> &'static str {
     }
 }
 
+/// The stable code name of one kernel *decode* error (include/wem.h section 5).
+///
+/// Four classes, one per row of that section, mapped exactly as
+/// `crates/wem-capi` maps `DecoderError` onto `WemError`: the input's own bytes
+/// do not parse; the container parses but names a configuration this build does
+/// not carry; the call was made outside the lifecycle; or this library broke an
+/// invariant. The match has no `_` arm on purpose — a variant added to
+/// `DecoderError` fails this build until its class is written.
+fn code_of_decoder(err: &DecoderError) -> &'static str {
+    match err {
+        DecoderError::Container(_)
+        | DecoderError::Setup { .. }
+        | DecoderError::SetupPadding { .. }
+        | DecoderError::Truncated { .. }
+        | DecoderError::MissingSetup { .. }
+        | DecoderError::BlockSizeMismatch { .. }
+        | DecoderError::Packet { .. }
+        | DecoderError::ResidueBitstreamDefect { .. }
+        | DecoderError::FrameCountMismatch { .. } => CODE_INPUT_MALFORMED,
+        DecoderError::NotWwiseVorbis { .. }
+        | DecoderError::ConfigurationUnsupported { .. }
+        | DecoderError::SetupNotCarried { .. } => CODE_FORMAT_UNSUPPORTED,
+        DecoderError::StateError { .. } => CODE_STATE_ERROR,
+        DecoderError::Floor1 { .. } | DecoderError::Internal(_) => CODE_INTERNAL,
+    }
+}
+
+/// One kernel error class as this shell reports it: the stable code plus the
+/// kernel's own diagnostic text.
+///
+/// Both directions are covered by one rule because `include/wem.h` declares one
+/// `WemError` table for both, so the code attachment and the panic rule below
+/// are written once and apply to either error type.
+trait KernelError: std::fmt::Display + Sized {
+    /// The stable cross-language code name (the C ABI's `WemError` spelling).
+    fn code(&self) -> &'static str;
+
+    /// The Python exception carrying `.code` and the kernel's untouched
+    /// message.
+    fn to_pyerr(self) -> PyErr {
+        error_with_code(self.code(), self.to_string())
+    }
+}
+
+impl KernelError for EncoderError {
+    fn code(&self) -> &'static str {
+        code_of(self)
+    }
+}
+
+impl KernelError for DecoderError {
+    fn code(&self) -> &'static str {
+        code_of_decoder(self)
+    }
+}
+
 /// Map one kernel error to the Python exception: the stable `.code` string
 /// plus the kernel's own diagnostic message (zero drift — the message is
 /// `EncoderError`'s Display output, untouched).
 fn error_to_pyerr(err: EncoderError) -> PyErr {
-    error_with_code(code_of(&err), err.to_string())
+    err.to_pyerr()
 }
 
 /// Binding-level rejection that is semantically a kernel STATE_ERROR
@@ -181,10 +256,13 @@ struct Guarded<T> {
 /// bodies so it can be tested directly: forcing a real panic through a kernel
 /// call would need a fault-injection switch inside the kernel, and shipping a
 /// switch that can abort an encode is not worth the test.
-fn guarded_outcome<T>(
+///
+/// Generic over the kernel error type: the rule is `include/wem.h`'s for every
+/// entry, and both directions reach it with their own error enum.
+fn guarded_outcome<T, E: KernelError>(
     scope: PanicScope,
     handle: &str,
-    caught: std::thread::Result<Result<T, EncoderError>>,
+    caught: std::thread::Result<Result<T, E>>,
 ) -> Guarded<T> {
     match caught {
         Ok(Ok(value)) => Guarded {
@@ -192,9 +270,9 @@ fn guarded_outcome<T>(
             handle_dead: false,
         },
         Ok(Err(error)) => {
-            let handle_dead = code_of(&error) == CODE_INTERNAL && scope == PanicScope::Handle;
+            let handle_dead = error.code() == CODE_INTERNAL && scope == PanicScope::Handle;
             Guarded {
-                outcome: Err(error_to_pyerr(error)),
+                outcome: Err(error.to_pyerr()),
                 handle_dead,
             }
         }
@@ -206,10 +284,10 @@ fn guarded_outcome<T>(
 }
 
 /// Run one kernel call under the panic rule.
-fn guard<T>(
+fn guard<T, E: KernelError>(
     scope: PanicScope,
     handle: &str,
-    work: impl FnOnce() -> Result<T, EncoderError> + UnwindSafe,
+    work: impl FnOnce() -> Result<T, E> + UnwindSafe,
 ) -> Guarded<T> {
     guarded_outcome(scope, handle, std::panic::catch_unwind(work))
 }
@@ -800,6 +878,328 @@ struct PyWemComplete {
 }
 
 // ---------------------------------------------------------------------------
+// Decoder (streaming decode lifecycle; include/wem.h section 5)
+// ---------------------------------------------------------------------------
+
+/// Frames per PCM block this shell hands back: the delivery size of the C ABI's
+/// `pcm_cb` (`PCM_BLOCK_FRAMES` in `crates/wem-capi`), so a Python caller
+/// receives the same bounded blocks a C caller is given.
+const PCM_BLOCK_FRAMES: usize = 1024;
+
+/// The one-time geometry and setup announcement of a decode session
+/// (include/wem.h `WemHeaderCb`), as a returned value instead of a callback.
+#[pyclass(name = "DecodedHeader", module = "wwise_wem._core")]
+#[derive(Clone)]
+struct PyDecodedHeader {
+    /// PCM channel count the container declares.
+    #[pyo3(get)]
+    channels: u32,
+    /// PCM sample rate the container declares.
+    #[pyo3(get)]
+    sample_rate: u32,
+    /// The setup packet this revision parsed, exactly as the container carried
+    /// it.
+    #[pyo3(get)]
+    setup_packet: Vec<u8>,
+}
+
+impl PyDecodedHeader {
+    fn from_kernel(header: DecodedHeader) -> Self {
+        Self {
+            channels: header.channels,
+            sample_rate: header.sample_rate,
+            setup_packet: header.setup_packet,
+        }
+    }
+}
+
+/// What one decode step produced, and how it ended (include/wem.h
+/// `wem_decoder_push` / `wem_decoder_finish`).
+///
+/// The step's output is reported whether or not it was refused — a rejection
+/// stops the step at the packet it could not read, and the blocks the earlier
+/// packets completed are still real, so a caller receives them instead of
+/// having them dropped. That is why the refusal travels *on* the step rather
+/// than only as a raised exception: the C ABI delivers this step's samples
+/// through `pcm_cb` and then returns the code, and a shell that raised first
+/// would lose the prefix the kernel says it delivered.
+#[pyclass(name = "DecodeStep", module = "wwise_wem._core")]
+struct PyDecodeStep {
+    /// The header announcement, on the one step that resolved it.
+    #[pyo3(get)]
+    header: Option<PyDecodedHeader>,
+    /// Interleaved f32 PCM in bounded blocks of at most [`PCM_BLOCK_FRAMES`]
+    /// frames each, at ±1.0 full scale.
+    #[pyo3(get)]
+    pcm: Vec<Vec<f32>>,
+    /// Channel count the PCM is interleaved over (`0` before the header is
+    /// known).
+    #[pyo3(get)]
+    channels: u32,
+    /// Frames across every block of [`PyDecodeStep::pcm`].
+    #[pyo3(get)]
+    frames: usize,
+    /// The rejection that stopped this step, as the exception it would be
+    /// raised as: its `.code` is the stable cross-language class and its
+    /// message is the kernel's own diagnostic. `None` when the step consumed
+    /// everything it was given. A defect (`INTERNAL`) is never reported here —
+    /// its output is not delivered at all, so it is raised instead.
+    #[pyo3(get)]
+    error: Option<Py<PyAny>>,
+}
+
+/// One streaming decode session (include/wem.h `wem_decoder_new` /
+/// `wem_decoder_push` / `wem_decoder_finish`): Init -> push* -> Finish ->
+/// release, with each step's output *returned* instead of delivered through the
+/// C ABI's `header_cb` / `pcm_cb`.
+///
+/// Single-threaded ownership, exactly as the C ABI's `WemDecoder` documents:
+/// one session must not be shared between threads.
+#[pyclass(name = "Decoder", module = "wwise_wem._core")]
+struct PyDecoder {
+    inner: WemDecodeSession,
+    /// `Finish` has run: the session is released, not reused, whatever the call
+    /// returned (include/wem.h section 5).
+    finished: bool,
+    /// A defect killed this handle: every later call raises `STATE_ERROR`
+    /// without touching the kernel again.
+    dead: bool,
+    /// Bytes pushed up to the header announcement — the container's header
+    /// region, which the declared frame count is read from (see
+    /// [`declared_total_frames`]). Held only until the announcement resolves:
+    /// for a container the kernel accepts that is the `fmt ` chunk and the
+    /// first packet, never the stream.
+    header_region: Vec<u8>,
+    /// The container's declared frame count, once the header announcement has
+    /// resolved it.
+    total_frames: Option<u32>,
+}
+
+impl PyDecoder {
+    /// The rejection a call after `Finish` answers with.
+    fn finished_error(&self) -> PyErr {
+        error_with_code(
+            CODE_STATE_ERROR,
+            "Decoder is finished: a decode session completes exactly once".to_string(),
+        )
+    }
+
+    /// Apply one guarded call's verdict to the handle, read the declared frame
+    /// count off the step that resolved the header, and convert the step.
+    fn settle(
+        &mut self,
+        py: Python<'_>,
+        guarded: Guarded<WemDecodeStep>,
+    ) -> PyResult<PyDecodeStep> {
+        if guarded.handle_dead {
+            self.dead = true;
+        }
+        let step = guarded.outcome?;
+        if self.total_frames.is_none() && step.header.is_some() {
+            self.total_frames = declared_total_frames(&self.header_region);
+            self.header_region = Vec::new();
+        }
+        match decode_step(py, step) {
+            Ok(py_step) => Ok(py_step),
+            Err(error) => {
+                // The step's own output was undeliverable, or it carried a
+                // defect: the C ABI reports the same situations as
+                // `WEM_ERR_INTERNAL` and kills the handle, because a session
+                // whose output cannot be interpreted is not one a caller may
+                // build on.
+                self.dead = true;
+                Err(error)
+            }
+        }
+    }
+}
+
+#[pymethods]
+impl PyDecoder {
+    /// Open a decode session (`Init`).
+    ///
+    /// There is no profile argument and no selection: a WEM is self-describing,
+    /// and the configuration is resolved from the container's own geometry,
+    /// which arrives through the header announcement on the step that parses
+    /// the setup packet.
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: WemDecodeSession::new(),
+            finished: false,
+            dead: false,
+            header_region: Vec::new(),
+            total_frames: None,
+        }
+    }
+
+    /// The container's declared frame count (`dwTotalPCMFrames`), readable once
+    /// the header announcement has resolved; `None` before that.
+    #[getter]
+    fn total_frames(&self) -> Option<u32> {
+        self.total_frames
+    }
+
+    /// Push one chunk of WEM bytes (`wem_decoder_push`) and return what it
+    /// completed: the header announcement, at most once per session, and the
+    /// PCM the packets in this chunk completed.
+    ///
+    /// Chunk boundaries never affect the emitted samples; an empty chunk is a
+    /// no-op. A rejection with any code but `INTERNAL` leaves the session
+    /// usable — the bytes it could not read stay pending, and the next call
+    /// reports the same rejection again — while `INTERNAL` is terminal for this
+    /// handle.
+    fn push(&mut self, py: Python<'_>, chunk: &Bound<'_, PyBytes>) -> PyResult<PyDecodeStep> {
+        if self.finished {
+            return Err(self.finished_error());
+        }
+        if self.dead {
+            return Err(unusable_error("Decoder"));
+        }
+        // Copy out before releasing the GIL so no Python object pointer
+        // crosses the thread boundary.
+        let data: Vec<u8> = chunk.as_bytes().to_vec();
+        if self.total_frames.is_none() {
+            self.header_region.extend_from_slice(&data);
+        }
+        let guarded = guard(
+            PanicScope::Handle,
+            "Decoder",
+            AssertUnwindSafe(|| {
+                Ok::<_, DecoderError>(py.allow_threads(|| self.inner.push_bytes(&data)))
+            }),
+        );
+        self.settle(py, guarded)
+    }
+
+    /// Mark the end of the WEM bytes and complete the decode
+    /// (`wem_decoder_finish`), returning the last frames.
+    ///
+    /// Terminal whatever it returns: after this call the session is released,
+    /// not reused. On success the session has delivered exactly the container's
+    /// declared frame count.
+    fn finish(&mut self, py: Python<'_>) -> PyResult<PyDecodeStep> {
+        if self.finished {
+            return Err(self.finished_error());
+        }
+        if self.dead {
+            return Err(unusable_error("Decoder"));
+        }
+        let guarded = guard(
+            PanicScope::Handle,
+            "Decoder",
+            AssertUnwindSafe(|| Ok::<_, DecoderError>(py.allow_threads(|| self.inner.finish()))),
+        );
+        // Terminal whatever it returned, like the C ABI's `wem_decoder_finish`.
+        self.finished = true;
+        let step = self.settle(py, guarded);
+        // No further push can arrive, so the retained header region is released
+        // whether or not the header resolved.
+        self.header_region = Vec::new();
+        step
+    }
+}
+
+/// Convert one kernel step into its returned Python form.
+///
+/// The PCM is handed back in bounded blocks — the delivery shape the C ABI's
+/// `pcm_cb` receives — and each block is a whole number of frames. A defect is
+/// raised rather than reported on the step, because the C ABI does not deliver
+/// a defect's output: the state it left behind is not something a caller may
+/// build on.
+fn decode_step(py: Python<'_>, step: WemDecodeStep) -> PyResult<PyDecodeStep> {
+    let channels = step.channels as usize;
+    let frames = step.frames();
+    let mut blocks: Vec<Vec<f32>> = Vec::new();
+    if !step.pcm.is_empty() {
+        if channels == 0 {
+            // PCM without a geometry cannot be interpreted, and delivering it
+            // under a guessed interleave would be worse than reporting the
+            // invariant (the C ABI's `deliver_decode_step` refuses it too).
+            return Err(error_with_code(
+                CODE_INTERNAL,
+                "kernel defect: a decode step delivered PCM without a geometry".to_string(),
+            ));
+        }
+        let mut offset = 0usize;
+        while offset < frames {
+            let block = (frames - offset).min(PCM_BLOCK_FRAMES);
+            blocks.push(step.pcm[offset * channels..(offset + block) * channels].to_vec());
+            offset += block;
+        }
+    }
+    let error = match &step.outcome {
+        Ok(()) => None,
+        Err(error) if code_of_decoder(error) == CODE_INTERNAL => {
+            return Err(error.clone().to_pyerr());
+        }
+        Err(error) => Some(
+            error_with_code(code_of_decoder(error), error.to_string())
+                .value(py)
+                .clone()
+                .into_any()
+                .unbind(),
+        ),
+    };
+    Ok(PyDecodeStep {
+        header: step.header.map(PyDecodedHeader::from_kernel),
+        pcm: blocks,
+        channels: step.channels,
+        frames,
+        error,
+    })
+}
+
+/// The container's declared frame count (`dwTotalPCMFrames`), read from the
+/// `fmt ` chunk of the container's header region.
+///
+/// The decode surface announces the geometry (channels, sample rate) and the
+/// setup packet, but not the declared frame count: `include/wem.h` section 5
+/// reports that only as "what the callbacks received" once a session has
+/// finished. The Python facade documents `total_frames` as the container's own
+/// declaration and makes it readable *before* iteration, so this shell reads
+/// that one field from the header region the kernel has already parsed and
+/// accepted — the container's `fmt ` payload at the offset
+/// `wem-container`'s `VorbisFmtFields` names, in the container's own byte
+/// order.
+///
+/// It is a field read, not a second container reader: the kernel decides
+/// whether the container parses (the header announcement is the proof that it
+/// did), no chunk is interpreted beyond locating `fmt `, and nothing is derived
+/// from the value here. `None` means the field could not be read — the facade
+/// reports that rather than substituting a guess.
+fn declared_total_frames(header_region: &[u8]) -> Option<u32> {
+    let big_endian = if header_region.starts_with(b"RIFF") {
+        false
+    } else if header_region.starts_with(b"RIFX") {
+        true
+    } else {
+        return None;
+    };
+    let read_u32 = |at: usize| -> Option<u32> {
+        let bytes: [u8; 4] = header_region.get(at..at + 4)?.try_into().ok()?;
+        Some(if big_endian {
+            u32::from_be_bytes(bytes)
+        } else {
+            u32::from_le_bytes(bytes)
+        })
+    };
+    // The chunk walk the container format defines: 12 bytes of RIFF/WAVE
+    // framing, then `id`, `size`, payload, one word pad for an odd payload.
+    let mut pos = 12usize;
+    while pos + 8 <= header_region.len() {
+        let id = header_region.get(pos..pos + 4)?;
+        let size = read_u32(pos + 4)? as usize;
+        if id == b"fmt " {
+            // `dwTotalPCMFrames` at 0x18 of the fmt payload.
+            return read_u32(pos + 8 + 0x18);
+        }
+        pos += 8 + size + (size & 1);
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
 // Compiled profile tables
 // ---------------------------------------------------------------------------
 
@@ -837,6 +1237,9 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyEncodeResult>()?;
     m.add_class::<PyPacket>()?;
     m.add_class::<PyWemComplete>()?;
+    m.add_class::<PyDecodedHeader>()?;
+    m.add_class::<PyDecodeStep>()?;
+    m.add_class::<PyDecoder>()?;
     Ok(())
 }
 
@@ -912,6 +1315,9 @@ mod tests {
                 "WemEncoderError",
                 "WwiseVersion",
                 "WwiseProfile",
+                "Decoder",
+                "DecodeStep",
+                "DecodedHeader",
             ] {
                 m.getattr(name)
                     .unwrap_or_else(|err| panic!("{name} missing; err={err}"));
@@ -1665,7 +2071,7 @@ else:
         Python::with_gil(|py| {
             // A call that returns: nothing is terminal, either scope.
             for scope in [PanicScope::OneShot, PanicScope::Handle] {
-                let guarded = guarded_outcome::<u32>(scope, "Encoder", Ok(Ok(7)));
+                let guarded = guarded_outcome::<u32, EncoderError>(scope, "Encoder", Ok(Ok(7)));
                 assert_eq!(guarded.outcome.ok(), Some(7), "{scope:?}");
                 assert!(!guarded.handle_dead, "{scope:?}: success kills nothing");
             }
@@ -1701,7 +2107,11 @@ else:
                     CODE_FORMAT_UNSUPPORTED,
                 ),
             ] {
-                let guarded = guarded_outcome::<u32>(PanicScope::Handle, "Encoder", Ok(Err(error)));
+                let guarded = guarded_outcome::<u32, EncoderError>(
+                    PanicScope::Handle,
+                    "Encoder",
+                    Ok(Err(error)),
+                );
                 let pyerr = guarded.outcome.expect_err("a rejection stays a rejection");
                 assert_eq!(
                     code_attribute(py, &pyerr),
@@ -1719,7 +2129,7 @@ else:
             for scope in [PanicScope::OneShot, PanicScope::Handle] {
                 let terminal = scope == PanicScope::Handle;
 
-                let reported = guarded_outcome::<u32>(
+                let reported = guarded_outcome::<u32, EncoderError>(
                     scope,
                     "Encoder",
                     Ok(Err(EncoderError::Internal(
@@ -1730,7 +2140,7 @@ else:
                 assert_eq!(code_attribute(py, &pyerr), CODE_INTERNAL);
                 assert_eq!(reported.handle_dead, terminal, "{scope:?}");
 
-                let panicked = guarded_outcome::<u32>(
+                let panicked = guarded_outcome::<u32, EncoderError>(
                     scope,
                     "Encoder",
                     std::panic::catch_unwind(|| -> Result<u32, EncoderError> {
@@ -1917,5 +2327,419 @@ assert result.channels == 6, result.channels
             .expect("every WemEncoderError carries .code")
             .extract()
             .expect(".code is a string")
+    }
+
+    // -----------------------------------------------------------------------
+    // Decode surface (include/wem.h section 5)
+    // -----------------------------------------------------------------------
+
+    /// The fixture WAV's interleaved source samples at the kernel's own
+    /// normalization (`i16 / 32768.0`, the inverse of the encoder's input path).
+    fn fixture_source_samples() -> (Vec<f32>, usize) {
+        let (raw, _rate, channels, _frames) = fixture_pcm_bytes();
+        let samples = raw
+            .chunks_exact(2)
+            .map(|pair| i16::from_le_bytes([pair[0], pair[1]]) as f32 / 32768.0)
+            .collect();
+        (samples, channels)
+    }
+
+    /// The largest `max(|a - b|)` a reconstruction of `source` may leave, and
+    /// the RMS difference: a structural bound on the decode, not a quality
+    /// threshold (the kernel's own decode test is where the live, relative
+    /// comparison lives).
+    fn error_against(decoded: &[f32], source: &[f32]) -> (f32, f64) {
+        let shared = decoded.len().min(source.len());
+        let mut peak = 0.0f32;
+        let mut sum = 0.0f64;
+        for index in 0..shared {
+            let difference = f64::from(decoded[index] - source[index]);
+            peak = peak.max(difference.abs() as f32);
+            sum += difference * difference;
+        }
+        let rms = if shared == 0 {
+            0.0
+        } else {
+            (sum / shared as f64).sqrt()
+        };
+        (peak, rms)
+    }
+
+    /// The setup packet of the committed reference container, read with the
+    /// kernel's own container reader (dev-dependency).
+    fn reference_setup_packet() -> Vec<u8> {
+        let parts =
+            wem_container::load_wem_parts_bytes(&reference_wem()).expect("the fixture parses");
+        parts
+            .setup_packet
+            .expect("the reference container carries a setup packet")
+    }
+
+    /// Push `wem` through one `_core.Decoder` in `chunk_bytes`-sized chunks and
+    /// return the announced header, every PCM block the shell handed back, and
+    /// the number of steps that produced PCM.
+    fn decode_through_shell<'py>(
+        py: Python<'py>,
+        module: &Bound<'py, PyModule>,
+        wem: &[u8],
+        chunk_bytes: usize,
+    ) -> (Bound<'py, PyAny>, Vec<Vec<f32>>, usize) {
+        let decoder = module
+            .getattr("Decoder")
+            .expect("Decoder is exported")
+            .call0()
+            .expect("a decode session opens");
+        let mut header: Option<Bound<'py, PyAny>> = None;
+        let mut blocks: Vec<Vec<f32>> = Vec::new();
+        let mut producing_steps = 0usize;
+        let chunk = chunk_bytes.max(1);
+        for bytes in wem.chunks(chunk) {
+            let step = decoder
+                .call_method1("push", (PyBytes::new(py, bytes),))
+                .unwrap_or_else(|error| panic!("the session accepts the real WEM: {error}"));
+            let step_header = step.getattr("header").expect("DecodeStep.header");
+            if !step_header.is_none() {
+                assert!(header.is_none(), "the header is announced exactly once");
+                header = Some(step_header);
+            }
+            assert!(
+                step.getattr("error").expect("DecodeStep.error").is_none(),
+                "the session accepts the real WEM"
+            );
+            let produced: Vec<Vec<f32>> = step
+                .getattr("pcm")
+                .expect("DecodeStep.pcm")
+                .extract()
+                .expect("pcm blocks are lists of floats");
+            if !produced.is_empty() {
+                producing_steps += 1;
+            }
+            blocks.extend(produced);
+        }
+        let step = decoder
+            .call_method0("finish")
+            .expect("Finish completes the decode");
+        assert!(
+            step.getattr("error").unwrap().is_none(),
+            "Finish completes the decode"
+        );
+        let produced: Vec<Vec<f32>> = step.getattr("pcm").unwrap().extract().unwrap();
+        if !produced.is_empty() {
+            producing_steps += 1;
+        }
+        blocks.extend(produced);
+        (
+            header.expect("the header was announced"),
+            blocks,
+            producing_steps,
+        )
+    }
+
+    /// The decode shell end to end: a real paired-build WEM through
+    /// `_core.Decoder`, with the geometry and the declared frame count readable
+    /// before the stream is consumed, bounded PCM blocks, exactly the declared
+    /// number of frames, and every sample a reconstruction of the WAV the
+    /// container was produced from.
+    #[test]
+    fn decoder_decodes_the_reference_wem_through_the_shell() {
+        let wem = reference_wem();
+        let setup_packet = reference_setup_packet();
+        let (source, source_channels) = fixture_source_samples();
+        Python::with_gil(|py| {
+            let m = import_module(py).unwrap();
+            let decoder = m.getattr("Decoder").unwrap().call0().unwrap();
+
+            // Nothing is known before the header region arrives.
+            assert!(
+                decoder.getattr("total_frames").unwrap().is_none(),
+                "the declared frame count is not readable before the header resolves"
+            );
+
+            // One bounded first chunk: the header announcement, the geometry
+            // and the declared frame count all arrive before the rest of the
+            // stream is pushed.
+            let first = wem.len().min(8192);
+            let step = decoder
+                .call_method1("push", (PyBytes::new(py, &wem[..first]),))
+                .expect("the first chunk is accepted");
+            let header = step.getattr("header").unwrap();
+            assert!(!header.is_none(), "the header announcement arrives");
+            assert_eq!(
+                header
+                    .getattr("channels")
+                    .unwrap()
+                    .extract::<u32>()
+                    .unwrap(),
+                6
+            );
+            assert_eq!(
+                header
+                    .getattr("sample_rate")
+                    .unwrap()
+                    .extract::<u32>()
+                    .unwrap(),
+                44_100
+            );
+            assert_eq!(
+                header
+                    .getattr("setup_packet")
+                    .unwrap()
+                    .extract::<Vec<u8>>()
+                    .unwrap(),
+                setup_packet,
+                "the announced setup packet is the container's own bytes"
+            );
+            assert_eq!(
+                decoder
+                    .getattr("total_frames")
+                    .unwrap()
+                    .extract::<u32>()
+                    .unwrap(),
+                139_398,
+                "the container's dw_total_pcm_frames"
+            );
+
+            // The rest of the stream, in bounded chunks, through the same
+            // session.
+            let mut pcm: Vec<f32> = Vec::new();
+            let push = |step: Bound<'_, PyAny>, pcm: &mut Vec<f32>| {
+                for block in step
+                    .getattr("pcm")
+                    .unwrap()
+                    .extract::<Vec<Vec<f32>>>()
+                    .unwrap()
+                {
+                    assert!(block.len() % 6 == 0, "a block is a whole number of frames");
+                    assert!(
+                        block.len() <= PCM_BLOCK_FRAMES * 6,
+                        "a block is bounded by the C ABI's delivery size"
+                    );
+                    pcm.extend_from_slice(&block);
+                }
+            };
+            push(step, &mut pcm);
+            for bytes in wem[first..].chunks(4096) {
+                let step = decoder
+                    .call_method1("push", (PyBytes::new(py, bytes),))
+                    .expect("the session accepts the rest of the container");
+                push(step, &mut pcm);
+            }
+            let step = decoder.call_method0("finish").expect("Finish succeeds");
+            push(step, &mut pcm);
+
+            assert_eq!(pcm.len() % 6, 0);
+            let frames = pcm.len() / 6;
+            assert_eq!(frames, 139_398, "exactly the declared frame count");
+            assert_eq!(
+                frames,
+                source.len() / source_channels,
+                "the source's own length"
+            );
+
+            let (peak, rms) = error_against(&pcm, &source);
+            let baseline = source.iter().fold(0.0f32, |peak, s| peak.max(s.abs()));
+            println!(
+                "shell decode: {frames} frames x 6ch, max|error| {peak:.6e} \
+                 ({:.3}% of the source peak {baseline:.6}), rms {rms:.6e}",
+                peak / baseline * 100.0
+            );
+            assert!(
+                peak <= 2.0 * baseline,
+                "the shell's decode is not a reconstruction of the source: \
+                 max|error| {peak} against a source peak of {baseline}"
+            );
+
+            // Finish is terminal whatever it returned (include/wem.h).
+            let error = decoder
+                .call_method1("push", (PyBytes::new(py, &wem[..16]),))
+                .expect_err("a finished session refuses a push");
+            assert_eq!(code_attribute(py, &error), CODE_STATE_ERROR);
+            let error = decoder
+                .call_method0("finish")
+                .expect_err("Finish completes exactly once");
+            assert_eq!(code_attribute(py, &error), CODE_STATE_ERROR);
+        });
+    }
+
+    /// Chunk boundaries never move a sample, through the shell's own surface:
+    /// the same WEM pushed in one chunk and in 997-byte chunks emits the same
+    /// samples. (The *blocking* follows the chunking — a step hands back what
+    /// its own bytes completed — so the sample stream is what must agree.)
+    #[test]
+    fn decoder_chunk_boundaries_never_move_a_sample() {
+        let wem = reference_wem();
+        Python::with_gil(|py| {
+            let m = import_module(py).unwrap();
+            let (_, whole, _) = decode_through_shell(py, &m, &wem, wem.len());
+            let (_, uneven, _) = decode_through_shell(py, &m, &wem, 997);
+            let flatten =
+                |blocks: Vec<Vec<f32>>| -> Vec<f32> { blocks.into_iter().flatten().collect() };
+            assert_eq!(
+                flatten(whole),
+                flatten(uneven),
+                "chunk size 997 changed the samples"
+            );
+        });
+    }
+
+    /// Every decode rejection reaches Python with the class include/wem.h
+    /// section 5 documents for it — the same mapping `crates/wem-capi` applies
+    /// — and none of them is a `PanicException`.
+    ///
+    /// The class travels on the step the call returns, because the C ABI
+    /// delivers that step's samples and *then* returns the code: a shell that
+    /// raised first would drop the prefix the kernel delivered.
+    #[test]
+    fn decoder_rejections_carry_the_documented_codes() {
+        Python::with_gil(|py| {
+            let m = import_module(py).unwrap();
+
+            // The rejection one step reports, as the exception it would raise.
+            let step_error = |step: &Bound<'_, PyAny>| -> PyErr {
+                let error = step.getattr("error").expect("DecodeStep.error");
+                assert!(!error.is_none(), "the step was expected to be refused");
+                PyErr::from_value(error.downcast_into().expect("an exception instance"))
+            };
+
+            // A container that does not parse: the input's own bytes.
+            let decoder = m.getattr("Decoder").unwrap().call0().unwrap();
+            let step = decoder
+                .call_method1("push", (PyBytes::new(py, b"NOTARIFF\x00\x00\x00\x00...."),))
+                .expect("a refusal is reported on the step, which is returned");
+            assert!(step
+                .getattr("pcm")
+                .unwrap()
+                .extract::<Vec<Vec<f32>>>()
+                .unwrap()
+                .is_empty());
+            let error = step_error(&step);
+            assert_eq!(code_attribute(py, &error), CODE_INPUT_MALFORMED);
+            assert!(
+                error.to_string().contains("container"),
+                "the kernel's own diagnostic travels: {error}"
+            );
+
+            // A container that parses but names a geometry this build does not
+            // hold: unsupported, never malformed. The header region is the
+            // only thing changed, so the container still parses.
+            let mut patched = reference_wem();
+            let fmt_payload = patched
+                .windows(4)
+                .position(|window| window == b"fmt ")
+                .expect("the fixture carries a fmt chunk")
+                + 8;
+            patched[fmt_payload + 0x02..fmt_payload + 0x04].copy_from_slice(&3u16.to_le_bytes());
+            let decoder = m.getattr("Decoder").unwrap().call0().unwrap();
+            let step = decoder
+                .call_method1("push", (PyBytes::new(py, &patched),))
+                .expect("a refusal is reported on the step");
+            let error = step_error(&step);
+            assert_eq!(code_attribute(py, &error), CODE_FORMAT_UNSUPPORTED);
+            assert!(
+                error.to_string().contains("3ch/44100Hz"),
+                "the kernel names the geometry it could not resolve: {error}"
+            );
+
+            // A call outside the lifecycle: STATE_ERROR, as at the C ABI.
+            let decoder = m.getattr("Decoder").unwrap().call0().unwrap();
+            let step = decoder
+                .call_method0("finish")
+                .expect("an empty session reports its shortfall on the step");
+            assert_eq!(code_attribute(py, &step_error(&step)), CODE_INPUT_MALFORMED);
+            let error = decoder
+                .call_method1("push", (PyBytes::new(py, b"\x00"),))
+                .expect_err("Finish is terminal whatever it returned");
+            assert_eq!(code_attribute(py, &error), CODE_STATE_ERROR);
+
+            // The class mapping itself: representative variants of each row,
+            // with the exhaustive match in `code_of_decoder` making a new
+            // variant a build failure until its class is written.
+            for (error, code) in [
+                (
+                    DecoderError::Container(wem_container::error::ContainerError::NotRiff),
+                    CODE_INPUT_MALFORMED,
+                ),
+                (
+                    DecoderError::Truncated {
+                        stream_offset: 0,
+                        need: "a packet payload",
+                    },
+                    CODE_INPUT_MALFORMED,
+                ),
+                (
+                    DecoderError::MissingSetup { data_size: 0 },
+                    CODE_INPUT_MALFORMED,
+                ),
+                (
+                    DecoderError::BlockSizeMismatch {
+                        container: [256, 2048],
+                        profile: [128, 1024],
+                    },
+                    CODE_INPUT_MALFORMED,
+                ),
+                (
+                    DecoderError::NotWwiseVorbis { format_tag: 0 },
+                    CODE_FORMAT_UNSUPPORTED,
+                ),
+                (
+                    DecoderError::StateError {
+                        message: "x".into(),
+                    },
+                    CODE_STATE_ERROR,
+                ),
+                (
+                    DecoderError::Internal(wem_core::InternalError::Invariant { message: "x" }),
+                    CODE_INTERNAL,
+                ),
+            ] {
+                assert_eq!(code_of_decoder(&error), code, "{error}");
+                let pyerr = error.to_pyerr();
+                assert_eq!(code_attribute(py, &pyerr), code);
+            }
+        });
+    }
+
+    /// The declared frame count is read from the container's own `fmt ` field,
+    /// and a container that does not carry one is reported as unreadable rather
+    /// than as a guess.
+    #[test]
+    fn declared_total_frames_reads_the_container_field() {
+        let wem = reference_wem();
+        assert_eq!(declared_total_frames(&wem), Some(139_398));
+        assert_eq!(
+            declared_total_frames(b"NOTARIFF and no chunks at all"),
+            None
+        );
+        // A header region that stops before the fmt payload has nothing to
+        // read; the kernel would not have announced a header from it either.
+        let fmt_at = wem
+            .windows(4)
+            .position(|window| window == b"fmt ")
+            .expect("the fixture carries a fmt chunk");
+        assert_eq!(declared_total_frames(&wem[..fmt_at + 8 + 0x10]), None);
+    }
+
+    /// The decode shell's PCM geometry comes from the kernel, never from a
+    /// caller: the session opens with no selection at all, and the pcm-bearing
+    /// steps report the container's channel count.
+    #[test]
+    fn decoder_takes_no_selection_and_reports_the_containers_geometry() {
+        Python::with_gil(|py| {
+            let m = import_module(py).unwrap();
+            let decoder = m.getattr("Decoder").unwrap();
+            let error = decoder
+                .call1((6i64, 44_100i64))
+                .expect_err("Decoder takes no selection");
+            assert!(
+                error.to_string().contains("takes no arguments")
+                    || error.to_string().contains("arguments"),
+                "the constructor's own arity error: {error}"
+            );
+
+            let wem = reference_wem();
+            let (_, blocks, producing_steps) = decode_through_shell(py, &m, &wem, 8192);
+            assert!(producing_steps > 1, "the stream is delivered in steps");
+            assert!(!blocks.is_empty(), "the decode produced PCM");
+        });
     }
 }

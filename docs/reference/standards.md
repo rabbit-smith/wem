@@ -1,7 +1,10 @@
 # Standards
 
-The product norms for the encoder: what the system must be, and the test that
-establishes each one. How to work in this repository — git and commit
+The product norms for the encoder and the decoder: what the system must be, and
+the test that establishes each one. The encode direction's norms are claims
+about bytes; the decode direction's are claims about determinism and round trip
+([Decoding](#decoding)), because the decode direction has no paired artifact to
+be byte-identical to. How to work in this repository — git and commit
 discipline, lanes and the shared checkout, the verification ladder, what to read
 first — is in the layered [`AGENTS.md`](../../AGENTS.md) set, because an agent
 reads those automatically. Task instructions are in [`../guides/`](../guides/),
@@ -46,10 +49,46 @@ words; a stage is not done until it comes back zero.
 | Geometry-materializer parity: the ported builder == the carrier's registered words == the kernel's `psy_geom*` surfaces | `tests/parity/test_geometry_materializer_parity.py`; `cargo test -p wem-analysis` |
 | The compiled profile carrier: the kernel's tables equal the recorded material, table by table | `crates/wem-profiles/src/carrier_tests.rs` (stage 1, retired with the recorded tree), `tests/parity/test_geometry_materializer_parity.py`, `cargo test -p wem-profiles` |
 | The 2ch/48 kHz result, its corpora, and the limits of that evidence | `tests/parity/test_2ch_corpus.py`, [`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md) |
+| The decode of the committed paired-build container: the geometry and frame count it declares, and a reconstruction of the WAV it was produced from | `crates/wem-core/tests/decode_reference_wem.rs`, `tests/parity/test_decode_surface.py` |
+| The decode round trip: `decode(encode(x))` reconstructs `x` over both registered profiles and the tracked 2ch corpus, and decoding our own encode of the fixture equals decoding the paired build's container, sample for sample | `crates/wem-core/tests/decode_reference_wem.rs`, `crates/wem-core/tests/encoder.rs` |
+| The C ABI decode surface: its lifecycle, its error classes, its callback delivery order and its terminal handles | `crates/wem-capi/tests/decode_capi.rs`, `crates/wem-capi/tests/capi_surface.rs` |
+| The decode shells' error table and step framing, mirrored 1:1 from the C ABI | `crates/wem-python/src/lib.rs`, `crates/wem-wasm/src/lib.rs` (their unit tests) |
+| The shipped wheel decodes through its embedded kernel, announcing the source's geometry and delivering exactly its frame count, in a clean environment | `make wheel-smoke` (`scripts/wheel_smoke.py`) |
 
 Running those suites is what establishes each claim. The local targets that run
 them are listed in
 [`../guides/development.md`](../guides/development.md#what-each-target-runs).
+
+## Decoding
+
+Correctness in the decode direction is defined by determinism and round trip,
+not by byte identity with an external decoder: there is no paired artifact for
+the decode direction to be byte-identical to. The decoder must be deterministic
+(the same WEM decodes to the same samples, every run), exact in its geometry
+(exactly the container's declared frame count, output sample *i* being the
+encoder's input sample *i*), and a reconstruction of its source — established by
+round trip against this repository's own encoder, whose output is byte-exact
+against the paired build, so `decode(encode(x))` against `x` measures the
+decoder over every input this repository can encode.
+
+No external decoder is an oracle here. The one route that would make a
+bit-exactness claim checkable binds the host's libvorbis through `ctypes` and
+compiles a C helper with `cc` on first use (`scripts/decode_wem.py
+--libvorbis-exact`), and is documented as not byte-stable across environments —
+a comparison against it would be a comparison against the machine's libraries,
+not against a specification. The design, the surface and the refusal classes are
+in [`decoding.md`](decoding.md).
+
+Everywhere else the decode direction carries the same norms as the encode
+direction. Failures are the same stable classes, with `WEM_ERR_INPUT_MALFORMED`
+appended for input whose own bytes do not parse, and nothing is swallowed: a
+decoded sample outside ±1.0 is passed through rather than silently clipped,
+because the library owns no clipping policy. Input-derived paths are panic-free.
+A rejection never advances the stream and delivers the prefix it completed. A
+result carries observations rather than recompositions — the geometry and the
+declared frame count are the container's own, available nowhere else in the
+decoder's output. And the shells mirror the C ABI 1:1 without owning numerics or
+profile logic.
 
 ## Determinism
 
@@ -189,7 +228,9 @@ terminates the instance instead of unwinding. A handle that carries state across
 calls is terminal after a failure: `push` and `finish` on a finished or failed
 session are rejected, never silently resumed, while a one-shot call may be
 retried (`crates/wem-capi/tests/capi_surface.rs` covers the finished-session
-rejection and two encodes through one shared handle).
+rejection and two encodes through one shared handle; the decode session's
+`push` and `finish` follow the same rule, covered by
+`crates/wem-capi/tests/decode_capi.rs`).
 
 ## Caller streams and ambient state
 
@@ -259,7 +300,11 @@ The Rust kernel is the sole integration point. Its cross-language surface is the
 C ABI declared in [`include/wem.h`](../../include/wem.h) and implemented 1:1 by
 `crates/wem-capi`: the lifecycle (`Init` → `push*` → `Finish`), the reply framing
 (seq 0 carries the setup packet, then the audio packets), memory ownership, and
-the error codes. Every language binding is a parallel shell over the kernel —
+the error codes. The decode surface is the same topology with the data direction
+reversed — section 5 of the same header, the same crate, and the same shells
+mirroring it (`Decoder` in PyO3, `WemDecoder` in wasm) — so there is one
+integration surface, not one per direction. Every language binding is a parallel
+shell over the kernel —
 PyO3 (`wwise_wem._core`), wasm for the browser and Node (`crates/wem-wasm`,
 `js/`), Go via cgo (`examples/go-cgo`), C — never a parallel implementation.
 Shells mirror that interface 1:1, map errors 1:1 without inventing variants, and
