@@ -32,7 +32,9 @@ ordinary Matplotlib figure, because a reader who wants to change it should
 only have to read the plot calls. The two settings that *are* chosen — figure
 size and DPI — are chosen for legibility and for byte-stability, not for
 appearance, and are named in ``FIGURE_SIZE_INCHES`` and ``FIGURE_DPI`` below.
-The default colour cycle (``tab10``) and the default font (DejaVu Sans) are
+So are the two layout choices: the caption anchor (``CAPTION_OFFSET_POINTS``)
+and the ``tight_layout`` rectangle, which is the only layout call made. The
+default colour cycle (``tab10``) and the default font (DejaVu Sans) are
 left alone.
 
 Byte-stability, and what makes it hold: the same input, the same code and the
@@ -85,8 +87,41 @@ OUTPUT = REPO / "docs" / "figures" / "concurrency-curves.png"
 #     rather than of the machine's display.
 # `savefig` then uses ``figure.dpi`` because the default ``savefig.dpi`` is
 # ``"figure"``, which is left as it is.
-FIGURE_SIZE_INCHES = (11.0, 13.0)
+#
+# The width is a **budget**, not a taste. At ``FIGURE_DPI`` the widest object a
+# single panel has to hold is the per-geometry input caption (467 px), then the
+# longest panel title (380 px) and the widest legend (276 px); the tightest
+# thing it has to hold is the run of tick labels at N = 1, 2, 3, 4, which are
+# one N apart on a linear axis whose whole range is 16.5 N wide. At this size a
+# panel is 492 px: the caption takes 0.95 of it, the title 0.77, the legend
+# 0.56, and the four tight tick labels have 19.8 px between them.
+#
+# Below that the objects do not simply crowd, they leave the figure. At the
+# previous 11 in the panel was 198 px, so all three of those objects were wider
+# than the panel they belonged to: the column-3 titles were clipped by the right
+# edge of the figure (measured: they ended at x = 1284 in a 1210 px figure) and
+# the throughput legends by the left one (x = -4.5), while the four tick labels
+# at N <= 4 had 2 px between them and read as one number. Worse, the caption
+# under column 1 is an unclipped annotation and so part of that column's tight
+# bounding box; being 467 px wide it widened the column from 198 px to 529 px,
+# which ``tight_layout`` paid for by shrinking *every* panel and opening a
+# 260 px gap between the columns - wider than the panels themselves. At 16.5 in
+# each of the three fits inside its own panel, the caption no longer distorts
+# the grid, and the gap between columns is 122 px, a quarter of a panel.
+FIGURE_SIZE_INCHES = (16.5, 11.5)
 FIGURE_DPI = 110
+
+# The caption's clearance under its axes, in points. Points rather than an axes
+# fraction, because a fraction would move the caption with the panel height and
+# the panel height is one of the things that changed. The band it needs is still
+# reserved for it: the text is left in the layout, so ``tight_layout`` counts it.
+CAPTION_OFFSET_POINTS = -42.0
+
+# The only layout call made, and the whole of the outer margin it leaves: the
+# top of the rectangle is the suptitle's band, the bottom the last row's caption
+# band. Everything inside the grid, including the band between the two rows that
+# holds the first row's caption, is the single ``tight_layout`` call's business.
+TIGHT_LAYOUT_RECT = (0.0, 0.01, 1.0, 0.975)
 
 # Two series, one per feature configuration, from the default colour cycle.
 CONFIG_STYLE = {
@@ -203,10 +238,17 @@ def draw(document: dict, output: Path) -> None:
         axis.set_ylabel("milliseconds")
         axis.set_xticks(n_values)
 
+        # The row's provenance, hung under the first panel of the row. Left in
+        # the layout on purpose: it sits below the x label, so the band it needs
+        # is its own and ``tight_layout`` is what reserves it. That is only safe
+        # because the caption is narrower than its panel — see the width budget
+        # at ``FIGURE_SIZE_INCHES``.
         axes[row][0].annotate(
             f"input {entry['input']}  ({audio_s:.3f} s, "
             f"{entry['channels']} ch @ {entry['sample_rate']} Hz)",
-            xy=(0.0, -0.22), xycoords="axes fraction", fontsize=8, color="0.35",
+            xy=(0.0, 0.0), xycoords="axes fraction",
+            xytext=(0.0, CAPTION_OFFSET_POINTS), textcoords="offset points",
+            ha="left", va="top", fontsize=8, color="0.35",
         )
 
     for row in range(len(geometries)):
@@ -215,7 +257,7 @@ def draw(document: dict, output: Path) -> None:
             axes[row][column].legend(fontsize=7)
 
     figure.suptitle("Encoding throughput, per-encode latency and CPU per encode", fontsize=13)
-    figure.tight_layout(rect=(0.0, 0.01, 1.0, 0.975))
+    figure.tight_layout(rect=TIGHT_LAYOUT_RECT)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output, metadata={})

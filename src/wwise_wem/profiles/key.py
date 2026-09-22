@@ -18,7 +18,7 @@ from dataclasses import dataclass
 #: The Wwise generation of the installed profiles.
 WWISE_GENERATION = "2013.2"
 #: The short spelling of the same generation, as it appears in messages, on a
-#: command line, and in the kernel's ``metadata_source``; mirrors the kernel's
+#: command line, and in a selection description; mirrors the kernel's
 #: ``WwiseVersion::label()`` (the oracle and the tooling cannot read that type,
 #: because they must also run where the native extension is absent).
 WWISE_GENERATION_LABEL = "2013"

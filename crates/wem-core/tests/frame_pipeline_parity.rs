@@ -21,7 +21,7 @@
 //! posts, residue rows) are crate surfaces the PyO3 binding does not expose, so
 //! a Python-side comparison could never see more than packet bytes. The kernel
 //! crates are directly reachable from a Rust integration test, which mirrors
-//! `crates/wem-container/tests/container_parity.rs` the other way round: that
+//! `crates/wem-container/tests/container_codec.rs` the other way round: that
 //! one drives the oracle in a subprocess and compares in Rust, this one does
 //! the same with the oracle as the subprocess.
 

@@ -1,6 +1,6 @@
 /* Encode signed-16 PCM through the WEM C ABI core surface.
  *
- * ABI revision 2 selects the encoder configuration with one structured
+ * ABI revision 3 selects the encoder configuration with one structured
  * `WemProfile` value (a Wwise generation plus the PCM geometry), passed by
  * pointer. A RIFF/WAVE input describes its own geometry, so this example
  * reads channels and sample rate out of the header; header-less PCM falls
@@ -17,7 +17,7 @@
 #include <wem.h>
 
 /* The Wwise generation this example selects (include/wem.h `WemVersion`;
- * the revision 2 table holds exactly this one code). */
+ * the current revision's table holds exactly this one code). */
 static const WemVersion kWwiseVersion = WEM_WWISE_2013;
 
 static void usage(const char *program) {

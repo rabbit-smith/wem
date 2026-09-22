@@ -27,7 +27,6 @@ REPO = Path(__file__).resolve().parents[1]
 FIXTURES = REPO / "tests" / "fixtures"
 SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
 UNINSTALLED_SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 2, 44100)
-PROFILE_METADATA_SOURCE = "profile:6ch/44100Hz/2013"
 
 
 def read_pcm16_interleaved(path: Path) -> tuple[int, int, bytes]:
@@ -111,9 +110,8 @@ def main() -> int:
     wem_bytes = bytes(complete.bytes)
     print(f"chunk pattern (bytes): {chunk_sizes}")
     print(f"packets emitted before/at finish: {len(packets)} (seq 0..{len(packets)-1})")
-    print(f"complete.sha256: {complete.sha256}")
+    print(f"complete.bytes: {len(wem_bytes)}")
     check("stream bytes equal reference.wem", wem_bytes == reference)
-    check("complete.total_len matches", complete.total_len == len(reference))
     seqs = [p.seq for p in packets]
     check(
         "packet seq is 0..n-1 in emission order",
@@ -149,16 +147,12 @@ def main() -> int:
         for c in range(channels)
     ]
     result = native.Encoder(SELECTION).encode_pcm(sample_rate, rows)
-    print(f"encode_pcm(lists).sha256(): {result.sha256()}")
+    print(f"encode_pcm(lists).bytes: {len(result.data)}")
     check("encode_pcm(lists) bytes equal reference.wem", bytes(result.data) == reference)
     check("stats.audio_packets", result.audio_packets == 205)
-    check("stats.bytes_out", result.bytes_out == len(reference))
+    check("len(result.data)", len(bytes(result.data)) == len(reference))
     check("stats.pcm_frames", result.pcm_frames == total_frames)
     check("stats.channels", result.channels == channels)
-    check(
-        "stats.metadata_source",
-        result.metadata_source == PROFILE_METADATA_SOURCE,
-    )
 
     # --- 3) one-shot path: 2-D signed-16 memoryview ------------------------
     cm_bytes = b"".join(
@@ -166,7 +160,7 @@ def main() -> int:
     )
     mv = memoryview(cm_bytes).cast("h", [channels, total_frames])
     result_mv = native.Encoder(SELECTION).encode_pcm(sample_rate, mv)
-    print(f"encode_pcm(memoryview).sha256(): {result_mv.sha256()}")
+    print(f"encode_pcm(memoryview).bytes: {len(result_mv.data)}")
     check("encode_pcm(memoryview) bytes equal reference.wem", bytes(result_mv.data) == reference)
 
     # --- 4) error mapping --------------------------------------------------

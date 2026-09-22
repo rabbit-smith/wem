@@ -38,7 +38,7 @@ def main() -> None:
     result.write_to(args.output)
     print(
         f"wrote {len(result)} bytes to {args.output} "
-        f"({result.stats.audio_packets} audio packets, sha256={result.sha256})"
+        f"({result.stats.audio_packets} audio packets)"
     )
 
 

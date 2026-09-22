@@ -27,9 +27,9 @@ Two consequences follow and are the whole of the change:
 |---|---|
 | The generated tables equal the recorded documents, table by table, bit by bit | `crates/wem-profiles/src/carrier_tests.rs` (`every_compiled_profile_matches_the_recorded_tree`, `assembled_resources_are_identical_from_both_sources`) — retired in stage 2 together with the recorded tree it compared against; the parity suites are what hold the carrier now |
 | The assembled codec inputs are identical from either source | same file, `assembled_resources_are_identical_from_both_sources` |
-| The kernel's dump equals the recorded documents | `tests/parity/test_profile_artifact_bridge.py` — retired in stage 2 for the same reason; the reader itself is covered by `tests/unit/profiles/test_profile_artifact.py` |
-| Whole-file output is unchanged | `make wem-bytes`, `cargo test -p wem-core --test complete_wem_bytes` |
-| Every stage and frame is unchanged | `frame_pipeline_parity`, `stage_parity` (retired later with the recorded stage assets it read; `frame_pipeline_parity` covers its frames word for word), `vorbis_oracle_values`, `tests/parity/` |
+| The kernel's dump equals the recorded documents | `tests/parity/test_profile_artifact_bridge.py` — retired in stage 2 for the same reason; the reader itself is covered by `tests/unit/profiles/test_profile_carrier.py` |
+| Whole-file output is unchanged | `make wem-bytes`, `cargo test -p wem-core --test encoder` |
+| Every stage and frame is unchanged | `frame_pipeline_parity`, `stage_parity` (retired later with the recorded stage assets it read; `frame_pipeline_parity` covers its frames word for word), `vorbis_codec`, `tests/parity/` |
 | Regeneration is byte-stable | `python3 scripts/generate_profile_code.py` twice, empty diff; `--check` exits 0 |
 
 ## The one thing that was not a rename
@@ -166,7 +166,7 @@ The deletion step, with its exact surface, measured from the tree at that point:
 | `src/frozen.rs`, `src/quality.rs`'s loader, `src/transient.rs`'s loaders, `src/psychoacoustics/*`'s loaders | document decoding; the typed value objects and the materialization kernels stay |
 | `src/source.rs`'s `impl ProfileSource for ProfileBundle` | the development seam; the trait itself can collapse once one implementation remains |
 | `src/model.rs`'s `EncoderProfile` name field | the profile label becomes derived from the key |
-| `crates/wem-profiles/tests/{profiles_integration,record_family,two_channel_profile,profile_selection}.rs` | the loader suites |
+| `crates/wem-profiles/tests/{profiles,quality}.rs` | the loader suites |
 
 **Python**
 

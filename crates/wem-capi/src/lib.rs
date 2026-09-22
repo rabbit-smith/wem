@@ -70,9 +70,13 @@ use wem_core::{WwiseProfile, WwiseVersion};
 ///
 /// Revision 2 replaced the `profile_name` + `data_dir` argument pair of
 /// `wem_encoder_new`, `wem_encode_pcm16_interleaved` and `wem_session_new`
-/// with one `const WemProfile *` selection. The header and this crate are
+/// with one `const WemProfile *` selection. Revision 3 removed the
+/// `out_meta` out-parameter from `wem_session_finish` together with the
+/// `WemMeta` struct it filled: a terminal summary of length and digest is
+/// either what the client's own write callback already counts or something it
+/// computes from the bytes it received. The header and this crate are
 /// pinned together by the `header_matches_this_crate` integration test.
-pub const ABI_REVISION: u32 = 2;
+pub const ABI_REVISION: u32 = 3;
 
 /// Callback that receives output bytes in blocks: the one-shot container
 /// bytes and the terminal streaming container bytes. The `data` pointer
@@ -120,17 +124,6 @@ impl WemError {
             EncoderError::Internal(_) => Self::Internal,
         }
     }
-}
-
-/// Terminal container summary (include/wem.h `WemMeta`): byte length and
-/// lowercase-hex SHA-256 of the assembled WEM bytes (64 chars, no NUL).
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct WemMeta {
-    /// Byte length of the assembled container.
-    pub total_len: u64,
-    /// SHA-256 of the container bytes, lowercase hex (exactly 64 bytes).
-    pub sha256_hex: [u8; 64],
 }
 
 /// Wwise generation selector (include/wem.h `WemVersion`).
@@ -756,31 +749,23 @@ pub unsafe extern "C" fn wem_session_push(
     }
 }
 
-/// Mark the end of the PCM stream, complete the encode, deliver the
-/// container bytes through the write callback, and fill the terminal
-/// summary (include/wem.h `wem_session_finish`). Terminal: after this
-/// call (regardless of outcome) the session must be released, not used.
+/// Mark the end of the PCM stream, complete the encode, and deliver the
+/// container bytes through the write callback (include/wem.h
+/// `wem_session_finish`). Terminal: after this call (regardless of outcome)
+/// the session must be released, not used.
 ///
-/// `*out_meta` is written when and only when this returns `WEM_OK`
-/// (include/wem.h, "MEMORY OWNERSHIP"): on every other return — a
-/// malformed call, a session already terminal, a kernel rejection, a write
-/// callback that aborted — the struct is left exactly as the caller had it.
-/// There is no empty `WemMeta` to write: a zero length plus a 64-character
-/// lowercase-hex digest has no value that means "no container", so a filled
-/// but meaningless struct would be a worse answer than an untouched one.
-/// The return code is what says whether the summary exists.
+/// There is no terminal summary to write and no out-parameter to write it
+/// through: the container length is what the client's own write callback
+/// already counted, and a digest of the bytes that callback received is the
+/// client's to compute. The return code is the whole result.
 ///
 /// # Safety
 ///
 /// - `session` must be NULL or a live handle owned by this thread;
-/// - `out_meta` must not be NULL;
 /// - the write callback must be callable from this thread.
 #[no_mangle]
-pub unsafe extern "C" fn wem_session_finish(
-    session: *mut WemSession,
-    out_meta: *mut WemMeta,
-) -> WemError {
-    if session.is_null() || out_meta.is_null() {
+pub unsafe extern "C" fn wem_session_finish(session: *mut WemSession) -> WemError {
+    if session.is_null() {
         return WemError::StateError;
     }
     if unsafe { (*session).failed } {
@@ -799,11 +784,6 @@ pub unsafe extern "C" fn wem_session_finish(
             if let Err(code) = emit_bytes(&result.data, state.write_cb, state.user_data) {
                 state.failed = true;
                 return code;
-            }
-            let sha = result.sha256();
-            unsafe {
-                (*out_meta).total_len = result.len() as u64;
-                (&mut (*out_meta).sha256_hex)[..sha.len()].copy_from_slice(sha.as_bytes());
             }
             state.failed = true;
             WemError::Ok
@@ -850,16 +830,6 @@ mod tests {
     }
 
     #[test]
-    fn meta_layout_matches_wem_h() {
-        // u64 total_len + sha256_hex[64] — exactly the C struct.
-        assert_eq!(std::mem::size_of::<WemMeta>(), 72);
-        assert_eq!(
-            std::mem::size_of::<u64>() + 64,
-            std::mem::size_of::<WemMeta>()
-        );
-    }
-
-    #[test]
     fn version_codes_follow_the_wem_h_table() {
         assert_eq!(WemVersion::Wwise2013 as u32, 0);
     }
@@ -867,10 +837,11 @@ mod tests {
     /// The header is the interface, so the crate must not drift
     /// from it: the declared revision has to match, no declaration may
     /// reintroduce a profile name or a profile directory (ABI revision 2
-    /// replaced both with the `WemProfile` selection), and the two rules a
-    /// caller can only learn from the header — what every exit writes through
-    /// an out-parameter, and what `WEM_ERR_STATE_ERROR` covers — must still be
-    /// stated there.
+    /// replaced both with the `WemProfile` selection), no entry may grow back
+    /// a terminal summary out-parameter (ABI revision 3 removed
+    /// `wem_session_finish`'s), and the two rules a caller can only learn from
+    /// the header — what every exit writes through an out-parameter, and what
+    /// `WEM_ERR_STATE_ERROR` covers — must still be stated there.
     #[test]
     fn header_matches_this_crate() {
         let header = std::fs::read_to_string(
@@ -899,16 +870,11 @@ mod tests {
         for (text, rule) in [
             (
                 "OUT-PARAMETERS: WHAT EVERY EXIT WRITES",
-                "the out-parameter rule (handle out-pointers written on every \
-                 exit, *out_meta only on WEM_OK)",
+                "the out-parameter rule (handle out-pointers written on every exit)",
             ),
             (
                 "One code, three situations: WEM_ERR_STATE_ERROR",
                 "the WEM_ERR_STATE_ERROR situations and their single recovery",
-            ),
-            (
-                "`*out_meta` unless that code was WEM_OK",
-                "the rule that says when the terminal summary exists",
             ),
         ] {
             assert!(
@@ -917,13 +883,22 @@ mod tests {
             );
         }
 
-        // Check the declarations only: the header's evolution note names the
-        // removed arguments on purpose, so strip comments before looking.
+        // Check the declarations only: the header's evolution note and its
+        // migration appendix name the removed arguments and the removed
+        // terminal summary on purpose, so strip comments before looking.
         let declarations = strip_c_comments(&header);
-        for removed in ["profile_name", "data_dir"] {
+        assert!(
+            declarations.contains("wem_session_finish(WemSession *session)"),
+            "include/wem.h must declare the revision 3 finish signature, \
+             which takes the session alone"
+        );
+        // A declaration that creeps back in would be a revision nobody bumped:
+        // revision 2 removed the profile name and the data directory,
+        // revision 3 removed the terminal summary and its out-parameter.
+        for removed in ["profile_name", "data_dir", "WemMeta", "out_meta"] {
             assert!(
                 !declarations.contains(removed),
-                "include/wem.h declares {removed:?} again; ABI revision 2 removed it"
+                "include/wem.h declares {removed:?} again"
             );
         }
     }

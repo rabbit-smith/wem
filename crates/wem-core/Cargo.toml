@@ -13,7 +13,6 @@ default = ["parallel"]
 parallel = ["wem-analysis/parallel"]
 
 [dependencies]
-sha2 = { workspace = true }
 wem-scheduling = { workspace = true }
 wem-analysis = { workspace = true }
 wem-vorbis = { workspace = true }

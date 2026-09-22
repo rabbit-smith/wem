@@ -103,7 +103,7 @@ jobs:
 
   capi:
     # C ABI core surface (the single cross-language integration point):
-    # proves byte-exactness end-to-end — the Rust FFI tests (capi_e2e)
+    # proves byte-exactness end-to-end — the Rust FFI tests (capi_surface)
     # plus the Go cgo binding and the plain C client, each streaming the
     # fixture through the C ABI and rebuilding the reference WEM.
     runs-on: ubuntu-latest

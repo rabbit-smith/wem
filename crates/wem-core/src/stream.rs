@@ -629,7 +629,6 @@ impl StreamSession {
 
         let short_packets = pipeline.modes.iter().filter(|&&mode| mode == 0).count() as i64;
         let long_packets = pipeline.modes.iter().filter(|&&mode| mode == 1).count() as i64;
-        let bytes = built.wem_bytes.len() as i64;
         Ok(EncodeResult {
             data: built.wem_bytes,
             stats: EncodeStats {
@@ -638,8 +637,6 @@ impl StreamSession {
                 audio_packets: short_packets + long_packets,
                 short_packets,
                 long_packets,
-                bytes,
-                metadata_source: encoder.container_plan().metadata_source().to_string(),
             },
         })
     }

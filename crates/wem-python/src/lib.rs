@@ -600,7 +600,14 @@ impl PyEncoder {
 // ---------------------------------------------------------------------------
 
 /// Immutable encode result (field set follows `wem_core::EncodeStats`
-/// plus the container bytes; `bytes_out` names the stats `bytes`).
+/// plus the container bytes).
+///
+/// Every field is an observation the caller cannot recompose: `pcm_frames`
+/// (a streaming caller may never have counted the frames it pushed) and the
+/// packet counts (they require parsing the container). The container's byte
+/// length is not among them — it is `len(result.data)` — and neither is a
+/// label naming the selected profile, which is the selection the caller
+/// itself passed to the constructor.
 #[pyclass(name = "EncodeResult", module = "wwise_wem._core")]
 #[derive(Clone)]
 struct PyEncodeResult {
@@ -617,11 +624,6 @@ impl PyEncodeResult {
     #[getter]
     fn audio_packets(&self) -> i64 {
         self.inner.stats.audio_packets
-    }
-
-    #[getter]
-    fn bytes_out(&self) -> i64 {
-        self.inner.stats.bytes
     }
 
     #[getter]
@@ -642,16 +644,6 @@ impl PyEncodeResult {
     #[getter]
     fn long_packets(&self) -> i64 {
         self.inner.stats.long_packets
-    }
-
-    #[getter]
-    fn metadata_source(&self) -> String {
-        self.inner.stats.metadata_source.clone()
-    }
-
-    /// SHA-256 of the encoded bytes, lowercase hex (kernel-computed).
-    fn sha256(&self) -> String {
-        self.inner.sha256()
     }
 }
 
@@ -762,7 +754,7 @@ impl PyStreamSession {
     }
 
     /// Mark the end of the PCM stream and assemble the container
-    /// (`Finish`); returns the container summary.
+    /// (`Finish`); returns the container bytes.
     fn finish(&mut self, py: Python<'_>) -> PyResult<PyWemComplete> {
         if self.is_dead() {
             return Err(self.unusable());
@@ -776,19 +768,7 @@ impl PyStreamSession {
             self.dead = true;
         }
         let result = guarded.outcome?;
-        let sha256 = result.sha256();
-        let total_len = result.data.len() as u64;
-        Ok(PyWemComplete {
-            bytes: result.data,
-            sha256,
-            total_len,
-        })
-    }
-
-    /// PCM frames accumulated so far (streaming observability).
-    #[getter]
-    fn pcm_frames(&self) -> i64 {
-        self.inner.pcm_frames()
+        Ok(PyWemComplete { bytes: result.data })
     }
 }
 
@@ -806,19 +786,17 @@ struct PyPacket {
     data: Vec<u8>,
 }
 
-/// Terminal container summary (the stream's completion result).
+/// Terminal container result (the stream's completion value).
+///
+/// The container bytes and nothing derived from them: its length is
+/// `len(complete.bytes)`, and a digest of it is the caller's to compute
+/// from those bytes.
 #[pyclass(name = "WemComplete", module = "wwise_wem._core")]
 #[derive(Clone)]
 struct PyWemComplete {
     /// The assembled WEM container bytes.
     #[pyo3(get)]
     bytes: Vec<u8>,
-    /// SHA-256 of the container bytes, lowercase hex (64 chars).
-    #[pyo3(get)]
-    sha256: String,
-    /// Byte length of the container.
-    #[pyo3(get)]
-    total_len: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -1133,15 +1111,12 @@ rows = [
     for c in range(channels)
 ]
 by_selection = m.Encoder(selection).encode_pcm(rate, rows)
-assert bytes(by_selection.data) == expected_bytes, by_selection.sha256()
+assert bytes(by_selection.data) == expected_bytes, "not the reference container"
 assert by_selection.audio_packets == 205, by_selection.audio_packets
 assert by_selection.pcm_frames == frames, by_selection.pcm_frames
 assert by_selection.channels == channels, by_selection.channels
-assert by_selection.metadata_source == (
-    "profile:" + str(channels) + "ch/" + str(rate) + "Hz/2013"
-), by_selection.metadata_source
 packed = m.Encoder(selection).encode_pcm16_interleaved(rate, channels, raw)
-assert bytes(packed.data) == expected_bytes, packed.sha256()
+assert bytes(packed.data) == expected_bytes, "not the reference container"
 assert bytes(packed.data) == bytes(by_selection.data)
 "#
                 ),
@@ -1176,10 +1151,8 @@ for i in range(len(cuts) - 1):
     lo, hi = cuts[i] * step, cuts[i + 1] * step
     packets.extend(session.push(raw[lo:hi]))
 complete = session.finish()
-assert bytes(complete.bytes) == expected_bytes, complete.sha256
-assert complete.total_len == len(bytes(complete.bytes))
+assert bytes(complete.bytes) == expected_bytes, "not the reference container"
 assert [p.seq for p in packets] == list(range(len(packets))), "seq must be 0..n-1"
-assert session.pcm_frames == frames, session.pcm_frames
 "#
                 ),
                 Some(&globals),
@@ -1259,16 +1232,12 @@ rows = [
     for c in range(channels)
 ]
 res = m.Encoder(selection).encode_pcm(rate, rows)
-assert bytes(res.data) == expected_bytes, res.sha256()
-assert len(bytes(res.data)) == res.bytes_out
+assert bytes(res.data) == expected_bytes, "not the reference container"
 assert res.audio_packets == 205, res.audio_packets
 assert res.short_packets == 77, res.short_packets
 assert res.long_packets == 128, res.long_packets
 assert res.pcm_frames == n // channels, res.pcm_frames
 assert res.channels == channels, res.channels
-assert res.metadata_source == (
-    "profile:" + str(channels) + "ch/" + str(rate) + "Hz/2013"
-), res.metadata_source
 "#
                 ),
                 Some(&globals),
@@ -1302,8 +1271,7 @@ rows_flat = [vals[f * channels + c]
 cm_bytes = b''.join(struct.pack('<h', v) for v in rows_flat)
 mv = memoryview(cm_bytes).cast('h', [channels, frames])
 res = m.Encoder(selection).encode_pcm(rate, mv)
-assert bytes(res.data) == expected_bytes, res.sha256()
-assert res.bytes_out == len(bytes(res.data))
+assert bytes(res.data) == expected_bytes, "not the reference container"
 "#
                 ),
                 Some(&globals),
@@ -1575,8 +1543,7 @@ for i in range(len(cuts) - 1):
     lo, hi = cuts[i] * step, cuts[i + 1] * step
     packets.extend(session.push(raw[lo:hi]))
 complete = session.finish()
-assert bytes(complete.bytes) == expected_bytes, complete.sha256
-assert complete.total_len == len(bytes(complete.bytes))
+assert bytes(complete.bytes) == expected_bytes, "not the reference container"
 assert [p.seq for p in packets] == list(range(len(packets))), "seq must be 0..n-1"
 assert len(packets) >= 1
 # The setup packet leaves first and equals the reference container's.

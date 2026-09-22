@@ -29,6 +29,14 @@
  * bytes, or an environment variable. A conforming revision 1 client
  * must be recompiled against this header; WemError values were not
  * renumbered and remain stable.
+ *
+ * ABI revision 3 removed the `out_meta` out-parameter of
+ * `wem_session_finish` and the `WemMeta` struct it filled. The container
+ * length it reported is what the client's own write callback counts as it
+ * receives the bytes, and a digest is something a client computes from the
+ * bytes it already holds; neither is a fact the library observes. A
+ * conforming revision 2 client must be recompiled against this header;
+ * WemError values were not renumbered and remain stable.
  */
 #ifndef WEM_H
 #define WEM_H
@@ -37,7 +45,7 @@
 #include <stddef.h>
 
 /* Current ABI revision of this header (see the evolution note above). */
-#define WEM_ABI_REVISION 2
+#define WEM_ABI_REVISION 3
 
 #ifdef __cplusplus
 extern "C" {
@@ -99,8 +107,7 @@ typedef struct WemProfile {
  *      wem_session_new(...)    — Init: open on one profile selection
  *      wem_session_push(...)   — chunk*: zero or more PCM chunks
  *      wem_session_finish(...) — Finish: complete the encode; container
- *                                bytes out via the write callback, plus
- *                                the terminal WemMeta summary
+ *                                bytes out via the write callback
  *      wem_session_free(...)   — release the handle
  *
  *  Streaming rules (identical to the kernel):
@@ -246,12 +253,16 @@ typedef WemError (*WemPacketCb)(uint32_t seq, const uint8_t *data,
  * configuration.)
  */
 
-/* Terminal container summary: byte length + lowercase-hex SHA-256
- * (exactly 64 characters, no NUL). */
-typedef struct WemMeta {
-  uint64_t total_len;
-  char sha256_hex[64];
-} WemMeta;
+/* What every exit hands back is the container bytes through the write
+ * callback and the WemError code. Nothing is returned that the client can
+ * compute from those bytes or compose from the arguments it already passed:
+ * a container length is what the client's own write callback counts, and a
+ * digest of the container is the client's to compute from the bytes it
+ * received — with whatever tool and encoding it prefers (`sha256sum`,
+ * `shasum -a 256`, `certutil -hashfile`), compared against a recorded value
+ * with the same tool or with `cmp`. The library picks no algorithm, no
+ * encoding and no buffer size for it, and charges no caller for one.
+ */
 
 /*
  * 3. MEMORY OWNERSHIP
@@ -276,15 +287,12 @@ typedef struct WemMeta {
  *    hand to the matching *_free, whatever the return code says. (A NULL
  *    out-pointer is itself the malformed call WEM_ERR_STATE_ERROR, and
  *    there is nothing to write.)
- *  - `wem_session_finish` writes `*out_meta` when and only when it returns
- *    WEM_OK. On every other return the struct is left exactly as the caller
- *    had it, and its contents are not a summary of anything: there is no
- *    empty WemMeta, because a zero length and a 64-character lowercase-hex
- *    digest have no value that means "no container was produced". The
- *    return code is what says whether the summary exists, and a caller must
- *    not read `*out_meta` unless that code was WEM_OK.
  *  - A handle returned through an out-pointer is owned by the client and
  *    released with the matching *_free (NULL is a no-op).
+ *
+ *  Those are the only out-parameters this header declares. A call that
+ *  returns a code returns nothing else: what it produced left through the
+ *  client's callback, or was never produced at all.
  */
 
 /* Profile-resolved shareable encoder (concurrent encodes OK).
@@ -311,11 +319,13 @@ WemError wem_session_new(const WemProfile *profile, WemWriteCb write_cb,
                          WemSession **out_session);
 WemError wem_session_push(WemSession *session, const uint8_t *data,
                           size_t len);
-/* Finish: complete the encode, deliver the container bytes through the
- * session's write callback, and fill `*out_meta` — written when and only
- * when this returns WEM_OK; untouched on every other return (section 3).
+/* Finish: complete the encode and deliver the container bytes through the
+ * session's write callback. The return code is the whole result — no
+ * summary is handed back, because the container length is what the client's
+ * write callback counts and a digest of those bytes is the client's to
+ * compute (see the note above section 3).
  * Terminal: whatever it returns, the session is then released, not reused. */
-WemError wem_session_finish(WemSession *session, WemMeta *out_meta);
+WemError wem_session_finish(WemSession *session);
 void wem_session_free(WemSession *session);
 
 /*
@@ -334,9 +344,42 @@ void wem_session_free(WemSession *session);
  */
 
 /*
- * APPENDIX: MIGRATING FROM REVISION 1
+ * APPENDIX: MIGRATING FROM REVISION 2 (AND REVISION 1)
  *
  * Informative, not interface: the normative text is above.
+ *
+ * REVISION 2 -> 3
+ *
+ * `wem_session_finish` lost its out-parameter, and the struct that
+ * out-parameter pointed at is gone:
+ *
+ *   revision 2                                    revision 3
+ *   ----------                                    ----------
+ *   WemMeta meta;                                 (no struct)
+ *   wem_session_finish(session, &meta)            wem_session_finish(session)
+ *
+ * What a client must change:
+ *
+ *  - Delete its `WemMeta` value and pass the session alone. The call is
+ *    otherwise identical: same lifecycle position, same terminal rule
+ *    (whatever it returns, the session is released, not reused), same
+ *    write-callback delivery, and the same WemError values.
+ *  - For the container length, count what the write callback received:
+ *    sum the `len` of every block it was handed. That sum is the container
+ *    size, and it is exact — the callback is called with the whole
+ *    container, across one or more blocks.
+ *  - For a digest, compute one over the bytes the callback received (or
+ *    over the file the client wrote) with its own tool. To compare against
+ *    a recorded digest, run the platform's tool — `sha256sum`, `shasum -a
+ *    256`, `certutil -hashfile` — and compare its output, or compare the
+ *    two files directly with `cmp`. The library deliberately returns
+ *    neither: which algorithm, which encoding and how much CPU per encode
+ *    are the caller's decisions, and a digest of bytes the caller already
+ *    holds is something it can compute itself.
+ *
+ * No other declaration changed, and no WemError value was renumbered.
+ *
+ * REVISION 1 -> 2
  *
  * The three profile-taking entries lost their `profile_name` + `data_dir`
  * argument pair and gained one borrowed `const WemProfile *`:
@@ -351,9 +394,10 @@ void wem_session_free(WemSession *session);
  *   wem_session_new(                              wem_session_new(
  *       name, dir, wb, pb, ud, &session)              &prof, wb, pb, ud, &session)
  *
- * `wem_encoder_encode`, `wem_encoder_free`, `wem_session_push`,
- * `wem_session_finish` and `wem_session_free` are unchanged, as is every
- * WemError value, the lifecycle, and the reply framing.
+ * `wem_encoder_encode`, `wem_encoder_free`, `wem_session_push` and
+ * `wem_session_free` are unchanged, as is every WemError value, the
+ * lifecycle, and the reply framing; `wem_session_finish` changed only in
+ * revision 3, as above.
  *
  * Building the selection: the generation is the WEM_WWISE_2013 code and the
  * two geometry fields are the channel count and sample rate the client was

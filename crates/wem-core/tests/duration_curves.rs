@@ -9,7 +9,7 @@
 //! freshly spawned child process, and one `#[ignore]`d **parent reporter**
 //! (`duration_curves_point`) that runs exactly one worker and prints the
 //! child's peak RSS, user CPU, system CPU and wall time. That is the same
-//! child-process pattern `stream_session.rs` uses for its bounded-memory
+//! child-process pattern `streaming.rs` uses for its bounded-memory
 //! check (`wait4().ru_maxrss`), with `ru_utime`/`ru_stime` read from the same
 //! `rusage` so a run reports memory *and* CPU together, from the reaped child,
 //! never from the shared test process (whose allocator never returns memory to
@@ -778,7 +778,7 @@ fn duration_from(sec: i64, usec: i64) -> std::time::Duration {
 }
 
 /// `struct rusage` on macOS: `ru_maxrss` sits at offset 32 of a 144-byte
-/// struct on arm64/x86_64 darwin (the same layout `stream_session.rs` reads).
+/// struct on arm64/x86_64 darwin (the same layout `streaming.rs` reads).
 #[cfg(target_os = "macos")]
 #[repr(C)]
 struct MacRusage {

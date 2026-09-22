@@ -80,8 +80,6 @@ def encode_pcm_python(
         audio_packets=len(audio_packets),
         short_packets=modes.count(0),
         long_packets=modes.count(1),
-        bytes=len(encoded),
-        metadata_source=container.metadata_source,
     )
     return EncodeResult(encoded, stats)
 

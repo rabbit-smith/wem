@@ -350,7 +350,13 @@ flatten wants the latency and CPU panels beside it, not in another image.
   N = 1**, drawn as a thin dotted line in the same colour. Anchoring each series
   at its own starting rate is what makes the gap readable as lost scaling rather
   than as a difference in baseline; one shared reference line would compare a
-  parallel run against a sequential baseline it never claimed.
+  parallel run against a sequential baseline it never claimed. Drawn to scale it
+  also sets the throughput panels' y range — it climbs to 134.2/s and 657.5/s
+  where the measured series reach 63.8/s and 339.4/s — so the measured series
+  fill 41% and 44% of those panels against 91% for every latency and CPU panel.
+  That band *is* the gap the panel exists to show, so it is left whole: an axis
+  clamped to the data would take the parallel series' reference off the top of
+  the frame from N ≈ 6, which is where the feature is losing.
 - **The latency panel draws median solid and p95 dashed**, because the p95 is
   where oversubscription appears first and it is the number a caller with a
   timeout cares about: on the fixture it leaves the median behind at N = 6.
@@ -358,11 +364,39 @@ flatten wants the latency and CPU panels beside it, not in another image.
   quantity and so the one that survives this machine's noise; a reader deciding
   a deployment shape should be able to see that the parallel series starts
   higher than the sequential one and never crosses below it.
+- **The N axis is linear, because the samples are not evenly spaced and the
+  axis must say so.** The matrix is N = 1, 2, 3, 4, 6, 8, 16, so the last
+  segment is drawn eight units wide against one for the first. The flattening
+  that shows is in the data and not in the spacing: on the linear axis, the
+  sequential 6-channel series loses slope from 7.02 encodes/s per unit of N at
+  the first step to 1.44 at the last, and that is what the reader sees. Evenly
+  spaced ticks would be the misleading choice, drawing the 8 → 16 step — 11.52
+  encodes/s over eight units of N — across the same width as the 1 → 2 step's
+  7.02 over one, and so at eight times its true slope.
+
+**The size is a width budget, and 11 in did not meet it.** At 110 DPI the widest
+object a single panel has to hold is the per-geometry input caption (467 px),
+then the longest panel title (380 px) and the widest legend (276 px); the
+tightest is the run of tick labels at N = 1, 2, 3, 4, which sit one N apart. At
+11 in a panel was 198 px, so all three of those objects were wider than the
+panel they belonged to: the third column's titles were clipped by the right edge
+of the figure (measured: they ended at x = 1284 in a 1210 px image) and the
+throughput legends by the left edge (x = -4.5), while the four tick labels had
+2 px between them and read as one number. The caption under column 1 was not
+merely a symptom — it is an unclipped annotation and so part of that column's
+tight bounding box, so its 467 px widened the column from 198 px to 529 px,
+which `tight_layout` paid for by shrinking *every* panel and leaving a 260 px
+gap between the columns, wider than the panels themselves. At 16.5 in a panel is
+492 px: the caption takes 0.95 of it, the title 0.77 and the legend 0.56, the
+four tight tick labels have 19.8 px between them, no artist is drawn outside the
+figure, and the gap between columns is 122 px. The caption is anchored in points
+under its axes rather than in axes fractions, so it no longer moves with the
+panel height it is sitting below.
 
 **Style is the default `rcParams`, unmodified.** No style sheet, no
-`rcParams.update`. The only chosen values are the figure size (11 × 13 in) and
-the DPI (110), both for legibility; the default colour cycle (`tab10`) and the
-default font (DejaVu Sans) are left alone, and the figure is meant to be
+`rcParams.update`. The only chosen values are the figure size (16.5 × 11.5 in)
+and the DPI (110), both for legibility; the default colour cycle (`tab10`) and
+the default font (DejaVu Sans) are left alone, and the figure is meant to be
 recognisable as an ordinary Matplotlib figure. Matplotlib is a documentation
 tool for this one script: it is not in `pyproject.toml`, not in any crate, and
 not in the shared `.venv`. It was installed into a throwaway venv inside the
@@ -390,9 +424,13 @@ shasum -a256 docs/figures/concurrency-curves.png
 cmp docs/figures/concurrency-curves.png "$TMPDIR/run2.png"
 ```
 
-Three consecutive renders of the committed JSON all produced
-`sha256 d928f2b5c8cb6fddb06602f62fd85e605c45f03efde2952d9639aebd09b8e8ac`, and
-`cmp` reported no difference.
+Three consecutive renders of the committed JSON, at the figure size above, all
+produced
+`sha256 e199b898cc0f4568ae3793782da0720a59c39185fb8b84de17e42d304d310421`, and
+`cmp` reported no difference. (The digest the 11 × 13 in figure had,
+`d928f2b5c8cb6fddb06602f62fd85e605c45f03efde2952d9639aebd09b8e8ac`, is
+superseded: the raster geometry is part of the image, so a deliberate change of
+figure size changes the digest and that is the only reason this one did.)
 
 What makes it hold: figure size and DPI pinned, so the raster geometry cannot
 drift with a display; every series sorted by N before it is drawn, so the drawn

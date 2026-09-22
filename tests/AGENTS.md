@@ -30,6 +30,32 @@ runs the crate suites. Helper modules without the `test_` prefix (e.g.
 `oracle_frame_values.py`, `wem_byte_compare.py`) are imported by those modules
 and are never run on their own.
 
+## Suite layout
+
+One module per object under test, not per dataset, per artifact or per
+historical event. A suite that tests the same object from another angle lives
+in that object's module as a class named for the angle — `test_quality.py`
+holds the interpolation kernel, the assembly wiring and the record family;
+`crates/wem-core/tests/encoder.rs` holds the PCM shapes, the plan tail and the
+byte claims. Two exceptions, both because the build names the path:
+`tests/whole_file/test_whole_file.py` (`make wem-bytes`) and
+`tests/parity/two_channel_long_run.py` (`make 2ch-long`), which is also why the
+latter keeps its non-`test_` prefix.
+
+Roughly 150 lines is the floor: a module below it belongs with its neighbours in
+the same subject area. Merging never merges checks — a merged module keeps every
+test function, its name and its failure message, so one claim can still be run
+by name and still says which frame, stage, channel, bin, packet or byte
+diverged. The language's own structure does the navigating: Python classes, one
+per angle, under a banner comment naming the module each section came from; Rust
+`mod` blocks inside one test binary (`cargo test -p wem-core --test errors
+source_chain::…`).
+
+A helper that would otherwise be repeated across merged modules lives in the
+shared support module: `oracle_frame_values.py`, `wem_byte_compare.py`,
+`two_channel_corpus_support.py`, `analysis_resource_support.py`,
+`codebook_resource_support.py`, `pcm_sample_support.py`.
+
 ## Environment
 
 All test targets run with `PYTHONPATH=src:reference` (the Makefile sets it):

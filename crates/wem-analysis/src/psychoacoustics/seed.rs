@@ -388,18 +388,6 @@ fn tone_banks_as_f64(banks: &[Vec<Vec<f32>>]) -> Vec<Vec<Vec<f64>>> {
         .collect()
 }
 
-/// Build the floor seed from a long seed look
-/// (Python `build_long_floor_seed_from_look`).
-pub fn build_long_floor_seed_from_look(
-    look: &WwisePsyLongSeedLook,
-    logfft: &[f64],
-    channel_specmax: f64,
-    global_specmax: f64,
-) -> Result<Vec<f64>, AnalysisError> {
-    let tone_banks = tone_banks_as_f64(&look.tone_banks);
-    seed_from_parts(look, &tone_banks, logfft, channel_specmax, global_specmax)
-}
-
 /// The half of a long floor-seed build that genuinely depends on this
 /// channel's spectrum and this frame's peaks, given an already-derived look
 /// and its f64 tone banks.
@@ -435,18 +423,6 @@ fn seed_from_parts(
         global_specmax,
         look.seed_ceiling as f64,
     )
-}
-
-/// Convenience wrapper to build a floor seed from long tables
-/// (Python `build_long_floor_seed`).
-pub fn build_long_floor_seed(
-    table: &WwisePsyLongTables,
-    logfft: &[f64],
-    channel_specmax: f64,
-    global_specmax: f64,
-) -> Result<Vec<f64>, AnalysisError> {
-    let look = crate::config::make_wwise_long_seed_look(table)?;
-    build_long_floor_seed_from_look(&look, logfft, channel_specmax, global_specmax)
 }
 
 /// Build the seed floor (Python `wwise_seed_floor`).

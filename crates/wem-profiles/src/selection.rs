@@ -156,8 +156,8 @@ impl WwiseProfile {
     /// (`tests/profile_selection.rs::selection_describes_itself_for_diagnostics`
     /// here, `tests/profiles_integration.rs` for the key), so they must not be
     /// unified: the short one is the spelling a caller meets — the version in
-    /// [`ProfileError::NoProfileForSelection`], the container's
-    /// `metadata_source`, and the form a command line accepts — while the
+    /// [`ProfileError::NoProfileForSelection`], a selection error's
+    /// `requested` field, and the form a command line accepts — while the
     /// key's is registry and diagnostic identity. The Python side documents
     /// the same split (`wwise_wem.profiles.key`: `WWISE_GENERATION_LABEL =
     /// "2013"` beside `WWISE_GENERATION = "2013.2"`).

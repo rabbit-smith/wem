@@ -6,28 +6,29 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from wwise_wem.profiles.key import WWISE_GENERATION_LABEL
-
 from ..profiles.artifact import CompiledProfile
 
 
 @dataclass(frozen=True)
 class ContainerPlan:
-    """Per-output container metadata, kept separate from codec identity."""
+    """Per-output container metadata, kept separate from codec identity.
+
+    The plan carries the profile's container metadata and nothing that
+    describes *which* profile it came from, mirroring the kernel's
+    `ContainerPlan`: the selection is the caller's own argument, so a label
+    naming it back is not a second observation.
+    """
 
     fmt: Mapping[str, Any]
     endian: str
     seek_table: bytes
     extra_chunks: tuple[tuple[bytes, bytes], ...]
-    metadata_source: str
 
     def __post_init__(self) -> None:
         if not isinstance(self.fmt, Mapping):
             raise TypeError("container fmt must be a mapping")
         if self.endian not in ("le", "be"):
             raise ValueError("container endian must be 'le' or 'be'")
-        if not isinstance(self.metadata_source, str) or not self.metadata_source:
-            raise ValueError("metadata_source must be a non-empty string")
         extras: list[tuple[bytes, bytes]] = []
         for chunk_id, payload in self.extra_chunks:
             chunk_id = bytes(chunk_id)
@@ -40,10 +41,6 @@ class ContainerPlan:
 
     @classmethod
     def from_profile(cls, profile: CompiledProfile) -> "ContainerPlan":
-        # The provenance label names the selected configuration, not the
-        # carrier it happens to come from: it mirrors the kernel's
-        # `ContainerPlan::from_profile`, so the oracle and the kernel report
-        # the same `metadata_source` for the same selection.
         return cls(
             fmt=profile.container_metadata.to_fmt_dict(
                 frame_count=profile.container_metadata.dwTotalPCMFrames
@@ -51,10 +48,6 @@ class ContainerPlan:
             endian=profile.endian,
             seek_table=profile.seek_table,
             extra_chunks=profile.extra_chunks,
-            metadata_source=(
-                f"profile:{profile.channels}ch/{profile.sample_rate}Hz/"
-                f"{WWISE_GENERATION_LABEL}"
-            ),
         )
 
 
