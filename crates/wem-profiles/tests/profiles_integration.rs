@@ -442,18 +442,21 @@ fn container_metadata_matches_profile() {
 
 #[test]
 fn profile_key_requires_complete_identity() {
-    // The recorded setup identity is read off the installed carrier's own key,
-    // never re-typed as a literal.
-    let identity = profile().key().quality_setup_identity().to_string();
-    let key = ProfileKey::new(6, 44100, "2013.2".into(), "5.1".into(), identity.clone())
-        .expect("complete identity");
+    // The layout is read off the installed carrier's own key, never re-typed
+    // as a literal.
+    let layout = profile().key().channel_layout().to_string();
+    let key =
+        ProfileKey::new(6, 44100, "2013.2".into(), layout.clone()).expect("complete identity");
     assert_eq!(key.generation(), "2013.2");
-    assert_eq!(key.channel_layout(), "5.1");
-    assert_eq!(key.quality_setup_identity(), identity);
-    // The human label is derived from the identity, never stored.
+    assert_eq!(key.channel_layout(), layout);
+    // The human label is derived from the identity, never stored; the full
+    // description adds the layout, which is what tells two profiles with the
+    // same geometry apart.
     assert_eq!(key.label(), "6ch/44100Hz/2013.2");
-    // Non-positive geometry rejected.
-    assert!(ProfileKey::new(0, 44100, "2013.2".into(), "5.1".into(), "sha256:x".into(),).is_err());
+    assert_eq!(key.describe(), format!("6ch/44100Hz/2013.2/{layout}"));
+    // Non-positive geometry rejected, and so is an empty identity field.
+    assert!(ProfileKey::new(0, 44100, "2013.2".into(), "5.1".into()).is_err());
+    assert!(ProfileKey::new(6, 44100, "2013.2".into(), String::new()).is_err());
 }
 
 // ---------------------------------------------------------------------------

@@ -69,34 +69,34 @@ fn two_channel_profile_exposes_its_quality_curves() {
 #[test]
 fn two_channel_profile_lists_in_the_registry_as_setup_available() {
     // The runtime registry: the 2ch/48000 profile is fully registered (setup
-    // and psychoacoustics available), and a setup identity stays a
+    // and psychoacoustics available), and its setup packet stays a
     // consequence of a selection, never an alternative selector.
     let registry = embedded_registry().expect("registry loads");
     assert_eq!(registry.len(), 2);
     let profile = registry
         .resolve_selection(two_channel_selection())
         .expect("2ch selection resolves");
-    // The label and the setup identity are properties read off the identity
-    // the selection resolves to, never literals in the test.
+    // The label and the layout are properties read off the identity the
+    // selection resolves to, never literals in the test.
     let compiled =
         compiled_profile_for_selection(two_channel_selection()).expect("2ch profile resolves");
     assert_eq!(profile.label(), compiled.label());
     assert_eq!(profile.key(), compiled.key());
     assert!(profile.setup_available());
     // The setup bytes the registry's profile hands back are the committed
-    // container's, so its declared digest is never re-typed as a literal.
+    // container's, compared as bytes rather than by a digest.
     assert_the_committed_container_carries(&profile.setup_packet().expect("setup packet"));
     assert!(profile.pending_reason().is_none());
 
     // The two installed selections resolve to distinct setup packets and
-    // distinct setup identities, so a setup identity is a consequence of the
+    // distinct channel layouts, so the packet is a consequence of the
     // selection, never a selector.
     let six_channel = registry
         .resolve_selection(six_selection())
         .expect("6ch selection resolves");
     assert_ne!(six_channel.setup_bytes(), profile.setup_bytes());
     assert_ne!(
-        six_channel.key().quality_setup_identity(),
-        profile.key().quality_setup_identity()
+        six_channel.key().channel_layout(),
+        profile.key().channel_layout()
     );
 }

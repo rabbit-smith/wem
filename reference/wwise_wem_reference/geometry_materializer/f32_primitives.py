@@ -139,7 +139,6 @@ def add80(left, right):
 # Supplied crt90/_ciatan.txt: SSE2 callee the build's code..10039666.
 # Constants read from work/msvcr90.dll using its OWN PE section table:
 # the corresponding locations..10087027 -> file offset 0x85560.
-# DLL SHA256: fac1c95630e93103f45c3a783f5a8cc6135af70dbad9727403dc13cd3a789319
 _CIATAN_DATA = bytes.fromhex(
     "e2652f227f2b7a3c075c143326a6813cbdcbf07a8807703c075c143326a6913c"
     "4fbb610567acdd3f182d4454fb21e93f9bf681d20b73ef3f182d4454fb21f93f"

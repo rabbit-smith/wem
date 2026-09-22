@@ -16,7 +16,7 @@ js/
   src/index.ts     the wrapper (typed entry; erasable-TS only, no build step)
   pkg/             wasm-pack --target web      (browser/worker; .wasm fetched by URL)
   pkg-node/        wasm-pack --target nodejs   (Node; .wasm read from disk on import)
-  test-node.mjs    Node parity test (reference sha256 + chunking consistency + selection/error codes)
+  test-node.mjs    Node parity test (reference bytes + chunking consistency + selection/error codes)
 ```
 
 Rebuilds (need wasm-pack + a wasm32 toolchain):

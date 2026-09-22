@@ -21,11 +21,12 @@ independent observable.**
 
 ## The loop
 
-1. **Establish a deterministic red light.** Pin the input digest, output size,
-   output digest, and packet count. Re-run it before and after every change; the
-   residuals are your only progress signal. If two failures exist, separate them
-   first — a streaming-tail regression will otherwise be charged to the codec
-   gap.
+1. **Establish a deterministic red light.** Pin the input bytes, output size,
+   the output bytes themselves (the committed container, or a dump of the
+   differing region), and packet count. Re-run it before and after every
+   change; the residuals are your only progress signal. If two failures exist,
+   separate them first — a streaming-tail regression will otherwise be charged
+   to the codec gap.
 2. **Instrument before hypothesising.** Instruments are code and they have bugs.
    Validate a new instrument against a case whose answer you already know, and
    confirm it is measuring what you think (entry point, argument order, units,
@@ -129,7 +130,8 @@ because that shape names the mechanism.
 
 A finding document is the durable artefact, and it has a fixed shape:
 
-1. **Result** — size, digest, packet counts, and the exact input identity.
+1. **Result** — size, the bytes or the first differing byte, packet counts, and
+   the exact input identity.
 2. **Root causes** — one per gap, each with the observation that established it
    and the packet-count movement it produced.
 3. **Accounting** — the bit ledger that closes against the target.
@@ -141,7 +143,7 @@ A finding document is the durable artefact, and it has a fixed shape:
 
 ## Checklist before declaring a gap closed
 
-- [ ] Whole-file digest, size, and packet counts identical on at least one paired
+- [ ] Whole-file bytes, size, and packet counts identical on at least one paired
       real input.
 - [ ] The same result through every implementation path (native, direct core,
       oracle) and under randomized chunking.

@@ -17,7 +17,6 @@ Exit code 0 on success, 1 on any failure.
 
 from __future__ import annotations
 
-import hashlib
 import struct
 import sys
 from pathlib import Path
@@ -74,10 +73,6 @@ def first_wem_packet(raw: bytes) -> bytes:
     raise ValueError("container has no data chunk")
 
 
-def sha256_hex(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
 def main() -> int:
     import wwise_wem._core as native
 
@@ -89,12 +84,11 @@ def main() -> int:
     )
     total_frames = len(interleaved) // (2 * channels)
     reference = (FIXTURES / "reference.wem").read_bytes()
-    ref_sha = sha256_hex(reference)
     print(
         f"input.wav: {channels}ch / {sample_rate}Hz / {total_frames} frames "
         f"({len(interleaved)} PCM bytes)"
     )
-    print(f"reference.wem: {len(reference)} bytes sha256={ref_sha}")
+    print(f"reference.wem: {len(reference)} bytes")
 
     failures: list[str] = []
 
@@ -118,7 +112,6 @@ def main() -> int:
     print(f"chunk pattern (bytes): {chunk_sizes}")
     print(f"packets emitted before/at finish: {len(packets)} (seq 0..{len(packets)-1})")
     print(f"complete.sha256: {complete.sha256}")
-    check("stream complete.sha256 matches reference", complete.sha256 == ref_sha)
     check("stream bytes equal reference.wem", wem_bytes == reference)
     check("complete.total_len matches", complete.total_len == len(reference))
     seqs = [p.seq for p in packets]
@@ -136,8 +129,8 @@ def main() -> int:
     )
     # The setup packet is a recorded artifact twice over: the compiled
     # profile carries it, and the reference container carries it as its first
-    # length-prefixed packet. Compare bytes against both; the carrier's
-    # recorded SHA-256 pins the value (no re-typed digest).
+    # length-prefixed packet. Compare bytes against both — no digest stands in
+    # for either.
     from wwise_wem_reference.profiles.artifact import resolve_selection
 
     check(
@@ -157,7 +150,6 @@ def main() -> int:
     ]
     result = native.Encoder(SELECTION).encode_pcm(sample_rate, rows)
     print(f"encode_pcm(lists).sha256(): {result.sha256()}")
-    check("encode_pcm(lists) sha256 matches reference", result.sha256() == ref_sha)
     check("encode_pcm(lists) bytes equal reference.wem", bytes(result.data) == reference)
     check("stats.audio_packets", result.audio_packets == 205)
     check("stats.bytes_out", result.bytes_out == len(reference))
@@ -175,7 +167,6 @@ def main() -> int:
     mv = memoryview(cm_bytes).cast("h", [channels, total_frames])
     result_mv = native.Encoder(SELECTION).encode_pcm(sample_rate, mv)
     print(f"encode_pcm(memoryview).sha256(): {result_mv.sha256()}")
-    check("encode_pcm(memoryview) sha256 matches reference", result_mv.sha256() == ref_sha)
     check("encode_pcm(memoryview) bytes equal reference.wem", bytes(result_mv.data) == reference)
 
     # --- 4) error mapping --------------------------------------------------

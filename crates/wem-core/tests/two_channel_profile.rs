@@ -86,14 +86,14 @@ fn two_channel_profile_lists_in_the_registry_as_setup_available() {
     assert!(profile.pending_reason().is_none());
 
     // The two installed selections resolve to distinct setup packets and
-    // distinct setup identities, so a setup identity is a consequence of the
+    // distinct channel layouts, so the packet is a consequence of the
     // selection, never a selector.
     let six_channel = registry
         .resolve_selection(fixture_selection())
         .expect("6ch selection resolves");
     assert_ne!(six_channel.setup_bytes(), profile.setup_bytes());
     assert_ne!(
-        six_channel.key().quality_setup_identity(),
-        profile.key().quality_setup_identity()
+        six_channel.key().channel_layout(),
+        profile.key().channel_layout()
     );
 }

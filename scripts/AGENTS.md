@@ -23,7 +23,8 @@ idempotent, and offline. What their outputs must satisfy is in
   side effect.
 - **Cross-check before emit**: generators assert their output against the
   existing versioned assets (frozen table generation proves domain agreement with
-  the recorded site pairs; the reference digest is verified after, not assumed).
+  the recorded site pairs; the reference container is compared byte for byte
+  after, not assumed).
 - Scripts must pass `make lint` (ruff covers `scripts/`), use `#!/usr/bin/env
   python3`, type hints, and `SystemExit` codes; failures print the offending
   artifact path, never a stack-trace shrug.

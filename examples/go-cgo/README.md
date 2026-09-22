@@ -46,11 +46,10 @@ name, no profile directory, and no environment variable.
    go run . -wav ../../tests/fixtures/input.wav -out out.wem
    ```
 
-   Byte-exactness check (against the reference digest):
+   Byte-exactness check (against the committed reference container):
 
    ```bash
-   shasum -a 256 out.wem
-   # expect: 17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247
+   cmp out.wem ../../tests/fixtures/reference.wem && echo "byte-identical"
    ```
 
 ## Notes

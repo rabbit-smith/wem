@@ -1,6 +1,6 @@
 //! Container bytes: rebuild the Wwise WEM from the real captured packet
-//! stream and verify the fmt/setup/data segment hashes and the full-file
-//! SHA-256 against `tests/data/stage-records/stages/index.json`.
+//! stream and compare the fmt/setup/data segments and the full file against
+//! the committed reference container, byte for byte.
 //!
 //! The packet stream (setup packet + 205 audio packets, seek table, fmt
 //! fields, extra chunks) is captured from the reference-oracle encode path
@@ -9,14 +9,13 @@
 //! capture drives the reference oracle directly (a test asset, not an
 //! engine: the facade's single execution path is the native kernel and is
 //! never on this path), observes the arguments of the reference-tree
-//! `build_vorbis_wem` (`wwise_wem_reference.python_engine`). All
-//! assertions are against the committed index.json hashes.
+//! `build_vorbis_wem` (`wwise_wem_reference.python_engine`). Every assertion
+//! is a byte comparison against `tests/fixtures/reference.wem`.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use wem_container::{build_vorbis_wem, load_wem_parts_bytes, Endian, VorbisFmtFields};
 
 fn repo_root() -> PathBuf {
@@ -30,25 +29,10 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn stages_dir() -> PathBuf {
-    repo_root().join("tests/data/stage-records/stages")
-}
-
-fn sha256_hex(payload: &[u8]) -> String {
-    let digest = Sha256::digest(payload);
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::new();
-    for &b in digest.as_slice() {
-        out.push(DIGITS[(b >> 4) as usize] as char);
-        out.push(DIGITS[(b & 0xF) as usize] as char);
-    }
-    out
-}
-
-fn load_index() -> Value {
-    let raw = std::fs::read_to_string(stages_dir().join("index.json"))
-        .expect("stage-records index.json exists");
-    serde_json::from_str(&raw).expect("index parses")
+/// The committed reference container for `tests/fixtures/input.wav`.
+fn reference_wem() -> Vec<u8> {
+    std::fs::read(repo_root().join("tests/fixtures/reference.wem"))
+        .expect("committed reference container reads")
 }
 
 /// Python script: capture the reference-oracle encoder's build_vorbis_wem
@@ -185,9 +169,10 @@ fn base64_decode(text: &str) -> Vec<u8> {
 }
 
 #[test]
-fn container_matches_stage_records() {
-    let index = load_index();
-    let container = &index["container"];
+fn container_matches_reference_bytes() {
+    let reference = reference_wem();
+    let reference_parts =
+        load_wem_parts_bytes(&reference).expect("the committed reference container parses");
 
     let captured = capture_packet_stream();
     let endian = if captured["endian"].as_str() == Some("be") {
@@ -252,11 +237,17 @@ fn container_matches_stage_records() {
         u_blocksize1_pow: i64f("uBlocksize1Pow") as u8,
     };
 
-    // Sanity: the captured setup packet is the reference setup packet.
+    // Sanity: the captured packet stream is the committed container's own — its
+    // setup packet and every audio packet, byte for byte.
     assert_eq!(
-        sha256_hex(&packets[0]),
-        container["setup_sha256"].as_str().unwrap(),
-        "captured setup packet differs from index.json"
+        reference_parts.setup_packet.as_deref(),
+        Some(packets[0].as_slice()),
+        "the captured setup packet must be the reference container's"
+    );
+    assert_eq!(
+        reference_parts.audio_packets,
+        packets[1..].to_vec(),
+        "the captured audio packets must be the reference container's"
     );
 
     // Rebuild the container with the Rust kernel.
@@ -271,38 +262,19 @@ fn container_matches_stage_records() {
     )
     .expect("build_vorbis_wem succeeds");
 
-    // Segment hashes (fmt / data) and sizes against index.json.
+    // The fmt and data segments, and the file the kernel assembles from them,
+    // are the reference container's bytes.
     assert_eq!(
-        sha256_hex(&built.fmt_raw),
-        container["fmt_sha256"].as_str().unwrap(),
-        "fmt segment hash differs"
+        built.fmt_raw, reference_parts.fmt_raw,
+        "fmt segment differs from the reference container"
     );
     assert_eq!(
-        built.fmt_raw.len(),
-        container["fmt_size"].as_u64().unwrap() as usize,
-        "fmt segment size differs"
+        built.data_raw, reference_parts.data_raw,
+        "data segment differs from the reference container"
     );
     assert_eq!(
-        sha256_hex(&built.data_raw),
-        container["data_sha256"].as_str().unwrap(),
-        "data segment hash differs"
-    );
-    assert_eq!(
-        built.data_raw.len(),
-        container["data_size"].as_u64().unwrap() as usize,
-        "data segment size differs"
-    );
-
-    // Whole-file hash.
-    assert_eq!(
-        sha256_hex(&built.wem_bytes),
-        container["wem_sha256"].as_str().unwrap(),
-        "full WEM SHA-256 differs"
-    );
-    assert_eq!(
-        built.wem_bytes.len(),
-        container["wem_size"].as_u64().unwrap() as usize,
-        "full WEM size differs"
+        built.wem_bytes, reference,
+        "the rebuilt container differs from the reference container"
     );
 
     // Round-trip: the structural parser sees the expected layout.

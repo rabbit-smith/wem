@@ -3,9 +3,8 @@
 
 The default 6ch/44100 profile derives every value from the current analysis
 path (the oracle), cross-checks the generated input domain against the
-recording produced by ``scripts/record_tmath.py``, then writes the payload,
-registers it in the profile manifest, and re-addresses index.json by the
-manifest's new SHA-256.
+recording produced by ``scripts/record_tmath.py``, then writes the payload and
+registers it in the profile manifest by path.
 
 The 2ch/48000 profile derives its coordinate domain analytically (seed-
 surface n with the manifest's sample rate and block sizes; the seed-surface
@@ -22,7 +21,6 @@ Usage: python3 scripts/generate_frozen_tables.py [--profile NAME] [--record-dir 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import struct
@@ -208,25 +206,17 @@ def main() -> int:
     payload_path.parent.mkdir(parents=True, exist_ok=True)
     payload_path.write_text(json.dumps(payload, indent=2) + "\n")
 
-    digest = hashlib.sha256(payload_path.read_bytes()).hexdigest()
+    # The manifest and the index address the payload by path and schema. The
+    # bytes are the payload's own: no digest of it is stored beside it, and
+    # re-running this generator rewrites the same files.
     manifest = json.loads(manifest_path.read_text())
     manifest["resources"][FROZEN_RESOURCE] = {
         "path": FROZEN_RELATIVE_PATH,
         "schema": FROZEN_SCHEMA,
-        "sha256": digest,
     }
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 
-    manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
-    index = json.loads(INDEX_PATH.read_text())
-    entry = index["profiles"][profile]
-    if entry["sha256"] == manifest_digest:
-        raise SystemExit(f"index already addresses the {profile} manifest; nothing to do")
-    entry["sha256"] = manifest_digest
-    INDEX_PATH.write_text(json.dumps(index, indent=2) + "\n")
-
-    print(f"wrote {payload_path.relative_to(ROOT)} sha256={digest}")
-    print(f"{profile} manifest sha256={manifest_digest} (index re-addressed)")
+    print(f"wrote {payload_path.relative_to(ROOT)}")
     print(f"recording cross-checks passed: {recording_checks}")
     return 0
 

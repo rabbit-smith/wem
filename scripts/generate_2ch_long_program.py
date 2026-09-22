@@ -10,7 +10,6 @@ There are no platform math-library calls in the signal definition.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import struct
 import wave
 from pathlib import Path
@@ -126,7 +125,7 @@ def main() -> int:
         destination.setsampwidth(2)
         destination.setframerate(SAMPLE_RATE)
         destination.writeframes(pcm)
-    print(f"{hashlib.sha256(pcm).hexdigest()}  {args.output}")
+    print(f"{len(pcm)} PCM bytes across {len(pcm) // (2 * CHANNELS)} frames  {args.output}")
     return 0
 
 

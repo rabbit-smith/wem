@@ -10,7 +10,6 @@ There is no document and no resource tree behind it any more.
 
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import struct
 import unittest
@@ -50,12 +49,19 @@ class ProfileStreamTests(unittest.TestCase):
                     (profile.container_metadata.nChannels, profile.container_metadata.nSamplesPerSec),
                     (profile.channels, profile.sample_rate),
                 )
-                # The identity the key carries names exactly the packet the
-                # stream carries: the digest is computed from those bytes.
+                # The identity is the key the stream carries — generation,
+                # geometry and layout — reconstructed from those fields, with
+                # nothing derived from the setup packet beside it.
                 self.assertEqual(
-                    profile.key.quality_setup_identity,
-                    "sha256:" + hashlib.sha256(profile.setup_packet).hexdigest(),
+                    profile.key,
+                    ProfileKey(
+                        profile.channels,
+                        profile.sample_rate,
+                        profile.generation,
+                        profile.channel_layout,
+                    ),
                 )
+                self.assertTrue(profile.setup_packet)
                 # A compiled profile is always complete: no draft state exists
                 # without a manifest to declare one.
                 self.assertTrue(profile.setup_available)

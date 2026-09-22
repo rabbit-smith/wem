@@ -6,7 +6,7 @@
 #   wem-vorbis            - depends on wem-analysis; bitstream/codebook/setup primitives
 #   wem-container         - no sibling dependencies; RIFF/WEM models
 #   wem-profiles          - depends on wem-analysis + wem-vorbis; sole owner of packaged
-#                           calibration resources, checksum verification, table loaders
+#                           calibration resources and table loaders
 #   wem-core              - depends on everything; the only orchestration layer
 #   wem-capi              - C ABI shell over wem-core + wem-profiles (include/wem.h)
 #   wem-python            - PyO3 binding over wem-core

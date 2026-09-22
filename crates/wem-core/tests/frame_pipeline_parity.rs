@@ -27,7 +27,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdout, Command, Stdio};
 
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use wem_analysis::model::PsyFrame;
 use wem_analysis::session::AnalysisSession;
 use wem_core::pack::pack_analysis_frame;
@@ -136,17 +135,6 @@ impl OracleStream {
 // ---------------------------------------------------------------------------
 // Word-level comparison
 // ---------------------------------------------------------------------------
-
-fn sha256_hex(payload: &[u8]) -> String {
-    let digest = Sha256::digest(payload);
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(64);
-    for &byte in digest.as_slice() {
-        out.push(DIGITS[(byte >> 4) as usize] as char);
-        out.push(DIGITS[(byte & 0xF) as usize] as char);
-    }
-    out
-}
 
 fn hex_digit(byte: u8, context: &str) -> u32 {
     match byte {
@@ -335,7 +323,6 @@ fn float_stage<'a>(psy: &'a PsyFrame, stage: &str, window: &'a [Vec<f64>]) -> &'
 #[test]
 fn every_frame_matches_the_python_oracle() {
     let wav_path = fixtures_dir().join("input.wav");
-    let raw = std::fs::read(&wav_path).expect("fixture reads");
     let wav = wav::read_pcm16(&wav_path).expect("fixture parses as signed-16 PCM");
     let pcm = wav.to_pcm16().expect("fixture geometry");
     let encoder = Encoder::new(fixture_selection()).expect("fixture selection resolves");
@@ -384,10 +371,16 @@ fn every_frame_matches_the_python_oracle() {
         Some(pcm.frame_count()),
         "oracle PCM frame count"
     );
+    // The oracle names the source it read; the kernel read the same path, and
+    // every frame below is compared word for word, so a different input on
+    // either side cannot pass unnoticed.
+    let expected_source = wav_path
+        .strip_prefix(repo_root())
+        .expect("the fixture lives under the repository root");
     assert_eq!(
-        header["input_sha256"].as_str(),
-        Some(sha256_hex(&raw).as_str()),
-        "both sides read the same input bytes"
+        header["wav"].as_str(),
+        Some(expected_source.to_string_lossy().as_ref()),
+        "both sides read the same source path"
     );
     assert_eq!(
         header["stages"].as_array().map(Vec::len),

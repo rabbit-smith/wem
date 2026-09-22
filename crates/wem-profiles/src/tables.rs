@@ -23,7 +23,6 @@ pub struct ProfileKeyParts {
     pub sample_rate: i64,
     pub generation: &'static str,
     pub channel_layout: &'static str,
-    pub quality_setup_identity: &'static str,
 }
 
 /// One static MDCT trig bank: `n + n/4` stored f32 words.

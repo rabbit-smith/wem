@@ -63,5 +63,6 @@ const labelled = new WemSession("2013", 2, 48000);   // label or "2013.2"
 - **Host** `wem_wasm_bg.wasm` with `Content-Type: application/wasm`
   (enables `instantiateStreaming`). That binary plus the WAV is the whole
   deployment: there are no profile files to mirror or cache.
-- Pin the wasm bytes in git or a CDN, and add a `Content-SHA256` check in
-  your loader if the host is untrusted.
+- Pin the wasm bytes in git or a CDN by serving a versioned path, so a loader
+  can be sure which build it fetched; the module itself is a pure encoder with
+  no profile files to mirror or cache.

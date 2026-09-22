@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import unittest
 
 from wwise_wem_reference.profiles.book_ids import resolve_book_id
@@ -10,6 +9,7 @@ from wwise_wem_reference.profiles.psychoacoustics.long_tables import load_long_p
 from wwise_wem_reference.profiles.psychoacoustics.long_variants import load_long_variant
 from wwise_wem_reference.profiles.psychoacoustics.short_tables import load_short_psy_profiles
 from wwise_wem import WwiseProfile, WwiseVersion
+from wwise_wem.profiles.key import ProfileKey
 from wwise_wem_reference.profiles.artifact import resolve_selection
 from tests.analysis_resource_support import installed_profile
 from tests.codebook_resource_support import installed_codebook_tables
@@ -82,12 +82,12 @@ class SetupRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "no installed Wwise 2013 profile"):
             resolve_selection(WwiseProfile(WwiseVersion.WWISE2013, 2, 44100))
 
-        # The key's setup identity names exactly the carried bytes: the digest
-        # is computed from the packet rather than carried beside it, so there
-        # is no second copy to disagree with.
+        # The identity is the key the carrier carries — generation, geometry
+        # and layout — never a value derived from the setup packet, whose
+        # bytes the resolution hands back directly.
         self.assertEqual(
-            SIX_CHANNEL_PROFILE.key.quality_setup_identity,
-            "sha256:" + hashlib.sha256(SIX_CHANNEL_PROFILE.setup_packet).hexdigest(),
+            SIX_CHANNEL_PROFILE.key,
+            ProfileKey(6, 44100, "2013.2", "5.1"),
         )
 
 

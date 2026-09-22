@@ -30,7 +30,6 @@ Design notes:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import random
@@ -194,14 +193,12 @@ def cmd_gen_wavs(args: argparse.Namespace) -> int:
             fpath = out_dir / fname
             frames = _GENERATORS[ctype](length, CHANNELS)
             _write_wav(fpath, frames)
-            digest = hashlib.sha256(fpath.read_bytes()).hexdigest()
             files.append(
                 {
                     "path": fname,
                     "content": ctype,
                     "frames": length,
                     "seconds": length / SAMPLE_RATE,
-                    "sha256": digest,
                 }
             )
 
@@ -272,8 +269,10 @@ def _project_template(channels: int, sample_rate: int, plugin_id: int, quality: 
 
 
 def _guid_for(kind: str) -> str:
-    # Deterministic pseudo-GUID (not a real UUID; just stable per kind).
-    h = hashlib.sha1(kind.encode()).hexdigest()
+    # Deterministic pseudo-GUID (not a real UUID; just stable per kind): the
+    # kind's own bytes, hex-spelled and padded to the GUID shape. Derived
+    # directly from the name, so nothing here hashes anything.
+    h = kind.encode("utf-8").hex().ljust(32, "0")[:32]
     return (
         h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
     )

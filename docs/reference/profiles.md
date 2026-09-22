@@ -4,8 +4,8 @@ A caller selects a configuration with one structured value — `WwiseProfile`: a
 `WwiseVersion`, a channel count and a sample rate. Never with a profile name, a
 profile directory, profile index/manifest bytes, or an environment variable.
 Inside the kernel, `ProfileKey` carries the full immutable identity
-(generation, geometry, channel layout, setup identity) and is an exact lookup,
-never a request to synthesize or approximate a configuration.
+(generation, geometry, channel layout) and is an exact lookup, never a request
+to synthesize or approximate a configuration.
 
 The two types have one spelling per language and the same shape
 everywhere: Rust `WwiseVersion` / `WwiseProfile`, C `WemVersion` / `WemProfile`
@@ -75,14 +75,13 @@ encoder build through the `(2, 45000, 50000)` descriptor family, whose
 No profile value is fitted to an output; the provenance rule is in
 [`../methodology/byte-exact-diagnosis.md`](../methodology/byte-exact-diagnosis.md).
 
-## Exact setup identity
+## Exact profile identity
 
-A profile selection resolves to exactly one compiled profile. The setup packet
-is a Rust constant and the identity the key carries is the SHA-256 of exactly
-those bytes: the value model recomputes the digest from the packet when it
-builds an identity from the carrier, so no stored copy can drift from them. An
-unsatisfiable or ambiguous selection is an error, and so is a key whose setup
-identity does not describe the packet it carries. The built-in path is
+A profile selection resolves to exactly one compiled profile. The identity the
+key carries is the key itself — generation, channels, sample rate and channel
+layout — and the setup packet is a Rust constant carried as its own bytes, with
+nothing derived from them stored beside it. An unsatisfiable or ambiguous
+selection is an error, not a first-match pick. The built-in path is
 self-contained: it reads the compiled carrier and never reads a reference WEM.
 Expected outputs are test assets, not runtime inputs.
 

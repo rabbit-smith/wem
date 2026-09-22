@@ -149,9 +149,9 @@ impl WwiseProfile {
     ///
     /// The generation spelled here is the **version label** (`"2013"`), so
     /// this reads `"6ch/44100Hz/2013"`; the profile-key spelling carries the
-    /// full generation instead, plus layout and identity where the key has
-    /// them ([`ProfileKey::label`] → `"6ch/44100Hz/2013.2"`,
-    /// [`ProfileKey::describe`] → `"6ch/44100Hz/2013.2/5.1(sha256:…)"`). Both
+    /// full generation instead, plus the layout ([`ProfileKey::label`] →
+    /// `"6ch/44100Hz/2013.2"`, [`ProfileKey::describe`] →
+    /// `"6ch/44100Hz/2013.2/5.1"`). Both
     /// spellings are deliberate and pinned by separate tests
     /// (`tests/profile_selection.rs::selection_describes_itself_for_diagnostics`
     /// here, `tests/profiles_integration.rs` for the key), so they must not be

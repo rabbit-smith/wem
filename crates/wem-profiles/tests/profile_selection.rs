@@ -95,16 +95,14 @@ fn selection_requires_positive_geometry() {
 
 #[test]
 fn selection_matches_on_generation_and_geometry_together() {
-    let installed =
-        ProfileKey::new(6, 44_100, "2013.2".into(), "5.1".into(), "sha256:0".into()).expect("key");
+    let installed = ProfileKey::new(6, 44_100, "2013.2".into(), "5.1".into()).expect("key");
     assert!(six_selection().matches_key(&installed));
     assert!(!two_channel_selection().matches_key(&installed));
 
     // The generation participates: the same geometry from another Wwise
     // generation is a different selection. This is the ambiguity that
     // geometry-only resolution could not express.
-    let other_generation =
-        ProfileKey::new(6, 44_100, "2012.1".into(), "5.1".into(), "sha256:0".into()).expect("key");
+    let other_generation = ProfileKey::new(6, 44_100, "2012.1".into(), "5.1".into()).expect("key");
     assert!(!six_selection().matches_key(&other_generation));
 }
 
@@ -268,7 +266,6 @@ fn an_ambiguous_selection_is_rejected_rather_than_picked() {
         base.sample_rate(),
         base.key().generation().to_string(),
         "5.1-twin".into(),
-        base.key().quality_setup_identity().to_string(),
     )
     .expect("twin key");
     let twin = EncoderProfile::new(

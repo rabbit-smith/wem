@@ -479,7 +479,6 @@ name = "wem-container"
 version = "0.1.0"
 dependencies = [
  "serde_json",
- "sha2",
 ]
 
 [[package]]
@@ -499,7 +498,6 @@ dependencies = [
 name = "wem-profiles"
 version = "0.1.0"
 dependencies = [
- "sha2",
  "wem-analysis",
  "wem-vorbis",
 ]

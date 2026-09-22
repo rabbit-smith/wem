@@ -66,13 +66,12 @@ pub fn internal_error(value: &InternalError) {
     }
 }
 
-/// `wem_profiles::error::ProfileError` — 30 variants.
+/// `wem_profiles::error::ProfileError` — 29 variants.
 pub fn profile_error(value: &ProfileError) {
     match value {
         ProfileError::ProfileKeyNonPositive => {}
         ProfileError::ProfileKeyFieldEmpty { .. } => {}
         ProfileError::ProfileGeometryMismatch => {}
-        ProfileError::ProfileSetupIdentityMismatch => {}
         ProfileError::ProfileBlockSizesMalformed => {}
         ProfileError::ProfileBlockSizesMismatch => {}
         ProfileError::BundleMissingVorbisSetup => {}

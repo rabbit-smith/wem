@@ -13,7 +13,7 @@ how a failing comparison is read is in the same document, under
 | unit | `make test-fast` (discovery) | module behavior, validation, loaders |
 | integration | in `make test-fast` | CLI/API/adapter end paths |
 | cross-implementation | in `make test-fast` (discovery) | pipeline invariants, cross-implementation parity |
-| whole-file | `make wem-bytes` | whole-file byte identity (the digest) |
+| whole-file | `make wem-bytes` | whole-file byte identity against the committed container |
 | capi | `cargo test -p wem-capi` | C ABI surface: reference byte identity via the FFI, error-code mapping, lifecycle violations |
 | wheel | `make wheel-smoke` | single-wheel (facade + native extension) inventory, clean-venv byte-exact encode |
 

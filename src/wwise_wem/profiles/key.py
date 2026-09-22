@@ -5,7 +5,10 @@ The profile values live in the kernel as Rust constants
 is the identity below plus whatever it decodes from the compiled artifact
 (``wwise_wem._core.profile_tables()``). There is no profile *name*: the human
 label is derived from the identity, so nothing stores a label that could drift
-from the values it names.
+from the values it names. The identity is the key itself — generation,
+geometry and channel layout — and nothing derived from the setup packet: the
+packet travels as bytes, so a digest carried beside it would only ever be
+checked against those bytes.
 """
 
 from __future__ import annotations
@@ -31,7 +34,6 @@ def profile_description(
     sample_rate: int,
     generation: str,
     channel_layout: str,
-    quality_setup_identity: str,
 ) -> str:
     """The complete description of one identity, for resolution diagnostics.
 
@@ -39,10 +41,7 @@ def profile_description(
     nowhere else — the label alone would print them identically, which is
     exactly the ambiguity a selection cannot resolve.
     """
-    return (
-        f"{profile_label(channels, sample_rate, generation)}"
-        f"/{channel_layout}({quality_setup_identity})"
-    )
+    return f"{profile_label(channels, sample_rate, generation)}/{channel_layout}"
 
 
 @dataclass(frozen=True, order=True)
@@ -53,7 +52,6 @@ class ProfileKey:
     sample_rate: int
     generation: str
     channel_layout: str
-    quality_setup_identity: str
 
     def __post_init__(self) -> None:
         if self.channels <= 0 or self.sample_rate <= 0:
@@ -62,8 +60,6 @@ class ProfileKey:
             raise ValueError("profile generation must not be empty")
         if not self.channel_layout:
             raise ValueError("profile channel layout must not be empty")
-        if not self.quality_setup_identity:
-            raise ValueError("profile quality/setup identity must not be empty")
 
     def label(self) -> str:
         """The human label for this profile, derived from the identity."""
@@ -76,7 +72,6 @@ class ProfileKey:
             self.sample_rate,
             self.generation,
             self.channel_layout,
-            self.quality_setup_identity,
         )
 
 

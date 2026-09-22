@@ -1,11 +1,12 @@
-# This repository verifies byte digests across machines (profile SHA-256
-# chain, reference WEM, stage-records hashes). Text files must therefore check
-# out with identical bytes on every platform: checkout line endings are
-# pinned to LF regardless of a machine's core.autocrlf (Windows runners
-# otherwise rewrite JSON to CRLF and every checksum verification fails).
+# This repository compares produced containers and fixtures byte for byte
+# across machines (the committed reference WEM, the stage-records dumps). Text
+# files must therefore check out with identical bytes on every platform:
+# checkout line endings are pinned to LF regardless of a machine's
+# core.autocrlf (Windows runners otherwise rewrite JSON to CRLF and every byte
+# comparison fails).
 * text=auto eol=lf
 
-# Binary payloads and checked hashes: never touch bytes.
+# Binary payloads and checked assets: never touch bytes.
 *.bin binary
 *.wav binary
 *.wem binary

@@ -25,7 +25,7 @@ Two consequences follow and are the whole of the change:
 
 | Claim | Evidence |
 |---|---|
-| The generated tables equal the recorded documents, table by table, bit by bit | `crates/wem-profiles/src/carrier_tests.rs` (`every_compiled_profile_matches_the_recorded_tree`, `assembled_resources_are_identical_from_both_sources`) — retired in stage 2 together with the recorded tree it compared against; the generation-time digest and the parity suites are what hold the carrier now |
+| The generated tables equal the recorded documents, table by table, bit by bit | `crates/wem-profiles/src/carrier_tests.rs` (`every_compiled_profile_matches_the_recorded_tree`, `assembled_resources_are_identical_from_both_sources`) — retired in stage 2 together with the recorded tree it compared against; the parity suites are what hold the carrier now |
 | The assembled codec inputs are identical from either source | same file, `assembled_resources_are_identical_from_both_sources` |
 | The kernel's dump equals the recorded documents | `tests/parity/test_profile_artifact_bridge.py` — retired in stage 2 for the same reason; the reader itself is covered by `tests/unit/profiles/test_profile_artifact.py` |
 | Whole-file output is unchanged | `make wem-bytes`, `cargo test -p wem-core --test complete_wem_bytes` |
@@ -55,9 +55,11 @@ against the documents rather than by comparing the carrier against itself.
 
 `corpus/profiles/` — the untracked development-material tree at the repository
 root, next to the paired-build measurements. It is the same tree, byte for byte,
-that the package shipped under `src/wwise_wem/data/profiles/`; its content digest
-(`f5f97ba673b4b045a1b741b94bbeb8801cf3b357c086221de9bea764b137672f`, over the
-sorted `path\0sha256` pairs) is recorded in the header of every generated module.
+that the package shipped under `src/wwise_wem/data/profiles/`. Its content
+digest (over the sorted `path\0sha256` pairs) was recorded in the header of every
+generated module at the time of this change; the header carries no digest now —
+the emitted source depends on the tree's contents and the branch diff is what
+shows a tree changed.
 
 It was taken from revision 9c73bd4 on `main`. `scripts/generate_profile_code.py
 --help` names the location, and `--profiles-dir` overrides it; the generator is
@@ -126,8 +128,8 @@ that buys and what it costs:
   no index, and no name-keyed lookup left to get wrong at run time.
 * **Cost** — the recorded material is no longer visible to `git`. Reproducing a
   generated table from scratch needs `corpus/profiles/`, which is untracked
-  development material; the generator says so in `--help`, and the content digest
-  in each generated header says which revision of the material produced it.
+  development material; the generator says so in `--help`, and regenerating from
+  a changed tree shows up as a diff in the generated source itself.
 ## What has landed, and what the deletion step still owns
 
 > The section below is the stage-1 hand-off, kept as written: it states the tree

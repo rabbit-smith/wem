@@ -25,7 +25,6 @@ never an engine.
 
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import sys
 import unittest
@@ -143,15 +142,22 @@ class TwoChannelResolutionTests(unittest.TestCase):
     def test_repeated_resolution_is_one_cached_profile(self) -> None:
         self.assertIs(resolve_selection(SELECTION), PROFILE)
 
-    def test_setup_packet_matches_the_profile_key_identity(self) -> None:
+    def test_resolved_profile_key_is_the_carriers_own_identity(self) -> None:
         profile = PROFILE
         setup = profile.setup_packet
         self.assertEqual(len(setup), 215)
-        # The key's identity names exactly the carried bytes: the digest is a
-        # function of the packet, computed here rather than stored beside it.
+        # The identity is the key the carrier holds — the selection's
+        # generation and geometry plus the channel layout — and the setup
+        # packet travels as its own bytes beside it, not as a value derived
+        # from them.
         self.assertEqual(
-            profile.key.quality_setup_identity,
-            f"sha256:{hashlib.sha256(setup).hexdigest()}",
+            (profile.key.channels, profile.key.sample_rate, profile.key.generation),
+            (CHANNELS, SAMPLE_RATE, "2013.2"),
+        )
+        self.assertEqual(profile.key.label(), "2ch/48000Hz/2013.2")
+        self.assertEqual(
+            profile.key.describe(),
+            f"2ch/48000Hz/2013.2/{profile.key.channel_layout}",
         )
 
     def test_unsupported_geometry_still_rejected(self) -> None:

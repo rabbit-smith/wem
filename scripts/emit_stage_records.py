@@ -67,7 +67,6 @@ def main() -> None:
     summary.update(
         {
             "profile": index_doc["profile"],
-            "input_sha256": index_doc["input_sha256"],
             "wem_sha256": index_doc["container"]["wem_sha256"],
             "wem_size": index_doc["container"]["wem_size"],
         }

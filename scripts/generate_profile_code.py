@@ -21,7 +21,8 @@ Every floating-point value is written as an integer bit pattern
 every integer table keeps the width the kernel's loader gave it.  The output
 is therefore byte-identical to what the JSON loaders decoded, and running the
 script twice produces an empty diff.  No network, no timestamps, no absolute
-paths: the header records a content digest over the tree.
+paths: the emitted source depends on the tree's *contents* only, and the
+branch's diff is what shows a tree changed.
 
 Usage
 -----
@@ -32,7 +33,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import hashlib
 import json
 import struct
 import sys
@@ -48,9 +48,8 @@ HEADER = (
     "//! Generated encoder profile tables. Do not edit; regenerate with\n"
     "//! `python3 {script}`.\n"
     "//!\n"
-    "//! Source material: the profile tree (`--help` names the location),\n"
-    "//! content digest `{digest}`. Every float is stored as its IEEE bit\n"
-    "//! pattern, never as a decimal literal.\n"
+    "//! Source material: the profile tree (`--help` names the location).\n"
+    "//! Every float is stored as its IEEE bit pattern, never as a decimal literal.\n"
 )
 
 # ---------------------------------------------------------------------------
@@ -541,16 +540,16 @@ def profile_module(
     lines: list[str] = []
 
     key = manifest["key"]
-    # No stored profile name and no stored setup digest: the human label is
-    # derived from the key (`ProfileKey::label`), the setup identity the key
-    # carries names the packet, and the packet bytes are the carrier's own.
+    # No stored profile name, no stored setup digest and no stored setup
+    # identity: the human label is derived from the key (`ProfileKey::label`),
+    # the key is the profile's identity (generation, geometry, layout), and the
+    # setup packet's bytes are the carrier's own.
     lines.append("#[rustfmt::skip]")
     lines.append("pub static KEY: ProfileKeyParts = ProfileKeyParts {")
     lines.append(f'    channels: {key["channels"]},')
     lines.append(f'    sample_rate: {key["sample_rate"]},')
     lines.append(f'    generation: "{key["generation"]}",')
     lines.append(f'    channel_layout: "{key["channel_layout"]}",')
-    lines.append(f'    quality_setup_identity: "{key["quality_setup_identity"]}",')
     lines.append("};")
     lines.append("")
 
@@ -1082,17 +1081,6 @@ def emit_long_arrays(prefix: str, table: dict[str, Any], prefix_suffix: bool = T
 # ---------------------------------------------------------------------------
 
 
-def tree_digest(profiles_dir: Path) -> str:
-    digest = hashlib.sha256()
-    for path in sorted(p for p in profiles_dir.rglob("*") if p.is_file()):
-        relative = path.relative_to(profiles_dir).as_posix()
-        digest.update(relative.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(hashlib.sha256(path.read_bytes()).hexdigest().encode("ascii"))
-        digest.update(b"\n")
-    return digest.hexdigest()
-
-
 def resource_path(profile_dir: Path, manifest: dict[str, Any], logical: str) -> Path | None:
     entry = manifest["resources"].get(logical)
     if entry is None:
@@ -1102,8 +1090,7 @@ def resource_path(profile_dir: Path, manifest: dict[str, Any], logical: str) -> 
 
 def build(profiles_dir: Path, out_dir: Path) -> dict[Path, str]:
     index = load_json(profiles_dir / "index.json")
-    digest = tree_digest(profiles_dir)
-    header = HEADER.format(script=GENERATED_BY, digest=digest)
+    header = HEADER.format(script=GENERATED_BY)
 
     files: dict[Path, str] = {}
     profile_names = sorted(index["profiles"])
@@ -1325,7 +1312,7 @@ def main(argv: list[str]) -> int:
 
     write(files, out_dir)
     total = sum(len(text) for text in files.values())
-    print(f"{len(files)} generated modules, {total} bytes, tree digest {tree_digest(profiles_dir)}")
+    print(f"{len(files)} generated modules, {total} bytes")
     return 0
 
 

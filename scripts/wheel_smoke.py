@@ -135,13 +135,13 @@ def _facade_metadata_smoke(allowlist: dict[str, object]) -> str:
     here: an abi3 extension cannot be imported from inside a zip, so this
     smoke never touches ``wwise_wem._core``.
     """
-    zeros = "0" * 64
     return (
         "import wwise_wem; "
         f"assert wwise_wem.__all__=={allowlist['root_exports']!r}; "
         "from wwise_wem.profiles.key import ProfileKey, profile_label; "
-        f"k=ProfileKey(6,44100,'2013.2','5.1','sha256:{zeros}'); "
+        "k=ProfileKey(6,44100,'2013.2','5.1'); "
         "assert k.label()=='6ch/44100Hz/2013.2', k.label(); "
+        "assert k.describe()=='6ch/44100Hz/2013.2/5.1', k.describe(); "
         "assert profile_label(2,48000,'2013.2')=='2ch/48000Hz/2013.2'; "
         "import importlib.util as u; "
         "assert u.find_spec('wwise_wem.data') is None, 'packaged data tree'; "
@@ -156,14 +156,15 @@ def _facade_metadata_smoke(allowlist: dict[str, object]) -> str:
 def _clean_venv_core_smoke() -> str:
     """Installed facade must encode byte-exactly through the embedded kernel."""
     return (
-        "import hashlib\n"
         "import sys\n"
         "from wwise_wem import RawPcm, WwiseWemError, encode\n"
         "import wwise_wem._core as core\n"
         "assert hasattr(core, 'Encoder'), core\n"
         "result = encode(sys.argv[1])\n"
-        "ref = hashlib.sha256(open(sys.argv[2], 'rb').read()).hexdigest()\n"
-        "assert result.sha256 == ref, (result.sha256, ref)\n"
+        # The comparison is the committed container's own bytes: the installed
+        # wheel must reproduce them exactly, not merely agree on a digest.
+        "reference = open(sys.argv[2], 'rb').read()\n"
+        "assert result.data == reference, (len(result.data), len(reference))\n"
         # The shipped entry point carries the kernel's stable error code:
         # 2ch/44100 is not an installed configuration, so the kernel rejects
         # the selection and the facade must hand the code to the caller.

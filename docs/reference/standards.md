@@ -81,8 +81,8 @@ them are listed in
 
 Bit patterns travel as integers or little-endian bytes, never as decimal strings.
 A float crosses a boundary through `to_bits`/`from_bits` or its little-endian
-bytes; a digest or a word is carried as a value or as bytes, not as text to be
-re-parsed. This includes code that carries profile data.
+bytes; a word is carried as a value or as bytes, not as text to be re-parsed.
+This includes code that carries profile data.
 
 The assets follow the same rule: values are compared as 8-hex-digit words
 (`tests/parity/oracle_frame_values.py`), and byte-level dumps are raw or
@@ -214,14 +214,25 @@ resource intake and the frozen transcendental tables are in
 
 A profile's values are Rust constants in the same artifact as the setup packet
 they belong to, so there is nothing to locate, address or verify at run time:
-the identity the key carries is the digest of exactly the packet the carrier
-holds, recomputed from those bytes when the value model is built from the
-carrier (`crates/wem-profiles/src/model.rs`), so no stored digest copy can drift
-from them; the carrier itself is proved value-for-value against the recorded
-material. A construction path that requests a value outside the frozen domain
-fails loudly instead of consulting the host libm. The carrier layout is in
-[`architecture.md`](architecture.md#profile-ownership), and provenance — no
-profile value is fitted to an output — is in [`profiles.md`](profiles.md).
+the identity is the key, the packet travels as its own bytes and nothing derived
+from them is stored beside them, and the carrier is proved value-for-value
+against the recorded material. A construction path that requests a value outside
+the frozen domain fails loudly instead of consulting the host libm. The carrier
+layout is in [`architecture.md`](architecture.md#profile-ownership), and
+provenance — no profile value is fitted to an output — is in
+[`profiles.md`](profiles.md).
+
+A hash exists only as a property of a produced artifact: the digest of the
+container the encoder produced, handed to the caller as `EncodeResult::sha256`
+in Rust, `sha256_hex` on the C ABI surface, `.sha256` in Python and `sha256Hex`
+in the browser shell. Nothing else is hashed. A profile's identity is its key —
+generation, channels, sample rate, channel layout — so no digest names a packet
+or a table; a setup packet, a record or a fixture travels as the bytes
+themselves, so nothing is compared against a digest of what is already at hand
+and nothing is derived from bytes only to be checked against those same bytes;
+a comparison is made against the bytes it is about (the committed reference
+container, the recorded stage dumps), and a failure prints the first differing
+byte and the two lengths instead of a digest of two whole files.
 
 ## Integration topology
 

@@ -18,12 +18,12 @@ UNINSTALLED_SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 2, 44100)
 
 class InstalledProfileTests(unittest.TestCase):
     def test_profile_key_keeps_complete_identity(self) -> None:
-        key = ProfileKey(6, 44100, "2013.2", "5.1", "sha256:example")
+        key = ProfileKey(6, 44100, "2013.2", "5.1")
         self.assertEqual((key.channels, key.sample_rate), (6, 44100))
         self.assertEqual(key.generation, "2013.2")
         self.assertEqual(key.channel_layout, "5.1")
         self.assertEqual(key.label(), "6ch/44100Hz/2013.2")
-        self.assertEqual(key.describe(), "6ch/44100Hz/2013.2/5.1(sha256:example)")
+        self.assertEqual(key.describe(), "6ch/44100Hz/2013.2/5.1")
         with self.assertRaises(dataclasses.FrozenInstanceError):
             key.channels = 2  # type: ignore[misc]
         with self.assertRaises(TypeError):
