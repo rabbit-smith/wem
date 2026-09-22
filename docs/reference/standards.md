@@ -289,9 +289,11 @@ by the test suites, and never imported by runtime code.
 
 The kernel stays compilable for `wasm32-unknown-unknown` in a scalar
 configuration. `wem-core`'s `parallel` feature — per-channel rayon partitioning
-inside `wem-analysis` — is default-on for native builds and can be dropped by a
-threadless consumer, which is how `crates/wem-wasm` builds it; the scalar path
-is the one the parity comparisons read.
+inside `wem-analysis`, run in a worker pool the analysis session owns and sizes
+to its channel count rather than in rayon's process-global pool — is default-on
+for native builds and can be dropped by a threadless consumer, which is how
+`crates/wem-wasm` builds it; the scalar path is the one the parity comparisons
+read.
 
 Profile bytes are consumable without filesystem I/O: the tables are compiled
 into the library and resolved by selection

@@ -57,6 +57,10 @@ pub mod transient {
 pub mod psychoacoustics {
     pub mod envelope;
     pub mod pipeline;
+    /// The session-owned worker pool the long-frame channel waves run in
+    /// (see the module docs for why its size is the encode's geometry and not
+    /// the host's, and for what a caller may read about it).
+    pub mod pool;
     pub mod remap;
     pub mod seed;
     pub mod short;

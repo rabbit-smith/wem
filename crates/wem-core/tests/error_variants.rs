@@ -101,7 +101,7 @@ pub fn profile_error(value: &ProfileError) {
     }
 }
 
-/// `wem_analysis::config::AnalysisError` — 150 variants.
+/// `wem_analysis::config::AnalysisError` — 151 variants.
 pub fn analysis_error(value: &AnalysisError) {
     match value {
         AnalysisError::UnsupportedGeometry { .. } => {}
@@ -254,6 +254,7 @@ pub fn analysis_error(value: &AnalysisError) {
         AnalysisError::StreamFeederChannelsMismatch { .. } => {}
         AnalysisError::StreamFeederSourceShort { .. } => {}
         AnalysisError::StreamFeederWindowNotReady { .. } => {}
+        AnalysisError::PoolUnavailable { .. } => {}
     }
 }
 

@@ -11,6 +11,7 @@ use crate::preprocessing::conditioner::InputConditioner;
 use crate::preprocessing::detector_input::detector_pcm_streams;
 use crate::preprocessing::windowing::{iter_pcm_windows, PlannedWindowSource, WindowedFrame};
 use crate::psychoacoustics::pipeline::{analyze_long_frame, analyze_short_frame};
+use crate::psychoacoustics::pool::ChannelPool;
 use crate::psychoacoustics::seed::{MaterializedLongSeedLook, SpectrumPeakState};
 use crate::psychoacoustics::short::ShortPsyAnalyzer;
 use crate::transient::detector::TransientDetector;
@@ -75,6 +76,11 @@ pub struct AnalysisSession {
     /// Frame- and channel-invariant long seed look, materialized once here and
     /// shared read-only with the per-channel long-frame jobs.
     long_seed_look: MaterializedLongSeedLook,
+    /// The worker pool the long-frame channel waves run in: this session's own,
+    /// sized to this encode's channel count when the session is built, and never
+    /// rayon's process-global pool. See `psychoacoustics::pool` for the
+    /// measurement and the ambient-state argument.
+    channel_pool: ChannelPool,
     transient_detector: TransientDetector,
     mode_selector: ModeSelector,
     mode_scan: ModeScanState,
@@ -101,6 +107,7 @@ impl std::fmt::Debug for AnalysisSession {
             .field("channels", &self.channels)
             .field("sample_rate", &self.sample_rate)
             .field("blocksizes", &self.blocksizes)
+            .field("channel_pool_workers", &self.channel_pool.workers())
             .field("next_frame_index", &self.next_frame_index)
             .field("last_frame_modes", &self.last_frame_modes)
             .field("input_conditioner", &self.input_conditioner.is_some())
@@ -159,12 +166,18 @@ impl AnalysisSession {
         // identically. It belongs to this session: one instance, borrowed
         // read-only by the per-channel jobs (see `MaterializedLongSeedLook`).
         let long_seed_look = MaterializedLongSeedLook::from_tables(&resources.long_base)?;
+        // The channel pool belongs to this session and to this geometry: one
+        // worker per channel, built here so the long-frame waves have it from
+        // the first frame. A host that refuses the workers fails this
+        // constructor, not the first frame.
+        let channel_pool = ChannelPool::for_channels(channels)?;
         let mut session = Self {
             channels,
             sample_rate,
             blocksizes,
             resources,
             long_seed_look,
+            channel_pool,
             // Placeholders replaced by reset().
             transient_detector,
             mode_selector,
@@ -180,6 +193,18 @@ impl AnalysisSession {
         };
         session.reset();
         Ok(session)
+    }
+
+    /// How many workers this session's long-frame channel waves run on: one per
+    /// channel, derived from the geometry this session was built for, and one —
+    /// the calling thread — in a build without the `parallel` feature.
+    ///
+    /// A reading, not a knob. The pool's size is the encode's own: it is the
+    /// number of per-channel jobs each wave spawns, so there is nothing to set
+    /// and nothing to choose, and a caller reading this learns what the geometry
+    /// produced rather than deciding anything.
+    pub fn channel_pool_workers(&self) -> usize {
+        self.channel_pool.workers()
     }
 
     /// The short block's transform bins (Python `short_bins` property).
@@ -631,6 +656,7 @@ impl AnalysisSession {
             long_variant,
             following_mode,
             Some(&mut self.spectrum_peak),
+            &self.channel_pool,
         )?;
         let spectrum = SpectrumFrame {
             window,
