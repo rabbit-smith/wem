@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Regenerate the stage-golden baseline assets from the checked fixture.
+"""Regenerate the stage-records baseline assets from the checked fixture.
 
 One-shot, idempotent, byte-stable:
 
-    python3 scripts/emit_stage_golden.py
+    python3 scripts/emit_stage_records.py
 
-By default this re-derives every asset under tests/data/stage-golden/stages/
+By default this re-derives every asset under tests/data/stage-records/stages/
 from tests/fixtures/input.wav through the real production encoder path and
 rewrites index.json and the raw frame dumps.  Stale dumps are removed.
 """
@@ -23,9 +23,9 @@ for entry in (ROOT, ROOT / "src", ROOT / "reference"):
     if str(entry) not in sys.path:
         sys.path.insert(0, str(entry))
 
-from tests.contract.stage_golden_support import (  # noqa: E402
-    build_stage_golden,
-    write_stage_golden,
+from tests.parity.stage_records_support import (  # noqa: E402
+    build_stage_records,
+    write_stage_records,
 )
 
 
@@ -40,8 +40,8 @@ def main() -> None:
     parser.add_argument(
         "--out",
         type=Path,
-        default=ROOT / "tests" / "data" / "stage-golden" / "stages",
-        help="asset directory (default: tests/data/stage-golden/stages)",
+        default=ROOT / "tests" / "data" / "stage-records" / "stages",
+        help="asset directory (default: tests/data/stage-records/stages)",
     )
     parser.add_argument(
         "--wwise-version",
@@ -62,8 +62,8 @@ def main() -> None:
             pcm.sample_rate,
         )
 
-    index_doc, dumps = build_stage_golden(args.wav, selection=selection)
-    summary = write_stage_golden(index_doc, dumps, args.out)
+    index_doc, dumps = build_stage_records(args.wav, selection=selection)
+    summary = write_stage_records(index_doc, dumps, args.out)
     summary.update(
         {
             "profile": index_doc["profile"],

@@ -459,11 +459,11 @@ fn stream_tail_matches_batch_when_final_center_crosses_source_end() {
 // 3. Performance regression check (encode_pcm median, release only)
 // ---------------------------------------------------------------------------
 
-const ENCODE_MEDIAN_GATE_MS: f64 = 150.0;
+const ENCODE_MEDIAN_BUDGET_MS: f64 = 150.0;
 const ENCODE_RUNS: usize = 5;
 
 #[test]
-fn encode_pcm_release_median_within_gate() {
+fn encode_pcm_release_median_within_budget() {
     if cfg!(debug_assertions) {
         eprintln!("skipping performance check in debug build");
         return;
@@ -492,8 +492,8 @@ fn encode_pcm_release_median_within_gate() {
     durations_ms.sort_by(|a, b| a.partial_cmp(b).expect("durations order"));
     let median_ms = durations_ms[durations_ms.len() / 2];
     assert!(
-        median_ms <= ENCODE_MEDIAN_GATE_MS,
-        "encode_pcm median {median_ms:.1} ms exceeds the {ENCODE_MEDIAN_GATE_MS:.0} ms budget \
+        median_ms <= ENCODE_MEDIAN_BUDGET_MS,
+        "encode_pcm median {median_ms:.1} ms exceeds the {ENCODE_MEDIAN_BUDGET_MS:.0} ms budget \
          (runs: {:?} ms)",
         durations_ms
             .iter()

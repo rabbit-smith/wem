@@ -248,7 +248,7 @@ def analyze_short_frame(
     short_variant: int,
     following_mode: int,
     q: float = -1.0,
-    update_gate: int = 0,
+    hold_update: int = 0,
     carried_global_specmax: float = NEGATIVE_INFINITY_DB,
     specmax_state: SpectrumPeakState | None = None,
     groups: Sequence[Sequence[float]] | None = None,
@@ -321,7 +321,7 @@ def analyze_short_frame(
         short_variant=short_variant,
         following_mode=following_mode,
         q=q,
-        update_gate=update_gate,
+        hold_update=hold_update,
         groups=groups,
     )
     return ShortPsyStreamFrame(

@@ -509,7 +509,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wwise_db_quant_golden() {
+    fn wwise_db_quant_matches_python() {
         // Oracle from Python _wwise_db_quant.
         assert_eq!(wwise_db_quant(0.0), 1023);
         assert_eq!(wwise_db_quant(-140.0), 0);

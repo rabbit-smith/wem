@@ -261,7 +261,7 @@ mod tests {
         assert_eq!(parts.fmt.dw_data_payload_size, 2 + setup.len() as u32);
         assert_eq!(parts.fmt.dw_seek_table_size, 0);
         // no audio packets: the field keeps its incoming value, mirroring the
-        // Python contract's named "preserve existing max" case
+        // Python reference's named "preserve existing max" case
         assert_eq!(parts.fmt.u_max_packet_size, 0xEEEE);
     }
 }

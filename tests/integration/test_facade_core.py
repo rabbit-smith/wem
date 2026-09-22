@@ -51,7 +51,7 @@ def _rows_from_pcm(pcm: PcmBuffer) -> list[list[int]]:
 class FacadeIsCoreTests(unittest.TestCase):
     """The facade is the core: one execution path, identical bytes."""
 
-    def test_facade_bytes_match_the_raw_core_binding_and_golden(self):
+    def test_facade_bytes_match_the_raw_core_binding_and_reference(self):
         pcm = read_pcm_wav(INPUT)
         reference = REFERENCE.read_bytes()
 

@@ -14,7 +14,7 @@ same ground.
 | `include/wem.h` | C ABI interface the shells mirror 1:1, implemented by `crates/wem-capi` |
 | `reference/wwise_wem_reference/` | Bit-exact pure-Python oracle, development tree only, never shipped |
 | `src/wwise_wem/data/profiles/` | Immutable packaged profile bundles (setup, codebooks, transforms, analysis, psychoacoustics) |
-| `tests/` | `unit/`, `integration/`, `contract/`, `golden/`, and the `data/` regression assets |
+| `tests/` | `unit/`, `integration/`, `parity/`, `whole_file/`, and the `data/` regression assets |
 | `scripts/` | Regeneration, decoding, fuzz, and packaging tools |
 | `examples/`, `js/` | Runnable bindings: Python, Rust, C, Go via cgo, Node and browser via wasm |
 | `docs/` | This guide set; see [Documentation map](#documentation-map) |
@@ -42,8 +42,8 @@ make wheel-smoke     # install the wheel in a clean venv and encode once
 Climb from the cheapest executable target; do not start from the full suite.
 
 1. One `unittest`/`cargo test` case or module.
-2. The affected suite: `make stage-contract`, `make 2ch-stress`,
-   `make 2ch-long`, `tests/contract/test_frame_pipeline_parity.py`, or one
+2. The affected suite: `make test-fast`, `make 2ch-stress`,
+   `make 2ch-long`, `tests/parity/test_frame_pipeline_parity.py`, or one
    crate's tests.
 3. The full ladders (`make test`, `cargo test --workspace`) at phase
    boundaries, or whenever the change touches shared state, configuration,
@@ -63,9 +63,9 @@ to fix the code or the test rather than to re-record the expectation.
 
 | Target | Checks |
 | --- | --- |
-| `make golden` | Whole-file golden WEM identity: `SHA-256 17851d26…d35247`, 205 audio packets |
-| `tests/contract/test_frame_pipeline_parity.py`, `cargo test -p wem-core --test frame_pipeline_parity` | Per-frame values (scheduling fields, eight analysis stages, floor posts, residue rows, audio packet) against the pure-Python oracle, all 205 frames |
-| `make stage-contract` | Per-frame × per-stage pipeline hashes and raw dumps |
+| `make wem-bytes` | Whole-file reference WEM identity: `SHA-256 17851d26…d35247`, 205 audio packets |
+| `tests/parity/test_frame_pipeline_parity.py`, `cargo test -p wem-core --test frame_pipeline_parity` | Per-frame values (scheduling fields, eight analysis stages, floor posts, residue rows, audio packet) against the pure-Python oracle, all 205 frames |
+| `tests/parity/test_stage_pipeline.py` | Per-frame × per-stage pipeline hashes and raw dumps |
 | `make 2ch-stress`, `make 2ch-long` | The 2ch stress corpus and the long-run cross-implementation comparison |
 | `make fuzz-parity` | Native vs oracle parity under randomized chunking and quality; Python unit, integration and cross-implementation suites run in `make test-fast` |
 | `cargo test --workspace` | Rust kernel, C ABI and shell suites, including the geometry-materializer parity suites |
@@ -101,7 +101,7 @@ or a ZIP import.
 
 Adding any file under `src/wwise_wem/`, or any packaged data, requires:
 
-1. an entry in `tests/contract/distribution_allowlist.json`;
+1. an entry in `tests/parity/distribution_allowlist.json`;
 2. package-data glob coverage in `pyproject.toml` for data;
 3. for profile data, a manifest `resources` entry with its SHA-256 and a
    re-addressed index, followed by `make wheel-smoke`.
@@ -163,5 +163,5 @@ change per conventional commit (`feat(rust):`, `fix(profiles):`, `test:`,
 `docs:`, `ci:`, `chore:`), keep `crates/Cargo.lock` committed, push only when the
 human asks, and keep repository surfaces clean-room phrased — inside
 `src/wwise_wem/` the marker substrings enforced by
-`tests/contract/distribution_allowlist.json` must not appear in literals,
+`tests/parity/distribution_allowlist.json` must not appear in literals,
 identifiers, or paths.

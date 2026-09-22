@@ -128,7 +128,7 @@ impl std::error::Error for ResidueError {}
 /// Deliberately absent from the serialized Vorbis setup packet.
 const WWISE_RESIDUE_44_LOW_UN_METRICS_MAX: [i64; 7] = [0, 1, 1, 2, 2, 4, 28];
 /// Encoder-only mean-absolute-coefficient thresholds; negative disables the
-/// average-absolute-value gate for that class.
+/// average-absolute-value threshold for that class.
 const WWISE_RESIDUE_44_LOW_UN_METRICS_AVG: [i64; 7] = [-1, 25, -1, 45, -1, -1, -1];
 
 /// Number of partitions from begin/end (optionally clipped by spectrum n)
@@ -176,7 +176,7 @@ pub fn quantize_residue_value(value: f64) -> i64 {
 /// Classification operates on the already integer-quantized residue, scans
 /// class 0 through `nclass - 2`, and selects the first class satisfying both
 /// its maximum absolute coefficient and (when enabled) mean-absolute
-/// coefficient gates. Only the installed 8-class profile metrics are
+/// coefficient thresholds. Only the installed 8-class profile metrics are
 /// available; other setups raise [`ResidueError::UnsupportedClassCount`].
 pub fn classify_partition(samples: &[f64], nclass: u64) -> Result<i64, ResidueError> {
     if nclass != 8 {
@@ -316,7 +316,7 @@ pub fn pack_residue_silent(
 /// (Python `pack_residue_vq`).
 ///
 /// `residuals[ch][bin]`: full spectrum residual (floor-divided MDCT). Only
-/// bins `[begin, end)` are coded; `ch_used` gates channels.
+/// bins `[begin, end)` are coded; `ch_used` restricts channels.
 pub fn pack_residue_vq(
     op: &mut OggPack,
     residue: &ResidueSetup,
@@ -491,7 +491,7 @@ const TYPE2_CLASS_ANGLE_METRICS: [i64; 9] = [0, 0, 999, 0, 999, 4, 8, 16, 32];
 /// The reference classifier takes two peaks over the partition's flat
 /// `(bin * channels + channel)` domain: the maximum absolute coefficient of
 /// channel 0, and the maximum over every other channel. It scans the class
-/// metrics in order and takes the first class whose magnitude and angle gates
+/// metrics in order and takes the first class whose magnitude and angle thresholds
 /// both hold, otherwise the last class. `long_block` is unused by the
 /// reference classifier.
 pub fn classify_partition_type2(

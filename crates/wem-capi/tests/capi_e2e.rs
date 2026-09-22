@@ -2,12 +2,12 @@
 //!
 //! Drive the FFI surface exactly the way an external language would
 //! (through the rlib symbols, `unsafe` and all) and prove:
-//! * one-shot encode == golden WEM bytes (fixture PCM);
+//! * one-shot encode == reference WEM bytes (fixture PCM);
 //! * streaming with seven uneven chunks == the same bytes, seq-ordered
 //!   packets, correct terminal meta;
 //! * encoder-handle path matches the one-shot convenience entry;
 //! * one handle shared by several threads encodes concurrently and every
-//!   thread reproduces the golden bytes (the include/wem.h shareability
+//!   thread reproduces the reference bytes (the include/wem.h shareability
 //!   promise);
 //! * NULL arguments, unsatisfiable selections, and lifecycle violations
 //!   return the expected stable codes;
@@ -136,7 +136,7 @@ fn setup_packet_of(wem_bytes: &[u8]) -> Vec<u8> {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn one_shot_fixture_rebuilds_golden() {
+fn one_shot_fixture_rebuilds_reference_wem() {
     let (pcm, frames, _channels) = read_fixture_pcm();
     let mut sinks = Sinks::new();
     let ud = sinks.user_data();
@@ -197,7 +197,7 @@ fn encoder_handle_matches_one_shot_and_reuses() {
 /// include/wem.h: *"WemEncoder is shareable: concurrent encodes may use one
 /// handle on different threads."* This is that sentence executed: one handle,
 /// four threads, each encoding the fixture PCM into its own sink, and each
-/// reproducing the golden container byte for byte.
+/// reproducing the reference container byte for byte.
 #[test]
 fn concurrent_encodes_share_one_handle() {
     const THREADS: usize = 4;
@@ -307,7 +307,7 @@ fn streaming_seven_uneven_chunks_match_one_shot() {
         wem_capi::wem_session_free(session);
     }
 
-    // Container bytes: the golden.
+    // Container bytes: the reference.
     let out = &sinks.out;
     assert_eq!(
         out,

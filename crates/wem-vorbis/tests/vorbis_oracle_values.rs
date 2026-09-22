@@ -1,4 +1,4 @@
-//! Golden-value tests for the pure Vorbis codec core, mirrored from the
+//! Reference-value tests for the pure Vorbis codec core, mirrored from the
 //! Python reference (tests/unit in the wem repo).
 
 use wem_vorbis::bitio::{BitReader, OggPack};
@@ -17,8 +17,8 @@ fn ilog_bits_matches_python() {
 }
 
 #[test]
-fn float32_unpack_golden() {
-    // Oracle from Python: struct/ldexp golden values.
+fn float32_unpack_matches_python() {
+    // Oracle from Python: struct/ldexp reference values.
     assert_eq!(float32_unpack(0), 0.0);
     // Oracle values computed by the Python reference.
     assert_eq!(float32_unpack(0x6180_0001), 0.00390625);
@@ -81,7 +81,7 @@ fn decode_tree_roundtrip() {
 }
 
 #[test]
-fn maptype1_quantvals_golden() {
+fn maptype1_quantvals_matches_python() {
     // 81 entries, dim 4 -> largest r with r^4 <= 81 is 3.
     assert_eq!(book_maptype1_quantvals(81, 4).unwrap(), 3);
     assert_eq!(book_maptype1_quantvals(0, 4).unwrap(), 0);

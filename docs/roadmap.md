@@ -8,7 +8,7 @@ Both registered profiles are byte-exact for their paired reference inputs. The
 
 | Area | Current state | Evidence |
 | --- | --- | --- |
-| 6ch/44.1 kHz | Whole WEM and every registered frame/stage are byte-exact | `make golden`, `make stage-contract`, `tests/contract/test_frame_pipeline_parity.py`, `cargo test -p wem-core --test frame_pipeline_parity` |
+| 6ch/44.1 kHz | Whole WEM and every registered frame/stage are byte-exact | `make wem-bytes`, `tests/parity/test_stage_pipeline.py`, `tests/parity/test_frame_pipeline_parity.py`, `cargo test -p wem-core --test frame_pipeline_parity` |
 | 2ch/48 kHz | Paired 96,000-frame input is byte-exact: 37,658 B, 142/142 audio packets, SHA-256 `41fe43e…ef629` | [`findings/2ch-byte-exactness.md`](findings/2ch-byte-exactness.md) |
 | 2ch representative corpus | Six real-build cases are whole-file byte-exact: silence, opposed DC, low tone, high tones, isolated impulses, independent stereo noise | `tests/data/2ch-reference/manifest.json` |
 | 2ch stress corpus | Alternating channel bursts and a tail-changing input are whole-file byte-exact through the native batch, native streaming, and Python oracle paths | `make 2ch-stress` |
@@ -35,5 +35,5 @@ Both registered profiles are byte-exact for their paired reference inputs. The
 The command-by-command ladder is in
 [`guides/development.md`](guides/development.md#verification-ladder). The order
 is fixed: targeted test → differential parity and the affected
-cross-implementation suite → the frame/stage and golden suites → the Rust
+cross-implementation suite → the frame/stage and whole-file suites → the Rust
 workspace → the installed-wheel smoke.

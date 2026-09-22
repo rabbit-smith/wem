@@ -1,10 +1,10 @@
 //! Container bytes: rebuild the Wwise WEM from the real captured packet
 //! stream and verify the fmt/setup/data segment hashes and the full-file
-//! SHA-256 against `tests/data/stage-golden/stages/index.json`.
+//! SHA-256 against `tests/data/stage-records/stages/index.json`.
 //!
 //! The packet stream (setup packet + 205 audio packets, seek table, fmt
 //! fields, extra chunks) is captured from the reference-oracle encode path
-//! via a subprocess: the stage-golden dumps only carry 28 representative
+//! via a subprocess: the stage-records dumps only carry 28 representative
 //! audio packets, so the full 206-packet stream is fetched on demand. The
 //! capture drives the reference oracle directly (a test asset, not an
 //! engine: the facade's single execution path is the native kernel and is
@@ -31,7 +31,7 @@ fn repo_root() -> PathBuf {
 }
 
 fn stages_dir() -> PathBuf {
-    repo_root().join("tests/data/stage-golden/stages")
+    repo_root().join("tests/data/stage-records/stages")
 }
 
 fn sha256_hex(payload: &[u8]) -> String {
@@ -47,13 +47,13 @@ fn sha256_hex(payload: &[u8]) -> String {
 
 fn load_index() -> Value {
     let raw = std::fs::read_to_string(stages_dir().join("index.json"))
-        .expect("stage-golden index.json exists");
+        .expect("stage-records index.json exists");
     serde_json::from_str(&raw).expect("index parses")
 }
 
 /// Python script: capture the reference-oracle encoder's build_vorbis_wem
 /// arguments (packets / seek table / fmt fields / extra chunks) as JSON.
-/// Mirrors tests/contract/stage_golden_support.py's observing wrapper.
+/// Mirrors tests/parity/stage_records_support.py's observing wrapper.
 const CAPTURE_SCRIPT: &str = r#"
 import base64, json, sys
 from pathlib import Path
@@ -176,7 +176,7 @@ fn base64_decode(text: &str) -> Vec<u8> {
 }
 
 #[test]
-fn container_contract_matches_stage_golden() {
+fn container_matches_stage_records() {
     let index = load_index();
     let container = &index["container"];
 
@@ -243,7 +243,7 @@ fn container_contract_matches_stage_golden() {
         u_blocksize1_pow: i64f("uBlocksize1Pow") as u8,
     };
 
-    // Sanity: the captured setup packet is the golden setup packet.
+    // Sanity: the captured setup packet is the reference setup packet.
     assert_eq!(
         sha256_hex(&packets[0]),
         container["setup_sha256"].as_str().unwrap(),

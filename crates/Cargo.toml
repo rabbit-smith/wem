@@ -40,7 +40,7 @@ serde_json = "1.0.151"
 # `parallel` feature: per-channel partitioning inside a single long-frame
 # analysis call, never across frames (cross-frame state updates stay strictly
 # sequential, and each channel reads only its own slice + immutable looks).
-# Bit-exact parity is backed by the golden_e2e / stage_frames / vorbis_golden
+# Bit-exact parity is backed by the complete_wem_bytes / stage_frames / vorbis_oracle_values
 # tests. It is feature-gated so threadless targets (e.g. wasm32-unknown-
 # unknown) can build a pure-scalar path via `default-features = false`.
 rayon = "1.10.0"

@@ -50,7 +50,7 @@ fn floor_integer(x: f64) -> i64 {
 }
 
 /// Materialize the logarithmic group label for every spectrum bin.
-/// Arithmetic order and truncation are part of the byte contract.
+/// Arithmetic order and truncation are part of the byte identity.
 pub fn octave(
     spectrum_bins: u32,
     sample_rate: u32,

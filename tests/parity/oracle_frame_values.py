@@ -3,7 +3,7 @@
 This program is the oracle side of the live per-frame parity suites.  The Rust
 suite (``crates/wem-core/tests/frame_pipeline_parity.rs``) spawns it and
 compares the native kernel's own per-frame results against the records it
-prints; ``tests/contract/test_frame_pipeline_parity.py`` imports
+prints; ``tests/parity/test_frame_pipeline_parity.py`` imports
 :func:`frame_records` for the fields reachable through the shipped binding.
 
 Nothing here is a recorded expectation: every value is produced by the oracle

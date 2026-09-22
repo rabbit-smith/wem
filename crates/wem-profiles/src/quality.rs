@@ -424,7 +424,7 @@ mod tests {
         // (1 - f) * -105 + f * -120 with f ~= 1.00000025e-6
         assert_eq!(values["desc29.psy_int1"], -105.00000375);
 
-        // Non-finite quality is rejected (honesty contract).
+        // Non-finite quality is rejected (no silent substitution).
         assert!(curves.evaluate_result(f64::NAN).is_err());
         assert!(curves.evaluate_result(f64::INFINITY).is_err());
     }

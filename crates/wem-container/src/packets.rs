@@ -127,7 +127,7 @@ pub fn build_packet_stream(
 /// fixture 108677 B / 139398 frames / 44100 Hz -> 34381, plus five 2ch/48k
 /// files); the 96000-frame sample whose exact quotient is 18600.5 pins the
 /// operator to truncation (rounding would give 18601). Deriving it also keeps
-/// the 6ch golden byte-identical, since that registration already equals the
+/// the 6ch container byte-identical, since that registration already equals the
 /// computed value.
 pub fn recompute_vorbis_fmt_sizes(
     fields: &mut VorbisFmtFields,

@@ -8,10 +8,10 @@ file first; subtree rules live in the child `AGENTS.md` files listed below.
 
 | Claim | Where it is checked |
 |---|---|
-| Golden WEM `SHA-256 17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247` | `make golden` |
-| Per-frame × per-stage pipeline hashes + representative raw dumps | `make stage-contract` (`tests/data/stage-golden/`) |
-| Package-root public exports (see `docs/reference/public-interface.md`) | `tests/contract/test_public_contract.py`; the export list in `tests/contract/test_distribution_contract.py`; wheel smoke |
-| Geometry-materializer parity: ported builder == registered 6ch surfaces == kernel `psy_geom*` | `tests/contract/test_geometry_materializer_contract.py` + `cargo test -p wem-analysis` parity suites |
+| Reference WEM `SHA-256 17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247` | `make wem-bytes` |
+| Per-frame × per-stage pipeline hashes + representative raw dumps | `tests/parity/test_stage_pipeline.py` over `tests/data/stage-records/` |
+| Package-root public exports (see `docs/reference/public-interface.md`) | `tests/parity/test_public_api.py`; the export list in `tests/parity/test_distribution.py`; wheel smoke |
+| Geometry-materializer parity: ported builder == registered 6ch surfaces == kernel `psy_geom*` | `tests/parity/test_geometry_materializer_parity.py` + `cargo test -p wem-analysis` parity suites |
 | Profile data digest chain: payload → manifest SHA → index SHA | `bundle.verify_all`, wheel smoke |
 
 Running those suites is what establishes each claim. A refactor is checked
@@ -22,8 +22,8 @@ work, and those are two different changes.
 ## Verification ladder (reuse before rerunning)
 
 1. Smallest executable target first: one `unittest`/`cargo test` case or module.
-2. Then the affected suite (`make stage-contract` / one crate test /
-   `tests/contract/test_frame_pipeline_parity.py`).
+2. Then the affected suite (`tests/parity/test_stage_pipeline.py` / one crate test /
+   `tests/parity/test_frame_pipeline_parity.py`).
 3. Full `make test` / `cargo test --workspace` only at phase boundaries or when
    the change touches shared state, configuration, lockfiles, or generated assets.
 4. A passing suite is reused — do not re-run it per task or per agent; rerun only
@@ -45,7 +45,7 @@ work, and those are two different changes.
   in a scalar configuration — parallel acceleration (e.g. rayon) lives behind a
   default-on, off-able feature, and profile bytes must be consumable via an
   I/O-free entry (`from_resources`), not only the filesystem loader.
-- Generated assets (`tests/data/stage-golden/`, the frozen tables) must come out
+- Generated assets (`tests/data/stage-records/`, the frozen tables) must come out
   byte-identical when regenerated: run the generator twice and the diff is empty,
   JSON is written with `sort_keys`, and file names carry explicit endianness.
 
@@ -83,7 +83,7 @@ This applies identically to Python (oracle) and Rust (kernel) crates.
 
 Repository surfaces are clean-room phrased. Inside the `src/wwise_wem` package,
 string literals, identifiers, and paths must not contain the forbidden marker
-substrings enforced by `tests/contract/distribution_allowlist.json` and the
+substrings enforced by `tests/parity/distribution_allowlist.json` and the
 cleanliness tests (`capture`, `fixture`, `the probe`, `research`, `experimental`
 — case-insensitive, substring level in package text; docs/README are exempt).
 Preferred vocabulary: `recording`/`record`, `representative`, `sample`, `site`.
@@ -91,7 +91,7 @@ Preferred vocabulary: `recording`/`record`, `representative`, `sample`, `site`.
 ## New-file registration checklist
 
 Adding any file under `src/wwise_wem/` or packaged data requires:
-1. entry in `tests/contract/distribution_allowlist.json` (modules/resources),
+1. entry in `tests/parity/distribution_allowlist.json` (modules/resources),
 2. package-data glob coverage in `pyproject.toml` (for data),
 3. if it is profile data: manifest `resources` entry with SHA-256 and index
    re-address, then the wheel packaging test (`make wheel-smoke`), which installs

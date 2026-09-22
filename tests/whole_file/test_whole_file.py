@@ -7,11 +7,11 @@ from wwise_wem import encode
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
 
-class GoldenEncoderTests(unittest.TestCase):
+class WholeFileEncoderTests(unittest.TestCase):
     def test_complete_wem_is_bit_exact(self):
         # The whole-file claim is the byte comparison against the committed
         # reference WEM; that file's SHA-256 is also recorded in
-        # tests/data/stage-golden/stages/index.json.
+        # tests/data/stage-records/stages/index.json.
         result = encode(FIXTURES / "input.wav")
         reference = (FIXTURES / "reference.wem").read_bytes()
         self.assertEqual(result.data, reference)

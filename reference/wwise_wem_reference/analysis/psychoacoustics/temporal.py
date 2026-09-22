@@ -35,7 +35,7 @@ class TemporalKernelInputs:
     curve_bias: float
     transition_code: int
     previous_transition: int
-    update_gate: int
+    hold_update: int
     analysis_mode: int
 
 
@@ -64,7 +64,7 @@ def compute_temporal_kernel(inputs: TemporalKernelInputs) -> TemporalKernelResul
     if not inputs.high_rate:
         return TemporalKernelResult()
 
-    update = int(not inputs.update_gate or inputs.analysis_mode == 2)
+    update = int(not inputs.hold_update or inputs.analysis_mode == 2)
     if not update and inputs.analysis_mode == 0:
         return TemporalKernelResult()
     if inputs.transition_code:
@@ -110,7 +110,7 @@ def compute_temporal_kernel(inputs: TemporalKernelInputs) -> TemporalKernelResul
     lower = result.lower_weight
     if inputs.tail_count:
         lower *= inputs.tail_count / divisor
-    if inputs.update_gate and inputs.analysis_mode == 0:
+    if inputs.hold_update and inputs.analysis_mode == 0:
         lower *= 0.2
     return TemporalKernelResult(
         result.active,

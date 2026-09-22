@@ -7,5 +7,5 @@
   "median_encode_ms": 127.15,
   "cap_ms": 150.0,
   "regression_factor": 1.25,
-  "notes": "Recorded on the development machine (Apple Silicon, release build). The 150ms cap is the normative budget for any runner; the regression factor guards relative drift against this recorded baseline. Re-record via `python3 scripts/perf_gate.py --record` only with an explicit decision."
+  "notes": "Recorded on the development machine (Apple Silicon, release build). The 150ms cap is the normative budget for any runner; the regression factor guards relative drift against this recorded baseline. Re-record via `python3 scripts/perf_check.py --record` only with an explicit decision."
 }

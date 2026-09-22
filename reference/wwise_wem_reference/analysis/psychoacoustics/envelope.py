@@ -92,7 +92,7 @@ def shape_floor_envelope(
             target -= subtract
 
         # floor-envelope stage enters the regular path directly unless the active state asks for
-        # the peak continuation and the previous curve fails its gate.
+        # the peak continuation and the previous curve fails that comparison.
         if (
             state_active
             and target < floor_value
@@ -250,7 +250,7 @@ def shape_first_long_floor_envelope(
     """Run a fresh long profile's inactive regular floor-envelope stage invocation.
 
     The first six long-channel calls reach the `(inactive, update-state)`
-    temporal-kernel result. Consequently their state/history gate is bypassed;
+    temporal-kernel result. Consequently their state/history hold is bypassed;
     the routine leaves history curve intact.  The normal `the normal long-frame transition` tail
     copies current raw MDCT-log values to current curve; the long→short
     `(2,0)` tail instead performs the documented 8:1 state reduction.

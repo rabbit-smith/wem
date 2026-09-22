@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Fixture-encode performance gate for the release build.
+"""Fixture-encode performance check for the release build.
 
-Measures the `wwise-wem` CLI's encode stage on the golden fixture
-(``--time`` stage timings, release build) over N runs and gates on:
+Measures the `wwise-wem` CLI's encode stage on the reference fixture
+(``--time`` stage timings, release build) over N runs and reports on:
 
   * the median must stay under the normative cap (``cap_ms``, 150);
   * the median must not degrade more than ``regression_factor``
@@ -13,10 +13,10 @@ re-record it only with an explicit decision (``--record``).
 
 Usage:
   cargo build --release -p wem-core
-  python3 scripts/perf_gate.py
-  python3 scripts/perf_gate.py --bin /path/to/wwise-wem --runs 9
+  python3 scripts/perf_check.py
+  python3 scripts/perf_check.py --bin /path/to/wwise-wem --runs 9
 
-Exit codes: 0 green, 1 red (threshold breach, the gate reason is printed),
+Exit codes: 0 green, 1 red (threshold breach; the reason is printed),
 2 usage/environment error.
 """
 from __future__ import annotations
@@ -102,7 +102,7 @@ def main() -> int:
     bin_path = Path(args.bin).expanduser()
     if not bin_path.is_file():
         print(
-            f"perf gate: binary not found: {bin_path}; build it first with: "
+            f"perf check: binary not found: {bin_path}; build it first with: "
             "cargo build --release -p wem-core",
             file=sys.stderr,
         )
@@ -132,20 +132,20 @@ def main() -> int:
 
     if median > cap_ms:
         print(
-            f"perf gate RED: median {median:.2f}ms exceeds the cap "
+            f"perf check RED: median {median:.2f}ms exceeds the cap "
             f"{cap_ms:.2f}ms",
             file=sys.stderr,
         )
         return 1
     if median > regression_limit:
         print(
-            f"perf gate RED: median {median:.2f}ms degraded more than "
+            f"perf check RED: median {median:.2f}ms degraded more than "
             f"{(factor - 1) * 100:.0f}% against baseline "
             f"{baseline_median:.2f}ms (limit {regression_limit:.2f}ms)",
             file=sys.stderr,
         )
         return 1
-    print("perf gate OK")
+    print("perf check OK")
     return 0
 
 

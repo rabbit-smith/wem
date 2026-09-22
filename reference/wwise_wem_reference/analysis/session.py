@@ -373,7 +373,7 @@ class AnalysisSession:
         *,
         short_variant: int | None = None,
         q: float = -1.0,
-        update_gate: int = 0,
+        hold_update: int = 0,
         groups: Sequence[Sequence[float]] | None = None,
     ) -> PsyFrame:
         """Run the exact state-owning short analysis path for one frame."""
@@ -388,7 +388,7 @@ class AnalysisSession:
             window,
             short_variant=short_variant,
             q=q,
-            update_gate=update_gate,
+            hold_update=hold_update,
             groups=groups,
         )
 
@@ -398,7 +398,7 @@ class AnalysisSession:
         *,
         short_variant: int | None,
         q: float = -1.0,
-        update_gate: int = 0,
+        hold_update: int = 0,
         groups: Sequence[Sequence[float]] | None = None,
     ) -> PsyFrame:
         variant = (
@@ -413,7 +413,7 @@ class AnalysisSession:
             short_variant=variant,
             following_mode=window.following,
             q=float(q),
-            update_gate=int(update_gate),
+            hold_update=int(hold_update),
             specmax_state=self._spectrum_peak,
             groups=groups,
         )

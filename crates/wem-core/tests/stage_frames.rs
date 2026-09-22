@@ -1,6 +1,6 @@
-//! 28-frame packet parity against the stage-golden pipeline assets.
+//! 28-frame packet parity against the stage-records pipeline assets.
 //!
-//! For every representative frame in `tests/data/stage-golden/stages` the
+//! For every representative frame in `tests/data/stage-records/stages` the
 //! packet path is re-run end to end:
 //!
 //!   f{NNN}.post.f32le.bin      → floor1_fit_wwise fitted curve (analysis.post)
@@ -26,7 +26,7 @@ mod common;
 
 use common::{fixture_selection, repo_root};
 
-const SCHEMA: &str = "wwise-wem.stage-golden.v1";
+const SCHEMA: &str = "wwise-wem.stage-records.v1";
 
 /// Encoder resources of the installed Wwise 2013 6ch/44100 configuration,
 /// resolved from a structured selection against the compiled-in profile
@@ -37,7 +37,7 @@ fn encoder_resources() -> wem_profiles::EncoderProfileResources {
 }
 
 fn stages_dir() -> PathBuf {
-    repo_root().join("tests/data/stage-golden/stages")
+    repo_root().join("tests/data/stage-records/stages")
 }
 
 fn sha256_hex(payload: &[u8]) -> String {
@@ -185,7 +185,7 @@ fn pack_frame(
 fn index_schema_is_current() {
     let index: Value = {
         let raw = std::fs::read_to_string(stages_dir().join("index.json"))
-            .expect("stage-golden index.json exists");
+            .expect("stage-records index.json exists");
         serde_json::from_str(&raw).expect("index parses")
     };
     assert_eq!(index["schema"].as_str(), Some(SCHEMA));
@@ -205,7 +205,7 @@ fn index_schema_is_current() {
 #[test]
 fn stage_frames_packet_parity_all_28_representatives() {
     let raw = std::fs::read_to_string(stages_dir().join("index.json"))
-        .expect("stage-golden index.json exists");
+        .expect("stage-records index.json exists");
     let index: Value = serde_json::from_str(&raw).expect("index parses");
     let channels = index["channels"].as_u64().unwrap() as u32;
     let frames: Vec<&Value> = index["frames"].as_array().unwrap().iter().collect();
@@ -218,7 +218,7 @@ fn stage_frames_packet_parity_all_28_representatives() {
     assert_eq!(
         reps.len(),
         28,
-        "stage-golden must carry 28 representative frames"
+        "stage-records must carry 28 representative frames"
     );
 
     let stages = stages_dir();

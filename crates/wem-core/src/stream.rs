@@ -7,7 +7,7 @@
 //!
 //! This lifecycle, the reply framing, and the error codes are pinned for
 //! the cross-language shells in `include/wem.h` (see crates/AGENTS.md,
-//! "C ABI contract"). The C ABI, PyO3 and wasm shells are thin wrappers
+//! "C ABI surface"). The C ABI, PyO3 and wasm shells are thin wrappers
 //! over this session; the reply side is a packet sequence (seq 0 = setup
 //! packet, then audio packets) followed by the container summary, which
 //! [`EncodeResult`] plus [`wem_container::load_wem_parts_bytes`] provide.
@@ -474,7 +474,7 @@ impl StreamSession {
     ///
     /// Internally the chunk is processed in bounded segments, so even one
     /// huge chunk materializes only `SEGMENT_FRAMES` of float rows at a
-    /// time — input memory stays bounded by the streaming contract.
+    /// time — input memory stays bounded by the streaming path.
     ///
     /// Emitted packets follow the reply order: the first packet
     /// ever emitted is the setup packet (seq 0), then audio packets in
@@ -551,8 +551,8 @@ impl StreamSession {
     /// `STATE_ERROR` when Init did not run or Finish already did;
     /// `INPUT_TOO_SHORT` below the 4096-frame minimum; otherwise the full
     /// encode result (container bytes + stats). The session is terminal
-    /// after this call regardless of the outcome, matching the stream
-    /// contract.
+    /// after this call regardless of the outcome, matching the streaming
+    /// lifecycle.
     pub fn finish(&mut self) -> Result<EncodeResult, EncoderError> {
         if !self.initialized || self.finished {
             return Err(EncoderError::StateError {

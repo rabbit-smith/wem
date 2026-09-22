@@ -41,7 +41,7 @@ fn main() {
     assert_eq!(
         warmup.data.len(),
         108771,
-        "warm-up encode must match the golden size"
+        "warm-up encode must match the reference size"
     );
 
     let mut session = AnalysisSession::new(

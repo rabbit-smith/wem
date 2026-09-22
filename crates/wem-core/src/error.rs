@@ -1,9 +1,9 @@
 //! Orchestration-layer errors (wem-core).
 //!
-//! Each variant is one stable class of the kernel's error-code contract,
+//! Each variant is one stable class of the kernel's error-code table,
 //! pinned for the cross-language shells in `include/wem.h` (the C ABI
 //! error-code table, 1:1 with these variants; see crates/AGENTS.md,
-//! "C ABI contract").
+//! "C ABI surface").
 //!
 //! Every public path returns one of these; none panics on input-derived
 //! conditions (crates/AGENTS.md).

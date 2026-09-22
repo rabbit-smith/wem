@@ -1,4 +1,4 @@
-"""Contract tests for the small, import-light package facade."""
+"""Parity tests for the small, import-light package facade."""
 
 from __future__ import annotations
 

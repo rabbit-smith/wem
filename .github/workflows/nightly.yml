@@ -30,10 +30,10 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/reference
       - name: long-form 2ch music case
-        run: python -m unittest tests.contract.two_channel_long_run_contract -v
+        run: python -m unittest tests.parity.two_channel_long_run -v
         env:
           PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/reference
       - name: release build for the performance check
         run: cd crates && cargo build --release -p wem-core
       - name: performance check (150ms median; > 25% vs baseline is red)
-        run: python scripts/perf_gate.py
+        run: python scripts/perf_check.py

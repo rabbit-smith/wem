@@ -163,10 +163,10 @@ class WindowingTests(unittest.TestCase):
             "9e6e9b30848596d0e7908f289d8aec2a"
         )
 
-        for frames, contract in expected.items():
+        for frames, case in expected.items():
             with self.subTest(frames=frames):
                 windows = tuple(
-                    iter_pcm_windows(_pcm(frames), contract["modes"])
+                    iter_pcm_windows(_pcm(frames), case["modes"])
                 )
                 first = windows[0]
                 last = windows[-1]
@@ -175,8 +175,8 @@ class WindowingTests(unittest.TestCase):
                 self.assertEqual(_word_hash(first.samples), first_hash)
                 self.assertTrue(any(first.samples[0][:128]))
 
-                self.assertEqual(last.center, contract["last_center"])
-                self.assertEqual(_word_hash(last.samples), contract["last_hash"])
+                self.assertEqual(last.center, case["last_center"])
+                self.assertEqual(_word_hash(last.samples), case["last_hash"])
                 last_start = last.center - len(last.samples[0]) // 2
                 source_words = max(0, frames - last_start)
                 self.assertLess(source_words, len(last.samples[0]))

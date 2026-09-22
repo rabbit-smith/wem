@@ -1,4 +1,4 @@
-"""LONG mode and seed materialization; registered values are gate-only inputs."""
+"""LONG mode and seed materialization; registered values serve verification only."""
 
 from . import long_base, short_seed
 

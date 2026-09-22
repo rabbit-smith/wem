@@ -9,12 +9,12 @@ this package at runtime.
 ## Status
 
 - **Not distributed.** It is not part of the wheel and not listed in
-  `tests/contract/distribution_allowlist.json`. The development tree drives
+  `tests/parity/distribution_allowlist.json`. The development tree drives
   every test target with `PYTHONPATH=src:reference` (see Makefile).
 - **Imported directly by tests and capture tooling only.** Parity suites,
   the frame/stage comparisons, and the container capture call
   `wwise_wem_reference.python_engine` directly and compare its bytes against
-  the kernel and the golden fixtures; parity is asserted by those tests, not a
+  the kernel and the reference fixtures; parity is asserted by those tests, not a
   runtime switch.
 - **Two-way naming.** Implementation domains here import facade DTOs and
   profile-metadata types (`wwise_wem.model`, `wwise_wem.profiles.*`) by
@@ -22,8 +22,8 @@ this package at runtime.
 
 ## Hard rules
 
-1. **Byte-for-byte output.** `make stage-contract`, `make golden` and the
-   core-oracle parity suite (`tests/integration/test_core_oracle_golden.py`)
+1. **Byte-for-byte output.** `make wem-bytes` and the
+   core-oracle parity suite (`tests/integration/test_core_oracle_reference.py`)
    compare this tree's bytes against the kernel and the committed reference. A
    failure names the value or the byte range that differs; the fix is either in
    the code or in the expected bytes, and which one is a decision about the

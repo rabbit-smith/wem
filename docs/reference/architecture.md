@@ -117,7 +117,7 @@ build (2013.2 conversion plug-in, geometry materializer at module offset
   bytes on the manifest/index digest chain);
 - kernel: `wem-analysis::dsp::{x87, crt90, psy_geom, psy_geom_long}`.
 
-Checked by `tests/contract/test_geometry_materializer_contract.py`, which
+Checked by `tests/parity/test_geometry_materializer_parity.py`, which
 asserts builder == registered bytes on the 6ch profile, and by the generated
 Rust suites (`crates/wem-analysis/tests/*_parity.rs`), which assert kernel ==
 builder bit for bit on both geometries. On 2ch the five short surfaces are
@@ -135,7 +135,7 @@ Structural changes must preserve:
 - an acyclic layer-compliant import graph;
 - the exact wheel inventory;
 - the 205-frame regression values;
-- the golden WEM byte stream and SHA-256;
+- the reference WEM byte stream and SHA-256;
 - installed-wheel and ZIP-import resource verification.
 
 Domain terminology is defined in [`domain-model.md`](domain-model.md); migration history lives in the git log.

@@ -23,7 +23,7 @@ INPUT = FIXTURES / "input.wav"
 SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
 
 
-class PublicEncodeContractTests(unittest.TestCase):
+class PublicEncodeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.directory = tempfile.TemporaryDirectory()
@@ -80,7 +80,7 @@ class PublicEncodeContractTests(unittest.TestCase):
                 encode(path)
 
 
-class PublicCliContractTests(unittest.TestCase):
+class PublicCliTests(unittest.TestCase):
     def run_cli(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, "-m", "wwise_wem", *arguments],

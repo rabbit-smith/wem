@@ -1,4 +1,4 @@
-//! Stage-golden parity test: validates the Rust analysis kernel against the
+//! Stage parity test: validates the Rust analysis kernel against the
 //! byte-exact reference assets captured from the Python encoder.
 //!
 //! For every one of the 205 frames it checks the mode/previous/current/
@@ -29,7 +29,7 @@ const FLOAT_STAGES: [&str; 8] = [
 ];
 
 fn stage_dir() -> std::path::PathBuf {
-    repo_root().join("tests/data/stage-golden/stages")
+    repo_root().join("tests/data/stage-records/stages")
 }
 
 fn read_index() -> Value {
@@ -203,11 +203,11 @@ fn stage_parity_all_frames() {
             for stage in FLOAT_STAGES {
                 let rows = get_stage(&psy, stage, &window.samples);
                 let packed = pack_f32le(&rows);
-                let golden_name = format!("f{i:03}.{stage}.f32le.bin");
-                let golden_path = stage_dir().join("frames").join(&golden_name);
-                let golden = std::fs::read(&golden_path)
-                    .unwrap_or_else(|_| panic!("golden dump reads: {golden_name}"));
-                assert_eq!(packed, golden, "frame {} stage {stage} byte parity", i);
+                let recorded_name = format!("f{i:03}.{stage}.f32le.bin");
+                let recorded_path = stage_dir().join("frames").join(&recorded_name);
+                let recorded = std::fs::read(&recorded_path)
+                    .unwrap_or_else(|_| panic!("recorded dump reads: {recorded_name}"));
+                assert_eq!(packed, recorded, "frame {} stage {stage} byte parity", i);
             }
             checked += 1;
         }

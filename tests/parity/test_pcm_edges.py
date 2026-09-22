@@ -15,7 +15,7 @@ from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem.model import PcmBuffer
 from wwise_wem.profiles.registry import resolve_selection
 from wwise_wem_reference.python_engine import ContainerPlan, encode_pcm_python
-from tests.contract.wem_byte_contract import assert_wem_equal
+from tests.parity.wem_byte_compare import assert_wem_equal
 
 
 CHANNELS = 6
@@ -47,11 +47,11 @@ class _Case(TypedDict):
     bytes: int
 
 
-class PcmLengthEncodeContractTests(unittest.TestCase):
+class PcmLengthEncodeTests(unittest.TestCase):
     # NOTE (the round, 2026): ``nAvgBytesPerSec`` is derived, not carried from the
     # profile -- ``floor(data_payload_bytes * nSamplesPerSec /
     # dwTotalPCMFrames)`` (see ``container.packets.recompute_vorbis_fmt_sizes``).
-    # The profile constant 34381 is only correct for the 139398-frame golden
+    # The profile constant 34381 is only correct for the 139398-frame reference
     # fixture, whose whole-file byte comparison pins that field; every other
     # input length must derive its own value.
     #
@@ -152,7 +152,7 @@ class PcmLengthEncodeContractTests(unittest.TestCase):
                 )
 
 
-class PcmInputAdapterContractTests(unittest.TestCase):
+class PcmInputAdapterTests(unittest.TestCase):
     def test_read_pcm_wav_preserves_geometry_and_signed_value_edges(self) -> None:
         interleaved = [
             -32768,
@@ -221,7 +221,7 @@ class PcmInputAdapterContractTests(unittest.TestCase):
                 read_pcm_wav(path)
 
 
-class PcmBufferEdgeContractTests(unittest.TestCase):
+class PcmBufferEdgeTests(unittest.TestCase):
     def test_empty_and_unequal_channels_keep_existing_errors(self) -> None:
         cases = (
             ((), "PCM buffer needs at least one channel"),

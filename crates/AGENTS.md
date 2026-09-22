@@ -41,7 +41,7 @@ wem-python    → wem-core (PyO3 binding; no numerics)
   something the others don't, the answer is a new stable C ABI entry
   point, not a kernel fork.
 - The shells may hold no numerics and no profile logic: byte-exactness
-  is decided by the kernel, and `make golden` and
+  is decided by the kernel, and `make wem-bytes` and
   `crates/wem-capi/tests/capi_e2e.rs` check the surfaces against it.
 
 ## Bit-exact porting rules
@@ -80,7 +80,7 @@ wem-python    → wem-core (PyO3 binding; no numerics)
 
 ## Verification workflow per crate
 
-- Every stage lands with its parity test against `tests/data/stage-golden/`
+- Every stage lands with its parity test against `tests/data/stage-records/`
   (hashes for all 205 frames, raw byte equality for the 28 representative
   frames). A stage is not done until the byte diff names the first mismatching
   frame and field and comes back zero.

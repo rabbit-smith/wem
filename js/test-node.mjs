@@ -2,18 +2,18 @@
 /**
  * wwise-wem-wasm — Node parity test.
  *
- * Proves the wasm shell encodes byte-exactly against the kernel golden
+ * Proves the wasm shell encodes byte-exactly against the kernel reference
  * bytes, through the package's own entry point (src/index.ts, run via
  * Node's native type stripping on >= 22.18), and that its profile selection
  * is the structured one of `include/wem.h` (ABI revision 2):
  *
  *   1. ONE-SHOT: the pinned 6ch/44.1kHz recording -> WEM, byte-identical to
- *      the committed kernel golden (tests/fixtures/reference.wem) —
+ *      the committed kernel reference (tests/fixtures/reference.wem) —
  *      auto-selected from the WAV geometry, with an explicit selection, and
  *      through the raw-PCM entry.
  *   2. STREAMING CHUNK CONSISTENCY: the same PCM fed to sessions with three
  *      different chunkings (single chunk, fixed-size chunks, irregular
- *      frame-aligned chunks) must each reproduce the golden — chunk
+ *      frame-aligned chunks) must each reproduce the reference — chunk
  *      boundaries never change the output bytes (include/wem.h).
  *   3. SELECTION BEHAVIOUR: the compiled-in generation table, the resolved
  *      selection of every constructor, and the selection error mapping
@@ -42,7 +42,7 @@ import {
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
 
-// Pinned kernel golden: tests/fixtures/input.wav (6ch/44.1kHz, 139398 frames)
+// Pinned kernel reference: tests/fixtures/input.wav (6ch/44.1kHz, 139398 frames)
 // -> tests/fixtures/reference.wem. The profile bundle rides inside the wasm
 // module. The comparison is the committed file's bytes; the SHA-256 of that
 // file is documented in js/README.md and is deliberately not restated here.
@@ -88,7 +88,7 @@ const describe = (s) =>
   `channels=${s.channels}, sampleRate=${s.sampleRate}, description=${s.description}`;
 
 const wavBytes = new Uint8Array(readFileSync(RECORDING));
-const goldenWem = new Uint8Array(readFileSync(REFERENCE));
+const referenceWem = new Uint8Array(readFileSync(REFERENCE));
 
 await initWasm();
 
@@ -118,14 +118,14 @@ const t0 = Date.now();
 const auto = await encodeWav(wavBytes); // no selection: auto-selected from the WAV
 check(
   "one-shot (auto-selected) bytes == reference.wem",
-  equal(auto.data, goldenWem),
+  equal(auto.data, referenceWem),
   `sha256=${auto.sha256Hex}, bytes=${auto.totalLen}, ${Date.now() - t0}ms`,
 );
 
 const explicit = await encodeWav(wavBytes, { version: 0, channels: 6, sampleRate: 44100 });
 check(
   "one-shot (explicit selection 0/6ch/44100) bytes == reference.wem",
-  equal(explicit.data, goldenWem),
+  equal(explicit.data, referenceWem),
   `sha256=${explicit.sha256Hex}, bytes=${explicit.totalLen}`,
 );
 
@@ -154,7 +154,7 @@ check(
 const pcmOneShot = encoder.encodePcm16Interleaved(parsed.pcm);
 check(
   "one-shot through the raw-PCM entry bytes == reference.wem",
-  equal(pcmOneShot.data, goldenWem),
+  equal(pcmOneShot.data, referenceWem),
   `sha256=${pcmOneShot.sha256Hex}, bytes=${pcmOneShot.totalLen}`,
 );
 encoder.destroy();
@@ -222,7 +222,7 @@ for (const [label, chunks] of Object.entries(plans)) {
   results.push(result);
   check(
     `streaming (${label}) bytes == reference.wem`,
-    equal(result.data, goldenWem),
+    equal(result.data, referenceWem),
     `sha256=${result.sha256Hex}, packets=${result.stats.audioPackets}, chunks=${chunks.length}`,
   );
   check(
@@ -387,6 +387,6 @@ if (failures > 0) {
 }
 console.log("\nALL NODE PARITY CHECKS PASSED");
 console.log(
-  `golden: ${goldenWem.byteLength} bytes identical to tests/fixtures/reference.wem`,
+  `reference: ${referenceWem.byteLength} bytes identical to tests/fixtures/reference.wem`,
 );
-console.log(`golden sha256 (computed, not compared): ${auto.sha256Hex}`);
+console.log(`reference sha256 (computed, not compared): ${auto.sha256Hex}`);

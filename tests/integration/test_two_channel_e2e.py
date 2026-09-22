@@ -56,7 +56,7 @@ TWO_CHANNEL_BUNDLE = installed_profile_bundle(
 # The reference decoder reads one profile's materials from the packaged
 # data directory; the path is derived from the resolved selection.
 PROFILE_DIR = Path(str(TWO_CHANNEL_BUNDLE.runtime_manifest.ref.traversable().parent))
-# >= 4096 frames required by the E2E contract; 16384 keeps the native
+# >= 4096 frames required by the E2E comparison; 16384 keeps the native
 # encode fast while covering several short/long block-size transitions.
 FRAMES = 16384
 # Steady-region guard: the first 1024 decoded samples overlap the MDCT
@@ -139,7 +139,7 @@ def _to_int16_domain(float_pcm: np.ndarray) -> np.ndarray:
 
 
 class TwoChannelResolutionTests(unittest.TestCase):
-    """Positive contract for the newly registered 2ch/48000 geometry."""
+    """Positive case for the newly registered 2ch/48000 geometry."""
 
     def test_selection_resolution_returns_the_registered_profile(self) -> None:
         profile = resolve_selection(SELECTION)

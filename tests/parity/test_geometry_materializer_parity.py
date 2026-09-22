@@ -41,7 +41,7 @@ from wwise_wem_reference.geometry_materializer import (
 )
 
 #: The packaged profile directories are the names their selections resolve to;
-#: the contract reads them off the registry rather than re-typing them.
+#: the comparison reads them off the registry rather than re-typing them.
 PROFILE_ROOT = (
     Path(__file__).resolve().parents[2] / "src" / "wwise_wem" / "data" / "profiles"
 )
@@ -67,7 +67,7 @@ def u32(x: int) -> int:
     return int(x) & 0xFFFFFFFF
 
 
-class GeometryMaterializerContract(unittest.TestCase):
+class GeometryMaterializerParityTests(unittest.TestCase):
     short_seed_reg: ClassVar[dict[str, Any]]
     short_profiles_reg: ClassVar[dict[str, Any]]
     long_base_reg: ClassVar[dict[str, Any]]

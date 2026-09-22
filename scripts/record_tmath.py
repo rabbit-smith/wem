@@ -4,7 +4,7 @@
 Runs one full fixture encoding with the site recorder switched on (this script
 turns it on explicitly, before the encoding runs), writes per-site
 ``(input bits, output bits)`` records under
-``tests/data/stage-golden/transcendental/``, then reports:
+``tests/data/stage-records/transcendental/``, then reports:
 
 - unique input count per site (0 = site not on the live path);
 - for ``floor_fit.ln``: the minimum distance of the dB-quant intermediate to an
@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-OUT_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "tests/data/stage-golden/transcendental"
+OUT_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "tests/data/stage-records/transcendental"
 
 # Both trees are resolved from this file, so the script runs from any cwd and
 # needs no PYTHONPATH: `src` is the distribution facade, `reference` the

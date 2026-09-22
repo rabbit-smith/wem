@@ -224,7 +224,7 @@ class ShortPsyAnalyzer:
         short_variant: int,
         following_mode: int,
         q: float = -1.0,
-        update_gate: int = 0,
+        hold_update: int = 0,
         groups: Sequence[Sequence[float]] | None = None,
     ) -> ShortPsyFrameResult:
         """Run all channel calls of one short packet/frame.
@@ -250,7 +250,7 @@ class ShortPsyAnalyzer:
                 curve_bias=profile.candidate_bias_by_mode[1],
                 transition_code=info.transition,
                 previous_transition=info.previous_transition,
-                update_gate=int(update_gate),
+                hold_update=int(hold_update),
                 analysis_mode=1,
             )
         )
@@ -301,7 +301,7 @@ class ShortPsyAnalyzer:
         *,
         long_variant: int,
         following_mode: int,
-        update_gate: int = 0,
+        hold_update: int = 0,
     ) -> PsyFrameControls:
         """Advance the shared state allocation through a 1024-bin frame.
 
@@ -326,9 +326,9 @@ class ShortPsyAnalyzer:
             following_mode=int(following_mode),
             profile_key="long_state_only",
         )
-        # Long-frame peak continuation is inactive; the update gate only
+        # Long-frame peak continuation is inactive; the hold flag only
         # controls whether the state curve is committed.
-        if not int(update_gate):
+        if not int(hold_update):
             for raw, channel in zip(raws, self.channels):
                 if following_mode:
                     channel.state[:] = [_f32(value) for value in raw]
@@ -409,7 +409,7 @@ def shape_short_floor_envelope(
     side_out = [_f32(value) for value in side]
     groups_out = [_f32(value) for value in groups]
 
-    # The chase minimum remains zero throughout this path.  It gates only the
+    # The chase minimum remains zero throughout this path.  It bounds only the
     # group-work minimum and the negative side-factor clamp.
     chase_min = 0.0
     peak_bins = 0

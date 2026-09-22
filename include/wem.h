@@ -1,8 +1,8 @@
 /*
  * wem.h — WEM encoder kernel: C ABI core surface.
  *
- * This header is the normative cross-language contract of the WEM
- * encoder kernel. The Rust kernel (crates/) implements it; every
+ * This header is the interface the language shells mirror: the C ABI of
+ * the WEM encoder kernel. The Rust kernel (crates/) implements it; every
  * language binding (the PyO3 extension, Go cgo, a future wasm build, ...)
  * is a parallel shell over this surface and must mirror its lifecycle,
  * reply framing, and error codes without inventing variants.
@@ -17,13 +17,14 @@
  *
  * Evolution: WemError values are stable across all revisions — new
  * codes are appended, never renumbered or reused. Lifecycle semantics
- * and callback behavior are likewise contract: a change that breaks a
- * conforming client is a new major revision of this header, not an edit.
+ * and callback behavior are likewise part of the interface: a change that
+ * breaks a conforming client is a new major revision of this header, not an
+ * edit.
  *
  * ABI revision 2 replaced the `profile_name` + `data_dir` argument pair
  * of `wem_encoder_new`, `wem_encode_pcm16_interleaved` and
  * `wem_session_new` with one `const WemProfile *` selection, so that
- * PROFILE SELECTION below is the entire profile contract: no entry
+ * PROFILE SELECTION below is the entire profile surface: no entry
  * accepts a profile name, a profile directory, profile index/manifest
  * bytes, or an environment variable. A conforming revision 1 client
  * must be recompiled against this header; WemError values were not
@@ -66,8 +67,8 @@ extern "C" {
  *
  * The struct is passed by pointer, and the pointer need only stay valid
  * for the duration of the call that takes it. Its layout (two 32-bit
- * geometry fields after a 32-bit version code) is part of this contract;
- * fields are appended, never reordered.
+ * geometry fields after a 32-bit version code) is fixed; fields are
+ * appended, never reordered.
  *
  * Evolution: WemVersion codes are stable and append-only, exactly like
  * WemError values — a new Wwise generation appends a code, it never
@@ -222,7 +223,7 @@ void wem_session_free(WemSession *session);
  * 4. CROSS-LANGUAGE INTEGRATION RULES
  *
  *  - This header is the single authority for the cross-language
- *    contract. A new language integrates by writing a thin shell over
+ *    interface. A new language integrates by writing a thin shell over
  *    these symbols (e.g. Go via cgo, as in examples/go-cgo); it never
  *    routes same-process calls through RPC or serialization, and never
  *    adds language-specific special cases to the kernel.
@@ -230,13 +231,13 @@ void wem_session_free(WemSession *session);
  *    error type) and mirror the lifecycle: no extra Init, no re-entrant
  *    Finish, no chunk-boundary-dependent behavior.
  *  - Shells must not embed numerics or profile logic: byte-exactness is
- *    defined by the kernel and pinned by the golden contracts.
+ *    defined by the kernel and checked by the parity suites.
  */
 
 /*
  * APPENDIX: MIGRATING FROM REVISION 1
  *
- * Informative, not contract: the normative text is above.
+ * Informative, not interface: the normative text is above.
  *
  * The three profile-taking entries lost their `profile_name` + `data_dir`
  * argument pair and gained one borrowed `const WemProfile *`:

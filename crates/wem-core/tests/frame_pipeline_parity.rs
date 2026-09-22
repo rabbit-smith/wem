@@ -10,7 +10,7 @@
 //! The kernel runs in this process — `AnalysisSession` plus
 //! `wem_core::pack::pack_analysis_frame`, the same calls `Encoder::encode_pcm`
 //! makes — and the oracle runs in a subprocess
-//! (`tests/contract/oracle_frame_values.py`), one JSON record per frame on
+//! (`tests/parity/oracle_frame_values.py`), one JSON record per frame on
 //! stdout. This suite decodes each record as it arrives and, on a divergence,
 //! names the frame, stage, channel, and bin and prints both words.
 //!
@@ -18,7 +18,7 @@
 //! posts, residue rows) are crate surfaces the PyO3 binding does not expose, so
 //! a Python-side comparison could never see more than packet bytes. The kernel
 //! crates are directly reachable from a Rust integration test, which mirrors
-//! `crates/wem-container/tests/container_contract.rs` the other way round: that
+//! `crates/wem-container/tests/container_parity.rs` the other way round: that
 //! one drives the oracle in a subprocess and compares in Rust, this one does
 //! the same with the oracle as the subprocess.
 
@@ -93,7 +93,7 @@ impl OracleStream {
             .current_dir(repo_root())
             .env("PYTHONPATH", python_path())
             .env("PYTHONDONTWRITEBYTECODE", "1")
-            .args(["-m", "tests.contract.oracle_frame_values", "--wav"])
+            .args(["-m", "tests.parity.oracle_frame_values", "--wav"])
             .arg(wav)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

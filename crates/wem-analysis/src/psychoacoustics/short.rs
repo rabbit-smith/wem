@@ -253,7 +253,7 @@ impl ShortPsyAnalyzer {
         short_variant: i64,
         following_mode: i64,
         q: f64,
-        update_gate: i64,
+        hold_update: i64,
         groups: Option<&[Vec<f64>]>,
     ) -> Result<ShortPsyFrameResult, AnalysisError> {
         let count = self.channels.len() as i64;
@@ -280,7 +280,7 @@ impl ShortPsyAnalyzer {
             curve_bias: profile.candidate_bias_by_mode[1],
             transition_code: info.transition,
             previous_transition: info.previous_transition,
-            update_gate,
+            hold_update,
             analysis_mode: 1,
         });
         let kernel = ShortPsyKernel {
@@ -337,7 +337,7 @@ impl ShortPsyAnalyzer {
         raws: &[Vec<f64>],
         long_variant: i64,
         following_mode: i64,
-        update_gate: i64,
+        hold_update: i64,
     ) -> Result<PsyFrameControls, AnalysisError> {
         if !(0..=1).contains(&long_variant) {
             return Err(AnalysisError::LongFrameVariantInvalid {
@@ -363,9 +363,9 @@ impl ShortPsyAnalyzer {
             following_mode,
             profile_key: "long_state_only".to_string(),
         };
-        // Long-frame peak continuation is inactive; the update gate only
+        // Long-frame peak continuation is inactive; the hold flag only
         // controls whether the state curve is committed.
-        if update_gate == 0 {
+        if hold_update == 0 {
             for (raw, channel) in raws.iter().zip(self.channels.iter_mut()) {
                 if following_mode != 0 {
                     channel.state = raw.iter().map(|v| f32_of(*v)).collect();

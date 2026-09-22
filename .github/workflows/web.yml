@@ -9,7 +9,7 @@ jobs:
     # Browser encoding shell: proves the wasm build compiles for
     # wasm32-unknown-unknown and that the Node-side parity test passes —
     # fixture PCM through the wasm package must reproduce the kernel
-    # golden sha256, one-shot and across chunkings.
+    # reference sha256, one-shot and across chunkings.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,5 +35,5 @@ jobs:
         run: cd crates && wasm-pack build wem-wasm --target nodejs --release --out-dir "$(pwd)/../js/pkg-node"
       - name: build web target (npm/browser artifact)
         run: cd crates && wasm-pack build wem-wasm --target web --release --out-dir "$(pwd)/../js/pkg"
-      - name: node parity test (golden sha256 + chunking consistency + error codes)
+      - name: node parity test (reference sha256 + chunking consistency + error codes)
         run: node js/test-node.mjs

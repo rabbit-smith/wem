@@ -37,7 +37,7 @@ def build_riff(
 ) -> bytes:
     """Build a RIFF/RIFX WAVE byte string from ``(fourcc, payload)`` chunks.
 
-    Odd intermediate payloads are word-padded. Wwise 2013 goldens commonly
+    Odd intermediate payloads are word-padded. Wwise 2013 references commonly
     omit the pad after the final chunk, so that remains the default; pass
     ``pad_final=True`` for a strict final pad.
     """

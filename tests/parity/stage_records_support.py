@@ -1,6 +1,6 @@
-"""Generate and compare the checked stage-golden pipeline assets.
+"""Generate and compare the checked stage-records pipeline assets.
 
-The stage golden assets freeze the per-frame values at every pipeline seam as
+The stage reference assets freeze the per-frame values at every pipeline seam as
 a byte-exact reference for the Rust kernel port:
 
 - ``index.json`` records SHA-256 hashes for every stage of every frame,
@@ -41,12 +41,12 @@ from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem.profiles.registry import resolve_selection
 
 
-SCHEMA = "wwise-wem.stage-golden.v1"
+SCHEMA = "wwise-wem.stage-records.v1"
 FIRST_REPRESENTATIVE_FRAMES = 6
 LAST_REPRESENTATIVE_FRAMES = 4
 
 # Hashed stages per frame, in pipeline order.  The names match the ones
-# tests/contract/oracle_frame_values.py emits and the per-frame parity
+# tests/parity/oracle_frame_values.py emits and the per-frame parity
 # suites compare.
 FLOAT_STAGES = (
     "window",
@@ -374,7 +374,7 @@ def stage_capture() -> Iterator[_StageCapture]:
         reference_engine_module.build_vorbis_wem = original_build
 
 
-def build_stage_golden(
+def build_stage_records(
     wav: Path, *, selection: WwiseProfile | None = None
 ) -> tuple[dict[str, Any], dict[str, bytes]]:
     """Run the reference oracle and return (stage index, raw dump blobs).
@@ -482,7 +482,7 @@ def build_stage_golden(
     return index_doc, dumps
 
 
-def write_stage_golden(
+def write_stage_records(
     index_doc: dict[str, Any],
     dumps: dict[str, bytes],
     out_dir: Path,
@@ -514,7 +514,7 @@ def write_stage_golden(
     }
 
 
-def first_stage_golden_difference(
+def first_stage_record_difference(
     expected: dict[str, Any], actual: dict[str, Any]
 ) -> dict[str, Any] | None:
     """Return a compact first-difference report, or ``None`` when identical."""

@@ -734,7 +734,7 @@ fn analysis_resources_pending(bundle: &ProfileBundle) -> bool {
 /// A selection that names no installed profile, or more than one, is a
 /// caller-facing resolution failure (`WEM_ERR_PROFILE_NOT_FOUND`), not an
 /// internal fault; an unrecognized generation code violates this revision's
-/// contract (`WEM_ERR_FORMAT_UNSUPPORTED`); anything else stays internal.
+/// selection rules (`WEM_ERR_FORMAT_UNSUPPORTED`); anything else stays internal.
 fn selection_error(error: &ProfileError, selection: WwiseProfile) -> EncoderError {
     match error {
         ProfileError::NoProfileForSelection { .. }

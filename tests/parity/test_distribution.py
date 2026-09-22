@@ -14,7 +14,7 @@ PACKAGE = ROOT / "src" / "wwise_wem"
 ALLOWLIST = Path(__file__).with_name("distribution_allowlist.json")
 
 
-def _contract() -> dict[str, object]:
+def _allowlist() -> dict[str, object]:
     return json.loads(ALLOWLIST.read_text(encoding="utf-8"))
 
 
@@ -22,9 +22,9 @@ def _wheel_name(path: Path) -> str:
     return "wwise_wem/" + path.relative_to(PACKAGE).as_posix()
 
 
-class DistributionContractTests(unittest.TestCase):
+class DistributionTests(unittest.TestCase):
     def test_root_all_is_the_exact_supported_surface(self) -> None:
-        expected = tuple(_contract()["root_exports"])
+        expected = tuple(_allowlist()["root_exports"])
         self.assertEqual(tuple(wwise_wem.__all__), expected)
         self.assertEqual(
             tuple(name for name in expected if name not in dir(wwise_wem)),
@@ -32,9 +32,9 @@ class DistributionContractTests(unittest.TestCase):
         )
 
     def test_source_modules_and_resources_match_distribution_allowlist(self) -> None:
-        contract = _contract()
+        allowlist = _allowlist()
         self.assertEqual(
-            contract["schema"],
+            allowlist["schema"],
             "wwise-wem.distribution-allowlist.v1",
         )
         modules = sorted(_wheel_name(path) for path in PACKAGE.rglob("*.py"))
@@ -43,12 +43,12 @@ class DistributionContractTests(unittest.TestCase):
             for path in (PACKAGE / "data").rglob("*")
             if path.is_file()
         )
-        self.assertEqual(modules, contract["modules"])
-        self.assertEqual(resources, contract["resources"])
+        self.assertEqual(modules, allowlist["modules"])
+        self.assertEqual(resources, allowlist["resources"])
 
     def test_allowlist_excludes_deleted_and_research_modules(self) -> None:
-        contract = _contract()
-        paths = tuple(contract["modules"]) + tuple(contract["resources"])
+        allowlist = _allowlist()
+        paths = tuple(allowlist["modules"]) + tuple(allowlist["resources"])
         deleted = {
             "bitreader.py",
             "oggpack.py",
@@ -61,7 +61,7 @@ class DistributionContractTests(unittest.TestCase):
         self.assertFalse(
             {Path(path).name for path in paths} & deleted,
         )
-        markers = tuple(str(value).lower() for value in contract["forbidden_path_markers"])
+        markers = tuple(str(value).lower() for value in allowlist["forbidden_path_markers"])
         violations = [
             path
             for path in paths
@@ -71,7 +71,7 @@ class DistributionContractTests(unittest.TestCase):
 
         content_markers = tuple(
             str(value).encode("ascii").lower()
-            for value in contract["forbidden_content_markers"]
+            for value in allowlist["forbidden_content_markers"]
         )
         content_violations = []
         for name in paths:
@@ -82,7 +82,7 @@ class DistributionContractTests(unittest.TestCase):
                 content_violations.append(name)
         self.assertEqual(content_violations, [])
 
-    def test_native_extension_contract_stays_synced_across_surfaces(self) -> None:
+    def test_native_extension_stays_synced_across_surfaces(self) -> None:
         """The in-package extension must agree across its name surfaces.
 
         The wheel ships the abi3 extension as `wwise_wem/_core.abi3.so`
@@ -93,8 +93,8 @@ class DistributionContractTests(unittest.TestCase):
         these files only: the facade imports `wwise_wem._core` directly
         and keeps no second copy of the name.
         """
-        contract = _contract()
-        native = contract["native_extensions"]
+        allowlist = _allowlist()
+        native = allowlist["native_extensions"]
         self.assertEqual(native, ["wwise_wem._core"])
 
         # Cargo lib name: the cdylib the wheel renames into place.

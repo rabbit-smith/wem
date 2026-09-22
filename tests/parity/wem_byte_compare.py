@@ -1,4 +1,4 @@
-"""Shared failure localization for whole-WEM byte contracts."""
+"""Shared failure localization for whole-WEM byte comparisons."""
 
 from __future__ import annotations
 

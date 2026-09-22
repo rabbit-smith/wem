@@ -4,9 +4,9 @@ import json
 import unittest
 from pathlib import Path
 
-from tests.contract.stage_golden_support import (
-    build_stage_golden,
-    first_stage_golden_difference,
+from tests.parity.stage_records_support import (
+    build_stage_records,
+    first_stage_record_difference,
     representative_frame_indices,
     transition_frame_indices,
 )
@@ -14,7 +14,7 @@ from tests.contract.stage_golden_support import (
 
 TESTS = Path(__file__).resolve().parents[1]
 FIXTURES = TESTS / "fixtures"
-STAGES_DIR = TESTS / "data" / "stage-golden" / "stages"
+STAGES_DIR = TESTS / "data" / "stage-records" / "stages"
 BASELINE = STAGES_DIR / "index.json"
 
 FLOAT_STAGES = (
@@ -30,11 +30,11 @@ FLOAT_STAGES = (
 INT_STAGES = ("floor_posts", "residue_q")
 
 
-class StagePipelineContractTests(unittest.TestCase):
+class StagePipelineTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.expected = json.loads(BASELINE.read_text())
-        cls.actual, cls.actual_dumps = build_stage_golden(FIXTURES / "input.wav")
+        cls.actual, cls.actual_dumps = build_stage_records(FIXTURES / "input.wav")
 
     def test_complete_stage_index_matches(self):
         self.assertEqual(len(self.actual["frames"]), 205)
@@ -53,14 +53,14 @@ class StagePipelineContractTests(unittest.TestCase):
             )
         )
         self.assertIsNone(
-            first_stage_golden_difference(self.expected, self.actual),
-            "stage-golden index differs from the live encoder output",
+            first_stage_record_difference(self.expected, self.actual),
+            "stage-records index differs from the live encoder output",
         )
 
     def test_first_difference_reports_frame_and_stage(self):
         changed = copy.deepcopy(self.expected)
         changed["frames"][17]["coefficients_sha256"] = "0" * 64
-        difference = first_stage_golden_difference(self.expected, changed)
+        difference = first_stage_record_difference(self.expected, changed)
         self.assertEqual(
             (difference["frame"], difference["stage"]),
             (17, "coefficients_sha256"),
@@ -69,7 +69,7 @@ class StagePipelineContractTests(unittest.TestCase):
     def test_container_difference_reports_segment(self):
         changed = copy.deepcopy(self.expected)
         changed["container"]["setup_sha256"] = "1" * 64
-        difference = first_stage_golden_difference(self.expected, changed)
+        difference = first_stage_record_difference(self.expected, changed)
         self.assertEqual(
             (difference["frame"], difference["stage"]),
             (None, "container.setup_sha256"),

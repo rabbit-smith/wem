@@ -69,7 +69,7 @@ def _pcm_fmt(tag: int = 0xFFFE) -> dict:
     }
 
 
-class WemAdapterContractTests(unittest.TestCase):
+class WemAdapterTests(unittest.TestCase):
     def _write(self, directory: str, name: str, raw: bytes) -> Path:
         path = Path(directory) / name
         path.write_bytes(raw)
@@ -338,7 +338,7 @@ class WemAdapterContractTests(unittest.TestCase):
                 parts["chunk_ids"], ["PRE ", "fmt ", "MID ", "data", "POST"]
             )
 
-    def test_missing_fmt_error_contracts(self):
+    def test_missing_fmt_errors(self):
         raw = build_riff([(b"data", b"payload")])
         with tempfile.TemporaryDirectory() as directory:
             path = self._write(directory, "missing-fmt.wem", raw)

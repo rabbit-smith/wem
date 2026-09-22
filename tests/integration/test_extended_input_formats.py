@@ -206,9 +206,9 @@ class ExtendedInputConsistencyTests(unittest.TestCase):
             pcm=pcm,
         )
 
-    def test_golden_input_via_extended_entry_matches_reference_and_oracle(self):
+    def test_whole_file_input_via_extended_entry_matches_reference_and_oracle(self):
         pcm = read_pcm_wav(INPUT)
-        golden = REFERENCE.read_bytes()
+        reference = REFERENCE.read_bytes()
 
         facade = W.encode(INPUT, profile=SELECTION)
         oracle = self._oracle_encode(pcm)
@@ -216,9 +216,9 @@ class ExtendedInputConsistencyTests(unittest.TestCase):
             44100,
             [[int(sample * 32768.0) for sample in row] for row in pcm.channels],
         )
-        self.assertEqual(facade.data, golden)
-        self.assertEqual(bytes(oracle.data), golden)
-        self.assertEqual(bytes(direct_core.data), golden)
+        self.assertEqual(facade.data, reference)
+        self.assertEqual(bytes(oracle.data), reference)
+        self.assertEqual(bytes(direct_core.data), reference)
         self.assertEqual(facade.data, oracle.data)
         self.assertEqual(facade.sha256, direct_core.sha256())
 

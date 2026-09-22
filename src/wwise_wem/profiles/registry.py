@@ -7,7 +7,7 @@ caller-facing surface: a caller selects with a structured ``WwiseProfile``
 the kernel resolves it against the configurations it carries.
 
 This module is the development-tree mirror of that resolution, used by the
-reference oracle, the contract suites and the tooling scripts, which need one
+reference oracle, the parity suites and the tooling scripts, which need one
 profile's materials rather than its bytes. It is deliberately not on the
 encoding path: :func:`wwise_wem.api.encode` hands its ``WwiseProfile``
 straight to the kernel, so the kernel stays the single authority on which

@@ -7,7 +7,7 @@ were previously wrong because the 2ch registration carried the 6ch values:
   lengths, and both the bank and external-source conversion routes) carry the
   identical triple ``16080 / 16560 / 0xec69cb18`` with ``0x24 = 0x32 = 0``, so
   they are per-layout constants, not per-sample data.  The 6ch profile carries
-  its own triple (18180 / 18636 / 0xb3dea448), which the byte-exact 6ch golden
+  its own triple (18180 / 18636 / 0xb3dea448), which the byte-exact 6ch reference
   already pins.
 
 * ``seed.outer_u32`` rate-dependent scalars.  The serialised array holds two
@@ -70,7 +70,7 @@ OUTER_SCALARS = {
 }
 
 
-class Paired2chScalarContract(unittest.TestCase):
+class Paired2chScalarParityTests(unittest.TestCase):
     container_metadata: ClassVar[dict[str, Any]]
     outer_u32: ClassVar[list[int]]
 

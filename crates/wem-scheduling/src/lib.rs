@@ -18,8 +18,8 @@ pub use selector::{ModeSelector, SelectorError};
 
 #[cfg(test)]
 mod parity {
-    //! Golden-oracle tests against the checked stage index
-    //! (`tests/data/stage-golden/stages/index.json`).
+    //! Oracle tests against the checked stage index
+    //! (`tests/data/stage-records/stages/index.json`).
 
     use serde_json::Value;
 
@@ -30,7 +30,7 @@ mod parity {
             .parent()
             .and_then(|p| p.parent())
             .expect("repo root")
-            .join("tests/data/stage-golden/stages/index.json");
+            .join("tests/data/stage-records/stages/index.json");
         let text = std::fs::read_to_string(path).expect("stage index reads");
         serde_json::from_str(&text).expect("stage index parses")
     }
@@ -50,7 +50,7 @@ mod parity {
     }
 
     #[test]
-    fn golden_geometry_header() {
+    fn stage_index_header() {
         let index = stage_index();
         assert_eq!(index["audio_packets"].as_i64(), Some(205));
         assert_eq!(index["channels"].as_i64(), Some(6));
@@ -58,10 +58,10 @@ mod parity {
     }
 
     #[test]
-    fn plan_sequence_matches_golden_all_frames() {
+    fn plan_sequence_matches_index_all_frames() {
         let index = stage_index();
         let frames = frames_of(&index);
-        assert_eq!(frames.len(), 205, "golden index records 205 frames");
+        assert_eq!(frames.len(), 205, "stage index records 205 frames");
 
         let modes: Vec<i64> = frames.iter().map(|f| int_field(f, "mode")).collect();
         let plans = plan_mode_sequence(&modes, &DEFAULT_BLOCKSIZES, 1).expect("plans build");

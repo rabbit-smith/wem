@@ -9,7 +9,7 @@
 //! into the library, so there is no ambient path or environment variable to
 //! point it at a tree.
 //!
-//! Both types are part of the cross-language contract: the C ABI spells them
+//! Both types are part of the cross-language interface: the C ABI spells them
 //! `WemVersion` / `WemProfile` in `include/wem.h`, the Python binding
 //! `WwiseVersion` / `WwiseProfile`. Codes and variants are stable and
 //! append-only — a new Wwise generation appends a variant and a code, it never
@@ -43,7 +43,7 @@ impl WwiseVersion {
     /// Decode a stable cross-language code.
     ///
     /// An unrecognized code is a caller error against this revision's
-    /// contract, never a silent fallback to a default generation.
+    /// rules, never a silent fallback to a default generation.
     pub fn from_code(code: u32) -> Result<Self, ProfileError> {
         Self::ALL
             .into_iter()

@@ -141,10 +141,10 @@ class Encoder:
         try:
             result = self._backend().encode_pcm(pcm.sample_rate, rows)
         except _core.WemEncoderError as error:
-            # The public contract surfaces input/configuration errors as
+            # The public API surfaces input/configuration errors as
             # ValueError; kernel rejections reach the user only after all
             # Python-side validation passed, so the mapping preserves the
-            # contract's error surface (message text is not contractual).
+            # kernel's error surface (message text is not part of it).
             # (Backend construction can raise the same kernel error, e.g.
             # a quality request on a profile without quality-curves, or a
             # selection no installed profile satisfies.)

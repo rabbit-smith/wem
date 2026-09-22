@@ -1,7 +1,7 @@
 """Facade encoder tests: ownership and validation invariants.
 
 The facade's byte-producing path is the native kernel
-(``wwise_wem._core``); byte-exact behavior is covered by the golden,
+(``wwise_wem._core``); byte-exact behavior is covered by the reference,
 core-oracle parity, and extended-input suites.  This file keeps the
 facade-level invariants that hold before any kernel work: selection
 ownership, input validation order, and an unsatisfiable selection.

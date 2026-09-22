@@ -1,11 +1,11 @@
 //! wem-capi — the C ABI core surface of the WEM encoder kernel.
 //!
 //! This crate is the single cross-language integration point: a thin,
-//! stable C ABI over `wem-core`. The normative contract lives in
+//! stable C ABI over `wem-core`. The interface is declared in
 //! `include/wem.h` (lifecycle, reply framing, error codes, memory
 //! ownership, integration rules); the signatures here mirror it 1:1.
 //!
-//! Design rules (crates/AGENTS.md, "C ABI contract"):
+//! Design rules (crates/AGENTS.md, "C ABI surface"):
 //! * Zero drift: validation, profile loading, checksums and encoding run
 //!   only in the kernel (`wem_core::Encoder`, `wem_core::StreamSession`);
 //!   this layer only converts C values to kernel types and kernel errors
@@ -49,7 +49,7 @@ pub type WemPacketFn =
 
 /// Stable error codes (include/wem.h): 1:1 with `EncoderError` variants,
 /// append-only, never renumbered. The discriminants are part of the
-/// cross-language contract (see the capi_e2e stability test).
+/// cross-language interface (see the capi_e2e stability test).
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WemError {
@@ -107,7 +107,7 @@ pub enum WemVersion {
 }
 
 /// Structured profile selection (include/wem.h `WemProfile`): one Wwise
-/// generation plus the PCM geometry. This is the whole profile contract of
+/// generation plus the PCM geometry. This is the whole profile selection of
 /// the ABI — no entry accepts a profile name, a profile directory, profile
 /// bytes, or an environment variable.
 #[repr(C)]
@@ -170,7 +170,7 @@ pub struct WemEncoder {
 /// header hands it out as a raw pointer).
 ///
 /// A future `Rc`, `RefCell`, or raw-pointer field anywhere under
-/// [`Encoder`] would turn that documented FFI contract into UB with nothing
+/// [`Encoder`] would turn that documented FFI invariant into UB with nothing
 /// failing. This `const` item is evaluated in every build (not only under
 /// `cfg(test)`); the closure body is never called — the bound is checked when
 /// the generic function is instantiated.
@@ -636,7 +636,7 @@ mod tests {
         assert_eq!(WemVersion::Wwise2013 as u32, 0);
     }
 
-    /// The header is the normative contract, so the crate must not drift
+    /// The header is the interface, so the crate must not drift
     /// from it: the declared revision has to match, and no declaration may
     /// reintroduce a profile name or a profile directory (ABI revision 2
     /// replaced both with the `WemProfile` selection).
@@ -651,10 +651,13 @@ mod tests {
             header.contains(&format!("#define WEM_ABI_REVISION {ABI_REVISION}")),
             "include/wem.h must declare WEM_ABI_REVISION {ABI_REVISION}"
         );
-        assert!(header.contains("} WemProfile;"), "WemProfile is contract");
+        assert!(
+            header.contains("} WemProfile;"),
+            "WemProfile is in the header"
+        );
         assert!(
             header.contains("WEM_WWISE_2013 = 0"),
-            "version table is contract"
+            "version table is in the header"
         );
 
         // Check the declarations only: the header's evolution note names the
@@ -729,7 +732,7 @@ mod tests {
 
     #[test]
     fn null_profile_is_a_malformed_call() {
-        // ABI contract: a NULL selection is rejected and the out-pointer is
+        // ABI surface: a NULL selection is rejected and the out-pointer is
         // cleared, never dereferenced. FFI requires the unsafe call; no
         // pointer is read.
         let mut encoder: *mut WemEncoder = std::ptr::null_mut();

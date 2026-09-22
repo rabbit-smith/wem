@@ -8,7 +8,7 @@ checked against that tree's byte-for-byte output, never the reverse.
 
 ## Hard rules
 
-1. **Byte-for-byte output.** `make stage-contract`, `make golden` and the
+1. **Byte-for-byte output.** `make wem-bytes` and the
    core-oracle parity suite compare this tree's bytes against the committed
    reference. A failure names the value or the byte range that differs; the fix
    is either in the code or in the expected bytes, and which one is a decision
@@ -41,7 +41,7 @@ checked against that tree's byte-for-byte output, never the reverse.
 ## Public surfaces
 
 - Package root exports (`docs/reference/public-interface.md`) are asserted by
-  `tests/contract/test_public_contract.py` and the distribution tests; internal
+  `tests/parity/test_public_api.py` and the distribution tests; internal
   module paths are not part of that surface.
 - `_f32` call sites mark the float32 assignment points the Rust port must match —
   when touching a numeric function, keep every rounding site where it is unless a
@@ -52,7 +52,7 @@ checked against that tree's byte-for-byte output, never the reverse.
 ## Registration duties
 
 Every new module or packaged data file requires, in the same commit:
-1. `tests/contract/distribution_allowlist.json` (modules/resources lists),
+1. `tests/parity/distribution_allowlist.json` (modules/resources lists),
 2. `pyproject.toml` package-data glob when under `data/`,
 3. profile data: manifest `resources` entry + SHA-256 + `index.json` re-hash
    (`scripts/generate_frozen_tables.py` shows the canonical update path),

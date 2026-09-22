@@ -66,7 +66,7 @@ def _synthetic(frames: int, channels: int) -> list[list[float]]:
 
 class ModeSelectionTailTests(unittest.TestCase):
     def test_six_channel_fixture_plan_is_stable(self) -> None:
-        """The byte-exact 6ch golden's plan must not move."""
+        """The byte-exact 6ch reference's plan must not move."""
         _, session = _session(SIX_CHANNEL_SELECTION)
         pcm = read_pcm_wav(SIX_CHANNEL_FIXTURE)
         modes = session.select_modes(pcm.channels)

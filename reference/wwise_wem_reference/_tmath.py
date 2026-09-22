@@ -6,13 +6,13 @@ profile.  Production calls forward to the host libm unchanged.
 :func:`start_recording` switches on an additional per-site record of
 deduplicated ``(float64 input bits, float64 output bits)`` pairs, written as
 compact 16-byte binary files so the live input domain of each call site becomes
-an auditable contract asset for cross-implementation verification.  Recording
+an auditable recorded asset for cross-implementation verification.  Recording
 is opt-in through that call — this module reads no environment variable, so a
 recorded domain is always something a caller asked for explicitly.  The
 recorded *values* are the same either way: recording observes calls, it never
 changes them.
 
-Site names are stable identities; renaming one is a contract change.
+Site names are stable identities; renaming one invalidates the recorded pairs.
 """
 from __future__ import annotations
 

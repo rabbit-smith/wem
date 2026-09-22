@@ -1,7 +1,7 @@
 """Live per-frame parity: the shipped binding against the pure-Python oracle.
 
 ``tests/fixtures/input.wav`` is encoded at test time on both sides — the oracle
-by :mod:`tests.contract.oracle_frame_values` in this process, the native kernel
+by :mod:`tests.parity.oracle_frame_values` in this process, the native kernel
 through the binding the package ships (``wwise_wem._core.Encoder``) — and the
 audio packets are compared frame by frame, all 205 of them, plus the frame
 count and the short/long split both sides report.  Nothing is recorded and
@@ -35,7 +35,7 @@ from wwise_wem_reference.scheduling.planner import (
     initial_state,
 )
 
-from tests.contract.oracle_frame_values import frame_records
+from tests.parity.oracle_frame_values import frame_records
 
 ROOT = Path(__file__).resolve().parents[2]
 INPUT = ROOT / "tests" / "fixtures" / "input.wav"

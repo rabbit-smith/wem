@@ -2,7 +2,7 @@
 //!
 //! Mirrors Python `wwise_wem/analysis/psychoacoustics/pipeline.py`. This is the
 //! orchestration that ties the transform, remap, seed, and envelope stages into
-//! the per-frame surfaces used by the golden dump.
+//! the per-frame surfaces used by the recorded stage dump.
 
 use crate::config::{AnalysisError, AnalysisProfileResources, FrozenMathTables, MdctLook};
 
@@ -134,7 +134,7 @@ pub fn analyze_long_frame(
     // cross-channel shared mutable state, `f32_of` is a pure, order-free
     // rounding, and rayon preserves channel order in collect, so the
     // results are bit-identical to the sequential loop. Guarded end-to-end
-    // by the golden_e2e / stage_frames / vorbis_golden byte-parity tests.
+    // by the complete_wem_bytes / stage_frames / vorbis_oracle_values byte-parity tests.
     //
     // Without `parallel` (threadless targets such as wasm32), run the same
     // work sequentially.
@@ -308,7 +308,7 @@ pub fn analyze_short_frame(
     short_variant: i64,
     following_mode: i64,
     q: f64,
-    update_gate: i64,
+    hold_update: i64,
     carried_global_specmax: f64,
     specmax_state: Option<&mut SpectrumPeakState>,
     groups: Option<&[Vec<f64>]>,
@@ -401,7 +401,7 @@ pub fn analyze_short_frame(
         short_variant,
         following_mode,
         q,
-        update_gate,
+        hold_update,
         groups,
     )?;
 

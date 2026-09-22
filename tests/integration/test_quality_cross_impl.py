@@ -9,7 +9,7 @@ Proves the Python/Rust quality mechanism stays aligned end to end:
   quality-curves resource, so a quality request must surface the kernel's
   configuration error — with a stale or bypassed kernel the encode would
   silently ignore the quality);
-* with no quality the facade keeps the golden bytes (compared byte-for-byte
+* with no quality the facade keeps the reference bytes (compared byte-for-byte
   against ``tests/fixtures/reference.wem``);
 * a bound quality is an additive copy: the resolved profile is never
   mutated.
@@ -32,7 +32,7 @@ from wwise_wem_reference.profiles.quality import (
 _SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
 _FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures"
 _FIXTURE_WAV = _FIXTURES / "input.wav"
-_GOLDEN_WEM = _FIXTURES / "reference.wem"
+_REFERENCE_WEM = _FIXTURES / "reference.wem"
 
 
 class QualityCrossImplementationTests(unittest.TestCase):
@@ -66,10 +66,10 @@ class QualityCrossImplementationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "quality-curves"):
             encoder.encode_pcm(pcm)
 
-    def test_facade_quality_none_keeps_the_golden_bytes(self):
+    def test_facade_quality_none_keeps_the_reference_bytes(self):
         pcm = read_pcm_wav(_FIXTURE_WAV)
         result = Encoder(_SELECTION).encode_pcm(pcm)
-        self.assertEqual(result.data, _GOLDEN_WEM.read_bytes())
+        self.assertEqual(result.data, _REFERENCE_WEM.read_bytes())
 
     def test_selection_quality_copy_never_mutates_the_resolved_profile(self):
         base = resolve_selection(_SELECTION)

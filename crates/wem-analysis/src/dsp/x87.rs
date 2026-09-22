@@ -15,7 +15,7 @@
 //! rationals; anything wider trips a debug assertion (builder call sites are
 //! curve/dB arithmetic with tiny exponent spans).
 //!
-//! Determinism contract (AGENTS.md): no host transcendental calls, no clocks,
+//! Determinism rules (AGENTS.md): no host transcendental calls, no clocks,
 //! no randomness; bit patterns travel as integers.
 
 /// Finite x87 register value. `man == 0` encodes zero (mirroring the

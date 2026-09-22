@@ -1,6 +1,6 @@
 """the round LONG analysis port of analysis_geometry_builder, call the build's code.
 
-Registered surfaces are read exclusively by gate_runner, never this builder.
+Registered surfaces are read exclusively by the verification runner, never this builder.
 """
 
 from __future__ import annotations

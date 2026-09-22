@@ -62,7 +62,7 @@ fn verify_all_on_real_assets() {
 }
 
 #[test]
-fn setup_parse_golden_and_roundtrip() {
+fn setup_parse_and_roundtrip() {
     let packet = bundle().setup_packet().expect("setup packet");
     assert_eq!(packet.len(), 201);
     let info = parse_setup(&packet, 6).expect("setup parses");
@@ -135,7 +135,7 @@ fn two_channel_profile_resolves_t282_books() {
 }
 
 #[test]
-fn codebook_golden_oracles() {
+fn codebook_oracle_values() {
     let b = bundle();
     let manifest = b.runtime_manifest();
     let t97 = load_book_table("t97", manifest.resource("vorbis.codebooks.t97").unwrap()).unwrap();
@@ -179,7 +179,7 @@ fn codebook_golden_oracles() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn mdct_look_golden_oracles() {
+fn mdct_look_oracle_values() {
     let looks = load_mdct_looks(
         bundle()
             .runtime_manifest()
@@ -240,7 +240,7 @@ fn mdct_look_golden_oracles() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn frozen_tables_golden_oracles() {
+fn frozen_tables_oracle_values() {
     let frozen = load_frozen_tables(
         bundle()
             .runtime_manifest()
@@ -323,7 +323,7 @@ fn frozen_tables_golden_oracles() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn transient_tables_golden_oracle() {
+fn transient_tables_oracle_values() {
     let tt = load_transient_tables(
         bundle()
             .runtime_manifest()
@@ -345,7 +345,7 @@ fn transient_tables_golden_oracle() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn short_seed_golden_oracle() {
+fn short_seed_oracle_values() {
     let b = bundle();
     let manifest = b.runtime_manifest();
     let ss = load_short_seed_surface(manifest.resource("psychoacoustics.short-seed").unwrap())
@@ -375,7 +375,7 @@ fn short_seed_golden_oracle() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn short_profiles_golden_oracle() {
+fn short_profiles_oracle_values() {
     let sps = load_short_psy_profiles(
         bundle()
             .runtime_manifest()
@@ -399,7 +399,7 @@ fn short_profiles_golden_oracle() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn long_tables_golden_oracle() {
+fn long_tables_oracle_values() {
     let lt = load_long_psy_tables(
         bundle()
             .runtime_manifest()

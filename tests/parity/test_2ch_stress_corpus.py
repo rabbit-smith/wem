@@ -8,7 +8,7 @@ import unittest
 import wave
 from pathlib import Path
 
-from tests.contract.wem_byte_contract import assert_wem_equal
+from tests.parity.wem_byte_compare import assert_wem_equal
 from tests.two_channel_corpus_support import corpus_selection, render_wav
 from wwise_wem import _core
 from wwise_wem.application.encoder import Encoder

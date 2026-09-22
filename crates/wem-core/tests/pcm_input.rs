@@ -173,7 +173,7 @@ fn the_three_pcm_shapes_share_one_float_row_view() {
 }
 
 /// The fixture PCM in all three shapes: one encode each, byte-identical to the
-/// golden container (the row shape's bytes are the reference).
+/// recorded container (the row shape's bytes are the reference).
 #[test]
 fn the_three_pcm_shapes_encode_to_identical_containers() {
     let wav = read_pcm16(&fixtures_dir().join("input.wav")).expect("input.wav reads");
@@ -218,10 +218,10 @@ fn the_three_pcm_shapes_encode_to_identical_containers() {
         containers.push((name, result.data));
     }
 
-    let golden = read_fixture("reference.wem");
+    let recorded = read_fixture("reference.wem");
     for (name, bytes) in &containers {
         assert_eq!(
-            bytes, &golden,
+            bytes, &recorded,
             "{name} container differs from reference.wem at file level"
         );
     }

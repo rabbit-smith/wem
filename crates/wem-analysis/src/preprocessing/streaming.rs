@@ -498,7 +498,7 @@ mod tests {
         }
         feeder.settle();
         // The ring retains exactly the bounded window (the 9216-sample
-        // input-memory ceiling of the streaming contract).
+        // input-memory ceiling of the streaming path).
         for ring in &feeder.ring {
             assert_eq!(ring.len() as i64, STREAM_RING_KEEP);
         }

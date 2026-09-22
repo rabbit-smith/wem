@@ -111,7 +111,7 @@ pub fn parse_chunks(raw: &[u8]) -> Result<(Endian, Vec<ParsedChunk>), ContainerE
 /// Build a RIFF/RIFX WAVE byte string from `(fourcc, payload)` chunks
 /// (Python `build_riff`).
 ///
-/// Odd intermediate payloads are word-padded. Wwise 2013 goldens commonly
+/// Odd intermediate payloads are word-padded. Wwise 2013 output files commonly
 /// omit the pad after the final chunk, so that remains the default; pass
 /// `pad_final=true` for a strict final pad.
 pub fn build_riff(
@@ -171,7 +171,7 @@ mod tests {
     #[test]
     fn build_riff_odd_payload_padding() {
         // Odd intermediate payload is padded; odd final payload is not
-        // (Wwise golden default).
+        // (the Wwise 2013 default).
         let bytes = build_riff(
             &[(b"junk", b"abc"), (b"data", b"xyz")],
             Endian::Little,

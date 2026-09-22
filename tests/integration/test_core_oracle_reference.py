@@ -1,4 +1,4 @@
-"""Core-oracle golden parity: facade (native kernel) vs reference oracle.
+"""Core-oracle reference parity: facade (native kernel) vs reference oracle.
 
 The single execution path, executable: the facade's byte-producing calls
 run on the in-package native extension (``wwise_wem._core``), and the
@@ -6,7 +6,7 @@ reference oracle — the ``wwise_wem_reference`` package, imported
 directly as a **test fixture** (a test asset, not an engine: nothing in
 the distributed package imports it at runtime) — must produce
 byte-identical WEM bytes for the same PCM.  The reference-input case must
-also match the golden WEM file: three-way, facade == oracle ==
+also match the reference WEM file: three-way, facade == oracle ==
 ``reference.wem``.  Boundary-length PCM inputs (around the short/long
 frame-plan edges) exercise the same requirement on synthetic streams.
 
@@ -109,10 +109,10 @@ def _synthetic_stereo_pcm(frames: int = 16384) -> PcmBuffer:
     return PcmBuffer(48000, channels)
 
 
-class CoreOracleGoldenTests(unittest.TestCase):
-    def test_reference_input_matches_golden_on_facade_and_oracle(self):
+class CoreOracleReferenceTests(unittest.TestCase):
+    def test_reference_input_matches_reference_on_facade_and_oracle(self):
         pcm = read_pcm_wav(INPUT)
-        golden = REFERENCE.read_bytes()
+        reference = REFERENCE.read_bytes()
 
         # Single execution path: the facade runs the native kernel.
         facade = Encoder(SELECTION).encode_pcm(pcm)
@@ -121,9 +121,9 @@ class CoreOracleGoldenTests(unittest.TestCase):
             pcm.sample_rate, _rows_from_pcm(pcm)
         )
 
-        self.assertEqual(facade.data, golden)
-        self.assertEqual(bytes(oracle_result.data), golden)
-        self.assertEqual(bytes(direct_core.data), golden)
+        self.assertEqual(facade.data, reference)
+        self.assertEqual(bytes(oracle_result.data), reference)
+        self.assertEqual(bytes(direct_core.data), reference)
         self.assertEqual(facade.sha256, direct_core.sha256())
         # One execution path: the stats surface carries no provenance tag.
         self.assertNotIn("engine", facade.stats.to_dict())
@@ -140,16 +140,16 @@ class CoreOracleGoldenTests(unittest.TestCase):
         """Both accepted PCM forms reach the same bytes.
 
         The buffer form is decoded channel-by-channel from one raw copy; it
-        must agree with the list form and with the golden file exactly.
+        must agree with the list form and with the reference file exactly.
         """
         pcm = read_pcm_wav(INPUT)
-        golden = REFERENCE.read_bytes()
+        reference = REFERENCE.read_bytes()
         encoder = core_module.Encoder(SELECTION)
 
         from_list = encoder.encode_pcm(pcm.sample_rate, _rows_from_pcm(pcm))
         from_view = encoder.encode_pcm(pcm.sample_rate, _channel_major_view(pcm))
 
-        self.assertEqual(bytes(from_view.data), golden)
+        self.assertEqual(bytes(from_view.data), reference)
         self.assertEqual(bytes(from_view.data), bytes(from_list.data))
         # Same accounting as the list form (the binding exposes the
         # fields individually; the facade is what groups them).
@@ -210,7 +210,7 @@ class CoreOracleGoldenTests(unittest.TestCase):
                     native.stats.metadata_source, KERNEL_METADATA_SOURCE
                 )
 
-    def test_stereo_profile_has_a_pinned_native_oracle_byte_contract(self):
+    def test_stereo_profile_has_a_pinned_native_oracle_byte_identity(self):
         # The synthetic stream has no committed counterpart; the 2ch/48 kHz
         # configuration's absolute byte pin is the committed real-build
         # corpora (tests/data/2ch-reference, tests/data/2ch-stress), so this

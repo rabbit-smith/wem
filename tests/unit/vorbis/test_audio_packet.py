@@ -66,7 +66,7 @@ class AudioPacketTests(unittest.TestCase):
         self.assertEqual(pack.call_args.kwargs["posts_are_10bit"], True)
         self.assertEqual(pack.call_args.kwargs["coupling_peak"], ((0.0,),))
 
-    def test_channel_contract_is_checked_before_floor_fitting(self):
+    def test_channel_count_is_checked_before_floor_fitting(self):
         window = _window(0, 0, 0, 0, 128)
         analysis = _analysis(window, raw=(0.0,), post=(0.0,), side=(0.0,))
         with self.assertRaisesRegex(ValueError, "channel count"):

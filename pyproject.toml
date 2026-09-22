@@ -36,7 +36,7 @@ exclude = ["src/wwise_wem/AGENTS.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["golden: complete bit-exact fixture encoding"]
+markers = ["whole_file: complete bit-exact fixture encoding"]
 
 [tool.ruff]
 line-length = 100

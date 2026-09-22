@@ -161,7 +161,7 @@ WWISE_RESIDUE_44_LOW_UN_METRICS = (
     # the serialized Vorbis setup packet.
     (0, 1, 1, 2, 2, 4, 28),
     # Encoder-only mean-absolute-coefficient thresholds. A negative value
-    # disables the average-absolute-value gate for that class.
+    # disables the average-absolute-value threshold for that class.
     (-1, 25, -1, 45, -1, -1, -1),
 )
 
@@ -205,7 +205,7 @@ def classify_partition(samples: Sequence[float], nclass: int = 8) -> int:
     Classification operates on the already integer-quantized residue, scans
     class 0 through
     ``nclass - 2``, and selects the first class satisfying both its maximum
-    absolute coefficient and (when enabled) mean-absolute coefficient gates.
+    absolute coefficient and (when enabled) mean-absolute coefficient thresholds.
     The 44.1-kHz uncoupled low template has eight classes and the
     installed metrics above. Other setups retain the bounded fallback until
     their encoder-only metric table is available.
@@ -267,7 +267,7 @@ def pack_residue_vq(
     Pack residue type 0/1 with greedy multi-stage VQ.
 
     residuals[ch][bin]: full spectrum residual (floor-divided MDCT).
-    Only bins [begin, end) are coded; ch_used gates channels.
+    Only bins [begin, end) are coded; ch_used restricts channels.
 
     Returns stats: npart, classes histogram, vq_count, bits written estimate.
     """
@@ -416,7 +416,7 @@ def _classify_partition_type2(
     The reference classifier takes two peaks over the partition's flat
     ``(bin * channels + channel)`` domain: the maximum absolute coefficient of
     channel 0, and the maximum over every other channel.  It scans the class
-    metrics in order and takes the first class whose magnitude and angle gates
+    metrics in order and takes the first class whose magnitude and angle thresholds
     both hold, otherwise the last class.  ``long_block`` is unused.
     """
     del long_block  # the reference type-2 classifier has no block dependence

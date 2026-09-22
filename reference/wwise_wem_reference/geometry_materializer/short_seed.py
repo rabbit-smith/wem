@@ -8,7 +8,7 @@ and the supplied CRT atan value implementation.
 SOURCES:
   - constants: read-only data read via the analysis tool (see constants in this module)
   - paired_ath_source_curve (88 f32): ATH source curve (read from the analysis tool)
-  - verification only: registered short-seed.json (read by gate_runner.py)
+  - verification only: registered short-seed.json (read by the verification runner)
 
 ARGUMENTS (analysis_geometry_builder(a1,a2,a3,a4,a5), the argument block):
   a1 = out struct (the 5 surfaces live here)
@@ -23,7 +23,7 @@ SURFACE BINDINGS (a1 offset -> out field, confirmed from disasm stores):
   a1[5] (+0x14) -> octave (128 i32)
   a1[6] (+0x18) -> interval_table (128 i32)
 
-STATUS: All five independent 6ch surfaces pass their byte gates. The same
+STATUS: All five independent 6ch surfaces match byte for byte. The same
 static default binding is regenerated at 48000 for the 2ch comparison.
 """
 
@@ -252,7 +252,7 @@ def interval_table(a4, a5, *, a2_120=3, a2_124=3):
 
     # a2+112/116: 0.5f/0.5f static seed the build's code (r7 byte proof: untouched).
     # a2+120/124: seed 0/0; setter-chain conditional value 3/3 (r4 audit
-    # work/the round-audit.json; byte gate adjudicates, no fitting).
+    # work/the round-audit.json; the byte comparison adjudicates, no fitting).
     # LONG uses the same loop with its mode-indexed integer pair.
     for v43 in range(a4):
         v92 = f32_round(mapped(v68, v43 * v65))  # the build's code: fstp f32.

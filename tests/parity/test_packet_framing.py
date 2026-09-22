@@ -13,7 +13,7 @@ from wwise_wem_reference.container.packets import (
 )
 
 
-class PacketFramingContractTests(unittest.TestCase):
+class PacketFramingTests(unittest.TestCase):
     def test_little_and_big_endian_streams_preserve_seek_and_packets(self) -> None:
         packets = [b"setup", b"", b"audio"]
         seek = b"SEEK"
@@ -151,7 +151,7 @@ class PacketFramingContractTests(unittest.TestCase):
         self.assertNotIn("sizes", result)
 
 
-class VorbisFmtSizeContractTests(unittest.TestCase):
+class VorbisFmtSizeTests(unittest.TestCase):
     def test_recompute_sets_offsets_sizes_max_and_preserves_input(self) -> None:
         original = {
             "nChannels": 6,

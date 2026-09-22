@@ -530,7 +530,7 @@ impl AnalysisSession {
         window: WindowedFrame,
         short_variant: Option<i64>,
         q: f64,
-        update_gate: i64,
+        hold_update: i64,
         groups: Option<&[Vec<f64>]>,
     ) -> Result<PsyFrame, AnalysisError> {
         if window.current() != 0
@@ -544,7 +544,7 @@ impl AnalysisSession {
             });
         }
         self.consume_analysis_window(&window)?;
-        self.analyze_short_inner(window, short_variant, q, update_gate, groups)
+        self.analyze_short_inner(window, short_variant, q, hold_update, groups)
     }
 
     fn analyze_short_inner(
@@ -552,7 +552,7 @@ impl AnalysisSession {
         window: WindowedFrame,
         short_variant: Option<i64>,
         q: f64,
-        update_gate: i64,
+        hold_update: i64,
         groups: Option<&[Vec<f64>]>,
     ) -> Result<PsyFrame, AnalysisError> {
         let variant = match short_variant {
@@ -566,7 +566,7 @@ impl AnalysisSession {
             variant,
             window.following(),
             q,
-            update_gate,
+            hold_update,
             crate::config::NEGATIVE_INFINITY_DB as f64,
             Some(&mut self.spectrum_peak),
             groups,

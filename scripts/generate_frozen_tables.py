@@ -14,7 +14,7 @@ twiddle and window constants byte-identical to the 6ch payload. Its
 cross-check runs only once a 2ch-domain recording exists; it is skipped
 until then.
 
-Run `make golden` and the per-frame parity suites afterwards; the golden
+Run `make wem-bytes` and the per-frame parity suites afterwards; the reference
 encode and every per-frame value must stay identical.
 
 Usage: python3 scripts/generate_frozen_tables.py [--profile NAME] [--record-dir DIR]
@@ -85,8 +85,8 @@ FROZEN_RELATIVE_PATH = "analysis/frozen-tables.json"
 SHORT_SURFACE_N = 128
 INDEX_PATH = ROOT / "src/wwise_wem/data/profiles/index.json"
 RECORD_DIR_BY_PROFILE = {
-    SIX_CHANNEL_PROFILE: ROOT / "tests/data/stage-golden/transcendental",
-    TWO_CHANNEL_PROFILE: ROOT / "tests/data/stage-golden/transcendental-2ch-48000",
+    SIX_CHANNEL_PROFILE: ROOT / "tests/data/stage-records/transcendental",
+    TWO_CHANNEL_PROFILE: ROOT / "tests/data/stage-records/transcendental-2ch-48000",
 }
 
 

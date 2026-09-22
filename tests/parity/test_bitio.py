@@ -16,7 +16,7 @@ def _reference_pack(writes: list[tuple[int, int]]) -> bytes:
     return value.to_bytes((offset + 7) // 8, "little")
 
 
-class BitIoContractTests(unittest.TestCase):
+class BitIoTests(unittest.TestCase):
     def test_every_supported_width_roundtrips_and_masks(self) -> None:
         for width in range(33):
             with self.subTest(width=width):

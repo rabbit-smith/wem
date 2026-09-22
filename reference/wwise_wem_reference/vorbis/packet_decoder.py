@@ -189,7 +189,7 @@ def parse_audio_packet(
     # residue (eop-tolerant)
     ch_used = [bool(z) for z in floors.get("nonzero") or []]
     n_spec = (2048 if hdr["blockflag"] else 256) // 2
-    # one submap for golden; multi-submap: run each residue id once
+    # one submap in the reference WEM; multi-submap: run each residue id once
     residues_out = []
     for rid in hdr["residue_ids"]:
         residues_out.append(

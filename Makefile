@@ -1,28 +1,25 @@
-.PHONY: test test-fast fuzz-parity 2ch-stress 2ch-long stage-contract golden lint rust-fmt rust-lint rust-test rust-bench build wheel-smoke check clean native
+.PHONY: test test-fast fuzz-parity 2ch-stress 2ch-long wem-bytes lint rust-fmt rust-lint rust-test rust-bench build wheel-smoke check clean native
 
 PY ?= python3
 
-test: test-fast fuzz-parity 2ch-stress 2ch-long stage-contract golden
+test: test-fast fuzz-parity 2ch-stress 2ch-long wem-bytes
 
 test-fast:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest discover -s tests/unit -t . -v
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest discover -s tests/integration -t . -v
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest discover -s tests/contract -t . -v
+	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest discover -s tests/parity -t . -v
 
 fuzz-parity:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) scripts/fuzz_diff_parity.py --pr
 
 2ch-stress:
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest tests.contract.test_2ch_stress_corpus -v
+	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest tests.parity.test_2ch_stress_corpus -v
 
 2ch-long:
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest tests.contract.two_channel_long_run_contract -v
+	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest tests.parity.two_channel_long_run -v
 
-stage-contract:
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest tests.contract.stage_pipeline_contract -v
-
-golden:
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest tests.golden.test_golden -v
+wem-bytes:
+	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest tests.whole_file.test_whole_file -v
 
 # Lint tools come from the project venv when it exists. Without this, `make
 # lint` only works for a developer whose shell happens to have ruff/mypy on

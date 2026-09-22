@@ -19,7 +19,7 @@ The fixed paired input is 96,000-frame, 2ch/48 kHz PCM with input SHA-256
 
 All three complete WEMs are byte-for-byte identical and all 142 audio packets are
 exact, with a mode sequence of 55 short + 87 long.
-`tests/integration/test_core_oracle_golden.py` also holds an asset-free
+`tests/integration/test_core_oracle_reference.py` also holds an asset-free
 deterministic 2ch check pinning the output SHA, packet count and short/long
 counts for the native core, the direct core and the oracle; those layers are
 described in [`../reference/architecture.md`](../reference/architecture.md).
@@ -146,7 +146,7 @@ classifier reads.
 Six 48,000-frame real-build cases cover silence, opposed DC, low tone, high tones,
 isolated impulses and independent stereo noise. Their WAV and WEM pairs live in
 `tests/data/2ch-reference/`; the complete WEM of all six inputs is byte-identical
-to the Rust output, and `tests/contract/test_2ch_reference_corpus.py` pins the
+to the Rust output, and `tests/parity/test_2ch_reference_corpus.py` pins the
 input/output SHA-256, the packet count and the short/long counts.
 `tests/data/2ch-reference/manifest.json` records each case's digests and counts.
 
@@ -161,7 +161,7 @@ green suite:
   exact and the complete WEM is 4,909 B. It covers the dynamic EOS LPC training
   length and the last frame.
 
-`tests/contract/test_2ch_stress_corpus.py` checks the batch kernel, the Python
+`tests/parity/test_2ch_stress_corpus.py` checks the batch kernel, the Python
 oracle and the irregular-chunk streaming kernel; all three paths are whole-file
 byte-identical to the real build. The reference and stress WAVs are
 deterministically rebuilt by `scripts/generate_2ch_reference_inputs.py` and

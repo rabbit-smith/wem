@@ -42,7 +42,7 @@ pass packet-level and whole-file regression.
 
 | Selection | Name | Status |
 | --- | --- | --- |
-| `Wwise2013, 6, 44100` | `wwise2013-6ch-44100` | Byte-exact for the paired build; checked by the whole-file golden, the per-frame and the per-stage suites |
+| `Wwise2013, 6, 44100` | `wwise2013-6ch-44100` | Byte-exact for the paired build; checked by the whole-file, per-frame and per-stage suites |
 | `Wwise2013, 2, 48000` | `wwise2013-2ch-48000` | Byte-exact for the paired input and both real-build corpora; evidence and limits in [`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md) |
 
 ### 2ch/48 kHz provenance
@@ -73,8 +73,8 @@ A profile selection resolves to exactly one installed `EncoderProfile`. The
 packaged setup packet is checked against its declared SHA-256 whenever it is
 loaded; missing geometry, an unsatisfiable or ambiguous selection, or a
 checksum mismatch is an error. The built-in path is self-contained: it reads
-packaged profile resources and never reads a reference WEM. Golden expected
-outputs are test assets, not runtime inputs.
+packaged profile resources and never reads a reference WEM. Expected outputs
+are test assets, not runtime inputs.
 
 ## Access boundary
 
@@ -111,9 +111,9 @@ Two named entries (`floor_fit` dB quantization and the `residue` classification
 fallback) do not fire for the installed exact profiles. Should a future geometry
 activate them, ports must pin a reference double `log`/`log10` implementation and
 verify bit equality against the per-site records under
-`tests/data/stage-golden/transcendental/`.
+`tests/data/stage-records/transcendental/`.
 
 Regenerate the payload with `scripts/generate_frozen_tables.py`, which
 cross-checks the live domain recorded by `scripts/record_tmath.py`. Run
-`make golden` and the per-frame parity suites afterwards: the golden WEM bytes
+`make wem-bytes` and the per-frame parity suites afterwards: the reference WEM bytes
 and every per-frame value must come out unchanged.

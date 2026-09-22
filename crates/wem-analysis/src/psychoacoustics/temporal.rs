@@ -40,7 +40,7 @@ pub struct TemporalKernelInputs {
     pub curve_bias: f64,
     pub transition_code: i64,
     pub previous_transition: i64,
-    pub update_gate: i64,
+    pub hold_update: i64,
     pub analysis_mode: i64,
 }
 
@@ -89,7 +89,7 @@ pub fn compute_temporal_kernel(inputs: &TemporalKernelInputs) -> TemporalKernelR
         return TemporalKernelResult::default();
     }
 
-    let update = if inputs.update_gate == 0 || inputs.analysis_mode == 2 {
+    let update = if inputs.hold_update == 0 || inputs.analysis_mode == 2 {
         1
     } else {
         0
@@ -140,7 +140,7 @@ pub fn compute_temporal_kernel(inputs: &TemporalKernelInputs) -> TemporalKernelR
         if inputs.tail_count != 0 {
             lower *= inputs.tail_count as f64 / divisor;
         }
-        if inputs.update_gate != 0 && inputs.analysis_mode == 0 {
+        if inputs.hold_update != 0 && inputs.analysis_mode == 0 {
             lower *= 0.2;
         }
         TemporalKernelResult {
@@ -338,7 +338,7 @@ mod tests {
             curve_bias: 0.0,
             transition_code: 0,
             previous_transition: 0,
-            update_gate: 0,
+            hold_update: 0,
             analysis_mode: 0,
         };
         let result = compute_temporal_kernel(&inputs);

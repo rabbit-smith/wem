@@ -13,13 +13,13 @@ idempotent, and offline.
 - **No network, no ambient state**: operate on repo paths resolved from
   `Path(__file__)`; env overrides must be declared in `--help`.
 - **Write only to declared destinations**: e.g. `record_tmath.py` →
-  `tests/data/stage-golden/transcendental/`, `generate_frozen_tables.py` →
+  `tests/data/stage-records/transcendental/`, `generate_frozen_tables.py` →
   the payload + manifest + index trio (and it refuses when the index already
-  matches), `emit_stage_golden.py` → `tests/data/stage-golden/stages/`.
+  matches), `emit_stage_records.py` → `tests/data/stage-records/stages/`.
   Never write outside these trees as a side effect.
 - **Cross-check before emit**: generators assert their output against the
   existing versioned assets (frozen table generation proves domain agreement with
-  the recorded site pairs; the golden digest is verified after, not assumed).
+  the recorded site pairs; the reference digest is verified after, not assumed).
 - Scripts must pass `make lint` (ruff covers `scripts/`), use `#!/usr/bin/env
   python3`, type hints, and `SystemExit` codes; failures print the offending
   artifact path, never a stack-trace shrug.
@@ -36,7 +36,7 @@ idempotent, and offline.
   pure-Python oracle and the native streaming kernel; `--pr` is the small
   PR-budget run, `--full` the nightly-sized run. The seeds are fixed; never
   randomize them at run time.
-- `perf_gate.py` checks fixture performance on the release build:
+- `perf_check.py` checks fixture performance on the release build:
   the encode-stage median must stay under the 150ms cap and within 25% of
   the recorded baseline (`tests/data/perf-baseline.json`); re-recording the
   baseline is a deliberate decision, not an incident response.

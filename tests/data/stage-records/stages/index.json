@@ -5900,7 +5900,7 @@
     204
   ],
   "sample_rate": 44100,
-  "schema": "wwise-wem.stage-golden.v1",
+  "schema": "wwise-wem.stage-records.v1",
   "transition_frames": [
     63,
     78,

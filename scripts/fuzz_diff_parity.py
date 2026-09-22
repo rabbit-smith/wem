@@ -5,7 +5,7 @@ The executable definition of oracle-vs-kernel parity at scale: every
 stream is encoded once by the pure-Python reference oracle (one-shot) and
 once by the native kernel (streaming lifecycle with a randomized
 frame-aligned chunk split), and the two containers must be byte-identical.
-The golden fixture is checked three-way (oracle == native == the accepted
+The reference fixture is checked three-way (oracle == native == the accepted
 reference WEM).
 
 Fully deterministic: a fixed seed set, no network, no clock, no ambient
@@ -13,10 +13,10 @@ state; a re-run reproduces the same stream set byte-for-byte.
 
 Usage:
   PYTHONPATH=src:reference python3 scripts/fuzz_diff_parity.py --pr
-      PR tier: golden case + a small deterministic differential set
+      PR tier: reference case + a small deterministic differential set
       (budget < 1 minute).
   PYTHONPATH=src:reference python3 scripts/fuzz_diff_parity.py --full
-      Nightly: golden case + the full deterministic differential set
+      Nightly: reference case + the full deterministic differential set
       (budget < 30 minutes including oracle cost).
 
 Exit codes: 0 pass, 1 parity failure (the first mismatch is reported with
@@ -39,12 +39,12 @@ SAMPLE_RATE = 44100
 MIN_FRAMES = 4096
 MAX_CHUNKS = 8
 
-# PR gate: small deterministic set (golden + these cases, < 1 minute).
+# PR budget: small deterministic set (reference + these cases, < 1 minute).
 PR_CASES = 10
 PR_MAX_FRAMES = 6144
 PR_SEED_BASE = 20130701
 
-# Nightly: the full deterministic set (golden + these cases, < 30 minutes).
+# Nightly: the full deterministic set (reference + these cases, < 30 minutes).
 FULL_CASES = 200
 FULL_MAX_FRAMES = 8192
 FULL_SEED_BASE = 20130712
@@ -141,7 +141,7 @@ def _selection(channels: int, sample_rate: int):
     return WwiseProfile(WwiseVersion.WWISE2013, channels, sample_rate)
 
 
-def _golden_case(native) -> None:
+def _reference_case(native) -> None:
     """Oracle == native == accepted reference WEM, three-way on the fixture.
 
     The comparison is the bytes themselves: the fixture is the recorded
@@ -173,13 +173,13 @@ def _golden_case(native) -> None:
 
     if not (oracle_bytes == reference == native_bytes):
         raise RuntimeError(
-            "golden parity failed: oracle={o} native={n} reference={r}".format(
+            "reference parity failed: oracle={o} native={n} reference={r}".format(
                 o=_sha256_hex(oracle_bytes),
                 n=_sha256_hex(native_bytes),
                 r=_sha256_hex(reference),
             )
         )
-    print("golden: oracle == native == reference.wem (byte-identical)")
+    print("reference: oracle == native == reference.wem (byte-identical)")
 
 
 def _differential_case(
@@ -268,12 +268,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     mode.add_argument(
         "--pr",
         action="store_true",
-        help="PR tier: golden + small deterministic set (< 1 minute)",
+        help="PR tier: reference + small deterministic set (< 1 minute)",
     )
     mode.add_argument(
         "--full",
         action="store_true",
-        help="Nightly: golden + full deterministic set (< 30 minutes)",
+        help="Nightly: reference + full deterministic set (< 30 minutes)",
     )
     parser.add_argument(
         "--cases",
@@ -338,7 +338,7 @@ def main() -> int:
     )
 
     start = time.monotonic()
-    _golden_case(native)
+    _reference_case(native)
     for case_id in range(args.case_count):
         seed = args.seed_base + case_id
         started = time.monotonic()
@@ -402,7 +402,7 @@ def main() -> int:
 
     total = time.monotonic() - start
     print(
-        f"fuzz_diff_parity OK: golden + {args.case_count} differential + "
+        f"fuzz_diff_parity OK: reference + {args.case_count} differential + "
         f"{len(two_ch_seeds)} 2ch + {len(two_ch_quality_cases)} 2chq "
         f"(quality) cases byte-identical in {total:.0f}s"
     )

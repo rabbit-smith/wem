@@ -16,7 +16,7 @@ js/
   src/index.ts     the wrapper (typed entry; erasable-TS only, no build step)
   pkg/             wasm-pack --target web      (browser/worker; .wasm fetched by URL)
   pkg-node/        wasm-pack --target nodejs   (Node; .wasm read from disk on import)
-  test-node.mjs    Node parity test (golden sha256 + chunking consistency + selection/error codes)
+  test-node.mjs    Node parity test (reference sha256 + chunking consistency + selection/error codes)
 ```
 
 Rebuilds (need wasm-pack + a wasm32 toolchain):
@@ -39,7 +39,7 @@ npm test             # → node test-node.mjs (requires pkg-node)
 > ```
 >
 > The committed `pkg/` and `pkg-node/` artifacts are refreshed that way and
-> must track the kernel source: the golden-sha check in `test-node.mjs` fails
+> must track the kernel source: the reference-sha check in `test-node.mjs` fails
 > against stale kernel bytes, and its 2ch/48k positive check fails against a
 > kernel that still refuses the 2ch configuration.
 
@@ -100,7 +100,7 @@ argument), `WEM_ERR_GEOMETRY_MISMATCH`, `WEM_ERR_INPUT_TOO_SHORT`,
 
 `test-node.mjs` pins byte-exactness: the representative 6ch/44.1kHz recording
 encoded through the wasm package must be byte-identical to the committed
-kernel golden `tests/fixtures/reference.wem` (SHA-256
+kernel reference `tests/fixtures/reference.wem` (SHA-256
 `17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247` — the
 test compares that file's bytes, so this digest documents the expected value
 rather than being restated by the test),

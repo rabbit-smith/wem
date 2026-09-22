@@ -25,7 +25,7 @@ js/pkg/.gitignore
 js/pkg-node/.gitignore
 
 # Unverified extraction/derived data (the analysis tool dumps, corpus candidates).
-# Nothing under corpus/ is a trusted golden asset until verified and moved.
+# Nothing under corpus/ is a trusted reference asset until verified and moved.
 corpus/
 
 # macOS Finder metadata (generated noise, never an intentional artifact).

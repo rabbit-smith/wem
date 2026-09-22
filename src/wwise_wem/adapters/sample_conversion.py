@@ -25,7 +25,7 @@ Conversion rules (per sample, all values two's-complement LE sources):
   ``* 32768.0``; round-to-nearest with ties away from zero; then
   saturate to ``[-32768, 32767]``.  ``1.0`` saturates to 32767 while
   ``-1.0`` maps exactly to -32768 (the signed-16 asymmetry).
-* int16 -> encoder float domain: ``value / 32768.0`` (the byte-contract
+* int16 -> encoder float domain: ``value / 32768.0`` (the byte-exact
   signed-16 normalization).
 
 Inputs arriving through these rules are in-domain for the encoder;

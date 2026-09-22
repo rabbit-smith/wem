@@ -1,6 +1,6 @@
 //! Quality pass-through (wem-core level): a quality factor bound to the
 //! profile is forwarded to the analysis assembly; with quality=None the
-//! historical golden bytes are unchanged.
+//! historical reference bytes are unchanged.
 
 use wem_core::encoder::Encoder;
 use wem_core::usecases::wav::read_pcm16;
@@ -39,10 +39,10 @@ fn quality_none_encode_bytes_match_the_reference_container() {
     let pcm = wav.to_pcm16().expect("wav converts to Pcm16");
     let encoded = encoder.encode_pcm(&pcm).expect("encode runs");
     // Byte equality against the committed reference is the whole claim:
-    // quality=None must reproduce the historical golden container exactly.
+    // quality=None must reproduce the historical reference container exactly.
     assert_eq!(
         encoded.data,
         read_fixture("reference.wem"),
-        "quality=None must reproduce the historical golden bytes exactly"
+        "quality=None must reproduce the historical reference bytes exactly"
     );
 }

@@ -1,4 +1,4 @@
-//! End-to-end golden parity test: the Rust kernel must reproduce the
+//! End-to-end reference parity test: the Rust kernel must reproduce the
 //! reference WEM byte-for-byte.
 //!
 //! Oracle: `tests/fixtures/reference.wem`, produced by the Python encoder
@@ -30,11 +30,11 @@ fn encode_fixture() -> (wem_core::EncodeResult, Encoder) {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Golden byte parity (file-level, Vec<u8> equality)
+// 1. Reference byte parity (file-level, Vec<u8> equality)
 // ---------------------------------------------------------------------------
 
 #[test]
-fn golden_encode_is_byte_identical_to_reference_wem() {
+fn encode_is_byte_identical_to_reference_wem() {
     let (result, _encoder) = encode_fixture();
     let reference = read_fixture("reference.wem");
     // The whole claim: the kernel's bytes are the reference container's bytes.
@@ -42,7 +42,7 @@ fn golden_encode_is_byte_identical_to_reference_wem() {
         result.data, reference,
         "rust WEM differs from reference.wem at file level"
     );
-    // Stats mirror the Python golden expectations.
+    // Stats mirror the Python reference expectations.
     let stats = &result.stats;
     assert_eq!(stats.pcm_frames, 139398);
     assert_eq!(stats.channels, 6);

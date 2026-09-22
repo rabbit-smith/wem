@@ -30,7 +30,7 @@ from scripts.generate_2ch_long_program import (
     SAMPLE_RATE,
     render_pcm16le,
 )
-from tests.contract.wem_byte_contract import assert_wem_equal
+from tests.parity.wem_byte_compare import assert_wem_equal
 from wwise_wem import WwiseProfile, WwiseVersion, _core
 from wwise_wem.profiles.registry import resolve_selection
 from wwise_wem.adapters.raw import read_raw_pcm
@@ -67,7 +67,7 @@ def _iter_chunks(payload: bytes, frame_pattern: tuple[int, ...]):
         offset = end
 
 
-class TwoChannelLongRunContract(unittest.TestCase):
+class TwoChannelLongRunTests(unittest.TestCase):
     def test_twenty_second_music_program_is_stable_across_all_engines(self) -> None:
         raw = render_pcm16le()
         self.assertEqual(

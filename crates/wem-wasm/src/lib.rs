@@ -1,8 +1,8 @@
 //! wem-wasm — the wasm-bindgen shell of the WEM encoder kernel.
 //!
-//! A **parallel language shell** over the same kernel contract as the C ABI
+//! A **parallel language shell** over the same kernel interface as the C ABI
 //! (`include/wem.h`), for browser and web-worker use (crates/AGENTS.md,
-//! "C ABI contract"): same lifecycle, same error classes, same bytes; this
+//! "C ABI surface"): same lifecycle, same error classes, same bytes; this
 //! shell owns no numerics and no profile logic.
 //!
 //! # Profile selection (ABI revision 2)
@@ -28,7 +28,7 @@
 //! a default, and an ambiguous auto-selection is rejected rather than
 //! resolved by table order.
 //!
-//! # Contract mapping (1:1 with include/wem.h)
+//! # Shell mapping (1:1 with include/wem.h)
 //!
 //! * **One-shot** (`wem_encoder_*` / `wem_encode_pcm16_interleaved`):
 //!   [`WemEncoder`] — the shareable encoder handle.
@@ -306,7 +306,7 @@ fn read_session(
 /// One resolved profile selection as a JS object
 /// (`{ versionCode, version, generation, channels, sampleRate, description }`).
 ///
-/// This is the whole caller-facing profile contract of ABI revision 2: how
+/// This is the whole caller-facing profile selection of ABI revision 2: how
 /// the kernel stores and addresses the configuration behind it (profile
 /// name, resource paths, digests) is internal and stays on the kernel side.
 fn selection_object(selection: &WwiseProfile) -> JsValue {
@@ -488,7 +488,7 @@ impl WemEncoder {
     ///
     /// The PCM carries no geometry of its own: it is read at the selection's
     /// sample rate and channel count, exactly like the C ABI entry whose
-    /// contract requires the client to pass matching PCM. Use
+    /// interface requires the client to pass matching PCM. Use
     /// [`WemEncoder::encode_wav`] for a WAV, whose own geometry the kernel
     /// then cross-checks (`WEM_ERR_GEOMETRY_MISMATCH`).
     pub fn encode_pcm16_interleaved(&self, pcm: &[u8]) -> Result<JsValue, JsValue> {
@@ -528,7 +528,7 @@ impl WemEncoder {
 // ---------------------------------------------------------------------------
 
 /// One streaming encode session (the wasm mirror of `wem_session_new`;
-/// single-threaded ownership, matching the C ABI contract), selected by one
+/// single-threaded ownership, matching the C ABI surface), selected by one
 /// structured profile selection against the compiled-in profile bundle.
 #[wasm_bindgen]
 pub struct WemSession {
@@ -595,7 +595,7 @@ impl WemSession {
 
 #[cfg(test)]
 mod tests {
-    //! The error table is part of the cross-language contract; pin it here
+    //! The error table is part of the cross-language interface; pin it here
     //! (the C ABI crate carries the same test over numeric discriminants),
     //! together with the selection mapping of `include/wem.h`
     //! ("PROFILE SELECTION").

@@ -118,7 +118,7 @@ pub fn shape_floor_envelope(
 
         // floor-envelope stage enters the regular path directly unless the
         // active state asks for the peak continuation and the previous curve
-        // fails its gate.
+        // fails that comparison.
         if state_active
             && target < floor_value
             && psycho_curve[index] < floor_value

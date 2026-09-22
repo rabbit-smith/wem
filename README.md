@@ -9,7 +9,7 @@ behavioural similarity.
 
 | Wwise | PCM | Channels | Rate | Blocks | Status |
 | --- | --- | ---: | ---: | ---: | --- |
-| 2013.2 | signed 16-bit | 6 (5.1) | 44100 Hz | 256/2048 | bit-exact: whole-file golden, per-frame and per-stage comparisons |
+| 2013.2 | signed 16-bit | 6 (5.1) | 44100 Hz | 256/2048 | bit-exact: whole-file, per-frame and per-stage comparisons |
 | 2013.2 | signed 16-bit | 2 | 48000 Hz | 256/2048 | bit-exact: paired input plus eight real-build corpus cases |
 
 The registry is keyed by `(channels, sample_rate)`; further layouts and rates are
@@ -101,5 +101,5 @@ stress corpora. The full list of test targets is in
   tree only, imported by the test suites to check the kernel byte for byte.
 - `src/wwise_wem/data/`: immutable profile bundles — setup, codebooks and
   calibration tables.
-- `tests/`: unit, integration, cross-implementation and golden suites plus their
+- `tests/`: unit, integration, cross-implementation and whole-file suites plus their
   data assets.

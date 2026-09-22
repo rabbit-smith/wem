@@ -70,12 +70,6 @@ jobs:
           CARGO_TERM_COLOR: always
       - name: full suite on the native kernel
         run: python -m unittest discover -s tests -v
-      # The per-stage comparison suite is not `test_*`-prefixed, so discovery
-      # above cannot reach it; run it explicitly, in one cell rather than the
-      # whole matrix (portability is covered by the full suite).
-      - name: per-stage hashes (frame x stage hashes + representative dumps)
-        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.13'
-        run: python -m unittest tests.contract.stage_pipeline_contract -v
       - name: native binding smoke (streaming + one-shot, byte-exact)
         run: python scripts/native_smoke.py
       - name: "wheel packaging (single wheel: facade + native; clean-venv encode)"
@@ -85,7 +79,7 @@ jobs:
         # venv and break (or silently weaken) the structure check.
         env:
           PYTHONPATH: ""
-      - name: differential parity (golden + 10 cases, < 1 minute)
+      - name: differential parity (reference + 10 cases, < 1 minute)
         run: python scripts/fuzz_diff_parity.py --pr
 
   rust:
@@ -111,7 +105,7 @@ jobs:
     # C ABI core surface (the single cross-language integration point):
     # proves byte-exactness end-to-end — the Rust FFI tests (capi_e2e)
     # plus the Go cgo binding and the plain C client, each streaming the
-    # fixture through the C ABI and rebuilding the golden WEM.
+    # fixture through the C ABI and rebuilding the reference WEM.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -132,13 +126,13 @@ jobs:
           # Byte comparison, not a digest: the committed reference WEM is the
           # recorded artifact, and `cmp` reports the first differing byte.
           if ! cmp -s tests/fixtures/reference.wem "${RUNNER_TEMP}/c-capi-out.wem"; then
-            echo "golden byte mismatch: the C client output differs from tests/fixtures/reference.wem"
+            echo "reference byte mismatch: the C client output differs from tests/fixtures/reference.wem"
             echo "  expected (tests/fixtures/reference.wem): $(wc -c < tests/fixtures/reference.wem) bytes, sha256 $(sha256sum tests/fixtures/reference.wem | awk '{print $1}')"
             echo "  actual   (C client output)             : $(wc -c < "${RUNNER_TEMP}/c-capi-out.wem") bytes, sha256 $(sha256sum "${RUNNER_TEMP}/c-capi-out.wem" | awk '{print $1}')"
             cmp tests/fixtures/reference.wem "${RUNNER_TEMP}/c-capi-out.wem" || true
             exit 1
           fi
-          echo "golden bytes OK: C client output == tests/fixtures/reference.wem"
+          echo "reference bytes OK: C client output == tests/fixtures/reference.wem"
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
@@ -151,11 +145,11 @@ jobs:
           go run . -wav ../../tests/fixtures/input.wav -out "${RUNNER_TEMP}/go-capi-out.wem"
           # Same byte comparison as the C step, against the same artifact.
           if ! cmp -s ../../tests/fixtures/reference.wem "${RUNNER_TEMP}/go-capi-out.wem"; then
-            echo "golden byte mismatch: the Go binding output differs from tests/fixtures/reference.wem"
+            echo "reference byte mismatch: the Go binding output differs from tests/fixtures/reference.wem"
             echo "  expected (tests/fixtures/reference.wem): $(wc -c < ../../tests/fixtures/reference.wem) bytes, sha256 $(sha256sum ../../tests/fixtures/reference.wem | awk '{print $1}')"
             echo "  actual   (Go binding output)           : $(wc -c < "${RUNNER_TEMP}/go-capi-out.wem") bytes, sha256 $(sha256sum "${RUNNER_TEMP}/go-capi-out.wem" | awk '{print $1}')"
             cmp ../../tests/fixtures/reference.wem "${RUNNER_TEMP}/go-capi-out.wem" || true
             exit 1
           fi
-          echo "golden bytes OK: Go binding output == tests/fixtures/reference.wem"
+          echo "reference bytes OK: Go binding output == tests/fixtures/reference.wem"
 
