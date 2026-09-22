@@ -56,16 +56,23 @@ fn wwise_psy_band_update(
         .max()
         .unwrap_or(0);
     if (mask.len() as i64) < required {
-        return Err(AnalysisError::PsyMaskShortForBands {
-            want: required,
-            got: mask.len() as i64,
-        });
+        return Err(AnalysisError::configuration(format!(
+            "psy mask short for bands (want={:?}, got={:?})",
+            required,
+            mask.len() as i64
+        )));
     }
     if history.band_rings.len() != 12 || history.band_cursors.len() != 12 {
-        return Err(AnalysisError::PsyBandStateRings { want: 12 });
+        return Err(AnalysisError::configuration(format!(
+            "psy band state rings (want={:?})",
+            12
+        )));
     }
     if config_row.len() < 26 {
-        return Err(AnalysisError::PsyConfigRowShort { want: 26 });
+        return Err(AnalysisError::configuration(format!(
+            "psy config row short (want={:?})",
+            26
+        )));
     }
     let half_window = history_window / 2;
     let window = 2.max(half_window);
@@ -122,16 +129,18 @@ pub fn wwise_psy_mask(
 ) -> Result<Vec<f64>, crate::config::AnalysisError> {
     use crate::config::AnalysisError;
     if history.energy_ring.len() != 15 {
-        return Err(AnalysisError::PsyEnergyRingSlots {
-            want: 15,
-            got: history.energy_ring.len(),
-        });
+        return Err(AnalysisError::configuration(format!(
+            "psy energy ring slots (want={:?}, got={:?})",
+            15,
+            history.energy_ring.len()
+        )));
     }
     if samples.len() as i64 != tables.n {
-        return Err(AnalysisError::TransientMaskSamples {
-            want: tables.n,
-            got: samples.len() as i64,
-        });
+        return Err(AnalysisError::input(format!(
+            "transient mask samples (want={:?}, got={:?})",
+            tables.n,
+            samples.len() as i64
+        )));
     }
     let bias = bias.unwrap_or(tables.bias as f64);
     let config_row_owned: Vec<f64> = tables.config.iter().map(|v| *v as f64).collect();
@@ -142,9 +151,10 @@ pub fn wwise_psy_mask(
 
     let spectrum = wwise_psy_mdct(samples, mdct_look, tables)?;
     if spectrum.len() < 4 || spectrum.len() & 1 != 0 {
-        return Err(AnalysisError::PsySpectrumBinsOdd {
-            bins: spectrum.len() as i64,
-        });
+        return Err(AnalysisError::geometry(format!(
+            "psy spectrum bins odd (bins={:?})",
+            spectrum.len() as i64
+        )));
     }
 
     let energy = f32_of(
@@ -227,19 +237,22 @@ impl TransientDetector {
     ) -> Result<Self, crate::config::AnalysisError> {
         use crate::config::AnalysisError;
         if channels <= 0 {
-            return Err(AnalysisError::DetectorChannelCountMismatch { want: channels });
+            return Err(AnalysisError::geometry(format!(
+                "detector channel count mismatch (want={:?})",
+                channels
+            )));
         }
         if bins != 128 {
-            return Err(AnalysisError::TransientMaskSamples {
-                want: 128,
-                got: bins,
-            });
+            return Err(AnalysisError::geometry(format!(
+                "transient detector bins (want={:?}, got={:?})",
+                128, bins
+            )));
         }
         if tables.n != bins || mdct_look.n != bins {
-            return Err(AnalysisError::TransientMdctGeometry {
-                look_n: mdct_look.n,
-                n: tables.n,
-            });
+            return Err(AnalysisError::geometry(format!(
+                "transient mdct geometry (look_n={:?}, n={:?})",
+                mdct_look.n, tables.n
+            )));
         }
         let mut detector = Self {
             channels,
@@ -267,15 +280,22 @@ impl TransientDetector {
     ) -> Result<i64, crate::config::AnalysisError> {
         use crate::config::AnalysisError;
         if pcm_by_channel.len() as i64 != self.channels {
-            return Err(AnalysisError::DetectorChannelCountMismatch {
-                want: self.channels,
-            });
+            return Err(AnalysisError::input(format!(
+                "detector expects {} PCM channels, got {}",
+                self.channels,
+                pcm_by_channel.len()
+            )));
         }
-        if pcm_by_channel
+        if let Some((channel, samples)) = pcm_by_channel
             .iter()
-            .any(|row| row.len() as i64 != self.bins)
+            .enumerate()
+            .find(|(_, row)| row.len() as i64 != self.bins)
         {
-            return Err(AnalysisError::DetectorQuantumSamplesMismatch { want: self.bins });
+            return Err(AnalysisError::input(format!(
+                "detector PCM channel {channel} has {} samples, expected {}",
+                samples.len(),
+                self.bins
+            )));
         }
         let mut flags = 0i64;
         for (samples, history) in pcm_by_channel.iter().zip(self.histories.iter_mut()) {

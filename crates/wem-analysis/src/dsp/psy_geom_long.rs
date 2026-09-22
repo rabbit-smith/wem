@@ -20,9 +20,10 @@ fn bank(mode: u32) -> Result<&'static [u32], AnalysisError> {
     match mode {
         2 => Ok(MASK_BANK_MODE_2),
         3 => Ok(MASK_BANK_MODE_3),
-        _ => Err(AnalysisError::UnsupportedGeometry {
-            reason: "long geometry mode must be 2 or 3",
-        }),
+        _ => Err(AnalysisError::geometry(format!(
+            "unsupported geometry (reason={:?})",
+            "long geometry mode must be 2 or 3"
+        ))),
     }
 }
 
@@ -31,9 +32,10 @@ fn axis(mode: u32) -> Result<(i64, i64), AnalysisError> {
         2 => SCALAR_AXIS_MODE2,
         3 => SCALAR_AXIS_MODE3,
         _ => {
-            return Err(AnalysisError::UnsupportedGeometry {
-                reason: "long geometry mode must be 2 or 3",
-            })
+            return Err(AnalysisError::geometry(format!(
+                "unsupported geometry (reason={:?})",
+                "long geometry mode must be 2 or 3"
+            )))
         }
     };
     Ok((lo as i64, hi as i64))

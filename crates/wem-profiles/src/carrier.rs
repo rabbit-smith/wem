@@ -120,9 +120,9 @@ impl CompiledProfile {
         let t97 = match find("t97") {
             Some(entry) => BookTable::from_generated(entry.name, entry.rows)?,
             None => {
-                return Err(ProfileError::UnknownBookTable {
-                    table: "t97".to_string(),
-                })
+                return Err(ProfileError::tables(
+                    "missing decoded codebook table \"t97\"",
+                ))
             }
         };
         let optional = |name: &str| -> Result<Option<BookTable>, ProfileError> {
@@ -241,7 +241,9 @@ impl CompiledProfile {
             .iter()
             .find(|entry| entry.mode == mode)
         else {
-            return Err(ProfileError::LongVariantModeInvalid { mode });
+            return Err(ProfileError::tables(format!(
+                "long analysis mode must be 2 or 3: {mode}"
+            )));
         };
         Ok(WwisePsyLongTables {
             sample_rate: base.sample_rate,
@@ -311,12 +313,13 @@ pub fn compiled_profile_for_selection(
         })
         .collect();
     if matches.is_empty() {
-        return Err(ProfileError::NoProfileForSelection {
-            version: selection.version().label().to_string(),
-            channels: selection.channels(),
-            sample_rate: selection.sample_rate(),
-            installed: describe_installed(),
-        });
+        return Err(ProfileError::selection(format!(
+            "no installed Wwise {} profile for {}ch/{}Hz; installed: {}",
+            selection.version().label(),
+            selection.channels(),
+            selection.sample_rate(),
+            describe_installed(),
+        )));
     }
     if matches.len() != 1 {
         let names = matches
@@ -331,12 +334,12 @@ pub fn compiled_profile_for_selection(
             })
             .collect::<Vec<_>>()
             .join(", ");
-        return Err(ProfileError::AmbiguousProfileSelection {
-            version: selection.version().label().to_string(),
-            channels: selection.channels(),
-            sample_rate: selection.sample_rate(),
-            names,
-        });
+        return Err(ProfileError::selection(format!(
+            "Wwise {} profile selection {}ch/{}Hz is ambiguous: {names}",
+            selection.version().label(),
+            selection.channels(),
+            selection.sample_rate(),
+        )));
     }
     CompiledProfile::new(matches[0])
 }

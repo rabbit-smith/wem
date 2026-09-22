@@ -56,14 +56,18 @@ impl ProfileKey {
         channel_layout: String,
     ) -> Result<Self, ProfileError> {
         if channels <= 0 || sample_rate <= 0 {
-            return Err(ProfileError::ProfileKeyNonPositive);
+            return Err(ProfileError::identity(
+                "profile channels and sample rate must be positive",
+            ));
         }
         for (field, value) in [
             ("generation", &generation),
             ("channel layout", &channel_layout),
         ] {
             if value.is_empty() {
-                return Err(ProfileError::ProfileKeyFieldEmpty { field });
+                return Err(ProfileError::identity(format!(
+                    "profile {field} must not be empty"
+                )));
             }
         }
 

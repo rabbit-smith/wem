@@ -41,24 +41,28 @@ fn fit_floor_posts(
         analysis.coupling_peak.len(),
     ];
     if let Some(got) = row_counts.into_iter().find(|count| *count != ch) {
-        return Err(PacketError::AnalysisChannelsMismatch { want: ch, got });
+        return Err(PacketError::Analysis {
+            message: format!(
+                "analysis channel count differs from packet mapping (want={ch}, got={got})"
+            ),
+        });
     }
     let mode = analysis.window().current() as u32;
     let mode_config = setup
         .modes
         .get(mode as usize)
-        .ok_or(PacketError::ModeOutOfRange {
-            mode,
-            modes: setup.nmodes,
+        .ok_or_else(|| PacketError::Structure {
+            message: format!("mode {mode} out of range 0..{}", setup.nmodes),
         })?;
-    let mapping =
-        setup
-            .maps
-            .get(mode_config.mapping as usize)
-            .ok_or(PacketError::MappingOutOfRange {
-                mapping: mode_config.mapping,
-                maps: setup.nmaps,
-            })?;
+    let mapping = setup
+        .maps
+        .get(mode_config.mapping as usize)
+        .ok_or_else(|| PacketError::Structure {
+            message: format!(
+                "mapping {} out of range 0..{}",
+                mode_config.mapping, setup.nmaps
+            ),
+        })?;
     let mut posts = Vec::with_capacity(ch);
     for (channel, (post_curve, raw_curve)) in analysis
         .post
@@ -70,9 +74,11 @@ fn fit_floor_posts(
             *mapping
                 .chmux
                 .get(channel)
-                .ok_or(PacketError::ChannelMuxTooShort {
-                    got: mapping.chmux.len(),
-                    want: ch,
+                .ok_or_else(|| PacketError::Structure {
+                    message: format!(
+                        "channel mux is too short (got={}, want={ch})",
+                        mapping.chmux.len()
+                    ),
                 })?
         } else {
             0
@@ -81,14 +87,20 @@ fn fit_floor_posts(
             *mapping
                 .floors
                 .get(submap as usize)
-                .ok_or(PacketError::FloorMapTooShort {
-                    got: mapping.floors.len(),
-                    want: mapping.submaps as usize,
+                .ok_or_else(|| PacketError::Structure {
+                    message: format!(
+                        "floor map is too short (got={}, want={})",
+                        mapping.floors.len(),
+                        mapping.submaps
+                    ),
                 })?;
-        let floor = setup
-            .floors
-            .get(floor_index as usize)
-            .ok_or(PacketError::FloorIndexOutOfRange { index: floor_index })?;
+        let floor =
+            setup
+                .floors
+                .get(floor_index as usize)
+                .ok_or_else(|| PacketError::Structure {
+                    message: format!("floor index {floor_index} out of range"),
+                })?;
         posts.push(
             floor1_fit_wwise_carriers(post_curve, raw_curve, floor, Some(raw_curve.len()))
                 .map_err(PacketError::FloorFit)?,

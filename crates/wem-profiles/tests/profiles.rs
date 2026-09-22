@@ -543,14 +543,14 @@ mod selection {
 
     #[test]
     fn an_unknown_version_code_is_rejected_not_defaulted() {
-        assert_eq!(
+        assert!(matches!(
             WwiseVersion::from_code(1).unwrap_err(),
-            ProfileError::UnknownWwiseVersion { code: 1 }
-        );
-        assert_eq!(
+            ProfileError::Selection { .. }
+        ));
+        assert!(matches!(
             WwiseVersion::from_code(u32::MAX).unwrap_err(),
-            ProfileError::UnknownWwiseVersion { code: u32::MAX }
-        );
+            ProfileError::Selection { .. }
+        ));
     }
 
     #[test]
@@ -573,7 +573,7 @@ mod selection {
         );
         assert!(matches!(
             WwiseVersion::from_generation("2012.1").unwrap_err(),
-            ProfileError::UnsupportedWwiseGeneration { .. }
+            ProfileError::Selection { .. }
         ));
         // A label that is neither spelling is rejected, never silently defaulted.
         assert!(WwiseVersion::parse("2014").is_err());
@@ -590,10 +590,10 @@ mod selection {
     #[test]
     fn selection_requires_positive_geometry() {
         for (channels, sample_rate) in [(0, 44_100), (6, 0), (-6, 44_100), (6, -44_100)] {
-            assert_eq!(
+            assert!(matches!(
                 WwiseProfile::new(WwiseVersion::Wwise2013, channels, sample_rate).unwrap_err(),
-                ProfileError::SelectionGeometryNonPositive
-            );
+                ProfileError::Selection { .. }
+            ));
         }
     }
 
@@ -722,7 +722,9 @@ mod selection {
         let selection =
             WwiseProfile::new(WwiseVersion::Wwise2013, 3, 44_100).expect("positive geometry");
         match compiled_profile_for_selection(selection).unwrap_err() {
-            ProfileError::NoProfileForSelection { channels, .. } => assert_eq!(channels, 3),
+            ProfileError::Selection { message } => {
+                assert!(message.contains("3ch/44100Hz"), "{message}")
+            }
             other => panic!("expected NoProfileForSelection, got {other:?}"),
         }
     }
@@ -735,14 +737,11 @@ mod selection {
             let selection = WwiseProfile::new(WwiseVersion::Wwise2013, channels, sample_rate)
                 .expect("selection");
             match wem_profiles::resolve_wem_profile_selection(selection).unwrap_err() {
-                ProfileError::NoProfileForSelection {
-                    channels: reported_channels,
-                    sample_rate: reported_rate,
-                    installed,
-                    ..
-                } => {
-                    assert_eq!(reported_channels, channels);
-                    assert_eq!(reported_rate, sample_rate);
+                ProfileError::Selection { message: installed } => {
+                    assert!(
+                        installed.contains(&format!("{channels}ch/{sample_rate}Hz")),
+                        "{installed}"
+                    );
                     // Both installed configurations are named, with generation.
                     assert!(installed.contains("6ch/44100Hz/2013.2"), "{installed}");
                     assert!(installed.contains("2ch/48000Hz/2013.2"), "{installed}");
@@ -790,7 +789,7 @@ mod selection {
             ProfileRegistry::new(vec![base, twin]).expect("distinct keys are not duplicates");
         assert_eq!(registry.len(), 2);
         match registry.resolve_selection(six_selection()).unwrap_err() {
-            ProfileError::AmbiguousProfileSelection { names, .. } => {
+            ProfileError::Selection { message: names } => {
                 // The derived label alone would print both candidates
                 // identically; the ambiguity diagnostic carries the full
                 // identity so the collision is readable.

@@ -26,26 +26,12 @@ use crate::setup::{ilog, SetupInfo};
 /// Audio packet assembly errors (Python: `ValueError` family).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PacketError {
-    /// `mode` index out of range.
-    ModeOutOfRange { mode: u32, modes: u64 },
-    /// `mapping` index out of range.
-    MappingOutOfRange { mapping: u64, maps: u64 },
-    /// floor index out of range.
-    FloorIndexOutOfRange { index: u64 },
-    /// residue index out of range.
-    ResidueIndexOutOfRange { index: u64 },
-    /// subclass book id not present in `books`.
-    SubclassBookIndexOutOfRange { book_id: i64 },
-    /// master book id not present in `books`.
-    MasterBookIndexOutOfRange { book_id: u64 },
-    /// master book id missing where required.
-    MasterBookMissing { class: u64 },
-    /// Y length disagrees with `2 + len(x_list)`.
-    BadYLength { got: usize, want: usize },
-    /// mdct rows shorter than the spectrum.
-    MdctTooShort { channels: usize, n_spectrum: usize },
-    /// mdct row count differs from channel count.
-    MdctRowCount { got: usize, want: usize },
+    /// Malformed or internally inconsistent packet structure.
+    Structure { message: String },
+    /// Invalid analysis-frame input or output.
+    Analysis { message: String },
+    /// Invalid channel-coupling state or arithmetic.
+    Coupling { message: String },
     /// codebook use failed.
     Codebook(crate::codebook::CodebookError),
     /// floor1 algorithm failed.
@@ -54,123 +40,43 @@ pub enum PacketError {
     FloorFit(FloorFitError),
     /// residue packing failed.
     Residue(ResidueError),
-    /// analysis channel count differs from packet mapping.
-    AnalysisChannelsMismatch { want: usize, got: usize },
-    /// Stereo coupling peak rows do not match the MDCT geometry.
-    CouplingPeakGeometry,
-    /// Channel mux row is shorter than the declared channel count.
-    ChannelMuxTooShort { got: usize, want: usize },
-    /// Floor map is shorter than the declared submap count.
-    FloorMapTooShort { got: usize, want: usize },
-    /// Mapping declares no residue submap.
-    MissingResidueSubmap,
-    /// Floor multiplier has no range table entry.
-    FloorMultiplierOutOfRange { multiplier: u64 },
-    /// Floor class arrays do not contain the referenced class.
-    FloorClassOutOfRange { class: usize },
-    /// Mapping coupling references a missing channel.
-    CouplingChannelOutOfRange { channel: usize, channels: usize },
-    /// Coupled residue rows have different lengths.
-    CouplingRowLengthMismatch,
-    /// A coupling step references the same channel twice.
-    CouplingChannelsEqual { channel: usize },
-    /// Analysis produced a non-finite sample at the packet boundary.
-    NonFiniteAnalysisSample { channel: usize, bin: usize },
-    /// Integer-domain stereo coupling exceeded its representable range.
-    ResidueCouplingOverflow,
 }
 
 impl std::fmt::Display for PacketError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PacketError::ModeOutOfRange { mode, modes } => {
-                write!(f, "mode {mode} out of range 0..{modes}")
-            }
-            PacketError::MappingOutOfRange { mapping, maps } => {
-                write!(f, "mapping {mapping} out of range 0..{maps}")
-            }
-            PacketError::FloorIndexOutOfRange { index } => {
-                write!(f, "floor index {index} out of range")
-            }
-            PacketError::ResidueIndexOutOfRange { index } => {
-                write!(f, "residue index {index} out of range")
-            }
-            PacketError::SubclassBookIndexOutOfRange { book_id } => {
-                write!(f, "subclass book id {book_id} out of range")
-            }
-            PacketError::MasterBookIndexOutOfRange { book_id } => {
-                write!(f, "master book id {book_id} out of range")
-            }
-            PacketError::MasterBookMissing { class } => {
-                write!(f, "class {class} requires a master book")
-            }
-            PacketError::BadYLength { got, want } => {
-                write!(f, "Y len {got} != {want}")
-            }
-            PacketError::MdctTooShort {
-                channels,
-                n_spectrum,
-            } => {
-                write!(f, "mdct row {channels} shorter than {n_spectrum}")
-            }
-            PacketError::MdctRowCount { got, want } => {
-                write!(f, "mdct rows {got} != channels {want}")
-            }
+            PacketError::Structure { message }
+            | PacketError::Analysis { message }
+            | PacketError::Coupling { message } => f.write_str(message),
             PacketError::Codebook(e) => write!(f, "codebook: {e}"),
             PacketError::Floor1(e) => write!(f, "floor1: {e}"),
             PacketError::FloorFit(e) => write!(f, "floor fit: {e}"),
             PacketError::Residue(e) => write!(f, "residue: {e}"),
-            PacketError::AnalysisChannelsMismatch { want, got } => {
-                write!(
-                    f,
-                    "analysis channel count differs from packet mapping ({got} != {want})"
-                )
-            }
-            PacketError::CouplingPeakGeometry => {
-                write!(f, "stereo coupling peak rows differ from MDCT geometry")
-            }
-            PacketError::ChannelMuxTooShort { got, want } => {
-                write!(f, "channel mux row has {got} entries, expected {want}")
-            }
-            PacketError::FloorMapTooShort { got, want } => {
-                write!(f, "floor map has {got} entries, expected {want}")
-            }
-            PacketError::MissingResidueSubmap => write!(f, "mapping has no residue submap"),
-            PacketError::FloorMultiplierOutOfRange { multiplier } => {
-                write!(f, "floor multiplier {multiplier} has no range table")
-            }
-            PacketError::FloorClassOutOfRange { class } => {
-                write!(f, "floor class {class} is structurally incomplete")
-            }
-            PacketError::CouplingChannelOutOfRange { channel, channels } => {
-                write!(f, "coupling channel {channel} out of range 0..{channels}")
-            }
-            PacketError::CouplingRowLengthMismatch => {
-                write!(f, "coupled residue rows have different lengths")
-            }
-            PacketError::CouplingChannelsEqual { channel } => {
-                write!(f, "coupling step references channel {channel} twice")
-            }
-            PacketError::NonFiniteAnalysisSample { channel, bin } => {
-                write!(
-                    f,
-                    "analysis sample at channel {channel}, bin {bin} is not finite"
-                )
-            }
-            PacketError::ResidueCouplingOverflow => {
-                write!(f, "integer stereo coupling exceeded the residue range")
-            }
         }
     }
 }
 
-impl std::error::Error for PacketError {}
+impl std::error::Error for PacketError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            PacketError::Codebook(error) => Some(error),
+            PacketError::Floor1(error) => Some(error),
+            PacketError::FloorFit(error) => Some(error),
+            PacketError::Residue(error) => Some(error),
+            PacketError::Structure { .. }
+            | PacketError::Analysis { .. }
+            | PacketError::Coupling { .. } => None,
+        }
+    }
+}
 
 /// Map residual value to a used codebook entry (dim-1 maptype0:
 /// entry≈value) (Python `_nearest_used_entry`).
 fn nearest_used_entry(book: &Codebook, value: i64) -> Result<i64, PacketError> {
     book.nearest_used_entry(value)
-        .ok_or(PacketError::SubclassBookIndexOutOfRange { book_id: value })
+        .ok_or_else(|| PacketError::Structure {
+            message: format!("subclass book id {value} out of range"),
+        })
 }
 
 /// Choose masterbook cval so each dim's subclass book can represent Y
@@ -185,19 +91,27 @@ fn pick_subclass_cval(
     let cbits = *floor
         .class_subs
         .get(class)
-        .ok_or(PacketError::FloorClassOutOfRange { class })?;
+        .ok_or_else(|| PacketError::Structure {
+            message: format!("floor class {class} is structurally incomplete"),
+        })?;
     let cdim = *floor
         .class_dims
         .get(class)
-        .ok_or(PacketError::FloorClassOutOfRange { class })?;
+        .ok_or_else(|| PacketError::Structure {
+            message: format!("floor class {class} is structurally incomplete"),
+        })?;
     let csub = 1u64
         .checked_shl(cbits as u32)
-        .ok_or(PacketError::FloorClassOutOfRange { class })?
+        .ok_or_else(|| PacketError::Structure {
+            message: format!("floor class {class} is structurally incomplete"),
+        })?
         - 1;
     let sbooks = floor
         .subclass_books
         .get(class)
-        .ok_or(PacketError::FloorClassOutOfRange { class })?;
+        .ok_or_else(|| PacketError::Structure {
+            message: format!("floor class {class} is structurally incomplete"),
+        })?;
     if cbits == 0 {
         return Ok(0);
     }
@@ -214,14 +128,18 @@ fn pick_subclass_cval(
         let mut score = 0i64;
         let mut ok = true;
         for j in 0..cdim {
-            let book_id = *sbooks
-                .get((t & csub) as usize)
-                .ok_or(PacketError::FloorClassOutOfRange { class })?;
+            let book_id =
+                *sbooks
+                    .get((t & csub) as usize)
+                    .ok_or_else(|| PacketError::Structure {
+                        message: format!("floor class {class} is structurally incomplete"),
+                    })?;
             t >>= cbits;
-            let y = *y_slice.get(j as usize).ok_or(PacketError::BadYLength {
-                got: y_slice.len(),
-                want: cdim as usize,
-            })?;
+            let y = *y_slice
+                .get(j as usize)
+                .ok_or_else(|| PacketError::Structure {
+                    message: format!("Y len {} != {}", y_slice.len(), cdim as usize),
+                })?;
             if book_id < 0 {
                 if y != 0 {
                     ok = false;
@@ -231,7 +149,9 @@ fn pick_subclass_cval(
             } else {
                 let b = books
                     .get(book_id as usize)
-                    .ok_or(PacketError::SubclassBookIndexOutOfRange { book_id })?;
+                    .ok_or_else(|| PacketError::Structure {
+                        message: format!("subclass book id {book_id} out of range"),
+                    })?;
                 if b.entry_is_used(y) {
                     score += 2;
                 } else if b.has_used_within_two(y) {
@@ -263,17 +183,15 @@ pub fn pack_audio_header(
 ) -> Result<(), PacketError> {
     let nmodes = setup.nmodes;
     if mode as u64 >= nmodes || setup.modes.get(mode as usize).is_none() {
-        return Err(PacketError::ModeOutOfRange {
-            mode,
-            modes: nmodes,
+        return Err(PacketError::Structure {
+            message: format!("mode {mode} out of range 0..{nmodes}"),
         });
     }
     let mode_bits = if nmodes > 1 { ilog(nmodes - 1) } else { 0 };
     if mode_bits != 0 {
         op.write(mode as u64, mode_bits)
-            .map_err(|_| PacketError::ModeOutOfRange {
-                mode,
-                modes: nmodes,
+            .map_err(|_| PacketError::Structure {
+                message: format!("mode {mode} out of range 0..{nmodes}"),
             })?;
     }
     Ok(())
@@ -296,18 +214,19 @@ pub fn pack_floor1_body(
     let floor = setup
         .floors
         .get(floor_index as usize)
-        .ok_or(PacketError::FloorIndexOutOfRange { index: floor_index })?;
-    let rng = *FLOOR1_RANGES.get(floor.multiplier as usize).ok_or(
-        PacketError::FloorMultiplierOutOfRange {
-            multiplier: floor.multiplier,
-        },
-    )?;
+        .ok_or_else(|| PacketError::Structure {
+            message: format!("floor index {floor_index} out of range"),
+        })?;
+    let rng = *FLOOR1_RANGES
+        .get(floor.multiplier as usize)
+        .ok_or_else(|| PacketError::Structure {
+            message: format!("floor multiplier {} has no range table", floor.multiplier),
+        })?;
     let ybits = ilog(rng - 1);
     let nvals = 2 + floor.x_list.len();
     if Y.len() != nvals {
-        return Err(PacketError::BadYLength {
-            got: Y.len(),
-            want: nvals,
+        return Err(PacketError::Structure {
+            message: format!("Y len {} != {nvals}", Y.len()),
         });
     }
     // endpoints are absolute quant values in [0, range)
@@ -316,14 +235,12 @@ pub fn pack_floor1_body(
         c as u64
     };
     op.write(clamped(Y[0]), ybits)
-        .map_err(|_| PacketError::BadYLength {
-            got: Y.len(),
-            want: nvals,
+        .map_err(|_| PacketError::Structure {
+            message: format!("Y len {} != {nvals}", Y.len()),
         })?;
     op.write(clamped(Y[1]), ybits)
-        .map_err(|_| PacketError::BadYLength {
-            got: Y.len(),
-            want: nvals,
+        .map_err(|_| PacketError::Structure {
+            message: format!("Y len {} != {nvals}", Y.len()),
         })?;
     let mut ppos = 2usize;
     for &p in &floor.partition_classes {
@@ -331,20 +248,25 @@ pub fn pack_floor1_body(
         let cdim = *floor
             .class_dims
             .get(cl)
-            .ok_or(PacketError::FloorClassOutOfRange { class: cl })?;
+            .ok_or_else(|| PacketError::Structure {
+                message: format!("floor class {cl} is structurally incomplete"),
+            })?;
         let cbits = *floor
             .class_subs
             .get(cl)
-            .ok_or(PacketError::FloorClassOutOfRange { class: cl })?;
+            .ok_or_else(|| PacketError::Structure {
+                message: format!("floor class {cl} is structurally incomplete"),
+            })?;
         let csub = 1u64
             .checked_shl(cbits as u32)
-            .ok_or(PacketError::FloorClassOutOfRange { class: cl })?
+            .ok_or_else(|| PacketError::Structure {
+                message: format!("floor class {cl} is structurally incomplete"),
+            })?
             - 1;
         let y_slice = Y
             .get(ppos..ppos + cdim as usize)
-            .ok_or(PacketError::BadYLength {
-                got: Y.len(),
-                want: ppos + cdim as usize,
+            .ok_or_else(|| PacketError::Structure {
+                message: format!("Y len {} != {}", Y.len(), ppos + cdim as usize),
             })?;
         let mut cval;
         if cbits != 0 {
@@ -352,16 +274,21 @@ pub fn pack_floor1_body(
             let mb = floor
                 .class_masterbooks
                 .get(cl)
-                .ok_or(PacketError::FloorClassOutOfRange { class: cl })?
-                .ok_or(PacketError::MasterBookMissing { class: cl as u64 })?
-                as usize;
-            let master = books
-                .get(mb)
-                .ok_or(PacketError::MasterBookIndexOutOfRange { book_id: mb as u64 })?;
+                .ok_or_else(|| PacketError::Structure {
+                    message: format!("floor class {cl} is structurally incomplete"),
+                })?
+                .ok_or_else(|| PacketError::Structure {
+                    message: format!("class {} requires a master book", cl as u64),
+                })? as usize;
+            let master = books.get(mb).ok_or_else(|| PacketError::Structure {
+                message: format!("master book id {} out of range", mb as u64),
+            })?;
             let entry = nearest_used_entry(master, cval as i64)?;
             master
                 .encode(op, entry)
-                .map_err(|_| PacketError::MasterBookIndexOutOfRange { book_id: cval })?;
+                .map_err(|_| PacketError::Structure {
+                    message: format!("master book id {cval} out of range"),
+                })?;
         } else {
             cval = 0;
         }
@@ -370,15 +297,20 @@ pub fn pack_floor1_body(
                 .subclass_books
                 .get(cl)
                 .and_then(|row| row.get((cval & csub) as usize))
-                .ok_or(PacketError::FloorClassOutOfRange { class: cl })?;
+                .ok_or_else(|| PacketError::Structure {
+                    message: format!("floor class {cl} is structurally incomplete"),
+                })?;
             cval >>= cbits;
             if book_id >= 0 {
                 let book = books
                     .get(book_id as usize)
-                    .ok_or(PacketError::SubclassBookIndexOutOfRange { book_id })?;
+                    .ok_or_else(|| PacketError::Structure {
+                        message: format!("subclass book id {book_id} out of range"),
+                    })?;
                 let entry = nearest_used_entry(book, y_slice[j as usize])?;
-                book.encode(op, entry)
-                    .map_err(|_| PacketError::SubclassBookIndexOutOfRange { book_id })?;
+                book.encode(op, entry).map_err(|_| PacketError::Structure {
+                    message: format!("subclass book id {book_id} out of range"),
+                })?;
             }
             // book_id < 0 ⇒ residual forced 0 (no bits)
             ppos += 1;
@@ -399,27 +331,33 @@ fn coupling_pair<'a>(
     let mag = usize::try_from(step.mag)
         .ok()
         .filter(|&channel| channel < channels)
-        .ok_or(PacketError::CouplingChannelOutOfRange {
-            channel: if step.mag > usize::MAX as u64 {
-                usize::MAX
-            } else {
-                step.mag as usize
-            },
-            channels,
+        .ok_or_else(|| PacketError::Coupling {
+            message: format!(
+                "coupling channel {} out of range 0..{channels}",
+                if step.mag > usize::MAX as u64 {
+                    usize::MAX
+                } else {
+                    step.mag as usize
+                }
+            ),
         })?;
     let ang = usize::try_from(step.ang)
         .ok()
         .filter(|&channel| channel < channels)
-        .ok_or(PacketError::CouplingChannelOutOfRange {
-            channel: if step.ang > usize::MAX as u64 {
-                usize::MAX
-            } else {
-                step.ang as usize
-            },
-            channels,
+        .ok_or_else(|| PacketError::Coupling {
+            message: format!(
+                "coupling channel {} out of range 0..{channels}",
+                if step.ang > usize::MAX as u64 {
+                    usize::MAX
+                } else {
+                    step.ang as usize
+                }
+            ),
         })?;
     if mag == ang {
-        return Err(PacketError::CouplingChannelsEqual { channel: mag });
+        return Err(PacketError::Coupling {
+            message: format!("coupling step references channel {mag} twice"),
+        });
     }
     let (mag_row, ang_row) = if mag < ang {
         let (before_ang, from_ang) = rows.split_at_mut(ang);
@@ -452,7 +390,9 @@ fn apply_mapping_coupling(
     for step in coupling {
         let (mag_row, ang_row) = coupling_pair(residuals, step)?;
         if mag_row.len() != ang_row.len() {
-            return Err(PacketError::CouplingRowLengthMismatch);
+            return Err(PacketError::Coupling {
+                message: "coupled residue rows have different lengths".into(),
+            });
         }
         for (magnitude, angle) in mag_row.iter_mut().zip(ang_row.iter_mut()) {
             let m_value = *magnitude;
@@ -522,7 +462,9 @@ pub fn apply_mapping_coupling_inverse(
     for step in coupling.iter().rev() {
         let (mag_row, ang_row) = coupling_pair(rows, step)?;
         if mag_row.len() != ang_row.len() {
-            return Err(PacketError::CouplingRowLengthMismatch);
+            return Err(PacketError::Coupling {
+                message: "coupled residue rows have different lengths".into(),
+            });
         }
         for (magnitude, angle) in mag_row.iter_mut().zip(ang_row.iter_mut()) {
             let (mag, ang) = decode_branches(*magnitude, *angle);
@@ -550,7 +492,9 @@ pub fn apply_mid_side_coupling_inverse(
     for step in coupling {
         let (mag_row, ang_row) = coupling_pair(rows, step)?;
         if mag_row.len() != ang_row.len() {
-            return Err(PacketError::CouplingRowLengthMismatch);
+            return Err(PacketError::Coupling {
+                message: "coupled residue rows have different lengths".into(),
+            });
         }
         for (magnitude, angle) in mag_row.iter_mut().zip(ang_row.iter_mut()) {
             let mid = *magnitude;
@@ -571,15 +515,13 @@ fn propagate_mapping_nonzero(
         let mag = step.mag as usize;
         let ang = step.ang as usize;
         if mag >= ch_used.len() {
-            return Err(PacketError::CouplingChannelOutOfRange {
-                channel: mag,
-                channels: ch_used.len(),
+            return Err(PacketError::Coupling {
+                message: format!("coupling channel {mag} out of range 0..{}", ch_used.len()),
             });
         }
         if ang >= ch_used.len() {
-            return Err(PacketError::CouplingChannelOutOfRange {
-                channel: ang,
-                channels: ch_used.len(),
+            return Err(PacketError::Coupling {
+                message: format!("coupling channel {ang} out of range 0..{}", ch_used.len()),
             });
         }
         if ch_used[mag] || ch_used[ang] {
@@ -637,17 +579,21 @@ fn lossless_couple_i64(first: i64, second: i64) -> Result<(i64, i64), PacketErro
             },
         )
     };
-    let mut angle = angle.ok_or(PacketError::ResidueCouplingOverflow)?;
+    let mut angle = angle.ok_or_else(|| PacketError::Coupling {
+        message: "integer stereo coupling exceeded the residue range".into(),
+    })?;
     let threshold = magnitude
         .checked_abs()
         .and_then(|value| value.checked_mul(2));
     if threshold.is_some_and(|limit| angle >= limit) {
-        angle = angle
-            .checked_neg()
-            .ok_or(PacketError::ResidueCouplingOverflow)?;
+        angle = angle.checked_neg().ok_or_else(|| PacketError::Coupling {
+            message: "integer stereo coupling exceeded the residue range".into(),
+        })?;
         magnitude = magnitude
             .checked_neg()
-            .ok_or(PacketError::ResidueCouplingOverflow)?;
+            .ok_or_else(|| PacketError::Coupling {
+                message: "integer stereo coupling exceeded the residue range".into(),
+            })?;
     }
     Ok((magnitude, angle))
 }
@@ -681,14 +627,18 @@ fn aotuv_stereo_residue<S: F32Sample>(
 ) -> Result<Vec<Vec<i64>>, PacketError> {
     if mdct.len() != 2 || floor_indices.len() != 2 || coupling_peak.len() != 2 || ch_used.len() != 2
     {
-        return Err(PacketError::CouplingPeakGeometry);
+        return Err(PacketError::Coupling {
+            message: "stereo coupling peak rows differ from MDCT geometry".into(),
+        });
     }
     let n = mdct[0].len();
     if mdct.iter().any(|row| row.len() < n)
         || floor_indices.iter().any(|row| row.len() < n)
         || coupling_peak.iter().any(|row| row.len() < n)
     {
-        return Err(PacketError::CouplingPeakGeometry);
+        return Err(PacketError::Coupling {
+            message: "stereo coupling peak rows differ from MDCT geometry".into(),
+        });
     }
     let partition = if n == 128 { 8 } else { 32 };
     let point_limit = n / 3;
@@ -757,9 +707,10 @@ fn aotuv_stereo_residue<S: F32Sample>(
                     || !normalized.is_finite()
                     || !energy.is_finite()
                 {
-                    return Err(PacketError::NonFiniteAnalysisSample {
-                        channel,
-                        bin: index,
+                    return Err(PacketError::Analysis {
+                        message: format!(
+                            "analysis sample at channel {channel}, bin {index} is not finite"
+                        ),
                     });
                 }
                 residue[channel][local] = normalized;
@@ -837,7 +788,9 @@ fn aotuv_stereo_residue<S: F32Sample>(
             if flags[0][local] == 1 || flags[1][local] == 1 {
                 let coupled_float = lossless_couple_f32(residue[0][local], residue[1][local]);
                 if !coupled_float.0.is_finite() || !coupled_float.1.is_finite() {
-                    return Err(PacketError::ResidueCouplingOverflow);
+                    return Err(PacketError::Coupling {
+                        message: "integer stereo coupling exceeded the residue range".into(),
+                    });
                 }
                 (residue[0][local], residue[1][local]) = coupled_float;
                 (output[0][index], output[1][index]) =
@@ -914,29 +867,25 @@ fn pack_block_packet_impl<S: F32Sample>(
     let md = setup
         .modes
         .get(mode as usize)
-        .ok_or(PacketError::ModeOutOfRange {
-            mode,
-            modes: setup.nmodes,
+        .ok_or_else(|| PacketError::Structure {
+            message: format!("mode {mode} out of range 0..{}", setup.nmodes),
         })?;
     let mapping = setup
         .maps
         .get(md.mapping as usize)
-        .ok_or(PacketError::MappingOutOfRange {
-            mapping: md.mapping,
-            maps: setup.nmaps,
+        .ok_or_else(|| PacketError::Structure {
+            message: format!("mapping {} out of range 0..{}", md.mapping, setup.nmaps),
         })?;
     if mdct.len() != channels as usize {
-        return Err(PacketError::MdctRowCount {
-            got: mdct.len(),
-            want: channels as usize,
+        return Err(PacketError::Analysis {
+            message: format!("mdct rows {} != channels {channels}", mdct.len()),
         });
     }
     let n_spectrum = mdct.first().map_or(0, Vec::len);
     for (ch, row) in mdct.iter().enumerate() {
         if row.len() < n_spectrum {
-            return Err(PacketError::MdctTooShort {
-                channels: ch,
-                n_spectrum,
+            return Err(PacketError::Analysis {
+                message: format!("mdct row {ch} shorter than {n_spectrum}"),
             });
         }
     }
@@ -962,9 +911,11 @@ fn pack_block_packet_impl<S: F32Sample>(
             *mapping
                 .chmux
                 .get(ch as usize)
-                .ok_or(PacketError::ChannelMuxTooShort {
-                    got: mapping.chmux.len(),
-                    want: channels as usize,
+                .ok_or_else(|| PacketError::Structure {
+                    message: format!(
+                        "channel mux row has {} entries, expected {channels}",
+                        mapping.chmux.len()
+                    ),
                 })?
         } else {
             0
@@ -973,20 +924,25 @@ fn pack_block_packet_impl<S: F32Sample>(
             *mapping
                 .floors
                 .get(sub as usize)
-                .ok_or(PacketError::FloorMapTooShort {
-                    got: mapping.floors.len(),
-                    want: mapping.submaps as usize,
+                .ok_or_else(|| PacketError::Structure {
+                    message: format!(
+                        "floor map has {} entries, expected {}",
+                        mapping.floors.len(),
+                        mapping.submaps
+                    ),
                 })?;
-        let floor = setup
-            .floors
-            .get(floor_index as usize)
-            .ok_or(PacketError::FloorIndexOutOfRange { index: floor_index })?;
+        let floor =
+            setup
+                .floors
+                .get(floor_index as usize)
+                .ok_or_else(|| PacketError::Structure {
+                    message: format!("floor index {floor_index} out of range"),
+                })?;
         let posts = absolute_posts.get(ch as usize).and_then(|p| p.as_ref());
         match posts {
             None => {
-                op.write(0, 1).map_err(|_| PacketError::ModeOutOfRange {
-                    mode,
-                    modes: setup.nmodes,
+                op.write(0, 1).map_err(|_| PacketError::Structure {
+                    message: format!("mode {mode} out of range 0..{}", setup.nmodes),
                 })?;
                 ch_used.push(false);
                 if stereo_peak.is_some() {
@@ -996,16 +952,18 @@ fn pack_block_packet_impl<S: F32Sample>(
                 }
             }
             Some(posts) => {
-                op.write(1, 1).map_err(|_| PacketError::ModeOutOfRange {
-                    mode,
-                    modes: setup.nmodes,
+                op.write(1, 1).map_err(|_| PacketError::Structure {
+                    message: format!("mode {mode} out of range 0..{}", setup.nmodes),
                 })?;
                 let pl = postlist_from_floor(floor);
-                let rng = *FLOOR1_RANGES.get(floor.multiplier as usize).ok_or(
-                    PacketError::FloorMultiplierOutOfRange {
-                        multiplier: floor.multiplier,
-                    },
-                )?;
+                let rng = *FLOOR1_RANGES
+                    .get(floor.multiplier as usize)
+                    .ok_or_else(|| PacketError::Structure {
+                        message: format!(
+                            "floor multiplier {} has no range table",
+                            floor.multiplier
+                        ),
+                    })?;
                 let packet_posts = if posts_are_10bit {
                     floor1_quantize_posts(posts, floor.multiplier).map_err(PacketError::Floor1)?
                 } else {
@@ -1046,11 +1004,15 @@ fn pack_block_packet_impl<S: F32Sample>(
         let res_index = *mapping
             .residues
             .first()
-            .ok_or(PacketError::MissingResidueSubmap)?;
+            .ok_or_else(|| PacketError::Structure {
+                message: "mapping has no residue submap".into(),
+            })?;
         let res = setup
             .residues
             .get(res_index as usize)
-            .ok_or(PacketError::ResidueIndexOutOfRange { index: res_index })?;
+            .ok_or_else(|| PacketError::Structure {
+                message: format!("residue index {res_index} out of range"),
+            })?;
         // Coupled streams (mapping0 coupling_steps > 0) store the (mag, ang)
         // pair in the residue domain, not raw per-channel coefficients:
         // apply the exact inverse of the decoder's 4-branch coupling
@@ -1341,23 +1303,32 @@ mod coupling_round_trip {
             .expect_err("missing channel must be rejected");
         assert_eq!(
             err,
-            PacketError::CouplingChannelOutOfRange {
-                channel: 2,
-                channels: 2
+            PacketError::Coupling {
+                message: "coupling channel 2 out of range 0..2".into(),
             }
         );
 
         // A step that names one channel twice.
         let err = apply_mapping_coupling_inverse(&mut rows, &[CouplingStep { mag: 1, ang: 1 }])
             .expect_err("a step cannot couple a channel to itself");
-        assert_eq!(err, PacketError::CouplingChannelsEqual { channel: 1 });
+        assert_eq!(
+            err,
+            PacketError::Coupling {
+                message: "coupling step references channel 1 twice".into(),
+            }
+        );
 
         // Rows of different lengths cannot be coupled coefficient by
         // coefficient.
         let mut ragged = vec![vec![1.0, 2.0], vec![3.0]];
         let err = apply_mid_side_coupling_inverse(&mut ragged, &[CouplingStep { mag: 0, ang: 1 }])
             .expect_err("ragged rows must be rejected");
-        assert_eq!(err, PacketError::CouplingRowLengthMismatch);
+        assert_eq!(
+            err,
+            PacketError::Coupling {
+                message: "coupled residue rows have different lengths".into(),
+            }
+        );
     }
 
     /// The script's generic path carries a second, different inverse
@@ -1375,7 +1346,9 @@ mod coupling_round_trip {
     fn coupling_rejects_unrepresentable_integer_result() {
         assert_eq!(
             lossless_couple_i64(i64::MAX, i64::MIN),
-            Err(PacketError::ResidueCouplingOverflow)
+            Err(PacketError::Coupling {
+                message: "integer stereo coupling exceeded the residue range".into(),
+            })
         );
     }
 
@@ -1390,7 +1363,9 @@ mod coupling_round_trip {
             .expect_err("non-finite MDCT must be rejected");
         assert_eq!(
             err,
-            PacketError::NonFiniteAnalysisSample { channel: 0, bin: 0 }
+            PacketError::Analysis {
+                message: "analysis sample at channel 0, bin 0 is not finite".into(),
+            }
         );
     }
 }

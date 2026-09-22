@@ -22,18 +22,20 @@ const WWISE_SHORT_WINDOW_ENDPOINT_F32: f32 = f32::from_bits(0x050c_7838);
 /// Wwise binary has no static bank for (non-profile fallback path).
 pub fn make_mdct_look(n: i64, static_trig: Option<&[f32]>) -> Result<MdctLook, AnalysisError> {
     if n < 64 || (n & (n - 1)) != 0 {
-        return Err(AnalysisError::MalformedField {
-            reason: "MDCT size must be a power of two >= 64",
-        });
+        return Err(AnalysisError::invariant(format!(
+            "malformed field (reason={:?})",
+            "MDCT size must be a power of two >= 64"
+        )));
     }
     let log2n = n.trailing_zeros() as i64;
 
     let trig: Vec<f32> = match static_trig {
         Some(values) => {
             if values.len() as i64 != n + n / 4 {
-                return Err(AnalysisError::MalformedField {
-                    reason: "static MDCT trig bank has the wrong length",
-                });
+                return Err(AnalysisError::invariant(format!(
+                    "malformed field (reason={:?})",
+                    "static MDCT trig bank has the wrong length"
+                )));
             }
             values.to_vec()
         }
@@ -316,10 +318,11 @@ fn mdct_bitreverse(look: &MdctLook, x: &mut [f64]) {
 pub fn mdct_forward(look: &MdctLook, samples: &[f64]) -> Result<Vec<f64>, AnalysisError> {
     let n = look.n as usize;
     if samples.len() < n {
-        return Err(AnalysisError::SamplesShort {
-            need: look.n,
-            got: samples.len() as i64,
-        });
+        return Err(AnalysisError::input(format!(
+            "samples short (need={:?}, got={:?})",
+            look.n,
+            samples.len() as i64
+        )));
     }
     let n2 = n >> 1;
     let n4 = n >> 2;
@@ -414,10 +417,11 @@ pub fn mdct_backward(look: &MdctLook, spectrum: &[f64]) -> Result<Vec<f64>, Anal
     let n = look.n as usize;
     let n2 = n >> 1;
     if spectrum.len() < n2 {
-        return Err(AnalysisError::SamplesShort {
-            need: n2 as i64,
-            got: spectrum.len() as i64,
-        });
+        return Err(AnalysisError::input(format!(
+            "samples short (need={:?}, got={:?})",
+            n2 as i64,
+            spectrum.len() as i64
+        )));
     }
     let n4 = n >> 2;
     let mut out = vec![0.0f64; n];
@@ -647,13 +651,13 @@ impl SynthesisOla {
     /// (mode 0 = short, 1 = long).
     pub fn new(blocksizes: &[i64]) -> Result<Self, AnalysisError> {
         if blocksizes.len() != 2 || blocksizes.iter().any(|size| *size < 2 || *size & 1 != 0) {
-            return Err(AnalysisError::WindowBlockSizeInvalid);
+            return Err(AnalysisError::geometry("window block size invalid"));
         }
         if blocksizes[0] >= blocksizes[1] {
             // The pair is `[short, long]` — the container's own geometry and
             // the meaning of every span this module computes. Anything else
             // makes the timeline origin (`blocksizes[1] / 2`) meaningless.
-            return Err(AnalysisError::WindowIntervalsIncompatible);
+            return Err(AnalysisError::geometry("window intervals incompatible"));
         }
         let origin = (blocksizes[1] / 2) as usize;
         Ok(Self {
@@ -762,9 +766,9 @@ impl SynthesisOla {
         let following_size = self.block_size(following)?;
         if look.n != n {
             return Err(if current == 0 {
-                AnalysisError::ShortMdctLookGeometry { want: n }
+                AnalysisError::geometry(format!("short mdct look geometry (want={:?})", n))
             } else {
-                AnalysisError::LongMdctLookGeometry { want: n }
+                AnalysisError::geometry(format!("long mdct look geometry (want={:?})", n))
             });
         }
         let spans = synthesis_window_spans(
@@ -822,7 +826,10 @@ impl SynthesisOla {
     /// The block size one mode names, rejecting a mode the pair does not have.
     fn block_size(&self, mode: i64) -> Result<i64, AnalysisError> {
         if mode < 0 || mode >= self.blocksizes.len() as i64 {
-            return Err(AnalysisError::WindowStateIndexOutOfRange { index: mode });
+            return Err(AnalysisError::geometry(format!(
+                "window state index out of range (index={:?})",
+                mode
+            )));
         }
         Ok(self.blocksizes[mode as usize])
     }
@@ -863,10 +870,11 @@ pub fn synthesize_sequence(
     if spectra.len() != modes.len() {
         // One coefficient row per block; a short or surplus row set is the
         // same class of input defect as a short sample block.
-        return Err(AnalysisError::SamplesShort {
-            need: modes.len() as i64,
-            got: spectra.len() as i64,
-        });
+        return Err(AnalysisError::input(format!(
+            "samples short (need={:?}, got={:?})",
+            modes.len() as i64,
+            spectra.len() as i64
+        )));
     }
     let mut ola = SynthesisOla::new(blocksizes)?;
     let mut pcm: Vec<f64> = Vec::new();
@@ -876,9 +884,12 @@ pub fn synthesize_sequence(
         } else {
             terminal_following
         };
-        let look = looks
-            .get(current as usize)
-            .ok_or(AnalysisError::WindowStateIndexOutOfRange { index: current })?;
+        let look = looks.get(current as usize).ok_or_else(|| {
+            AnalysisError::geometry(format!(
+                "window state index out of range (index={:?})",
+                current
+            ))
+        })?;
         pcm.extend_from_slice(ola.push(
             look,
             frozen_windows,
@@ -903,18 +914,24 @@ pub fn wwise_psy_window(
     tables: &TransientDetectorTables,
 ) -> Result<Vec<f64>, AnalysisError> {
     if n < 2 {
-        return Err(AnalysisError::PsyWindowSize { n });
+        return Err(AnalysisError::geometry(format!(
+            "psy window size (n={:?})",
+            n
+        )));
     }
     if n == 128 {
         if tables.n != n {
-            return Err(AnalysisError::TransientWindowGeometry {
-                tables_n: tables.n,
-                n,
-            });
+            return Err(AnalysisError::geometry(format!(
+                "transient window geometry (tables_n={:?}, n={:?})",
+                tables.n, n
+            )));
         }
         return Ok(tables.window.iter().map(|v| *v as f64).collect());
     }
-    Err(AnalysisError::PsyWindowSize { n })
+    Err(AnalysisError::geometry(format!(
+        "psy window size (n={:?})",
+        n
+    )))
 }
 
 /// Run the transient -> spectrum psycho front-end (Python `wwise_psy_mdct`).
@@ -925,7 +942,10 @@ pub fn wwise_psy_mdct(
 ) -> Result<Vec<f64>, AnalysisError> {
     let n = samples.len() as i64;
     if look.n != n {
-        return Err(AnalysisError::TransientMdctGeometry { look_n: look.n, n });
+        return Err(AnalysisError::geometry(format!(
+            "transient mdct geometry (look_n={:?}, n={:?})",
+            look.n, n
+        )));
     }
     let window = wwise_psy_window(n, tables)?;
     let windowed: Vec<f64> = samples
@@ -995,17 +1015,20 @@ fn frame_window_spans(
     let left_n = blocksizes[previous as usize];
     let right_n = blocksizes[following as usize];
     if samples_len < n as usize {
-        return Err(AnalysisError::SamplesShort {
-            need: n,
-            got: samples_len as i64,
-        });
+        return Err(AnalysisError::input(format!(
+            "samples short (need={:?}, got={:?})",
+            n, samples_len as i64
+        )));
     }
     if blocksizes.iter().any(|size| *size < 2 || *size & 1 != 0) {
-        return Err(AnalysisError::WindowBlockSizeInvalid);
+        return Err(AnalysisError::geometry("window block size invalid"));
     }
     for index in [previous, current, following] {
         if !(0 <= index && index < blocksizes.len() as i64) {
-            return Err(AnalysisError::WindowStateIndexOutOfRange { index });
+            return Err(AnalysisError::geometry(format!(
+                "window state index out of range (index={:?})",
+                index
+            )));
         }
     }
 
@@ -1019,7 +1042,7 @@ fn frame_window_spans(
         && right_begin <= right_end
         && right_end <= n)
     {
-        return Err(AnalysisError::WindowIntervalsIncompatible);
+        return Err(AnalysisError::geometry("window intervals incompatible"));
     }
     Ok(WindowSpans {
         n,
@@ -1045,7 +1068,9 @@ fn window_frame(
     spans: &WindowSpans,
     frozen_windows: Option<&std::collections::HashMap<i64, Vec<f32>>>,
 ) -> Result<(), AnalysisError> {
-    let frozen = frozen_windows.ok_or(AnalysisError::FrozenWindowDomainMiss { size: spans.n })?;
+    let frozen = frozen_windows.ok_or_else(|| {
+        AnalysisError::geometry(format!("frozen window domain miss (size={:?})", spans.n))
+    })?;
     let left_half = frozen_window_half(frozen, spans.left_n)?;
     let right_half = frozen_window_half(frozen, spans.right_n)?;
 
@@ -1074,18 +1099,22 @@ fn frozen_window_half(
     frozen: &std::collections::HashMap<i64, Vec<f32>>,
     size: i64,
 ) -> Result<&[f32], AnalysisError> {
-    let half = frozen
-        .get(&size)
-        .ok_or(AnalysisError::FrozenWindowDomainMiss { size })?;
+    let half = frozen.get(&size).ok_or_else(|| {
+        AnalysisError::geometry(format!("frozen window domain miss (size={:?})", size))
+    })?;
     if size < 2 || size & 1 != 0 {
-        return Err(AnalysisError::WindowSizeInvalid { n: size });
+        return Err(AnalysisError::geometry(format!(
+            "window size invalid (n={:?})",
+            size
+        )));
     }
     if half.len() as i64 != size / 2 {
-        return Err(AnalysisError::FrozenWindowHalfMismatch {
+        return Err(AnalysisError::geometry(format!(
+            "frozen window half mismatch (size={:?}, want={:?}, got={:?})",
             size,
-            want: size / 2,
-            got: half.len() as i64,
-        });
+            size / 2,
+            half.len() as i64
+        )));
     }
     Ok(half)
 }
@@ -1108,7 +1137,7 @@ mod tests {
         let samples = vec![0.0f64; 63];
         assert!(matches!(
             mdct_forward(&look, &samples),
-            Err(AnalysisError::SamplesShort { .. })
+            Err(AnalysisError::Input { .. })
         ));
     }
 
@@ -1120,7 +1149,8 @@ mod tests {
         let mut row = vec![0.0f64; 2048];
         assert!(matches!(
             apply_vorbis_window_in_place(&mut row, &[256, 2048], 0, 1, 1, None),
-            Err(AnalysisError::FrozenWindowDomainMiss { size: 2048 })
+            Err(AnalysisError::Geometry { message })
+                if message == "frozen window domain miss (size=2048)"
         ));
     }
 
@@ -1593,40 +1623,43 @@ mod tests {
         let too_short = vec![0.0f64; 127];
         assert!(matches!(
             mdct_backward(&short_look, &too_short),
-            Err(AnalysisError::SamplesShort {
-                need: 128,
-                got: 127
-            })
+            Err(AnalysisError::Input { message })
+                if message == "samples short (need=128, got=127)"
         ));
         assert!(matches!(
             SynthesisOla::new(&[256]),
-            Err(AnalysisError::WindowBlockSizeInvalid)
+            Err(AnalysisError::Geometry { message }) if message == "window block size invalid"
         ));
         assert!(matches!(
             SynthesisOla::new(&[2048, 256]),
-            Err(AnalysisError::WindowIntervalsIncompatible)
+            Err(AnalysisError::Geometry { message }) if message == "window intervals incompatible"
         ));
 
         let mut ola = SynthesisOla::new(&blocksizes).expect("synthesis state");
         assert!(matches!(
             ola.next_position(2),
-            Err(AnalysisError::WindowStateIndexOutOfRange { index: 2 })
+            Err(AnalysisError::Geometry { message })
+                if message == "window state index out of range (index=2)"
         ));
         assert!(matches!(
             ola.push(&short_look, &frozen, 3, 1, &short_spectrum),
-            Err(AnalysisError::WindowStateIndexOutOfRange { index: 3 })
+            Err(AnalysisError::Geometry { message })
+                if message == "window state index out of range (index=3)"
         ));
         assert!(matches!(
             ola.push(&short_look, &frozen, 1, 9, &long_spectrum),
-            Err(AnalysisError::WindowStateIndexOutOfRange { index: 9 })
+            Err(AnalysisError::Geometry { message })
+                if message == "window state index out of range (index=9)"
         ));
         assert!(matches!(
             ola.push(&short_look, &frozen, 1, 1, &long_spectrum),
-            Err(AnalysisError::LongMdctLookGeometry { want: 2048 })
+            Err(AnalysisError::Geometry { message })
+                if message == "long mdct look geometry (want=2048)"
         ));
         assert!(matches!(
             ola.push(&short_look, &frozen, 0, 1, &truncated),
-            Err(AnalysisError::SamplesShort { need: 128, got: 64 })
+            Err(AnalysisError::Input { message })
+                if message == "samples short (need=128, got=64)"
         ));
 
         let short = synthetic_look(256);
@@ -1634,7 +1667,8 @@ mod tests {
         let one_row = vec![long_spectrum.clone()];
         assert!(matches!(
             synthesize_sequence([&short, &long], &frozen, &blocksizes, &[1, 1], 1, &one_row),
-            Err(AnalysisError::SamplesShort { need: 2, got: 1 })
+            Err(AnalysisError::Input { message })
+                if message == "samples short (need=2, got=1)"
         ));
         // The first block's left window is the short one (the planner's
         // initial `previous` is short), so that is the half it needs first.
@@ -1642,7 +1676,8 @@ mod tests {
         let rows = vec![long_spectrum.clone()];
         assert!(matches!(
             synthesize_sequence([&short, &long], &no_windows, &blocksizes, &[1], 1, &rows),
-            Err(AnalysisError::FrozenWindowDomainMiss { size: 256 })
+            Err(AnalysisError::Geometry { message })
+                if message == "frozen window domain miss (size=256)"
         ));
         let empty: Vec<Vec<f64>> = Vec::new();
         assert!(

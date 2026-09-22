@@ -752,13 +752,11 @@ impl DecodeSession {
                 // "Parses cleanly but names a configuration the carrier does not
                 // hold": the unsupported-configuration class, never malformed
                 // input and never a substituted default.
-                ProfileError::NoProfileForSelection { .. } => {
-                    DecoderError::ConfigurationUnsupported {
-                        channels,
-                        sample_rate,
-                        source,
-                    }
-                }
+                ProfileError::Selection { .. } => DecoderError::ConfigurationUnsupported {
+                    channels,
+                    sample_rate,
+                    source,
+                },
                 other => DecoderError::Internal(InternalError::Profile(other)),
             })?;
         let profile = compiled

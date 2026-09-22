@@ -106,8 +106,8 @@ impl ChannelPool {
     /// channel count leaves the derived size in place, because a wave has one
     /// job per channel and a worker beyond that would have nothing to take.
     ///
-    /// Fails only when the host refuses to start a worker ([`AnalysisError::
-    /// PoolUnavailable`]); the caller's session construction reports it.
+    /// Fails only when the host refuses to start a worker ([`AnalysisError::State`]);
+    /// the caller's session construction reports it.
     pub fn for_channels(
         channels: i64,
         max_workers: Option<NonZeroUsize>,
@@ -220,7 +220,7 @@ impl ChannelPool {
 /// `ThreadPoolBuilder::build` fails only when the host refuses to start a
 /// thread — the pool is the resource, and it is what the wave runs on, so there
 /// is no smaller thing to fall back to and no honest default to substitute. The
-/// refusal is reported as [`AnalysisError::PoolUnavailable`] and reaches the
+/// refusal is reported as [`AnalysisError::State`] and reaches the
 /// caller through the session constructor that asked for the pool: a library
 /// does not turn "the host said no" into a process abort.
 #[cfg(feature = "parallel")]
@@ -228,9 +228,11 @@ fn build(workers: usize) -> Result<rayon::ThreadPool, AnalysisError> {
     rayon::ThreadPoolBuilder::new()
         .num_threads(workers)
         .build()
-        .map_err(|error| AnalysisError::PoolUnavailable {
-            workers,
-            cause: error.to_string(),
+        .map_err(|error| {
+            AnalysisError::state(format!(
+                "could not start a pool with {} workers: {}",
+                workers, error
+            ))
         })
 }
 
@@ -308,12 +310,12 @@ mod tests {
         .expect("the host starts the workers");
         let failed = pool.map_channels(6, |channel_index| {
             if channel_index == 2 {
-                Err(AnalysisError::LongAnalysisEmpty)
+                Err(AnalysisError::invariant("long analysis empty"))
             } else {
                 Ok(channel_index)
             }
         });
-        assert_eq!(failed, Err(AnalysisError::LongAnalysisEmpty));
+        assert_eq!(failed, Err(AnalysisError::invariant("long analysis empty")));
     }
 
     /// Without the feature the same map is the sequential loop, in the same
@@ -347,10 +349,10 @@ mod tests {
     /// the `Debug` rendering.
     #[test]
     fn pool_unavailable_names_the_workers_and_the_cause() {
-        let error = AnalysisError::PoolUnavailable {
-            workers: 6,
-            cause: "resource temporarily unavailable".to_string(),
-        };
+        let error = AnalysisError::state(format!(
+            "could not start a pool with {} workers: {}",
+            6, "resource temporarily unavailable"
+        ));
         let message = error.to_string();
         assert!(message.contains("6 workers"), "{message}");
         assert!(

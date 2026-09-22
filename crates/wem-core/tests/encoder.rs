@@ -360,7 +360,8 @@ mod mode_tail {
 
         assert!(matches!(
             session.finalize_terminal_transition(0, 1),
-            Err(AnalysisError::TransitionCodeMissing { recorded: 0, .. })
+            Err(AnalysisError::State { message })
+                if message == "transition code missing (index=0, recorded=0)"
         ));
 
         let modes = session
@@ -383,10 +384,10 @@ mod mode_tail {
         };
         assert_eq!(
             session.transition_code(&missing),
-            Err(AnalysisError::TransitionCodeMissing {
-                index: missing_index,
-                recorded: modes.len(),
-            })
+            Err(AnalysisError::state(format!(
+                "transition code missing (index={missing_index}, recorded={})",
+                modes.len(),
+            )))
         );
     }
 }
@@ -395,8 +396,8 @@ mod reference_bytes {
     //! End-to-end reference parity test: the Rust kernel must reproduce the
     //! reference WEM byte-for-byte.
     //!
-    //! Oracle: `tests/fixtures/reference.wem`, produced by the Python encoder
-    //! from `tests/fixtures/input.wav`.
+    //! Oracle: the committed paired-build container `tests/fixtures/reference.wem`
+    //! for `tests/fixtures/input.wav`.
     //!
     //! This test asserts file-level byte equality (`Vec<u8> ==`); the digest of
     //! that artifact is never re-typed here — the bytes are the claim.

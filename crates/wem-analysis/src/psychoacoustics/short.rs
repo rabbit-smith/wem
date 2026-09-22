@@ -103,15 +103,17 @@ impl ShortPsyAnalyzer {
         temporal: Option<PsyTemporalState>,
     ) -> Result<Self, AnalysisError> {
         if channel_count <= 0 {
-            return Err(AnalysisError::ShortAnalyzerChannelsNonPositive {
-                channels: channel_count,
-            });
+            return Err(AnalysisError::geometry(format!(
+                "short analyzer channels non positive (channels={:?})",
+                channel_count
+            )));
         }
         if profiles.len() != 2 {
-            return Err(AnalysisError::ShortAnalyzerProfiles {
-                want: 2,
-                got: profiles.len() as i64,
-            });
+            return Err(AnalysisError::invariant(format!(
+                "short analyzer profiles (want={:?}, got={:?})",
+                2,
+                profiles.len() as i64
+            )));
         }
         let channels = match channels {
             Some(channels) => channels,
@@ -120,13 +122,14 @@ impl ShortPsyAnalyzer {
                 .collect(),
         };
         if channels.len() as i64 != channel_count {
-            return Err(AnalysisError::ShortAnalyzerChannelStateCount {
-                want: channel_count,
-            });
+            return Err(AnalysisError::geometry(format!(
+                "short analyzer channel state count (want={:?})",
+                channel_count
+            )));
         }
         for channel in &channels {
             if channel.state.len() as i64 != 1024 || channel.history.len() as i64 != N {
-                return Err(AnalysisError::ShortChannelStateGeometry);
+                return Err(AnalysisError::geometry("short channel state geometry"));
             }
         }
         let temporal = temporal.unwrap_or_default();
@@ -144,14 +147,16 @@ impl ShortPsyAnalyzer {
         following_mode: i64,
     ) -> Result<PsyFrameControls, AnalysisError> {
         if !(0..=1).contains(&short_variant) {
-            return Err(AnalysisError::ShortVariantInvalid {
-                variant: short_variant,
-            });
+            return Err(AnalysisError::invariant(format!(
+                "short variant invalid (variant={:?})",
+                short_variant
+            )));
         }
         if !(0..=1).contains(&following_mode) {
-            return Err(AnalysisError::ShortFollowingModeInvalid {
-                following: following_mode,
-            });
+            return Err(AnalysisError::geometry(format!(
+                "short following mode invalid (following={:?})",
+                following_mode
+            )));
         }
         let transition = short_variant;
         let profile = &self.profiles[transition as usize];
@@ -202,9 +207,10 @@ impl ShortPsyAnalyzer {
             return Ok(());
         }
         if !(0..=1).contains(&info.transition) {
-            return Err(AnalysisError::ShortAnalysisCannotApplyLongTransition {
-                transition: info.transition,
-            });
+            return Err(AnalysisError::invariant(format!(
+                "short analysis cannot apply long transition (transition={:?})",
+                info.transition
+            )));
         }
         if info.following_mode != 0 {
             let mut expanded = Vec::with_capacity(1024);
@@ -240,15 +246,18 @@ impl ShortPsyAnalyzer {
         let count = self.channels.len() as i64;
         for values in [remaps, seeds, sides, raws].iter() {
             if values.len() as i64 != count {
-                return Err(AnalysisError::ShortFrameChannelCountMismatch);
+                return Err(AnalysisError::geometry(
+                    "short frame channel count mismatch",
+                ));
             }
         }
         if let Some(groups) = groups {
             if groups.len() as i64 != count {
-                return Err(AnalysisError::ShortGroupWorkLength {
-                    want: count,
-                    got: groups.len() as i64,
-                });
+                return Err(AnalysisError::geometry(format!(
+                    "short group work length (want={:?}, got={:?})",
+                    count,
+                    groups.len() as i64
+                )));
             }
         }
         let info = self.frame_controls(short_variant, following_mode)?;
@@ -321,19 +330,24 @@ impl ShortPsyAnalyzer {
         hold_update: i64,
     ) -> Result<PsyFrameControls, AnalysisError> {
         if !(0..=1).contains(&long_variant) {
-            return Err(AnalysisError::LongFrameVariantInvalid {
-                variant: long_variant,
-            });
+            return Err(AnalysisError::invariant(format!(
+                "long frame variant invalid (variant={:?})",
+                long_variant
+            )));
         }
         if !(0..=1).contains(&following_mode) {
-            return Err(AnalysisError::LongFrameVariantInvalid {
-                variant: following_mode,
-            });
+            return Err(AnalysisError::invariant(format!(
+                "long frame variant invalid (variant={:?})",
+                following_mode
+            )));
         }
         if raws.len() as i64 != self.channels.len() as i64
             || raws.iter().any(|raw| raw.len() as i64 != 1024)
         {
-            return Err(AnalysisError::LongAnalysisFrameSize { want: 1024 });
+            return Err(AnalysisError::geometry(format!(
+                "long analysis frame size (want={:?})",
+                1024
+            )));
         }
         let transition = 2 | long_variant;
         let info = PsyFrameControls {
@@ -405,23 +419,31 @@ pub fn shape_short_floor_envelope(
 ) -> Result<ShortPsyChannelResult, AnalysisError> {
     let vectors = [remap, seed, side, raw, state, history];
     if vectors.iter().any(|values| values.len() as i64 != N) {
-        return Err(AnalysisError::ShortVectorsLength { want: N });
+        return Err(AnalysisError::geometry(format!(
+            "short vectors length (want={:?})",
+            N
+        )));
     }
     if mode < 0 || mode >= profile.mask_curves.len() as i64 {
-        return Err(AnalysisError::ShortModeOutOfRange {
+        return Err(AnalysisError::geometry(format!(
+            "short mode out of range (mode={:?}, curves={:?})",
             mode,
-            curves: profile.mask_curves.len() as i64,
-        });
+            profile.mask_curves.len() as i64
+        )));
     }
     if mode >= profile.candidate_bias_by_mode.len() as i64 {
-        return Err(AnalysisError::ShortModeBiasOutOfRange { mode });
+        return Err(AnalysisError::geometry(format!(
+            "short mode bias out of range (mode={:?})",
+            mode
+        )));
     }
     let expected_groups = (N + profile.group_span - 1) / profile.group_span;
     if groups.len() as i64 != expected_groups {
-        return Err(AnalysisError::ShortGroupWorkLength {
-            want: expected_groups,
-            got: groups.len() as i64,
-        });
+        return Err(AnalysisError::geometry(format!(
+            "short group work length (want={:?}, got={:?})",
+            expected_groups,
+            groups.len() as i64
+        )));
     }
 
     let curve = &profile.mask_curves[mode as usize];

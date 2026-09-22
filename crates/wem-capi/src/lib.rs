@@ -1255,7 +1255,7 @@ mod tests {
                 DecoderError::ConfigurationUnsupported {
                     channels: 3,
                     sample_rate: 44_100,
-                    source: ProfileError::SelectionGeometryNonPositive,
+                    source: ProfileError::selection("no installed profile for 3ch/44100"),
                 },
                 WemError::FormatUnsupported,
             ),

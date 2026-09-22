@@ -45,14 +45,15 @@ fn wwise_seed_curve(
     let mut choice = ((amp + db_offset - TONE_REFERENCE_LEVEL_DB as f64) * 0.1) as i64;
     choice = choice.clamp(0, TONE_LEVEL_COUNT - 1);
     if (choice as usize) >= curves.len() {
-        return Err(AnalysisError::ToneCurveBankShort {
-            want: choice,
-            got: curves.len() as i64,
-        });
+        return Err(AnalysisError::configuration(format!(
+            "tone curve bank short (want={:?}, got={:?})",
+            choice,
+            curves.len() as i64
+        )));
     }
     let posts = &curves[choice as usize];
     if posts.len() < 2 {
-        return Err(AnalysisError::ToneCurvePostArrayShort);
+        return Err(AnalysisError::configuration("tone curve post array short"));
     }
     let post0 = posts[0] as i64;
     let post1 = posts[1] as i64;
@@ -63,7 +64,7 @@ fn wwise_seed_curve(
         if seed_ptr > 0 && seed_ptr < (seed.len() as i64) {
             let curve_index = post;
             if (curve_index as usize) >= curve.len() {
-                return Err(AnalysisError::ToneCurvePostsShort);
+                return Err(AnalysisError::configuration("tone curve posts short"));
             }
             seed[seed_ptr as usize] =
                 seed[seed_ptr as usize].max(f32_of(amp + curve[curve_index as usize]));
@@ -141,12 +142,13 @@ fn wwise_apply_max_seed_floor(
     seed_ceiling: f64,
 ) -> Result<(), AnalysisError> {
     if octave.len() != floor_curve.len() {
-        return Err(AnalysisError::OctaveFloorLengthMismatch);
+        return Err(AnalysisError::geometry("octave floor length mismatch"));
     }
     if (seed.len() as i64) < total_octave_lines {
-        return Err(AnalysisError::SeedSurfaceShort {
-            want: total_octave_lines,
-        });
+        return Err(AnalysisError::configuration(format!(
+            "seed surface short (want={:?})",
+            total_octave_lines
+        )));
     }
     if octave.is_empty() {
         return Ok(());
@@ -156,10 +158,10 @@ fn wwise_apply_max_seed_floor(
     let n = octave.len() as i64;
     while linpos + 1 < n {
         if !(pos >= 0 && pos < total_octave_lines) {
-            return Err(AnalysisError::SeedCursorOutOfRange {
-                cursor: pos,
-                total: total_octave_lines,
-            });
+            return Err(AnalysisError::geometry(format!(
+                "seed cursor out of range (cursor={:?}, total={:?})",
+                pos, total_octave_lines
+            )));
         }
         let mut min_value = seed[pos as usize];
         let mut end =
@@ -175,10 +177,10 @@ fn wwise_apply_max_seed_floor(
             // out of bounds -- the paired build only avoids this because its
             // geometry keeps ``end`` inside the grid.
             if !(pos >= 0 && pos < total_octave_lines) {
-                return Err(AnalysisError::SeedCursorOutOfRange {
-                    cursor: pos,
-                    total: total_octave_lines,
-                });
+                return Err(AnalysisError::geometry(format!(
+                    "seed cursor out of range (cursor={:?}, total={:?})",
+                    pos, total_octave_lines
+                )));
             }
             let s = seed[pos as usize];
             if (s > NEGATIVE_INFINITY_DB as f64 && s < min_value)
@@ -216,7 +218,7 @@ fn wwise_max_seeds(
     seed_ceiling: f64,
 ) -> Result<(), AnalysisError> {
     if octave.len() != floor_curve.len() {
-        return Err(AnalysisError::OctaveFloorLengthMismatch);
+        return Err(AnalysisError::geometry("octave floor length mismatch"));
     }
     wwise_seed_chase(seed, eighth_octave_lines, total_octave_lines);
     wwise_apply_max_seed_floor(
@@ -247,7 +249,10 @@ fn wwise_seed_loop(
 ) -> Result<(), AnalysisError> {
     let n = spectrum.len();
     if floor_curve.len() != n || octave.len() != n {
-        return Err(AnalysisError::SeedLoopInputLengthMismatch { want: n as i64 });
+        return Err(AnalysisError::input(format!(
+            "seed loop input length mismatch (want={:?})",
+            n as i64
+        )));
     }
     let mut i = 0;
     while i < n {
@@ -263,10 +268,11 @@ fn wwise_seed_loop(
             let mut band = group_octave >> shift_octave;
             band = band.clamp(0, TONE_BAND_COUNT - 1);
             if (band as usize) >= curves.len() {
-                return Err(AnalysisError::ToneCurveBandBankShort {
-                    want: band,
-                    got: curves.len() as i64,
-                });
+                return Err(AnalysisError::configuration(format!(
+                    "tone curve band bank short (want={:?}, got={:?})",
+                    band,
+                    curves.len() as i64
+                )));
             }
             wwise_seed_curve(
                 seed,
@@ -293,7 +299,7 @@ pub fn compute_spectrum_peak(
     let mut local_maxima = Vec::with_capacity(fft_curves.len());
     for curve in fft_curves {
         if curve.is_empty() {
-            return Err(AnalysisError::FftCurveEmpty);
+            return Err(AnalysisError::configuration("fft curve empty"));
         }
         let local = f32_of(0.0f64.min(curve.iter().fold(f64::NEG_INFINITY, |a, b| a.max(*b))));
         local_maxima.push(local);
@@ -313,10 +319,10 @@ pub fn update_frame_spectrum_peak(
     state: &mut SpectrumPeakState,
 ) -> Result<(Vec<f64>, f64), AnalysisError> {
     if block_bins <= 0 || sample_rate <= 0 {
-        return Err(AnalysisError::SpecmaxGeometry {
-            block_bins,
-            sample_rate,
-        });
+        return Err(AnalysisError::geometry(format!(
+            "specmax geometry (block_bins={:?}, sample_rate={:?})",
+            block_bins, sample_rate
+        )));
     }
     let decay = f32_of(
         SPECTRUM_PEAK_DECAY_DB_PER_SECOND as f64 * (block_bins as f64) / (sample_rate as f64),
@@ -399,10 +405,11 @@ fn seed_from_parts(
     global_specmax: f64,
 ) -> Result<Vec<f64>, AnalysisError> {
     if logfft.len() as i64 != look.n {
-        return Err(AnalysisError::LongSeedLogFftLength {
-            want: look.n,
-            got: logfft.len() as i64,
-        });
+        return Err(AnalysisError::geometry(format!(
+            "long seed log fft length (want={:?}, got={:?})",
+            look.n,
+            logfft.len() as i64
+        )));
     }
     let ath_shift = ((look.ath_offset as f64) + channel_specmax).max(look.ath_floor as f64);
     let initial: Vec<f64> = look
@@ -441,14 +448,16 @@ fn wwise_seed_floor(
     seed_ceiling: f64,
 ) -> Result<Vec<f64>, AnalysisError> {
     if spectrum.len() != floor_curve.len() || octave.len() != spectrum.len() {
-        return Err(AnalysisError::SeedLoopInputLengthMismatch {
-            want: spectrum.len() as i64,
-        });
+        return Err(AnalysisError::input(format!(
+            "seed loop input length mismatch (want={:?})",
+            spectrum.len() as i64
+        )));
     }
     if total_octave_lines <= 0 {
-        return Err(AnalysisError::SeedTotalLinesNonPositive {
-            total: total_octave_lines,
-        });
+        return Err(AnalysisError::configuration(format!(
+            "seed total lines non positive (total={:?})",
+            total_octave_lines
+        )));
     }
     let mut seed = vec![NEGATIVE_INFINITY_DB as f64; total_octave_lines as usize];
     let mut out: Vec<f64> = floor_curve.iter().map(|v| f32_of(*v)).collect();
@@ -484,7 +493,7 @@ fn wwise_seed_initial_curve(
     channel_specmax: f64,
 ) -> Result<Vec<f64>, AnalysisError> {
     if look.ath.len() as i64 != look.n {
-        return Err(AnalysisError::LongSeedGeometry);
+        return Err(AnalysisError::geometry("long seed geometry"));
     }
     let ath_shift = ((look.ath_offset as f64) + channel_specmax).max(look.ath_floor as f64);
     Ok(look
@@ -503,10 +512,13 @@ pub fn wwise_seed_floor_from_look(
     global_specmax: f64,
 ) -> Result<Vec<f64>, AnalysisError> {
     if spectrum.len() as i64 != look.n {
-        return Err(AnalysisError::LongSeedGeometry);
+        return Err(AnalysisError::geometry("long seed geometry"));
     }
     if look.tone_curves.is_empty() {
-        return Err(AnalysisError::ShortVectorsLength { want: 1 });
+        return Err(AnalysisError::geometry(format!(
+            "short vectors length (want={:?})",
+            1
+        )));
     }
     let initial = wwise_seed_initial_curve(look, channel_specmax)?;
     let tone_curves: Vec<Vec<Vec<f64>>> = look
@@ -557,10 +569,8 @@ mod tests {
             .expect_err("out-of-range cursor must be reported");
         assert!(matches!(
             err,
-            AnalysisError::SeedCursorOutOfRange {
-                cursor: 10,
-                total: 10
-            }
+            AnalysisError::Geometry { message }
+                if message == "seed cursor out of range (cursor=10, total=10)"
         ));
     }
 }

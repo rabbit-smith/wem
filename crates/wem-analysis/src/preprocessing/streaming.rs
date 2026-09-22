@@ -121,14 +121,14 @@ impl StreamingPcmFeeder {
     /// Construct an empty feeder for the Wwise block geometry
     /// (mirrors the batch 256/2048 invariant).
     pub fn new(channels: i64, blocksizes: [i64; 2]) -> Result<Self, AnalysisError> {
-        use AnalysisError::*;
         if channels <= 0 {
-            return Err(PcmFeederEmpty);
+            return Err(AnalysisError::input("pcm feeder empty"));
         }
         if blocksizes != [256, 2048] {
-            return Err(AnalysisError::SessionBlockSizeMismatch {
-                got: [blocksizes[0], blocksizes[1]],
-            });
+            return Err(AnalysisError::geometry(format!(
+                "session block size mismatch (got={:?})",
+                [blocksizes[0], blocksizes[1]]
+            )));
         }
         Ok(Self {
             channels,
@@ -180,19 +180,23 @@ impl StreamingPcmFeeder {
     /// boundary is applied here, exactly where the batch
     /// `detector_pcm_streams` applies it.
     pub fn push(&mut self, rows: &[Vec<f64>]) -> Result<(), AnalysisError> {
-        use AnalysisError::*;
         if rows.len() as i64 != self.channels {
-            return Err(StreamFeederChannelsMismatch {
-                want: self.channels,
-                got: rows.len() as i64,
-            });
+            return Err(AnalysisError::input(format!(
+                "stream feeder channels mismatch (want={:?}, got={:?})",
+                self.channels,
+                rows.len() as i64
+            )));
         }
         let chunk_len = rows.first().map(|row| row.len() as i64).unwrap_or(0);
-        if rows.iter().any(|row| row.len() as i64 != chunk_len) {
-            return Err(PcmChannelsUnequal {
-                want: chunk_len,
-                got: 0,
-            });
+        if let Some((channel, samples)) = rows
+            .iter()
+            .enumerate()
+            .find(|(_, samples)| samples.len() as i64 != chunk_len)
+        {
+            return Err(AnalysisError::input(format!(
+                "PCM channel {channel} has {} frames, expected {chunk_len}",
+                samples.len()
+            )));
         }
         // Append without evicting: the quanta completed by this append may
         // reference the ring's oldest samples and must be extracted while
@@ -272,16 +276,16 @@ impl StreamingPcmFeeder {
     /// prepends one long half-block of 1024; the frame windowing primes
     /// with the batch default 128).
     fn compute_primes(&mut self) -> Result<(), AnalysisError> {
-        use AnalysisError::*;
         let detector_prefill = self.blocksizes[1] / 2;
         let window_prefill = 128;
         let mut detector_prime = Vec::with_capacity(self.channels as usize);
         let mut window_prime = Vec::with_capacity(self.channels as usize);
         for channel in &self.prefix {
             if (channel.len() as i64) < STREAM_PRIME_BATCH {
-                return Err(StreamFeederSourceShort {
-                    frames: channel.len() as i64,
-                });
+                return Err(AnalysisError::state(format!(
+                    "stream feeder source short (frames={:?})",
+                    channel.len() as i64
+                )));
             }
             let batch = &channel[..STREAM_PRIME_BATCH as usize];
             detector_prime.push(wwise_first_frame_lpc_prime(
@@ -309,23 +313,31 @@ impl StreamingPcmFeeder {
     /// consumable through
     /// [`for_each_completed_quantum`](Self::for_each_completed_quantum).
     pub fn finish_source(&mut self, tail_training: Option<i64>) -> Result<(), AnalysisError> {
-        use AnalysisError::*;
         if self.tails.is_some() {
             return Ok(());
         }
         if self.total < STREAM_PRIME_BATCH {
-            return Err(StreamFeederSourceShort { frames: self.total });
+            return Err(AnalysisError::state(format!(
+                "stream feeder source short (frames={:?})",
+                self.total
+            )));
         }
         let mut tails = Vec::with_capacity(self.channels as usize);
         let tail_training = tail_training.unwrap_or(self.blocksizes[1]);
         if tail_training <= TAIL_CONTEXT || tail_training > self.total {
-            return Err(StreamFeederSourceShort { frames: self.total });
+            return Err(AnalysisError::state(format!(
+                "stream feeder source short (frames={:?})",
+                self.total
+            )));
         }
         let tail_training = tail_training as usize;
         for ring in &self.ring {
             let len = ring.len();
             if len < tail_training {
-                return Err(StreamFeederSourceShort { frames: len as i64 });
+                return Err(AnalysisError::state(format!(
+                    "stream feeder source short (frames={:?})",
+                    len as i64
+                )));
             }
             let source: Vec<f64> = ring.iter().copied().collect();
             let coeffs = wwise_lpc_from_data(&source[len - tail_training..], TAIL_ORDER)?;
@@ -417,13 +429,12 @@ impl StreamingPcmFeeder {
         let source_origin = blocksizes[1] / 2;
         let start = plan.sample_start - source_origin;
         let end = start + n;
-        let primes =
-            self.window_prime
-                .as_ref()
-                .ok_or(AnalysisError::StreamFeederWindowNotReady {
-                    want_from: start,
-                    want_to: end,
-                })?;
+        let primes = self.window_prime.as_ref().ok_or_else(|| {
+            AnalysisError::state(format!(
+                "stream feeder window not ready (want_from={:?}, want_to={:?})",
+                start, end
+            ))
+        })?;
         let tails = self.tails.as_deref();
         // The batch windowing tail spans `max block size` samples; mirror
         // its exact 0.0 fallback beyond that.
@@ -443,10 +454,10 @@ impl StreamingPcmFeeder {
                     match self.retained_source_sample(channel, index) {
                         Some(value) => value,
                         None => {
-                            return Err(AnalysisError::StreamFeederWindowNotReady {
-                                want_from: start,
-                                want_to: end,
-                            })
+                            return Err(AnalysisError::state(format!(
+                                "stream feeder window not ready (want_from={:?}, want_to={:?})",
+                                start, end
+                            )))
                         }
                     }
                 } else {
@@ -460,10 +471,10 @@ impl StreamingPcmFeeder {
                             }
                         }
                         None => {
-                            return Err(AnalysisError::StreamFeederWindowNotReady {
-                                want_from: start,
-                                want_to: end,
-                            })
+                            return Err(AnalysisError::state(format!(
+                                "stream feeder window not ready (want_from={:?}, want_to={:?})",
+                                start, end
+                            )))
                         }
                     }
                 };

@@ -201,7 +201,7 @@ pub fn relax_history(
     delta: f64,
 ) -> Result<Vec<f64>, AnalysisError> {
     if !(history.len() == raw.len() && history.len() == widths.len()) {
-        return Err(AnalysisError::RelaxLengthMismatch);
+        return Err(AnalysisError::geometry("relax length mismatch"));
     }
     let mut out: Vec<f64> = history.iter().map(|value| f32_of(*value)).collect();
     let n = out.len();
@@ -217,7 +217,7 @@ pub fn relax_history(
             if raw[k] - j as f64 * 75.0 / width as f64 > out[index] {
                 let denominator = widths[index];
                 if denominator <= 0 {
-                    return Err(AnalysisError::RelaxWidthNonPositive);
+                    return Err(AnalysisError::invariant("relax width non positive"));
                 }
                 // Each relaxation is stored as float32 before later comparisons.
                 out[index] = f32_of(out[index] + delta / denominator as f64);

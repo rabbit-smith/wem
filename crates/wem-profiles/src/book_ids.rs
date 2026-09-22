@@ -45,8 +45,8 @@ impl BookTable {
         let (static_name, _expected_count) = BOOK_COUNTS
             .iter()
             .find(|(candidate, _)| *candidate == name)
-            .ok_or_else(|| ProfileError::UnknownBookTable {
-                table: name.to_string(),
+            .ok_or_else(|| {
+                ProfileError::tables(format!("missing decoded codebook table {name:?}"))
             })?;
         let rows = rows.iter().map(crate::carrier::codebook_row).collect();
         Ok(Self {

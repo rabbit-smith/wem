@@ -27,9 +27,10 @@ impl ProfileRegistry {
         for profile in profiles {
             let key = profile.key().clone();
             if by_key.iter().any(|(k, _)| k == &key) {
-                return Err(ProfileError::RegistryDuplicateKey {
-                    key: key.describe(),
-                });
+                return Err(ProfileError::selection(format!(
+                    "duplicate profile key: {}",
+                    key.describe()
+                )));
             }
             by_key.push((key, profile));
         }
@@ -53,12 +54,13 @@ impl ProfileRegistry {
             .map(|(_, profile)| profile)
             .collect();
         if matches.is_empty() {
-            return Err(ProfileError::NoProfileForSelection {
-                version: selection.version().label().to_string(),
-                channels: selection.channels(),
-                sample_rate: selection.sample_rate(),
-                installed: self.describe_installed(),
-            });
+            return Err(ProfileError::selection(format!(
+                "no installed Wwise {} profile for {}ch/{}Hz; installed: {}",
+                selection.version().label(),
+                selection.channels(),
+                selection.sample_rate(),
+                self.describe_installed(),
+            )));
         }
         if matches.len() != 1 {
             let names = matches
@@ -66,12 +68,12 @@ impl ProfileRegistry {
                 .map(|profile| profile.key().describe())
                 .collect::<Vec<_>>()
                 .join(", ");
-            return Err(ProfileError::AmbiguousProfileSelection {
-                version: selection.version().label().to_string(),
-                channels: selection.channels(),
-                sample_rate: selection.sample_rate(),
-                names,
-            });
+            return Err(ProfileError::selection(format!(
+                "Wwise {} profile selection {}ch/{}Hz is ambiguous: {names}",
+                selection.version().label(),
+                selection.channels(),
+                selection.sample_rate(),
+            )));
         }
         Ok(matches[0])
     }

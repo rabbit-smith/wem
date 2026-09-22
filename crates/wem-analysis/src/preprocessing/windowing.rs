@@ -107,33 +107,40 @@ impl PlannedWindowSource {
         }
         for (index, plan) in plans.iter().enumerate() {
             validate_modes(blocksizes, &[plan.previous, plan.current, plan.following])
-                .map_err(|_| AnalysisError::FramePlansNotContiguous)?;
+                .map_err(|_| AnalysisError::state("frame plans not contiguous"))?;
             if plan.index != index as i64 {
-                return Err(AnalysisError::FramePlansNotContiguous);
+                return Err(AnalysisError::state("frame plans not contiguous"));
             }
             let expected_size = blocksizes[plan.current as usize];
             if plan.sample_end - plan.sample_start != expected_size {
-                return Err(AnalysisError::FramePlanIntervalMismatch);
+                return Err(AnalysisError::state("frame plan interval mismatch"));
             }
             if index > 0 {
                 let prev = &plans[index - 1];
                 if prev.current != plan.previous || prev.following != plan.current {
-                    return Err(AnalysisError::FramePlanTransitionsDiffer);
+                    return Err(AnalysisError::state("frame plan transitions differ"));
                 }
             }
         }
         if pcm.is_empty() {
-            return Err(AnalysisError::PcmFeederEmpty);
+            return Err(AnalysisError::input("pcm feeder empty"));
         }
         let source_len = pcm[0].len() as i64;
         if source_len < 4096 {
-            return Err(AnalysisError::PcmFeederShort { frames: source_len });
+            return Err(AnalysisError::input(format!(
+                "pcm feeder short (frames={:?})",
+                source_len
+            )));
         }
-        if pcm.iter().any(|channel| channel.len() as i64 != source_len) {
-            return Err(AnalysisError::PcmChannelsUnequal {
-                want: source_len,
-                got: 0,
-            });
+        if let Some((channel, samples)) = pcm
+            .iter()
+            .enumerate()
+            .find(|(_, samples)| samples.len() as i64 != source_len)
+        {
+            return Err(AnalysisError::input(format!(
+                "PCM channel {channel} has {} frames, expected {source_len}",
+                samples.len()
+            )));
         }
 
         // LPC priming before packet zero.
@@ -153,7 +160,10 @@ impl PlannedWindowSource {
         let tail_count =
             tail_training.unwrap_or_else(|| blocksizes.iter().copied().max().unwrap_or(0));
         if tail_count <= 32 || tail_count > source_len {
-            return Err(AnalysisError::PcmFeederShort { frames: source_len });
+            return Err(AnalysisError::input(format!(
+                "pcm feeder short (frames={:?})",
+                source_len
+            )));
         }
         let tail_training = tail_count as usize;
         let tails: Vec<Vec<f64>> = channels
@@ -199,7 +209,7 @@ impl PlannedWindowSource {
         scratch: Option<WindowedFrame>,
     ) -> Result<WindowedFrame, AnalysisError> {
         if plan.index < 0 || plan.index as usize >= self.plans.len() {
-            return Err(AnalysisError::FramePlansNotContiguous);
+            return Err(AnalysisError::state("frame plans not contiguous"));
         }
         let current = plan.current;
         let previous = plan.previous;
@@ -275,8 +285,10 @@ pub fn iter_pcm_windows(
     tail_training: Option<i64>,
 ) -> Result<Vec<WindowedFrame>, AnalysisError> {
     let plans = plan_mode_sequence(modes, blocksizes, terminal_following).map_err(|e| match e {
-        wem_scheduling::PlannerError::BlockSizeCount => AnalysisError::WindowBlockSizeInvalid,
-        _ => AnalysisError::FramePlanIntervalMismatch,
+        wem_scheduling::PlannerError::BlockSizeCount => {
+            AnalysisError::geometry("window block size invalid")
+        }
+        _ => AnalysisError::state("frame plan interval mismatch"),
     })?;
     iter_planned_pcm_windows(pcm, &plans, blocksizes, frozen_windows, tail_training)
 }

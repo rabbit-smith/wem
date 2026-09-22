@@ -48,7 +48,7 @@ impl WwiseVersion {
         Self::ALL
             .into_iter()
             .find(|version| version.code() == code)
-            .ok_or(ProfileError::UnknownWwiseVersion { code })
+            .ok_or_else(|| ProfileError::selection(format!("unknown Wwise version code {code}")))
     }
 
     /// The profile-key `generation` string this version resolves against.
@@ -70,8 +70,8 @@ impl WwiseVersion {
         Self::ALL
             .into_iter()
             .find(|version| version.generation() == generation)
-            .ok_or_else(|| ProfileError::UnsupportedWwiseGeneration {
-                generation: generation.to_string(),
+            .ok_or_else(|| {
+                ProfileError::selection(format!("unsupported Wwise generation {generation:?}"))
             })
     }
 
@@ -93,7 +93,7 @@ impl WwiseVersion {
 /// This is the only profile selector on a caller-facing surface. It denotes
 /// exactly one installed encoder profile; a selection that no installed
 /// profile satisfies is rejected on resolution
-/// ([`ProfileError::NoProfileForSelection`]) rather than silently substituted,
+/// ([`ProfileError::Selection`]) rather than silently substituted,
 /// and a selection that more than one installed profile satisfies is rejected
 /// as ambiguous instead of picking one by load order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -111,7 +111,9 @@ impl WwiseProfile {
         sample_rate: i64,
     ) -> Result<Self, ProfileError> {
         if channels <= 0 || sample_rate <= 0 {
-            return Err(ProfileError::SelectionGeometryNonPositive);
+            return Err(ProfileError::selection(
+                "selected channels and sample rate must be positive",
+            ));
         }
         Ok(Self {
             version,
@@ -156,7 +158,7 @@ impl WwiseProfile {
     /// (`tests/profile_selection.rs::selection_describes_itself_for_diagnostics`
     /// here, `tests/profiles_integration.rs` for the key), so they must not be
     /// unified: the short one is the spelling a caller meets — the version in
-    /// [`ProfileError::NoProfileForSelection`], a selection error's
+    /// [`ProfileError::Selection`], a selection error's
     /// `requested` field, and the form a command line accepts — while the
     /// key's is registry and diagnostic identity. The Python side documents
     /// the same split (`wwise_wem.profiles.key`: `WWISE_GENERATION_LABEL =

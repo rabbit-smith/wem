@@ -14,13 +14,17 @@ pub fn wwise_lpc_from_data(
 ) -> Result<Vec<f64>, crate::config::AnalysisError> {
     use crate::config::AnalysisError;
     if order < 1 {
-        return Err(AnalysisError::LpcOrderInvalid { order });
+        return Err(AnalysisError::invariant(format!(
+            "lpc order invalid (order={:?})",
+            order
+        )));
     }
     if (samples.len() as i64) <= order {
-        return Err(AnalysisError::LpcSamplesShort {
+        return Err(AnalysisError::input(format!(
+            "lpc samples short (order={:?}, got={:?})",
             order,
-            got: samples.len() as i64,
-        });
+            samples.len() as i64
+        )));
     }
 
     let source: Vec<f64> = samples.to_vec();
@@ -80,16 +84,20 @@ pub fn wwise_lpc_predict(
     use crate::config::AnalysisError;
     let order = coefficients.len() as i64;
     if order < 1 {
-        return Err(AnalysisError::LpcCoefficientsEmpty);
+        return Err(AnalysisError::invariant("lpc coefficients empty"));
     }
     if prime.len() as i64 != order {
-        return Err(AnalysisError::LpcPrimeLengthMismatch {
-            want: order,
-            got: prime.len() as i64,
-        });
+        return Err(AnalysisError::geometry(format!(
+            "lpc prime length mismatch (want={:?}, got={:?})",
+            order,
+            prime.len() as i64
+        )));
     }
     if count < 0 {
-        return Err(AnalysisError::LpcCountNegative { count });
+        return Err(AnalysisError::geometry(format!(
+            "lpc count negative (count={:?})",
+            count
+        )));
     }
 
     let mut work: Vec<f64> = prime.iter().map(|v| f32_of(*v)).collect();
@@ -119,16 +127,23 @@ pub fn wwise_first_frame_lpc_prime(
 ) -> Result<Vec<f64>, crate::config::AnalysisError> {
     use crate::config::AnalysisError;
     if prefill < 1 {
-        return Err(AnalysisError::LpcPrefillInvalid { prefill });
+        return Err(AnalysisError::invariant(format!(
+            "lpc prefill invalid (prefill={:?})",
+            prefill
+        )));
     }
     if batch <= order {
-        return Err(AnalysisError::LpcBatchInvalid { batch, order });
+        return Err(AnalysisError::invariant(format!(
+            "lpc batch invalid (batch={:?}, order={:?})",
+            batch, order
+        )));
     }
     if (source.len() as i64) < batch {
-        return Err(AnalysisError::LpcSourceShort {
-            want: batch,
-            got: source.len() as i64,
-        });
+        return Err(AnalysisError::input(format!(
+            "lpc source short (want={:?}, got={:?})",
+            batch,
+            source.len() as i64
+        )));
     }
 
     let mut reversed_buffer: Vec<f64> = Vec::with_capacity((prefill + batch) as usize);

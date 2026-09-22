@@ -27,7 +27,9 @@ pub struct ResolvedBook {
 /// distinct rejection reasons.
 pub fn resolve_book_id(book_id: i64, tables: &BookTables) -> Result<ResolvedBook, ProfileError> {
     if book_id < 0 {
-        return Err(ProfileError::BookIdOutOfRange { book_id });
+        return Err(ProfileError::tables(format!(
+            "book id is outside the installed codebook tables: {book_id}"
+        )));
     }
     if book_id < T97_COUNT as i64 {
         return Ok(ResolvedBook {
@@ -40,7 +42,9 @@ pub fn resolve_book_id(book_id: i64, tables: &BookTables) -> Result<ResolvedBook
     let j = book_id - T97_COUNT as i64;
     if j < T219_COUNT as i64 {
         if tables.get("t219").is_none() {
-            return Err(ProfileError::BookIdOutOfRange { book_id });
+            return Err(ProfileError::tables(format!(
+                "book id is outside the installed codebook tables: {book_id}"
+            )));
         }
         let has_lengthlist = tables
             .get("t219")
@@ -57,7 +61,9 @@ pub fn resolve_book_id(book_id: i64, tables: &BookTables) -> Result<ResolvedBook
     let k = book_id - T97_COUNT as i64 - T219_COUNT as i64;
     if k < T282_COUNT as i64 {
         if tables.get("t282").is_none() {
-            return Err(ProfileError::BookIdOutOfRange { book_id });
+            return Err(ProfileError::tables(format!(
+                "book id is outside the installed codebook tables: {book_id}"
+            )));
         }
         return Ok(ResolvedBook {
             book_id,
@@ -66,7 +72,9 @@ pub fn resolve_book_id(book_id: i64, tables: &BookTables) -> Result<ResolvedBook
             from_direct_fields: false,
         });
     }
-    Err(ProfileError::BookIdOutOfRange { book_id })
+    Err(ProfileError::tables(format!(
+        "book id is outside the installed codebook tables: {book_id}"
+    )))
 }
 
 /// Build a runtime codebook from a resolved book descriptor
@@ -79,17 +87,18 @@ pub fn load_codebook(
     resolved: &ResolvedBook,
     tables: &BookTables,
 ) -> Result<Codebook, ProfileError> {
-    let table = tables
-        .get(resolved.table)
-        .ok_or_else(|| ProfileError::UnknownBookTable {
-            table: resolved.table.to_string(),
-        })?;
-    let row = table
-        .rows()
-        .get(resolved.index as usize)
-        .ok_or(ProfileError::BookIdOutOfRange {
-            book_id: resolved.book_id,
-        })?;
+    let table = tables.get(resolved.table).ok_or_else(|| {
+        ProfileError::tables(format!(
+            "missing decoded codebook table {:?}",
+            resolved.table
+        ))
+    })?;
+    let row = table.rows().get(resolved.index as usize).ok_or_else(|| {
+        ProfileError::tables(format!(
+            "book id is outside the installed codebook tables: {}",
+            resolved.book_id
+        ))
+    })?;
     let static_codebook = row.to_static().map_err(ProfileError::Codebook)?;
     Codebook::from_static(
         static_codebook,

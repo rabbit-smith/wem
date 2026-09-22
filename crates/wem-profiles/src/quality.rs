@@ -80,35 +80,49 @@ impl QualityCurves {
         semantics: BTreeMap<String, String>,
     ) -> Result<Self, ProfileError> {
         if schema != QUALITY_CURVES_SCHEMA {
-            return Err(ProfileError::QualityCurvesSchemaUnexpected { schema });
+            return Err(ProfileError::quality(format!(
+                "unexpected quality-curves schema: {schema:?}"
+            )));
         }
         if breakpoints.len() < 2 {
-            return Err(ProfileError::QualityCurvesTooFewBreakpoints);
+            return Err(ProfileError::quality(
+                "quality-curves needs at least two breakpoints",
+            ));
         }
         if breakpoints.windows(2).any(|pair| pair[0] >= pair[1]) {
-            return Err(ProfileError::QualityCurvesBreakpointsNotIncreasing);
+            return Err(ProfileError::quality(
+                "quality-curves breakpoints must be strictly increasing",
+            ));
         }
         if curves.is_empty() {
-            return Err(ProfileError::QualityCurvesEmptyCurves);
+            return Err(ProfileError::quality(
+                "quality-curves must define at least one curve",
+            ));
         }
         for (name, values) in &curves {
             if values.len() != breakpoints.len() {
-                return Err(ProfileError::QualityCurvesCurveLengthMismatch {
-                    name: name.clone(),
-                    want: breakpoints.len(),
-                    got: values.len(),
-                });
+                return Err(ProfileError::quality(format!(
+                    "quality curve {name:?} must contain {} values, found {}",
+                    breakpoints.len(),
+                    values.len()
+                )));
             }
             if values.iter().any(|value| !value.is_finite()) {
-                return Err(ProfileError::QualityCurvesValueNonFinite { name: name.clone() });
+                return Err(ProfileError::quality(format!(
+                    "quality curve {name:?} must be finite (NaN/inf rejected)"
+                )));
             }
         }
         if semantics.is_empty() || semantics.len() != curves.len() {
-            return Err(ProfileError::QualityCurvesSemanticsIncomplete);
+            return Err(ProfileError::quality(
+                "quality-curves semantics must cover every curve name exactly",
+            ));
         }
         for (name, semantic) in &semantics {
             if semantic.is_empty() || !curves.contains_key(name) {
-                return Err(ProfileError::QualityCurvesSemanticsIncomplete);
+                return Err(ProfileError::quality(
+                    "quality-curves semantics must cover every curve name exactly",
+                ));
             }
         }
         Ok(Self {
@@ -154,7 +168,7 @@ impl QualityCurves {
         quality: f64,
     ) -> Result<(BTreeMap<String, f64>, bool), ProfileError> {
         if !quality.is_finite() {
-            return Err(ProfileError::QualityValueNonFinite);
+            return Err(ProfileError::quality("quality must be a finite number"));
         }
         let mut values = BTreeMap::new();
         let mut extrapolated = false;
@@ -337,7 +351,7 @@ mod tests {
                 BTreeMap::from([("a".to_string(), vec![0.0, 0.0])]),
                 semantics_ok()
             ),
-            Err(ProfileError::QualityCurvesSchemaUnexpected { .. })
+            Err(ProfileError::Quality { .. })
         ));
         assert!(matches!(
             QualityCurves::new(
@@ -346,7 +360,7 @@ mod tests {
                 BTreeMap::from([("a".to_string(), vec![0.0])]),
                 semantics_ok()
             ),
-            Err(ProfileError::QualityCurvesTooFewBreakpoints)
+            Err(ProfileError::Quality { .. })
         ));
         assert!(matches!(
             QualityCurves::new(
@@ -355,7 +369,7 @@ mod tests {
                 BTreeMap::from([("a".to_string(), vec![0.0, 0.0])]),
                 semantics_ok()
             ),
-            Err(ProfileError::QualityCurvesBreakpointsNotIncreasing)
+            Err(ProfileError::Quality { .. })
         ));
         assert!(matches!(
             QualityCurves::new(
@@ -364,7 +378,7 @@ mod tests {
                 BTreeMap::new(),
                 semantics_ok()
             ),
-            Err(ProfileError::QualityCurvesEmptyCurves)
+            Err(ProfileError::Quality { .. })
         ));
         assert!(matches!(
             QualityCurves::new(
@@ -373,7 +387,7 @@ mod tests {
                 BTreeMap::from([("a".to_string(), vec![0.0])]),
                 semantics_ok()
             ),
-            Err(ProfileError::QualityCurvesCurveLengthMismatch { .. })
+            Err(ProfileError::Quality { .. })
         ));
         assert!(matches!(
             QualityCurves::new(
@@ -382,7 +396,7 @@ mod tests {
                 BTreeMap::from([("a".to_string(), vec![0.0, f64::NAN])]),
                 semantics_ok()
             ),
-            Err(ProfileError::QualityCurvesValueNonFinite { .. })
+            Err(ProfileError::Quality { .. })
         ));
         // v2 semantics: must cover the curve names exactly.
         assert!(matches!(
@@ -392,7 +406,7 @@ mod tests {
                 BTreeMap::from([("a".to_string(), vec![0.0, 0.0])]),
                 BTreeMap::new()
             ),
-            Err(ProfileError::QualityCurvesSemanticsIncomplete)
+            Err(ProfileError::Quality { .. })
         ));
         assert!(matches!(
             QualityCurves::new(
@@ -401,7 +415,7 @@ mod tests {
                 BTreeMap::from([("a".to_string(), vec![0.0, 0.0])]),
                 BTreeMap::from([("b".to_string(), "no-op".to_string())])
             ),
-            Err(ProfileError::QualityCurvesSemanticsIncomplete)
+            Err(ProfileError::Quality { .. })
         ));
     }
 }

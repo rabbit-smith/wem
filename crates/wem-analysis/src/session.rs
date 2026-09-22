@@ -19,17 +19,7 @@ use std::borrow::Cow;
 use wem_scheduling::{plan_mode_sequence, ModeSelector, SelectorError};
 
 fn selector_err(e: SelectorError) -> AnalysisError {
-    use AnalysisError::*;
-    match e {
-        SelectorError::HopCapacityNonPositive => SessionChannelsNonPositive { channels: 0 },
-        SelectorError::QueueSlotOutOfRange { .. } => AnalysisFrameNotContiguous {
-            expected: 0,
-            got: 0,
-        },
-        _ => UnsupportedGeometry {
-            reason: "mode selector rejected a state transition",
-        },
-    }
+    AnalysisError::state(format!("mode selector rejected its stream state: {e}"))
 }
 
 /// One mode decision captured at the selector's scan point.
@@ -150,17 +140,23 @@ impl AnalysisSession {
         resources: AnalysisProfileResources,
         max_channel_pool_workers: Option<std::num::NonZeroUsize>,
     ) -> Result<Self, AnalysisError> {
-        use AnalysisError::*;
         if channels <= 0 {
-            return Err(SessionChannelsNonPositive { channels });
+            return Err(AnalysisError::state(format!(
+                "session channels non positive (channels={:?})",
+                channels
+            )));
         }
         if sample_rate <= 0 {
-            return Err(SessionSampleRateNonPositive { sample_rate });
+            return Err(AnalysisError::state(format!(
+                "session sample rate non positive (sample_rate={:?})",
+                sample_rate
+            )));
         }
         if blocksizes != [256, 2048] {
-            return Err(SessionBlockSizeMismatch {
-                got: [blocksizes[0], blocksizes[1]],
-            });
+            return Err(AnalysisError::state(format!(
+                "session block size mismatch (got={:?})",
+                [blocksizes[0], blocksizes[1]]
+            )));
         }
         let transient_detector = TransientDetector::new(
             channels,
@@ -168,15 +164,21 @@ impl AnalysisSession {
             resources.mdct_looks[&128].clone(),
             128,
         )
-        .map_err(|_| UnsupportedGeometry {
-            reason: "transient detector geometry",
+        .map_err(|_| {
+            AnalysisError::geometry(format!(
+                "unsupported geometry (reason={:?})",
+                "transient detector geometry"
+            ))
         })?;
         let mode_selector =
             ModeSelector::new(64, 128, 0, 0, 0, 1024, vec![0; 128]).map_err(selector_err)?;
         let short_psy_analyzer =
             ShortPsyAnalyzer::new(channels, resources.short_profiles.clone(), None, None).map_err(
-                |_| UnsupportedGeometry {
-                    reason: "short psychoacoustic analyzer geometry",
+                |_| {
+                    AnalysisError::geometry(format!(
+                        "unsupported geometry (reason={:?})",
+                        "short psychoacoustic analyzer geometry"
+                    ))
                 },
             )?;
         let input_conditioner = resources
@@ -302,10 +304,11 @@ impl AnalysisSession {
         pcm: &'a [Vec<f64>],
     ) -> Result<Cow<'a, [Vec<f64>]>, AnalysisError> {
         if pcm.len() as i64 != self.channels {
-            return Err(AnalysisError::InputConditionerChannelCountMismatch {
-                want: self.channels,
-                got: pcm.len() as i64,
-            });
+            return Err(AnalysisError::input(format!(
+                "input conditioner channel count mismatch (want={:?}, got={:?})",
+                self.channels,
+                pcm.len() as i64
+            )));
         }
         match self.input_conditioner.as_mut() {
             Some(conditioner) => Ok(Cow::Owned(conditioner.process(pcm)?)),
@@ -316,16 +319,16 @@ impl AnalysisSession {
     /// Validate and consume one scheduler-bound analysis frame
     /// (Python `_consume_analysis_window`).
     fn consume_analysis_window(&mut self, window: &WindowedFrame) -> Result<(), AnalysisError> {
-        use AnalysisError::*;
         if window.index() != self.next_frame_index {
-            return Err(AnalysisFrameNotContiguous {
-                expected: self.next_frame_index,
-                got: window.index(),
-            });
+            return Err(AnalysisError::state(format!(
+                "analysis frame not contiguous (expected={:?}, got={:?})",
+                self.next_frame_index,
+                window.index()
+            )));
         }
         if let Some((last_current, last_following)) = self.last_frame_modes {
             if window.previous() != last_current || window.current() != last_following {
-                return Err(AdjacentAnalysisFrameModesDiffer);
+                return Err(AnalysisError::state("adjacent analysis frame modes differ"));
             }
         }
         self.next_frame_index += 1;
@@ -352,10 +355,9 @@ impl AnalysisSession {
         &mut self,
         pcm_by_channel: &[Vec<f64>],
     ) -> Result<i64, AnalysisError> {
-        use AnalysisError::*;
         let expected_generated = self.transient_quanta() * self.mode_selector.hop;
         if self.mode_selector.generated != expected_generated {
-            return Err(ManualIngestionMixed);
+            return Err(AnalysisError::state("manual ingestion mixed"));
         }
         let history_window = self.mode_selector.begin_quantum();
         let quantum_index = self.transient_quanta();
@@ -390,9 +392,12 @@ impl AnalysisSession {
                 .frame_transition_codes
                 .get(window.index() as usize)
                 .copied()
-                .ok_or(AnalysisError::TransitionCodeMissing {
-                    index: window.index(),
-                    recorded: self.frame_transition_codes.len(),
+                .ok_or_else(|| {
+                    AnalysisError::state(format!(
+                        "transition code missing (index={:?}, recorded={:?})",
+                        window.index(),
+                        self.frame_transition_codes.len()
+                    ))
                 });
         }
         let detector_center = window.center + self.blocksizes[1] / 2;
@@ -465,10 +470,12 @@ impl AnalysisSession {
         current_mode: i64,
     ) -> Result<(), AnalysisError> {
         let recorded = self.frame_transition_codes.len();
-        let code = self
-            .frame_transition_codes
-            .last_mut()
-            .ok_or(AnalysisError::TransitionCodeMissing { index: 0, recorded })?;
+        let code = self.frame_transition_codes.last_mut().ok_or_else(|| {
+            AnalysisError::state(format!(
+                "transition code missing (index={:?}, recorded={:?})",
+                0, recorded
+            ))
+        })?;
         if current_mode == 1 {
             *code = 2 | i64::from(previous_mode != 0);
         }
@@ -484,10 +491,11 @@ impl AnalysisSession {
         terminal_following: i64,
     ) -> Result<Vec<WindowedFrame>, AnalysisError> {
         if (pcm.len() as i64) != self.channels {
-            return Err(AnalysisError::PcmChannelsUnequal {
-                want: self.channels,
-                got: pcm.len() as i64,
-            });
+            return Err(AnalysisError::input(format!(
+                "pcm channels unequal (want={:?}, got={:?})",
+                self.channels,
+                pcm.len() as i64
+            )));
         }
         iter_pcm_windows(
             pcm,
@@ -502,19 +510,31 @@ impl AnalysisSession {
     /// Run transient detection and return the emitted mode sequence
     /// (Python `select_modes`).
     pub fn select_modes(&mut self, pcm: &[Vec<f64>]) -> Result<Vec<i64>, AnalysisError> {
-        use AnalysisError::*;
         if (pcm.len() as i64) != self.channels {
-            return Err(PcmChannelsUnequal {
-                want: self.channels,
-                got: pcm.len() as i64,
-            });
+            return Err(AnalysisError::input(format!(
+                "pcm channels unequal (want={:?}, got={:?})",
+                self.channels,
+                pcm.len() as i64
+            )));
         }
         if self.transient_quanta() != 0 || self.mode_selector.generated != 0 {
-            return Err(ModeSelectionNotFresh);
+            return Err(AnalysisError::state("mode selection not fresh"));
         }
         let source_len = pcm.first().map(|channel| channel.len() as i64).unwrap_or(0);
-        if source_len < 4096 || pcm.iter().any(|channel| channel.len() as i64 != source_len) {
-            return Err(ModeSelectionPcmInvalid { frames: source_len });
+        if source_len < 4096 {
+            return Err(AnalysisError::input(format!(
+                "mode selection requires at least 4096 PCM frames, got {source_len}"
+            )));
+        }
+        if let Some((channel, samples)) = pcm
+            .iter()
+            .enumerate()
+            .find(|(_, samples)| samples.len() as i64 != source_len)
+        {
+            return Err(AnalysisError::input(format!(
+                "PCM channel {channel} has {} frames, expected {source_len}",
+                samples.len()
+            )));
         }
         let hop = self.mode_selector.hop;
         let mut detector_streams = detector_pcm_streams(pcm, None, 0, None, &self.blocksizes)?;
@@ -541,9 +561,10 @@ impl AnalysisSession {
         self.eos_training_samples = self.blocksizes[1]
             .min(self.blocksizes[1] / 2 + source_len - self.mode_scan.next_center);
         if self.eos_training_samples <= 32 {
-            return Err(UnsupportedGeometry {
-                reason: "EOS LPC training window is too short",
-            });
+            return Err(AnalysisError::geometry(format!(
+                "unsupported geometry (reason={:?})",
+                "EOS LPC training window is too short"
+            )));
         }
         detector_streams = detector_pcm_streams(
             pcm,
@@ -564,8 +585,11 @@ impl AnalysisSession {
         }
 
         while self.mode_scan_has_source_frame(source_len) {
-            let decision = self.scan_next_mode(true)?.ok_or(UnsupportedGeometry {
-                reason: "EOS mode scan did not emit a decision",
+            let decision = self.scan_next_mode(true)?.ok_or_else(|| {
+                AnalysisError::geometry(format!(
+                    "unsupported geometry (reason={:?})",
+                    "EOS mode scan did not emit a decision"
+                ))
             })?;
             modes.push(decision.current);
         }
@@ -607,7 +631,7 @@ impl AnalysisSession {
     ) -> Result<(Vec<i64>, PlannedWindowSource), AnalysisError> {
         let modes = self.select_modes(pcm)?;
         let plans = plan_mode_sequence(&modes, &self.blocksizes, 1)
-            .map_err(|_| AnalysisError::FramePlanIntervalMismatch)?;
+            .map_err(|_| AnalysisError::state("frame plan interval mismatch"))?;
         let source = PlannedWindowSource::new(
             pcm,
             &plans,
@@ -717,7 +741,7 @@ impl AnalysisSession {
                 .iter()
                 .any(|row| row.len() as i64 != expected_size)
         {
-            return Err(AnalysisError::AnalysisWindowSamplesMismatch);
+            return Err(AnalysisError::input("analysis window samples mismatch"));
         }
         self.consume_analysis_window(&window)?;
         if window.current() == 1 {

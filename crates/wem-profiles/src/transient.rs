@@ -96,7 +96,9 @@ pub fn materialize_transient_tables(
 ) -> Result<TransientDetectorTables, ProfileError> {
     let index = match quality {
         None => family.default_record_index,
-        Some(quality) if !quality.is_finite() => return Err(ProfileError::QualityValueNonFinite),
+        Some(quality) if !quality.is_finite() => {
+            return Err(ProfileError::quality("quality must be a finite number"))
+        }
         Some(quality) => {
             let (value, _outside) = linear_frac(
                 &family.breakpoints,

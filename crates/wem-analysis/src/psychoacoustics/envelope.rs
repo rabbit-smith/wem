@@ -71,17 +71,26 @@ pub fn shape_floor_envelope(
     .iter()
     .any(|values| values.len() != n)
     {
-        return Err(AnalysisError::EnvelopeStageLengthMismatch { want: n as i64 });
+        return Err(AnalysisError::geometry(format!(
+            "envelope stage length mismatch (want={:?})",
+            n as i64
+        )));
     }
     let source_curve = source_curve.unwrap_or(target_curve);
     if source_curve.len() != n {
-        return Err(AnalysisError::EnvelopeStageLengthMismatch { want: n as i64 });
+        return Err(AnalysisError::geometry(format!(
+            "envelope stage length mismatch (want={:?})",
+            n as i64
+        )));
     }
     if n == 0 {
         return Ok((Vec::new(), Vec::new(), None));
     }
     if mode != 1 {
-        return Err(AnalysisError::EnvelopeStageModeUnsupported { mode });
+        return Err(AnalysisError::geometry(format!(
+            "envelope stage mode unsupported (mode={:?})",
+            mode
+        )));
     }
 
     let mut output = vec![0.0f64; n];
@@ -157,10 +166,11 @@ pub fn prepare_long_to_short_history(
     previous_state: &[f64],
 ) -> Result<Vec<f64>, AnalysisError> {
     if raw_long.len() != 1024 || previous_state.len() != 1024 {
-        return Err(AnalysisError::FloorTransitionBins {
-            want: 1024,
-            got: raw_long.len() as i64,
-        });
+        return Err(AnalysisError::geometry(format!(
+            "floor transition bins (want={:?}, got={:?})",
+            1024,
+            raw_long.len() as i64
+        )));
     }
     let mut out: Vec<f64> = previous_state.iter().map(|value| f32_of(*value)).collect();
     for index in 0..128 {
@@ -193,7 +203,7 @@ pub fn shape_first_long_floor_envelope(
         Some(look) => look,
         None => computed_look
             .as_ref()
-            .ok_or(AnalysisError::LongFloorGeometry)?,
+            .ok_or_else(|| AnalysisError::geometry("long floor geometry"))?,
     };
     let n = look.n as usize;
     if !(seed.len() == remap.len()
@@ -203,7 +213,7 @@ pub fn shape_first_long_floor_envelope(
         && scratch.current_curve.len() == n
         && (scratch.history_curve.len() == 128 || scratch.history_curve.len() == n))
     {
-        return Err(AnalysisError::LongEnvelopeStateBins);
+        return Err(AnalysisError::geometry("long envelope state bins"));
     }
     // history inside the generic floor loop.
     let history_curve: Vec<f64> = if scratch.history_curve.len() == n {
@@ -231,7 +241,9 @@ pub fn shape_first_long_floor_envelope(
         Some(raw),
     )?;
     if break_index.is_some() {
-        return Err(AnalysisError::FirstEnvelopeEnteredPeakBranch);
+        return Err(AnalysisError::invariant(
+            "first envelope entered peak branch",
+        ));
     }
     if (transition, same_run) == (2, 0) {
         let reduced = prepare_long_to_short_history(raw, &scratch.current_curve)?;

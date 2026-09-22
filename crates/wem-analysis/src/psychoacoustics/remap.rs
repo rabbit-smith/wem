@@ -103,7 +103,10 @@ fn fit_interval(
     denominator: f64,
 ) -> Result<(f64, f64, f64), AnalysisError> {
     if !(start >= 0 && start < n && end >= 0 && end < n) {
-        return Err(AnalysisError::PsyIntervalEndpointOutOfRange { start, end, n });
+        return Err(AnalysisError::geometry(format!(
+            "psy interval endpoint out of range (start={:?}, end={:?}, n={:?})",
+            start, end, n
+        )));
     }
     let (a, b, c, y, xy) = if crossing_zero {
         (
@@ -144,10 +147,11 @@ pub fn wwise_psy_curve_smooth(
         return Ok(Vec::new());
     }
     if (interval_table.len() as i64) < n {
-        return Err(AnalysisError::PsyIntervalTableShort {
-            want: n,
-            got: interval_table.len() as i64,
-        });
+        return Err(AnalysisError::geometry(format!(
+            "psy interval table short (want={:?}, got={:?})",
+            n,
+            interval_table.len() as i64
+        )));
     }
 
     let (p0, p1, p2, q0, q1) = wwise_psy_prefix_moments(curve, offset);
@@ -292,22 +296,25 @@ pub fn wwise_psy_peak_suppress(
     cap_curve: &[f64],
 ) -> Result<Vec<f64>, AnalysisError> {
     if original.len() != difference.len() {
-        return Err(AnalysisError::PsyCurveLengthMismatch {
-            want: original.len() as i64,
-            got: difference.len() as i64,
-        });
+        return Err(AnalysisError::geometry(format!(
+            "psy curve length mismatch (want={:?}, got={:?})",
+            original.len() as i64,
+            difference.len() as i64
+        )));
     }
     if original.len() as i64 != look.n {
-        return Err(AnalysisError::PsyLookCurveLengthMismatch {
-            look_n: look.n,
-            got: original.len() as i64,
-        });
+        return Err(AnalysisError::geometry(format!(
+            "psy look curve length mismatch (look_n={:?}, got={:?})",
+            look.n,
+            original.len() as i64
+        )));
     }
     if cap_curve.len() as i64 != look.n {
-        return Err(AnalysisError::PsyLookCurveLengthMismatch {
-            look_n: look.n,
-            got: cap_curve.len() as i64,
-        });
+        return Err(AnalysisError::geometry(format!(
+            "psy look curve length mismatch (look_n={:?}, got={:?})",
+            look.n,
+            cap_curve.len() as i64
+        )));
     }
     let n = look.n as usize;
     let limit = (look.short_limit.min(look.n)) as usize;
@@ -380,15 +387,19 @@ pub fn wwise_psy_peak_suppress_long_mode2(
     tables: &WwisePsyLongTables,
 ) -> Result<Vec<f64>, AnalysisError> {
     if base_curve.len() as i64 != LONG_PSY_N || tables.n != LONG_PSY_N {
-        return Err(AnalysisError::LongRemapMode2Bins { want: LONG_PSY_N });
+        return Err(AnalysisError::geometry(format!(
+            "long remap mode2 bins (want={:?})",
+            LONG_PSY_N
+        )));
     }
     // In the stored long look this is exactly the active-bin field in peak
     // suppression (the shared long-look word at index 23).
     let active_bins = tables.seed_outer_u32[23] as i64;
     if !(active_bins > 0 && active_bins <= LONG_PSY_N && active_bins % 8 == 0) {
-        return Err(AnalysisError::LongActiveSpanInvalid {
-            active: active_bins,
-        });
+        return Err(AnalysisError::invariant(format!(
+            "long active span invalid (active={:?})",
+            active_bins
+        )));
     }
     // peak suppression spills each eight-bin mean to a float stack slot.
     let mut means = Vec::with_capacity((active_bins / 8) as usize);
@@ -436,10 +447,16 @@ pub fn build_long_psy_remap_variant(
     table: &WwisePsyLongTables,
 ) -> Result<LongRemapResult, AnalysisError> {
     if raw.len() as i64 != 1024 {
-        return Err(AnalysisError::LongRemapBins { want: 1024 });
+        return Err(AnalysisError::geometry(format!(
+            "long remap bins (want={:?})",
+            1024
+        )));
     }
     if table.n != 1024 {
-        return Err(AnalysisError::LongRemapBins { want: 1024 });
+        return Err(AnalysisError::geometry(format!(
+            "long remap bins (want={:?})",
+            1024
+        )));
     }
     let original: Vec<f64> = raw.iter().map(|v| f32_of(*v)).collect();
     let first = wwise_psy_curve_smooth(
@@ -480,8 +497,11 @@ pub fn build_long_psy_remap_variant(
     let lut: Vec<f64> = table
         .analysis_profile_u32
         .get(84..124)
-        .ok_or(AnalysisError::LongRemapLutShort {
-            got: table.analysis_profile_u32.len() as i64,
+        .ok_or_else(|| {
+            AnalysisError::configuration(format!(
+                "long remap lut short (got={:?})",
+                table.analysis_profile_u32.len() as i64
+            ))
         })?
         .iter()
         .map(|word| u32_to_f32(*word) as f64)
@@ -520,10 +540,11 @@ pub fn build_coupling_peak(
 ) -> Result<Vec<f64>, AnalysisError> {
     let n = raw_mdct.len();
     if selector.len() != n || base.len() != n || previous_mdct.len() != n {
-        return Err(AnalysisError::PsyBaseSelectorLengthMismatch {
-            want: n as i64,
-            got: selector.len().min(base.len()).min(previous_mdct.len()) as i64,
-        });
+        return Err(AnalysisError::geometry(format!(
+            "psy base selector length mismatch (want={:?}, got={:?})",
+            n as i64,
+            selector.len().min(base.len()).min(previous_mdct.len()) as i64
+        )));
     }
     let mut peak = vec![0.0; n];
     if !enabled {
@@ -550,10 +571,11 @@ pub fn wwise_psy_row3_curve(
     curve_offsets: &[i64],
 ) -> Result<Vec<f64>, AnalysisError> {
     if base_curve.len() != selector_curve.len() {
-        return Err(AnalysisError::PsyBaseSelectorLengthMismatch {
-            want: base_curve.len() as i64,
-            got: selector_curve.len() as i64,
-        });
+        return Err(AnalysisError::geometry(format!(
+            "psy base selector length mismatch (want={:?}, got={:?})",
+            base_curve.len() as i64,
+            selector_curve.len() as i64
+        )));
     }
     Ok(base_curve
         .iter()
@@ -574,10 +596,11 @@ pub fn wwise_psy_residual_core(
     cap_curve: &[f64],
 ) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>), AnalysisError> {
     if original.len() as i64 != look.n {
-        return Err(AnalysisError::PsyLookCurveLengthMismatch {
-            look_n: look.n,
-            got: original.len() as i64,
-        });
+        return Err(AnalysisError::geometry(format!(
+            "psy look curve length mismatch (look_n={:?}, got={:?})",
+            look.n,
+            original.len() as i64
+        )));
     }
     let first = wwise_psy_curve_smooth(original, &look.interval_table, 140.0, 0)?;
     let difference: Vec<f64> = original

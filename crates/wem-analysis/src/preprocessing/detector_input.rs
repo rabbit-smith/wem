@@ -15,31 +15,39 @@ pub fn detector_pcm_streams(
     blocksizes: &[i64],
 ) -> Result<Vec<Vec<f64>>, AnalysisError> {
     if pcm.is_empty() {
-        return Err(AnalysisError::DetectorPcmEmpty);
+        return Err(AnalysisError::input("detector pcm empty"));
     }
     let source_len = pcm[0].len() as i64;
     if source_len < 4096 || pcm.iter().any(|c| c.len() as i64 != source_len) {
-        return Err(AnalysisError::DetectorPcmShort { frames: source_len });
+        return Err(AnalysisError::input(format!(
+            "detector pcm short (frames={:?})",
+            source_len
+        )));
     }
     if terminal_samples < 0 {
-        return Err(AnalysisError::DetectorTerminalNegative {
-            terminal: terminal_samples,
-        });
+        return Err(AnalysisError::invariant(format!(
+            "detector terminal negative (terminal={:?})",
+            terminal_samples
+        )));
     }
     let prefix_samples = match prefix_samples {
         Some(p) => p,
         None => blocksizes[1] / 2,
     };
     if prefix_samples < 1 {
-        return Err(AnalysisError::DetectorPrefixNonPositive {
-            prefix: prefix_samples,
-        });
+        return Err(AnalysisError::invariant(format!(
+            "detector prefix non positive (prefix={:?})",
+            prefix_samples
+        )));
     }
 
     let tail_training =
         tail_training.unwrap_or_else(|| blocksizes.iter().copied().max().unwrap_or(0));
     if tail_training <= 32 || tail_training > source_len {
-        return Err(AnalysisError::DetectorPcmShort { frames: source_len });
+        return Err(AnalysisError::input(format!(
+            "detector pcm short (frames={:?})",
+            source_len
+        )));
     }
     let tail_training = tail_training as usize;
     let mut result = Vec::with_capacity(pcm.len());
@@ -69,7 +77,10 @@ pub fn iter_detector_quanta(
     blocksizes: &[i64],
 ) -> Result<Vec<Vec<Vec<f64>>>, AnalysisError> {
     if hop <= 0 || window <= 0 {
-        return Err(AnalysisError::DetectorHopWindowInvalid { hop, window });
+        return Err(AnalysisError::geometry(format!(
+            "detector hop window invalid (hop={:?}, window={:?})",
+            hop, window
+        )));
     }
     let streams = detector_pcm_streams(pcm, None, terminal_samples, tail_training, blocksizes)?;
     let available = (streams[0].len() as i64 - window) / hop + 1;
@@ -78,10 +89,10 @@ pub fn iter_detector_quanta(
         None => available,
     };
     if count < 0 || count > available {
-        return Err(AnalysisError::DetectorQuantaOutOfRange {
-            requested: count,
-            available,
-        });
+        return Err(AnalysisError::geometry(format!(
+            "detector quanta out of range (requested={:?}, available={:?})",
+            count, available
+        )));
     }
     let mut quanta = Vec::with_capacity(count as usize);
     for quantum in 0..count {

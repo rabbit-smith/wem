@@ -41,7 +41,10 @@ pub fn wwise_fft_packed(
 ) -> Result<Vec<f64>, AnalysisError> {
     let n = samples.len();
     if n < 2 || (n & (n - 1)) != 0 || n & 1 != 0 {
-        return Err(AnalysisError::FftSizeInvalid { n: n as i64 });
+        return Err(AnalysisError::geometry(format!(
+            "fft size invalid (n={:?})",
+            n as i64
+        )));
     }
 
     let mut real: Vec<f64> = samples.iter().map(|v| f32_of(*v)).collect();
@@ -72,11 +75,12 @@ pub fn wwise_fft_packed(
     let mut length = 2usize;
     while length <= n {
         let half = length >> 1;
-        let entry = twiddles.fft_twiddles.get(&(length as i64)).ok_or(
-            AnalysisError::FrozenTwiddlesMissing {
-                length: length as i64,
-            },
-        )?;
+        let entry = twiddles.fft_twiddles.get(&(length as i64)).ok_or_else(|| {
+            AnalysisError::configuration(format!(
+                "frozen twiddles missing (length={:?})",
+                length as i64
+            ))
+        })?;
         let step_re = f32_of(entry.0);
         let step_im = f32_of(entry.1);
         // The stage's sequence, from `(1, 0)` up, by the identical recurrence

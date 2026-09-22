@@ -81,62 +81,74 @@ pub fn analyze_long_frame(
     specmax_state: Option<&mut SpectrumPeakState>,
     pool: &ChannelPool,
 ) -> Result<LongPsyFrame, AnalysisError> {
-    use AnalysisError::*;
     if windowed_frames.is_empty() {
-        return Err(LongAnalysisEmpty);
+        return Err(AnalysisError::invariant("long analysis empty"));
     }
     if !(0..=1).contains(&long_variant) {
-        return Err(LongFrameVariantInvalid {
-            variant: long_variant,
-        });
+        return Err(AnalysisError::state(format!(
+            "long frame variant invalid (variant={:?})",
+            long_variant
+        )));
     }
     let table = &resources.long_base;
     if table.n != 1024 {
-        return Err(LongAnalysisTableBins { want: 1024 });
+        return Err(AnalysisError::geometry(format!(
+            "long analysis table bins (want={:?})",
+            1024
+        )));
     }
     if windowed_frames
         .iter()
         .any(|frame| frame.len() as i64 != table.n * 2)
     {
-        return Err(LongAnalysisFrameSize { want: table.n * 2 });
+        return Err(AnalysisError::state(format!(
+            "long analysis frame size (want={:?})",
+            table.n * 2
+        )));
     }
     if let Some(scratch) = &scratch {
         if scratch.len() as i64 != windowed_frames.len() as i64 {
-            return Err(LongAnalysisScratchCount {
-                want: windowed_frames.len() as i64,
-            });
+            return Err(AnalysisError::geometry(format!(
+                "long analysis scratch count (want={:?})",
+                windowed_frames.len() as i64
+            )));
         }
     }
     if stream.is_some() {
         if scratch.is_some() {
-            return Err(LongAnalysisBothScratchAndStream);
+            return Err(AnalysisError::state(
+                "long analysis both scratch and stream",
+            ));
         }
         if let Some(stream) = &stream {
             if stream.channels.len() as i64 != windowed_frames.len() as i64 {
-                return Err(LongAnalysisStreamChannels {
-                    want: windowed_frames.len() as i64,
-                });
+                return Err(AnalysisError::state(format!(
+                    "long analysis stream channels (want={:?})",
+                    windowed_frames.len() as i64
+                )));
             }
         }
     }
 
     // Two scheduler variants are distinct psycho looks (mode 2 vs 3).
     let analysis_mode = 2 + long_variant;
-    let analysis_table =
-        resources
-            .long_variants
-            .get(&analysis_mode)
-            .ok_or(IncompleteResources {
-                reason: "analysis resources lack psychoacoustic variants",
-            })?;
-    let mdct_look = resources
-        .mdct_looks
-        .get(&(table.n * 2))
-        .ok_or(IncompleteResources {
-            reason: "analysis resources lack required MDCT looks",
-        })?;
+    let analysis_table = resources.long_variants.get(&analysis_mode).ok_or_else(|| {
+        AnalysisError::configuration(format!(
+            "incomplete resources (reason={:?})",
+            "analysis resources lack psychoacoustic variants"
+        ))
+    })?;
+    let mdct_look = resources.mdct_looks.get(&(table.n * 2)).ok_or_else(|| {
+        AnalysisError::configuration(format!(
+            "incomplete resources (reason={:?})",
+            "analysis resources lack required MDCT looks"
+        ))
+    })?;
     if mdct_look.n != table.n * 2 {
-        return Err(LongMdctLookGeometry { want: table.n * 2 });
+        return Err(AnalysisError::geometry(format!(
+            "long mdct look geometry (want={:?})",
+            table.n * 2
+        )));
     }
     let frozen = resources.frozen_twiddles()?;
     // SAFETY (per-channel partition, `parallel` feature): each job in this wave
@@ -174,13 +186,15 @@ pub fn analyze_long_frame(
     // Resolve per-channel scratch from the stream when present (single
     // direct clone; an earlier intermediate Vec doubled copy traffic).
 
-    let long_floor_envelope =
-        resources
-            .long_floor_looks
-            .get(&analysis_mode)
-            .ok_or(IncompleteResources {
-                reason: "analysis resources lack long floor looks",
-            })?;
+    let long_floor_envelope = resources
+        .long_floor_looks
+        .get(&analysis_mode)
+        .ok_or_else(|| {
+            AnalysisError::configuration(format!(
+                "incomplete resources (reason={:?})",
+                "analysis resources lack long floor looks"
+            ))
+        })?;
 
     // Snapshot the scratch contents once to avoid moving the Option per iteration.
     let scratch_snapshot: Option<Vec<FloorEnvelopeScratch>> = scratch.as_ref().map(|v| v.to_vec());
@@ -209,13 +223,12 @@ pub fn analyze_long_frame(
     let mut side: Vec<Vec<f64>> = Vec::new();
     let mut coupling_peak: Vec<Vec<f64>> = Vec::new();
     let mut scratches: Vec<FloorEnvelopeScratch> = Vec::new();
-    let coupling_tone_end = table
-        .seed_outer_u32
-        .get(17)
-        .copied()
-        .ok_or(IncompleteResources {
-            reason: "long psychoacoustic table lacks coupling tone limit",
-        })? as usize;
+    let coupling_tone_end = table.seed_outer_u32.get(17).copied().ok_or_else(|| {
+        AnalysisError::configuration(format!(
+            "incomplete resources (reason={:?})",
+            "long psychoacoustic table lacks coupling tone limit"
+        ))
+    })? as usize;
 
     // SAFETY (per-channel partition, `parallel` feature): same argument as
     // the transform region above — one job per channel in the same pool, each
@@ -296,8 +309,11 @@ pub fn analyze_long_frame(
         state_info = Some(
             stream
                 .commit_long_state(&raw_mdct, long_variant, following_mode, 0)
-                .map_err(|_| LongAnalysisStreamChannels {
-                    want: windowed_frames.len() as i64,
+                .map_err(|_| {
+                    AnalysisError::state(format!(
+                        "long analysis stream channels (want={:?})",
+                        windowed_frames.len() as i64
+                    ))
                 })?,
         );
     }
@@ -333,33 +349,41 @@ pub fn analyze_short_frame(
     specmax_state: Option<&mut SpectrumPeakState>,
     groups: Option<&[Vec<f64>]>,
 ) -> Result<ShortPsyStreamFrame, AnalysisError> {
-    use AnalysisError::*;
     if windowed_frames.is_empty() {
-        return Err(ShortAnalysisEmpty);
+        return Err(AnalysisError::invariant("short analysis empty"));
     }
     if windowed_frames.len() as i64 != stream.channels.len() as i64 {
-        return Err(ShortAnalysisChannelCount {
-            want: stream.channels.len() as i64,
-        });
+        return Err(AnalysisError::geometry(format!(
+            "short analysis channel count (want={:?})",
+            stream.channels.len() as i64
+        )));
     }
     if windowed_frames.iter().any(|frame| frame.len() != 256) {
-        return Err(ShortAnalysisFrameSize { want: 256 });
+        return Err(AnalysisError::state(format!(
+            "short analysis frame size (want={:?})",
+            256
+        )));
     }
     if let Some(groups) = groups {
         if groups.len() as i64 != windowed_frames.len() as i64 {
-            return Err(ShortAnalysisGroupWorkCount {
-                want: windowed_frames.len() as i64,
-            });
+            return Err(AnalysisError::geometry(format!(
+                "short analysis group work count (want={:?})",
+                windowed_frames.len() as i64
+            )));
         }
     }
 
-    let mdct_look = resources.mdct_looks.get(&256).ok_or(IncompleteResources {
-        reason: "analysis resources lack required MDCT looks",
+    let mdct_look = resources.mdct_looks.get(&256).ok_or_else(|| {
+        AnalysisError::configuration(format!(
+            "incomplete resources (reason={:?})",
+            "analysis resources lack required MDCT looks"
+        ))
     })?;
     if mdct_look.n != 256 {
-        return Err(IncompleteResources {
-            reason: "short MDCT look differs from analysis geometry",
-        });
+        return Err(AnalysisError::configuration(format!(
+            "incomplete resources (reason={:?})",
+            "short MDCT look differs from analysis geometry"
+        )));
     }
     // Short frames: the 256-sample per-channel work is too small for
     // rayon's per-region sync overhead to pay off, so this stays

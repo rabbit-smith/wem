@@ -84,9 +84,10 @@ fn resolve_quality_curves(
         return Ok(ResolvedQuality::none());
     };
     let Some(curves) = source.quality_curves()? else {
-        return Err(ProfileError::QualityCurvesResourceMissing {
-            profile: source.label(),
-        });
+        return Err(ProfileError::quality(format!(
+            "profile {:?} has no quality-curves resource; quality interpolation is unavailable for this profile",
+            source.label(),
+        )));
     };
     let normalized = normalize_quality_factor(quality);
     let (values, extrapolated) = curves.evaluate_result(normalized)?;
@@ -124,7 +125,9 @@ fn apply_short_quality_overrides(
             continue;
         };
         if !SHORT_QUALITY_FIELDS.contains(&field) {
-            return Err(ProfileError::QualityCurveParameterUnsupported { name: name.clone() });
+            return Err(ProfileError::quality(format!(
+                "quality curve {name:?} names an unsupported parameter"
+            )));
         }
         // f32 boundary: the reference casts the interpolated value to
         // float32 when writing the short surface field.

@@ -26,7 +26,10 @@ impl std::fmt::Debug for InputConditioner {
 impl InputConditioner {
     pub fn new(channels: i64, config: &InputConditionerConfig) -> Result<Self, AnalysisError> {
         if channels <= 0 {
-            return Err(AnalysisError::SessionChannelsNonPositive { channels });
+            return Err(AnalysisError::geometry(format!(
+                "session channels non positive (channels={:?})",
+                channels
+            )));
         }
         Ok(Self {
             coefficient: config.dc_filter_coefficient,
@@ -42,17 +45,18 @@ impl InputConditioner {
 
     pub fn process(&mut self, rows: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, AnalysisError> {
         if rows.len() != self.previous_input.len() {
-            return Err(AnalysisError::InputConditionerChannelCountMismatch {
-                want: self.previous_input.len() as i64,
-                got: rows.len() as i64,
-            });
+            return Err(AnalysisError::input(format!(
+                "input conditioner channel count mismatch (want={:?}, got={:?})",
+                self.previous_input.len() as i64,
+                rows.len() as i64
+            )));
         }
         let frames = rows.first().map(Vec::len).unwrap_or(0);
         if rows.iter().any(|row| row.len() != frames) {
-            return Err(AnalysisError::PcmChannelsUnequal {
-                want: frames as i64,
-                got: 0,
-            });
+            return Err(AnalysisError::input(format!(
+                "pcm channels unequal (want={:?}, got={:?})",
+                frames as i64, 0
+            )));
         }
 
         let mut conditioned = Vec::with_capacity(rows.len());

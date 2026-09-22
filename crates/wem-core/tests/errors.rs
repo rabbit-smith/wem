@@ -78,227 +78,40 @@ mod variants {
         }
     }
 
-    /// `wem_profiles::error::ProfileError` — 29 variants.
+    /// `wem_profiles::error::ProfileError` — 7 variants.
     pub fn profile_error(value: &ProfileError) {
         match value {
-            ProfileError::ProfileKeyNonPositive => {}
-            ProfileError::ProfileKeyFieldEmpty { .. } => {}
-            ProfileError::ProfileGeometryMismatch => {}
-            ProfileError::ProfileBlockSizesMalformed => {}
-            ProfileError::ProfileBlockSizesMismatch => {}
-            ProfileError::BundleMissingVorbisSetup => {}
-            ProfileError::RegistryDuplicateKey { .. } => {}
-            ProfileError::UnknownProfileKey { .. } => {}
-            ProfileError::UnknownWwiseVersion { .. } => {}
-            ProfileError::UnsupportedWwiseGeneration { .. } => {}
-            ProfileError::NoProfileForSelection { .. } => {}
-            ProfileError::AmbiguousProfileSelection { .. } => {}
-            ProfileError::SelectionGeometryNonPositive => {}
-            ProfileError::UnknownBookTable { .. } => {}
-            ProfileError::BookIdOutOfRange { .. } => {}
-            ProfileError::LongVariantModeInvalid { .. } => {}
-            ProfileError::QualityCurvesSchemaUnexpected { .. } => {}
-            ProfileError::QualityCurvesTooFewBreakpoints => {}
-            ProfileError::QualityCurvesBreakpointsNotIncreasing => {}
-            ProfileError::QualityCurvesCurveLengthMismatch { .. } => {}
-            ProfileError::QualityCurvesValueNonFinite { .. } => {}
-            ProfileError::QualityCurvesEmptyCurves => {}
-            ProfileError::QualityValueNonFinite => {}
-            ProfileError::QualityCurvesResourceMissing { .. } => {}
-            ProfileError::QualityCurveParameterUnsupported { .. } => {}
-            ProfileError::QualityCurvesSemanticsIncomplete => {}
+            ProfileError::Identity { .. } => {}
+            ProfileError::Selection { .. } => {}
+            ProfileError::Tables { .. } => {}
+            ProfileError::Quality { .. } => {}
             ProfileError::Analysis(..) => {}
             ProfileError::Codebook(..) => {}
             ProfileError::Bit(..) => {}
         }
     }
 
-    /// `wem_analysis::config::AnalysisError` — 151 variants.
+    /// `wem_analysis::config::AnalysisError` — 5 variants.
     pub fn analysis_error(value: &AnalysisError) {
         match value {
-            AnalysisError::UnsupportedGeometry { .. } => {}
-            AnalysisError::MalformedField { .. } => {}
-            AnalysisError::IncompleteResources { .. } => {}
-            AnalysisError::PsyLookGeometry { .. } => {}
-            AnalysisError::PsyLookRowLength { .. } => {}
-            AnalysisError::FrozenLnDomainMiss { .. } => {}
-            AnalysisError::LongSeedGeometry => {}
-            AnalysisError::LongSeedOctaveGeometry => {}
-            AnalysisError::LongSeedLabelsMalformed => {}
-            AnalysisError::LongSeedToneBanksMalformed => {}
-            AnalysisError::LongFloorGeometry => {}
-            AnalysisError::LongFloorScalars { .. } => {}
-            AnalysisError::FftSizeInvalid { .. } => {}
-            AnalysisError::SamplesShort { .. } => {}
-            AnalysisError::FrozenTwiddlesMissing { .. } => {}
-            AnalysisError::FrozenWindowHalfMismatch { .. } => {}
-            AnalysisError::WindowSizeInvalid { .. } => {}
-            AnalysisError::FrozenWindowDomainMiss { .. } => {}
-            AnalysisError::PsyWindowSize { .. } => {}
-            AnalysisError::TransientWindowGeometry { .. } => {}
-            AnalysisError::TransientMdctGeometry { .. } => {}
-            AnalysisError::BlockSizeInvalid { .. } => {}
-            AnalysisError::BufferBlockOutOfRange => {}
-            AnalysisError::WindowBlockSizeInvalid => {}
-            AnalysisError::WindowStateIndexOutOfRange { .. } => {}
-            AnalysisError::WindowIntervalsIncompatible => {}
-            AnalysisError::LpcOrderInvalid { .. } => {}
-            AnalysisError::LpcSamplesShort { .. } => {}
-            AnalysisError::LpcCoefficientsEmpty => {}
-            AnalysisError::LpcPrimeLengthMismatch { .. } => {}
-            AnalysisError::LpcCountNegative { .. } => {}
-            AnalysisError::LpcPrefillInvalid { .. } => {}
-            AnalysisError::LpcBatchInvalid { .. } => {}
-            AnalysisError::LpcSourceShort { .. } => {}
-            AnalysisError::DetectorPcmEmpty => {}
-            AnalysisError::DetectorPcmShort { .. } => {}
-            AnalysisError::DetectorTerminalNegative { .. } => {}
-            AnalysisError::DetectorPrefixNonPositive { .. } => {}
-            AnalysisError::DetectorHopWindowInvalid { .. } => {}
-            AnalysisError::DetectorQuantaOutOfRange { .. } => {}
-            AnalysisError::FramePlansNotContiguous => {}
-            AnalysisError::FramePlanIntervalMismatch => {}
-            AnalysisError::FramePlanTransitionsDiffer => {}
-            AnalysisError::PcmFeederEmpty => {}
-            AnalysisError::InputConditionerChannelCountMismatch { .. } => {}
-            AnalysisError::PcmFeederShort { .. } => {}
-            AnalysisError::PcmChannelsUnequal { .. } => {}
-            AnalysisError::DetectorChannelCountMismatch { .. } => {}
-            AnalysisError::DetectorQuantumSamplesMismatch { .. } => {}
-            AnalysisError::PsyEnergyRingSlots { .. } => {}
-            AnalysisError::PsyBandStateRings { .. } => {}
-            AnalysisError::PsyConfigRowShort { .. } => {}
-            AnalysisError::PsyMaskShortForBands { .. } => {}
-            AnalysisError::TransientMaskSamples { .. } => {}
-            AnalysisError::PsySpectrumBinsOdd { .. } => {}
-            AnalysisError::SessionChannelsNonPositive { .. } => {}
-            AnalysisError::SessionSampleRateNonPositive { .. } => {}
-            AnalysisError::SessionBlockSizeMismatch { .. } => {}
-            AnalysisError::AnalysisFrameNotContiguous { .. } => {}
-            AnalysisError::AdjacentAnalysisFrameModesDiffer => {}
-            AnalysisError::ShortAnalysisWindowGeometry { .. } => {}
-            AnalysisError::LongAnalysisWindowGeometry { .. } => {}
-            AnalysisError::AnalysisWindowSamplesMismatch => {}
-            AnalysisError::ManualIngestionMixed => {}
-            AnalysisError::ModeSelectionNotFresh => {}
-            AnalysisError::ModeSelectionPcmInvalid { .. } => {}
-            AnalysisError::TransitionCodeMissing { .. } => {}
-            AnalysisError::ShortVectorsLength { .. } => {}
-            AnalysisError::ShortModeOutOfRange { .. } => {}
-            AnalysisError::ShortModeBiasOutOfRange { .. } => {}
-            AnalysisError::ShortGroupWorkLength { .. } => {}
-            AnalysisError::ShortFrameChannelCountMismatch => {}
-            AnalysisError::ShortVariantInvalid { .. } => {}
-            AnalysisError::ShortFollowingModeInvalid { .. } => {}
-            AnalysisError::ShortChannelStateGeometry => {}
-            AnalysisError::ShortAnalyzerChannelsNonPositive { .. } => {}
-            AnalysisError::ShortAnalyzerProfiles { .. } => {}
-            AnalysisError::ShortAnalyzerChannelStateCount { .. } => {}
-            AnalysisError::LongVariantInvalid { .. } => {}
-            AnalysisError::LongAnalysisEmpty => {}
-            AnalysisError::LongAnalysisFrameSize { .. } => {}
-            AnalysisError::LongAnalysisTableBins { .. } => {}
-            AnalysisError::LongAnalysisScratchCount { .. } => {}
-            AnalysisError::LongAnalysisStreamChannels { .. } => {}
-            AnalysisError::LongMdctLookGeometry { .. } => {}
-            AnalysisError::LongAnalysisBothScratchAndStream => {}
-            AnalysisError::ShortAnalysisEmpty => {}
-            AnalysisError::ShortAnalysisChannelCount { .. } => {}
-            AnalysisError::ShortAnalysisFrameSize { .. } => {}
-            AnalysisError::ShortAnalysisGroupWorkCount { .. } => {}
-            AnalysisError::ShortMdctLookGeometry { .. } => {}
-            AnalysisError::LongStateBridgeGeometry => {}
-            AnalysisError::LongStateBridgeCount { .. } => {}
-            AnalysisError::LongToShortHistoryLength { .. } => {}
-            AnalysisError::ShortToLongHistoryLength { .. } => {}
-            AnalysisError::FloorEnvelopeScratchNonPositive { .. } => {}
-            AnalysisError::FloorEnvelopeCurveLengthMismatch { .. } => {}
-            AnalysisError::FloorEnvelopeSourceLengthMismatch { .. } => {}
-            AnalysisError::FloorEnvelopeModeUnsupported { .. } => {}
-            AnalysisError::FirstFloorEnvelopeBufferMismatch { .. } => {}
-            AnalysisError::FirstFloorEnvelopePeakBranch => {}
-            AnalysisError::LongFloorEnvelopeGeometry { .. } => {}
-            AnalysisError::LongFloorEnvelopePeakBranch => {}
-            AnalysisError::FirstLongFloorEnvelopePeakBranch => {}
-            AnalysisError::LongFloorEnvelopeNoLook => {}
-            AnalysisError::QualityExtrapolationWithoutValue => {}
-            AnalysisError::PsyCurveLengthMismatch { .. } => {}
-            AnalysisError::PsyLookCurveLengthMismatch { .. } => {}
-            AnalysisError::PsyIntervalTableShort { .. } => {}
-            AnalysisError::PsyIntervalEndpointOutOfRange { .. } => {}
-            AnalysisError::PsyBaseSelectorLengthMismatch { .. } => {}
-            AnalysisError::PsyLookMissingAth { .. } => {}
-            AnalysisError::PsySeedSpectrumLength { .. } => {}
-            AnalysisError::PsyLookMissingToneCurves => {}
-            AnalysisError::ToneCurveBankShort { .. } => {}
-            AnalysisError::ToneCurvePostArrayShort => {}
-            AnalysisError::ToneCurvePostsShort => {}
-            AnalysisError::ToneCurveBandBankShort { .. } => {}
-            AnalysisError::SeedLoopInputLengthMismatch { .. } => {}
-            AnalysisError::SeedPositionOutOfRange { .. } => {}
-            AnalysisError::SeedSurfaceShort { .. } => {}
-            AnalysisError::OctaveFloorLengthMismatch => {}
-            AnalysisError::RelaxWidthNonPositive => {}
-            AnalysisError::RelaxLengthMismatch => {}
-            AnalysisError::RebaseLengthMismatch { .. } => {}
-            AnalysisError::ShortTemporalBins { .. } => {}
-            AnalysisError::ShortTemporalLength { .. } => {}
-            AnalysisError::LongSeedLogFftLength { .. } => {}
-            AnalysisError::LongRemapBins { .. } => {}
-            AnalysisError::LongRemapMode2Bins { .. } => {}
-            AnalysisError::LongActiveSpanInvalid { .. } => {}
-            AnalysisError::LongRemapLutShort { .. } => {}
-            AnalysisError::LongRemapVariantBins { .. } => {}
-            AnalysisError::LongFrameVariantInvalid { .. } => {}
-            AnalysisError::FftCurveEmpty => {}
-            AnalysisError::SeedTotalLinesNonPositive { .. } => {}
-            AnalysisError::SpecmaxGeometry { .. } => {}
-            AnalysisError::SeedCursorOutOfRange { .. } => {}
-            AnalysisError::EnvelopeScratchLengthNonPositive { .. } => {}
-            AnalysisError::EnvelopeStageLengthMismatch { .. } => {}
-            AnalysisError::EnvelopeStageModeUnsupported { .. } => {}
-            AnalysisError::FloorTransitionBins { .. } => {}
-            AnalysisError::FirstEnvelopeBuffersMismatch { .. } => {}
-            AnalysisError::FirstEnvelopeEnteredPeakBranch => {}
-            AnalysisError::LongEnvelopeStateBins => {}
-            AnalysisError::ShortKernelWords { .. } => {}
-            AnalysisError::ShortAnalysisCannotApplyLongTransition { .. } => {}
-            AnalysisError::StreamFeederChannelsMismatch { .. } => {}
-            AnalysisError::StreamFeederSourceShort { .. } => {}
-            AnalysisError::StreamFeederWindowNotReady { .. } => {}
-            AnalysisError::PoolUnavailable { .. } => {}
+            AnalysisError::Configuration { .. } => {}
+            AnalysisError::Geometry { .. } => {}
+            AnalysisError::Input { .. } => {}
+            AnalysisError::State { .. } => {}
+            AnalysisError::Invariant { .. } => {}
         }
     }
 
-    /// `wem_vorbis::packet_encoder::PacketError` — 26 variants.
+    /// `wem_vorbis::packet_encoder::PacketError` — 7 variants.
     pub fn packet_error(value: &PacketError) {
         match value {
-            PacketError::ModeOutOfRange { .. } => {}
-            PacketError::MappingOutOfRange { .. } => {}
-            PacketError::FloorIndexOutOfRange { .. } => {}
-            PacketError::ResidueIndexOutOfRange { .. } => {}
-            PacketError::SubclassBookIndexOutOfRange { .. } => {}
-            PacketError::MasterBookIndexOutOfRange { .. } => {}
-            PacketError::MasterBookMissing { .. } => {}
-            PacketError::BadYLength { .. } => {}
-            PacketError::MdctTooShort { .. } => {}
-            PacketError::MdctRowCount { .. } => {}
+            PacketError::Structure { .. } => {}
+            PacketError::Analysis { .. } => {}
+            PacketError::Coupling { .. } => {}
             PacketError::Codebook(..) => {}
             PacketError::Floor1(..) => {}
             PacketError::FloorFit(..) => {}
             PacketError::Residue(..) => {}
-            PacketError::AnalysisChannelsMismatch { .. } => {}
-            PacketError::CouplingPeakGeometry => {}
-            PacketError::ChannelMuxTooShort { .. } => {}
-            PacketError::FloorMapTooShort { .. } => {}
-            PacketError::MissingResidueSubmap => {}
-            PacketError::FloorMultiplierOutOfRange { .. } => {}
-            PacketError::FloorClassOutOfRange { .. } => {}
-            PacketError::CouplingChannelOutOfRange { .. } => {}
-            PacketError::CouplingRowLengthMismatch => {}
-            PacketError::CouplingChannelsEqual { .. } => {}
-            PacketError::NonFiniteAnalysisSample { .. } => {}
-            PacketError::ResidueCouplingOverflow => {}
         }
     }
 
@@ -434,9 +247,11 @@ mod variants {
         }
         encoder_error(&error);
         internal_error(&InternalError::Invariant { message: "x" });
-        profile_error(&ProfileError::QualityValueNonFinite);
+        profile_error(&ProfileError::quality("quality must be a finite number"));
         container_error(&ContainerError::NotRiff);
-        packet_error(&PacketError::MasterBookMissing { class: 0 });
+        packet_error(&PacketError::Structure {
+            message: "master book is missing for class 0".to_string(),
+        });
         codebook_error(&CodebookError::Maptype1RequiresQuantlist);
         bit_error(&BitError::OutOfBits);
         setup_error(&SetupError::FieldMissing { field: "x" });
@@ -445,7 +260,164 @@ mod variants {
         residue_error(&ResidueError::InvalidPartitionSize);
         planner_error(&PlannerError::BlockSizeCount);
         selector_error(&SelectorError::HopCapacityNonPositive);
-        analysis_error(&AnalysisError::PsyCurveLengthMismatch { want: 2, got: 1 });
+        analysis_error(&AnalysisError::geometry(
+            "psy curve length mismatch (want=2, got=1)",
+        ));
+    }
+}
+
+mod classification {
+    use wem_analysis::config::{AnalysisError, AnalysisProfileResources};
+    use wem_analysis::dsp::psy_geom::ath;
+    use wem_analysis::preprocessing::streaming::StreamingPcmFeeder;
+    use wem_analysis::preprocessing::windowing::PlannedWindowSource;
+    use wem_analysis::session::AnalysisSession;
+    use wem_analysis::transient::detector::TransientDetector;
+    use wem_core::Encoder;
+    use wem_profiles::{WwiseProfile, WwiseVersion};
+
+    use crate::common::fixture_selection;
+
+    #[test]
+    fn real_rejections_keep_input_geometry_and_selection_categories() {
+        assert!(matches!(
+            StreamingPcmFeeder::new(0, [256, 2048]),
+            Err(AnalysisError::Input { .. })
+        ));
+        assert!(matches!(ath(1, 0), Err(AnalysisError::Geometry { .. })));
+        assert!(matches!(
+            WwiseProfile::new(WwiseVersion::Wwise2013, 0, 44_100),
+            Err(wem_profiles::error::ProfileError::Selection { .. })
+        ));
+    }
+
+    #[test]
+    fn caller_pcm_errors_report_actual_channels_and_lengths() {
+        let mut feeder = StreamingPcmFeeder::new(2, [256, 2048]).unwrap();
+        assert!(matches!(
+            feeder.push(&[vec![0.0; 3]]),
+            Err(AnalysisError::Input { .. })
+        ));
+        let error = feeder.push(&[vec![0.0; 3], vec![0.0; 2]]).unwrap_err();
+        assert!(matches!(error, AnalysisError::Input { .. }));
+        assert_eq!(error.to_string(), "PCM channel 1 has 2 frames, expected 3");
+
+        let plans = wem_scheduling::plan_mode_sequence(&[0, 0], &[256, 2048], 1).unwrap();
+        let Err(error) = PlannedWindowSource::new(
+            &[vec![0.0; 4096], vec![0.0; 4095]],
+            &plans,
+            &[256, 2048],
+            None,
+        ) else {
+            panic!("unequal PCM channel lengths were accepted");
+        };
+        assert!(matches!(error, AnalysisError::Input { .. }));
+        assert_eq!(
+            error.to_string(),
+            "PCM channel 1 has 4095 frames, expected 4096"
+        );
+    }
+
+    #[test]
+    fn session_and_detector_distinguish_bad_input_from_bad_state() {
+        let encoder = Encoder::new(fixture_selection()).unwrap();
+        let resources = encoder.analysis_resources().clone();
+        let mut detector = TransientDetector::new(
+            6,
+            resources.transient.clone(),
+            resources.mdct_looks[&128].clone(),
+            128,
+        )
+        .unwrap();
+        assert!(matches!(
+            detector.analyze_quantum(&[vec![0.0; 128]], 0),
+            Err(AnalysisError::Input { .. })
+        ));
+        let mut quantum = vec![vec![0.0; 128]; 6];
+        quantum[2].pop();
+        let error = detector.analyze_quantum(&quantum, 0).unwrap_err();
+        assert!(matches!(error, AnalysisError::Input { .. }));
+        assert_eq!(
+            error.to_string(),
+            "detector PCM channel 2 has 127 samples, expected 128"
+        );
+
+        let mut session = AnalysisSession::new(6, 44100, [256, 2048], resources).unwrap();
+        assert!(matches!(
+            session.select_modes(&vec![vec![0.0; 4]; 6]),
+            Err(AnalysisError::Input { .. })
+        ));
+        let mut pcm = vec![vec![0.0; 4096]; 6];
+        pcm[3].pop();
+        let error = session.select_modes(&pcm).unwrap_err();
+        assert!(matches!(error, AnalysisError::Input { .. }));
+        assert_eq!(
+            error.to_string(),
+            "PCM channel 3 has 4095 frames, expected 4096"
+        );
+        assert!(matches!(
+            session.finalize_terminal_transition(0, 1),
+            Err(AnalysisError::State { .. })
+        ));
+    }
+
+    #[test]
+    fn inconsistent_quality_metadata_is_a_configuration_error() {
+        let encoder = Encoder::new(fixture_selection()).unwrap();
+        let resources = encoder.analysis_resources().clone();
+        let error = AnalysisProfileResources::new(
+            resources.mdct_looks,
+            resources.transient,
+            resources.short_profiles,
+            resources.short_surface,
+            resources.short_look,
+            resources.long_base,
+            resources.long_variants,
+            resources.long_floor_looks,
+            resources.input_conditioner,
+            resources.frozen,
+            None,
+            true,
+        )
+        .unwrap_err();
+        assert!(matches!(error, AnalysisError::Configuration { .. }));
+        assert!(error.to_string().contains("quality value"));
+    }
+
+    #[test]
+    fn nonfinite_caller_quality_is_never_internal() {
+        for quality in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let error = Encoder::new_with_quality(fixture_selection(), Some(quality)).unwrap_err();
+            assert!(matches!(
+                error,
+                wem_core::error::EncoderError::StateError { .. }
+            ));
+            assert_eq!(error.to_string(), "quality must be a finite number");
+        }
+    }
+
+    #[test]
+    fn malformed_analysis_resources_report_observed_geometry() {
+        let encoder = Encoder::new(fixture_selection()).unwrap();
+        let resources = encoder.analysis_resources();
+        assert!(matches!(
+            TransientDetector::new(
+                6,
+                resources.transient.clone(),
+                resources.mdct_looks[&128].clone(),
+                64,
+            ),
+            Err(AnalysisError::Geometry { message })
+                if message == "transient detector bins (want=128, got=64)"
+        ));
+        let mut table = resources.long_base.clone();
+        table.analysis_profile_u32.truncate(167);
+        let error = wem_analysis::config::make_long_floor_envelope_look(&table).unwrap_err();
+        assert!(matches!(error, AnalysisError::Configuration { .. }));
+        assert_eq!(
+            error.to_string(),
+            "long floor scalars require at least 168 values, got 167"
+        );
     }
 }
 
@@ -506,7 +478,7 @@ mod source_chain {
                 panic!("InternalError::source() is not the ProfileError: {internal:?}")
             });
         assert!(
-            matches!(profile, ProfileError::QualityCurvesResourceMissing { .. }),
+            matches!(profile, ProfileError::Quality { .. }),
             "unexpected leaf profile error: {profile}"
         );
         assert!(
@@ -536,10 +508,7 @@ mod source_chain {
 
     #[test]
     fn every_wrapping_layer_appears_in_the_chain() {
-        let innermost = AnalysisError::PsyCurveLengthMismatch {
-            want: 1024,
-            got: 512,
-        };
+        let innermost = AnalysisError::geometry("psy curve length mismatch (want=1024, got=512)");
         let error = EncoderError::Internal(InternalError::Profile(ProfileError::Analysis(
             innermost.clone(),
         )));
@@ -563,12 +532,24 @@ mod source_chain {
             !messages[3].contains("PsyCurveLengthMismatch"),
             "AnalysisError's Display must be a message, not its Debug rendering: {messages:?}"
         );
-        // The profile layer's own wording for this variant is untouched by this
-        // change (it still prints the analysis Debug rendering); only the cause
-        // chain is new.
         assert!(
             messages[2].starts_with("analysis error: "),
             "the profile layer must keep its message prefix: {messages:?}"
         );
+    }
+
+    #[test]
+    fn packet_failure_keeps_the_nested_codec_cause() {
+        use wem_vorbis::codebook::CodebookError;
+        use wem_vorbis::packet_encoder::PacketError;
+        let error = EncoderError::Internal(InternalError::Packet(PacketError::Codebook(
+            CodebookError::EmptyCodebook,
+        )));
+        assert_eq!(chain(&error).len(), 4);
+        let cause = error.source().unwrap().source().unwrap().source().unwrap();
+        assert!(matches!(
+            cause.downcast_ref::<CodebookError>(),
+            Some(CodebookError::EmptyCodebook)
+        ));
     }
 }

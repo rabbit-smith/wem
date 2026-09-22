@@ -91,11 +91,13 @@ impl EncoderProfile {
     ) -> Result<Self, ProfileError> {
         if let Some(quality) = quality {
             if !quality.is_finite() {
-                return Err(ProfileError::QualityValueNonFinite);
+                return Err(ProfileError::quality("quality must be a finite number"));
             }
         }
         if setup_available != setup_packet.is_some() {
-            return Err(ProfileError::BundleMissingVorbisSetup);
+            return Err(ProfileError::identity(
+                "profile setup availability disagrees with its setup packet",
+            ));
         }
         if (key.channels(), key.sample_rate())
             != (
@@ -103,17 +105,23 @@ impl EncoderProfile {
                 container_metadata.n_samples_per_sec,
             )
         {
-            return Err(ProfileError::ProfileGeometryMismatch);
+            return Err(ProfileError::identity(
+                "profile key geometry differs from container metadata",
+            ));
         }
         if block_sizes[0] <= 0 || block_sizes[1] <= 0 {
-            return Err(ProfileError::ProfileBlockSizesMalformed);
+            return Err(ProfileError::identity(
+                "profile block sizes must contain two positive sizes",
+            ));
         }
         let expected = [
             1i64 << container_metadata.u_blocksize0_pow.max(0),
             1i64 << container_metadata.u_blocksize1_pow.max(0),
         ];
         if block_sizes != expected {
-            return Err(ProfileError::ProfileBlockSizesMismatch);
+            return Err(ProfileError::identity(
+                "profile block sizes differ from container metadata",
+            ));
         }
         Ok(Self {
             key,
@@ -134,7 +142,7 @@ impl EncoderProfile {
     /// registered profile itself is never mutated).
     pub fn with_quality(mut self, quality: f64) -> Result<Self, ProfileError> {
         if !quality.is_finite() {
-            return Err(ProfileError::QualityValueNonFinite);
+            return Err(ProfileError::quality("quality must be a finite number"));
         }
         self.quality = Some(quality);
         Ok(self)
@@ -202,8 +210,8 @@ impl EncoderProfile {
 
     /// The compiled setup packet bytes (Python `setup_packet()`).
     pub fn setup_packet(&self) -> Result<Vec<u8>, ProfileError> {
-        self.setup_packet
-            .clone()
-            .ok_or(ProfileError::BundleMissingVorbisSetup)
+        self.setup_packet.clone().ok_or_else(|| {
+            ProfileError::identity("profile setup availability disagrees with its setup packet")
+        })
     }
 }

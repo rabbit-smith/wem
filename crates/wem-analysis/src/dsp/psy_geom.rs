@@ -57,16 +57,18 @@ pub fn octave(
     octave_shift: u32,
 ) -> Result<Vec<i32>, AnalysisError> {
     validate_geometry(spectrum_bins, sample_rate)?;
-    let shift = octave_shift
-        .checked_add(1)
-        .ok_or(AnalysisError::UnsupportedGeometry {
-            reason: "octave shift is too large",
-        })?;
-    let scale = 1i64
-        .checked_shl(shift)
-        .ok_or(AnalysisError::UnsupportedGeometry {
-            reason: "octave shift is too large",
-        })? as f64;
+    let shift = octave_shift.checked_add(1).ok_or_else(|| {
+        AnalysisError::geometry(format!(
+            "unsupported geometry (reason={:?})",
+            "octave shift is too large"
+        ))
+    })?;
+    let scale = 1i64.checked_shl(shift).ok_or_else(|| {
+        AnalysisError::geometry(format!(
+            "unsupported geometry (reason={:?})",
+            "octave shift is too large"
+        ))
+    })? as f64;
     let bin_width = (sample_rate as f64) / (spectrum_bins as f64);
     Ok((0..spectrum_bins)
         .map(|bin| {
@@ -109,9 +111,10 @@ pub fn ath(spectrum_bins: u32, sample_rate: u32) -> Result<Vec<u32>, AnalysisErr
     }
     if cursor < bin_count {
         if cursor < 2 {
-            return Err(AnalysisError::UnsupportedGeometry {
-                reason: "ATH tail requires two materialized bins",
-            });
+            return Err(AnalysisError::geometry(format!(
+                "unsupported geometry (reason={:?})",
+                "ATH tail requires two materialized bins"
+            )));
         }
         let mut value = curve[(cursor - 1) as usize];
         let slope = f32_round(value - curve[(cursor - 2) as usize]);
@@ -232,14 +235,16 @@ pub fn interval_table(
 
 fn validate_geometry(spectrum_bins: u32, sample_rate: u32) -> Result<(), AnalysisError> {
     if spectrum_bins < 2 {
-        return Err(AnalysisError::UnsupportedGeometry {
-            reason: "psychoacoustic geometry needs at least two spectrum bins",
-        });
+        return Err(AnalysisError::geometry(format!(
+            "unsupported geometry (reason={:?})",
+            "psychoacoustic geometry needs at least two spectrum bins"
+        )));
     }
     if sample_rate == 0 {
-        return Err(AnalysisError::UnsupportedGeometry {
-            reason: "psychoacoustic geometry needs a positive sample rate",
-        });
+        return Err(AnalysisError::geometry(format!(
+            "unsupported geometry (reason={:?})",
+            "psychoacoustic geometry needs a positive sample rate"
+        )));
     }
     Ok(())
 }
@@ -287,9 +292,10 @@ pub(crate) fn mask_knots(raw: &[u32], index: f64) -> Result<[Vec<f64>; 3], Analy
     use super::x87::{add80, mul80, F80};
     const SIX: f64 = f64::from_bits(SIX_F64_BITS);
     if !index.is_finite() || index < 0.0 || index > raw.len() as f64 {
-        return Err(AnalysisError::MalformedField {
-            reason: "mask quality index must be finite and non-negative",
-        });
+        return Err(AnalysisError::invariant(format!(
+            "malformed field (reason={:?})",
+            "mask quality index must be finite and non-negative"
+        )));
     }
     let quality_row = index as i64;
     debug_assert!((quality_row as f64) <= index, "floor semantics expected");
@@ -301,11 +307,17 @@ pub(crate) fn mask_knots(raw: &[u32], index: f64) -> Result<[Vec<f64>; 3], Analy
         let mut values = Vec::with_capacity(17);
         for j in 0..17 {
             let offset = (quality_row * 51 + row as i64 * 17 + j as i64) as usize;
-            let left = (*raw.get(offset).ok_or(AnalysisError::MalformedField {
-                reason: "mask bank is shorter than the selected quality rows",
+            let left = (*raw.get(offset).ok_or_else(|| {
+                AnalysisError::invariant(format!(
+                    "malformed field (reason={:?})",
+                    "mask bank is shorter than the selected quality rows"
+                ))
             })? as i32) as i64;
-            let right = (*raw.get(offset + 51).ok_or(AnalysisError::MalformedField {
-                reason: "mask bank is shorter than the selected quality rows",
+            let right = (*raw.get(offset + 51).ok_or_else(|| {
+                AnalysisError::invariant(format!(
+                    "malformed field (reason={:?})",
+                    "mask bank is shorter than the selected quality rows"
+                ))
             })? as i32) as i64;
             values.push(f32_round(
                 add80(
@@ -339,9 +351,10 @@ pub(crate) fn mask_curves_knots(
 ) -> Result<[Vec<f64>; 3], AnalysisError> {
     validate_geometry(spectrum_bins, sample_rate)?;
     if knots.iter().any(|row| row.len() < 17) {
-        return Err(AnalysisError::MalformedField {
-            reason: "mask curve needs seventeen knots per row",
-        });
+        return Err(AnalysisError::invariant(format!(
+            "malformed field (reason={:?})",
+            "mask curve needs seventeen knots per row"
+        )));
     }
     let mut rows: [Vec<f64>; 3] = [Vec::new(), Vec::new(), Vec::new()];
     for r in rows.iter_mut() {
@@ -373,9 +386,10 @@ pub(crate) fn curve_row1(
 ) -> Result<Vec<f64>, AnalysisError> {
     validate_geometry(spectrum_bins, sample_rate)?;
     if row.len() < 17 {
-        return Err(AnalysisError::MalformedField {
-            reason: "mask curve needs seventeen knots",
-        });
+        return Err(AnalysisError::invariant(format!(
+            "malformed field (reason={:?})",
+            "mask curve needs seventeen knots"
+        )));
     }
     Ok((0..spectrum_bins)
         .map(|bin| {
