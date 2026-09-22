@@ -26,12 +26,15 @@ def _float32_bytes(*values: float) -> bytes:
 
 
 def _write_riff(path: Path, *, fmt_tag: int, channels: int, rate: int,
-                bits: int, data: bytes, fmt_bytes: bytes | None = None) -> None:
-    if fmt_bytes is None:
-        fmt_bytes = struct.pack(
-            "<HHIIHH", fmt_tag, channels, rate, rate * channels * bits // 8,
-            channels * bits // 8, bits,
-        )
+                bits: int, data: bytes) -> None:
+    # One fixed layout: a 16-byte canonical PCM fmt chunk, then the data
+    # chunk.  Cases that need a different shape (a truncated fmt, no data
+    # chunk) write their bytes inline instead, so the RIFF size below is
+    # exactly this file's length by construction.
+    fmt_bytes = struct.pack(
+        "<HHIIHH", fmt_tag, channels, rate, rate * channels * bits // 8,
+        channels * bits // 8, bits,
+    )
     with open(path, "wb") as handle:
         handle.write(b"RIFF")
         handle.write(struct.pack("<I", 36 + len(data)))

@@ -21,7 +21,8 @@ from .seed import (
     wwise_seed_floor_from_look,
 )
 from .short import PsyFrameControls, ShortPsyFrameResult, ShortPsyAnalyzer
-from ..dsp.transform import _f32, mdct_forward
+from ..._f32 import _f32
+from ..dsp.transform import mdct_forward
 
 @dataclass
 class FirstPsyFrame:

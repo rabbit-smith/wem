@@ -17,7 +17,7 @@ from ..config import (
     WwisePsyLook,
     make_wwise_long_seed_look,
 )
-from ..dsp.transform import _f32
+from ..._f32 import _f32
 
 def build_long_floor_seed_from_look(
     look: WwisePsyLongSeedLook,

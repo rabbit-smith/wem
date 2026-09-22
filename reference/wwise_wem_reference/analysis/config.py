@@ -11,6 +11,7 @@ import struct
 from types import MappingProxyType
 from typing import Mapping, Sequence
 
+from .._f32 import _f32
 from .._tmath import config_ln_f64, math_bits
 
 TONE_LEVEL_COUNT = 8
@@ -169,10 +170,6 @@ class WwisePsySeedSurface:
     remap_curve_offsets: tuple[int, ...]
     remap_low_by_index: tuple[float, ...]
     remap_high_by_index: tuple[float, ...]
-
-
-def _f32(value: float) -> float:
-    return struct.unpack("<f", struct.pack("<f", float(value)))[0]
 
 
 def _u32_f32(value: int) -> float:

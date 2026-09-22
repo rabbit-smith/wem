@@ -7,15 +7,13 @@ import struct
 from typing import Mapping, Sequence
 
 from ..config import MdctLook, TransientDetectorTables
+from ..._f32 import _f32
 from ..._tmath import (
     transform_cos_f64,
     transform_sin_f64,
     window_long_sin_f64,
     window_short_sin_f64,
 )
-
-def _f32(value: float) -> float:
-    return struct.unpack("<f", struct.pack("<f", float(value)))[0]
 
 
 def _u32_f32(value: int) -> float:

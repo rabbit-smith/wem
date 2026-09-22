@@ -25,10 +25,6 @@ def f32_bits(x: float) -> int:
     return to_f32_bits(x)
 
 
-def bits_f32(b: int) -> float:
-    return f32_from_bits(b)
-
-
 def f64(x: float) -> float:
     return to_float(x)
 
@@ -692,10 +688,3 @@ def to_f32_bits(x):
         return struct.unpack("<I", struct.pack("<f", float(x)))[0]
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"f32 bit extraction failed for {x!r}") from exc
-
-
-def f32_from_bits(b):
-    try:
-        return f32_from_bits(b)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"f32 bit decode failed for {b!r}") from exc

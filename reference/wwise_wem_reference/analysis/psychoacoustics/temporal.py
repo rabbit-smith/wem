@@ -6,12 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
-
-def _f32(value: float) -> float:
-    """Round a scalar at the algorithm's float32 storage boundary."""
-    import struct
-
-    return struct.unpack("<f", struct.pack("<f", float(value)))[0]
+from ..._f32 import _f32
 
 
 # Sliding relaxation widths for the 128-bin short-block history recurrence.
