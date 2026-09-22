@@ -18,7 +18,12 @@ license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["ruff>=0.6", "mypy>=1.11"]
+# numpy is a test-and-tooling dependency only: `scripts/decode_wem.py` and the
+# two-channel end-to-end suite use it, and nothing under `src/` does, so the
+# shipped wheel keeps `dependencies = []`. It went undeclared and the suite
+# passed locally while CI failed to import one module — the failure mode of a
+# dependency that only the developer's environment happened to have.
+dev = ["ruff>=0.6", "mypy>=1.11", "numpy>=1.24"]
 
 [project.scripts]
 wwise-wem = "wwise_wem.cli:main"
