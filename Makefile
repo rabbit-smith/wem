@@ -161,6 +161,6 @@ clean:
 # paths, flags and the release build they need are not worth remembering.
 # -----------------------------------------------------------------------------
 benchmark:
-	cd crates && cargo build --release -p wem-core
+	cd crates && cargo build --release -p wem-core --features parallel
 	$(PY) scripts/measure_encode_perf.py
 	$(PY) scripts/measure_decode_perf.py
