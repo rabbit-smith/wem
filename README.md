@@ -65,9 +65,11 @@ environment-variable lever are in
 
 ## Decode a file
 
-The decoder is in the Python API (the CLI encodes only, for now). It opens on no
-selection at all — the container describes itself — and hands back f32 samples at
-±1.0 full scale, in bounded blocks:
+The decoder is in the C ABI ([`include/wem.h`](include/wem.h) section 5:
+`wem_decoder_new` → `push*` → `finish`), so every shell has it — the Rust crate,
+the PyO3 extension, and the wasm module. It opens on no selection at all,
+because the container describes itself, and hands back f32 samples at ±1.0 full
+scale, in bounded blocks:
 
 ```python
 import wwise_wem
@@ -82,6 +84,11 @@ The geometry is readable before the first block, so a decode that expands to
 gigabytes streams through bounded memory rather than buffering. What the surface
 refuses and with which class, and the streaming property itself, are in
 [`docs/reference/decoding.md`](docs/reference/decoding.md).
+
+Three surfaces are still encode-only, and the decoder reaches none of them yet:
+the `wwise-wem` CLI, the runnable examples under [`examples/`](examples/README.md),
+and the hand-written JavaScript wrapper [`js/src/index.ts`](js/src/index.ts) —
+the wasm module itself exports the decoder, the wrapper does not re-export it.
 
 ## Every other language
 
