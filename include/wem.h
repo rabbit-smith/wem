@@ -138,10 +138,8 @@ typedef struct WemSession WemSession;
  *   WEM_OK                      — success
  *   WEM_ERR_PROFILE_NOT_FOUND   — no compiled profile satisfies the
  *                                 WemProfile selection
- *   WEM_ERR_STATE_ERROR         — lifecycle violation, a malformed
- *                                 argument (NULL where a value is
- *                                 required), or any call on a handle a
- *                                 defect has killed
+ *   WEM_ERR_STATE_ERROR         — malformed call, or a terminal handle;
+ *                                 see "one code, three situations" below
  *   WEM_ERR_GEOMETRY_MISMATCH   — PCM geometry disagrees with the
  *                                 selection
  *   WEM_ERR_INPUT_TOO_SHORT     — fewer than 4096 PCM frames
@@ -152,6 +150,38 @@ typedef struct WemSession WemSession;
  *                                 caller's input (a kernel panic can
  *                                 never unwind across this boundary; it
  *                                 surfaces as this code — see "Panics")
+ *
+ * One code, three situations: WEM_ERR_STATE_ERROR covers
+ *
+ *   (a) a malformed call — NULL where a value is required (a NULL
+ *       WemProfile, pcm, out-pointer or required callback), or a
+ *       non-positive WemProfile geometry;
+ *   (b) a call outside a handle's lifecycle — push or finish on a session
+ *       that already finished, or any call on a handle a defect has killed;
+ *   (c) the handle this call needed was never handed out, because the Init
+ *       that would have produced it failed (the out-pointer it returned was
+ *       NULL, which is what the call then rejected).
+ *
+ * These are not three different recoveries, which is why they share one
+ * code and why this header does not split them:
+ *
+ *   - The call did not run in every case. A handle the call had is released
+ *     with the matching *_free like any other (NULL is a no-op), and no
+ *     later call resumes it; a call without a handle is simply rewritten.
+ *   - The caller already holds the fact that separates them: whether it
+ *     passed NULL, and what its own earlier calls returned. A defect is
+ *     reported by the call that hits it — WEM_ERR_INTERNAL, once — never
+ *     retroactively as this code, and finish() is documented as terminal.
+ *   - The outcomes that *are* different recoveries are never folded in
+ *     here: WEM_ERR_GEOMETRY_MISMATCH, WEM_ERR_INPUT_TOO_SHORT,
+ *     WEM_ERR_FORMAT_UNSUPPORTED and WEM_ERR_PROFILE_NOT_FOUND all leave a
+ *     live handle usable for the next call, and WEM_ERR_INTERNAL is the
+ *     defect.
+ *
+ * Splitting (a), (b) and (c) into separate codes would change what an
+ * existing client observes for the same call, so it is a new revision of
+ * this header, not an edit to this one. A client that wants to react
+ * differently should key off the call it made, not off this code.
  */
 typedef enum WemError {
   WEM_OK = 0,
@@ -233,12 +263,33 @@ typedef struct WemMeta {
  *    the kernel never writes into client PCM memory.
  *  - A `const WemProfile *` is borrowed for the duration of the call
  *    that takes it; the kernel never retains it.
- *  - Handles returned through `out_...` pointers are owned by the
- *    client and released with the matching *_free (NULL is a no-op).
  *  - `user_data` is an opaque client pointer, passed back verbatim.
+ *
+ *  OUT-PARAMETERS: WHAT EVERY EXIT WRITES
+ *
+ *  A C caller cannot tell an unwritten out-parameter from one holding
+ *  garbage, so each one is specified for every exit, not only for success:
+ *
+ *  - `wem_encoder_new` and `wem_session_new` write their out-pointer on
+ *    every exit that can reach it: the handle on WEM_OK, NULL on every
+ *    failure. The value is therefore always readable and always safe to
+ *    hand to the matching *_free, whatever the return code says. (A NULL
+ *    out-pointer is itself the malformed call WEM_ERR_STATE_ERROR, and
+ *    there is nothing to write.)
+ *  - `wem_session_finish` writes `*out_meta` when and only when it returns
+ *    WEM_OK. On every other return the struct is left exactly as the caller
+ *    had it, and its contents are not a summary of anything: there is no
+ *    empty WemMeta, because a zero length and a 64-character lowercase-hex
+ *    digest have no value that means "no container was produced". The
+ *    return code is what says whether the summary exists, and a caller must
+ *    not read `*out_meta` unless that code was WEM_OK.
+ *  - A handle returned through an out-pointer is owned by the client and
+ *    released with the matching *_free (NULL is a no-op).
  */
 
-/* Profile-resolved shareable encoder (concurrent encodes OK). */
+/* Profile-resolved shareable encoder (concurrent encodes OK).
+ * `*out_encoder` is written on every exit: the handle on WEM_OK, NULL on
+ * every failure (section 3). */
 WemError wem_encoder_new(const WemProfile *profile, WemEncoder **out_encoder);
 void wem_encoder_free(WemEncoder *encoder);
 WemError wem_encoder_encode(const WemEncoder *encoder, const int16_t *pcm,
@@ -253,12 +304,17 @@ WemError wem_encode_pcm16_interleaved(const WemProfile *profile,
 
 /* Streaming session: Init -> push* -> Finish -> free. `write_cb` is
  * required (terminal container bytes); `packet_cb` may be NULL to
- * discard intermediate packets. */
+ * discard intermediate packets. `*out_session` is written on every exit:
+ * the handle on WEM_OK, NULL on every failure (section 3). */
 WemError wem_session_new(const WemProfile *profile, WemWriteCb write_cb,
                          WemPacketCb packet_cb, void *user_data,
                          WemSession **out_session);
 WemError wem_session_push(WemSession *session, const uint8_t *data,
                           size_t len);
+/* Finish: complete the encode, deliver the container bytes through the
+ * session's write callback, and fill `*out_meta` — written when and only
+ * when this returns WEM_OK; untouched on every other return (section 3).
+ * Terminal: whatever it returns, the session is then released, not reused. */
 WemError wem_session_finish(WemSession *session, WemMeta *out_meta);
 void wem_session_free(WemSession *session);
 

@@ -85,6 +85,29 @@ pub struct AnalysisSession {
     eos_training_samples: i64,
 }
 
+/// A summary, deliberately: the geometry, the frame cursor and the counts of
+/// the state that grows with the stream.
+///
+/// The profile resources are thousands of frozen table values and the
+/// per-frame vectors are as long as the encode is, so neither is printed; the
+/// fields here are what tells two sessions apart — which geometry one runs on
+/// and how far it has got.
+impl std::fmt::Debug for AnalysisSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AnalysisSession")
+            .field("channels", &self.channels)
+            .field("sample_rate", &self.sample_rate)
+            .field("blocksizes", &self.blocksizes)
+            .field("next_frame_index", &self.next_frame_index)
+            .field("last_frame_modes", &self.last_frame_modes)
+            .field("input_conditioner", &self.input_conditioner.is_some())
+            .field("frame_transition_codes", &self.frame_transition_codes.len())
+            .field("transition_codes_captured", &self.transition_codes_captured)
+            .field("eos_training_samples", &self.eos_training_samples)
+            .finish()
+    }
+}
+
 impl AnalysisSession {
     /// Validate the construction inputs (Python `__post_init__`).
     #[allow(clippy::too_many_arguments)]

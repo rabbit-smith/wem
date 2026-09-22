@@ -96,6 +96,29 @@ pub struct StreamSession {
     pipeline: Option<StreamPipeline>,
 }
 
+/// A summary, deliberately: the lifecycle position and the streaming
+/// counters, never the pipeline's buffers.
+///
+/// A live session holds the per-channel sample ring, the frame plans and the
+/// emitted packets — the last of which grows with the encoded output — so
+/// those are reported by count; the counters are what a diagnostic needs to
+/// tell "not opened", "mid-stream" and "finished" apart.
+impl std::fmt::Debug for StreamSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (frames_analyzed, audio_packets) = match &self.pipeline {
+            Some(pipeline) => (pipeline.frames_done, pipeline.audio_packets.len()),
+            None => (0, 0),
+        };
+        f.debug_struct("StreamSession")
+            .field("initialized", &self.initialized)
+            .field("finished", &self.finished)
+            .field("pcm_frames", &self.pcm_frames())
+            .field("frames_analyzed", &frames_analyzed)
+            .field("audio_packets", &audio_packets)
+            .finish()
+    }
+}
+
 /// The incremental encode state (only exists after `Init`).
 struct StreamPipeline {
     channels: i64,

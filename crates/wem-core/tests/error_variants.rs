@@ -415,8 +415,7 @@ fn a_real_fault_reaches_a_callers_own_arms() {
         wem_profiles::WwiseProfile::new(wem_profiles::WwiseVersion::Wwise2013, 2, 44_100)
             .expect("positive geometry"),
     )
-    .err()
-    .expect("2ch/44100 is not an installed configuration");
+    .expect_err("2ch/44100 is not an installed configuration");
     match &error {
         EncoderError::ProfileNotFound { .. } => {}
         other => panic!("expected ProfileNotFound, got {other}"),

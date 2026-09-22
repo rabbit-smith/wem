@@ -440,7 +440,10 @@ fn encode_with(
 /// One-shot: nothing was handed out when this fails, so a caught panic here
 /// is retryable, like any other rejection.
 ///
-/// On `WEM_OK`, `*out_encoder` owns the handle; on error it is set to NULL.
+/// `*out_encoder` is written on every exit: the handle on `WEM_OK`, NULL on
+/// every failure — an out-parameter a C caller can always read, and pass to
+/// `wem_encoder_free` (include/wem.h, "MEMORY OWNERSHIP"). The one call that
+/// cannot write is a NULL `out_encoder` itself, which is rejected.
 ///
 /// # Safety
 ///
@@ -598,10 +601,14 @@ pub unsafe extern "C" fn wem_encode_pcm16_interleaved(
 /// `wem_session_finish` (Finish) -> `wem_session_free`. Emitted packets
 /// are delivered through `packet_cb` (NULL discards them); the terminal
 /// container bytes are delivered through `write_cb` at `finish`
-/// (required). The session has single-threaded ownership. On `WEM_OK`,
-/// `*out_session` owns the handle; on error it is set to NULL. One-shot
-/// like `wem_encoder_new`: a caught panic here hands out no handle, so the
+/// (required). The session has single-threaded ownership. One-shot like
+/// `wem_encoder_new`: a caught panic here hands out no handle, so the
 /// caller may call again.
+///
+/// `*out_session` is written on every exit: the handle on `WEM_OK`, NULL on
+/// every failure — an out-parameter a C caller can always read, and pass to
+/// `wem_session_free` (include/wem.h, "MEMORY OWNERSHIP"). The one call that
+/// cannot write is a NULL `out_session` itself, which is rejected.
 ///
 /// # Safety
 ///
@@ -633,8 +640,13 @@ pub unsafe extern "C" fn wem_session_new(
     };
     // A session without its write callback cannot deliver the container, so
     // the missing callback is a malformed call — rejected here, never carried
-    // into the handle as a state a later call has to unwrap.
+    // into the handle as a state a later call has to unwrap. The out-pointer
+    // is cleared first: every failure of this entry leaves `*out_session` NULL
+    // (include/wem.h, "MEMORY OWNERSHIP"), including this one.
     let Some(write_cb) = write_cb else {
+        unsafe {
+            *out_session = std::ptr::null_mut();
+        }
         return WemError::StateError;
     };
     let outcome = guard(PanicScope::OneShot, move || {
@@ -749,10 +761,19 @@ pub unsafe extern "C" fn wem_session_push(
 /// summary (include/wem.h `wem_session_finish`). Terminal: after this
 /// call (regardless of outcome) the session must be released, not used.
 ///
+/// `*out_meta` is written when and only when this returns `WEM_OK`
+/// (include/wem.h, "MEMORY OWNERSHIP"): on every other return — a
+/// malformed call, a session already terminal, a kernel rejection, a write
+/// callback that aborted — the struct is left exactly as the caller had it.
+/// There is no empty `WemMeta` to write: a zero length plus a 64-character
+/// lowercase-hex digest has no value that means "no container", so a filled
+/// but meaningless struct would be a worse answer than an untouched one.
+/// The return code is what says whether the summary exists.
+///
 /// # Safety
 ///
 /// - `session` must be NULL or a live handle owned by this thread;
-/// - `out_meta` must not be NULL (it is written on `WEM_OK`);
+/// - `out_meta` must not be NULL;
 /// - the write callback must be callable from this thread.
 #[no_mangle]
 pub unsafe extern "C" fn wem_session_finish(
@@ -844,9 +865,12 @@ mod tests {
     }
 
     /// The header is the interface, so the crate must not drift
-    /// from it: the declared revision has to match, and no declaration may
+    /// from it: the declared revision has to match, no declaration may
     /// reintroduce a profile name or a profile directory (ABI revision 2
-    /// replaced both with the `WemProfile` selection).
+    /// replaced both with the `WemProfile` selection), and the two rules a
+    /// caller can only learn from the header — what every exit writes through
+    /// an out-parameter, and what `WEM_ERR_STATE_ERROR` covers — must still be
+    /// stated there.
     #[test]
     fn header_matches_this_crate() {
         let header = std::fs::read_to_string(
@@ -866,6 +890,32 @@ mod tests {
             header.contains("WEM_WWISE_2013 = 0"),
             "version table is in the header"
         );
+
+        // The two rules a C caller cannot derive from the prototypes and must
+        // find in the header: what every exit writes through an out-parameter,
+        // and what WEM_ERR_STATE_ERROR does and does not distinguish. Both are
+        // implemented here, so the text is part of the interface this crate is
+        // pinned to, not commentary free to drift away from the code.
+        for (text, rule) in [
+            (
+                "OUT-PARAMETERS: WHAT EVERY EXIT WRITES",
+                "the out-parameter rule (handle out-pointers written on every \
+                 exit, *out_meta only on WEM_OK)",
+            ),
+            (
+                "One code, three situations: WEM_ERR_STATE_ERROR",
+                "the WEM_ERR_STATE_ERROR situations and their single recovery",
+            ),
+            (
+                "`*out_meta` unless that code was WEM_OK",
+                "the rule that says when the terminal summary exists",
+            ),
+        ] {
+            assert!(
+                header.contains(text),
+                "include/wem.h must state {rule}; it no longer contains {text:?}"
+            );
+        }
 
         // Check the declarations only: the header's evolution note names the
         // removed arguments on purpose, so strip comments before looking.

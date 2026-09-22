@@ -58,6 +58,26 @@ pub struct ModeSelector {
     pub queue: Vec<i64>,
 }
 
+/// A summary: every counter, with the queue reported by length.
+///
+/// The queue is a fixed-capacity ring of transient indices (its full contents
+/// are `capacity` values of bookkeeping, not a diagnostic), so its length is
+/// shown instead of its contents; everything else here is a scalar and is
+/// printed as it stands.
+impl std::fmt::Debug for ModeSelector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModeSelector")
+            .field("hop", &self.hop)
+            .field("capacity", &self.capacity)
+            .field("cooldown", &self.cooldown)
+            .field("generated", &self.generated)
+            .field("selected", &self.selected)
+            .field("scan_cursor", &self.scan_cursor)
+            .field("queue_len", &self.queue.len())
+            .finish()
+    }
+}
+
 impl ModeSelector {
     /// Construct and pad the queue to its capacity
     /// (Python `__post_init__`).
