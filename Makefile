@@ -13,7 +13,8 @@
 # `2ch-long` (`tests/parity/two_channel_long_run.py`). Anything else a developer
 # might want to run alone is the underlying tool's own command, and
 # docs/guides/development.md shows that command rather than a name invented for
-# it here.
+# it here. One exception is named below -- `benchmark`, the measurement entry --
+# and it is not a check: `test` never runs it and it never fails on a number.
 # =============================================================================
 
 PY ?= python3
@@ -61,7 +62,7 @@ RUFF ?= $(VENV_BIN)ruff
 MYPY ?= $(VENV_BIN)mypy
 MATURIN ?= $(firstword $(wildcard $(VENV_BIN)maturin) maturin)
 
-.PHONY: test test-fast wem-bytes 2ch-long native build wasm-build clean
+.PHONY: test test-fast wem-bytes 2ch-long native build wasm-build clean benchmark
 
 # -----------------------------------------------------------------------------
 # The verdict. Cheap first: the static checks, then the suites, then the checks
@@ -75,9 +76,8 @@ MATURIN ?= $(firstword $(wildcard $(VENV_BIN)maturin) maturin)
 # clippy leg is there for the same reason from the other side: `--workspace
 # --all-targets` does not lint the bin that feature gates.
 #
-# The measurement instruments are deliberately not in this list and have no
-# target: they report numbers and never fail on one. Their commands are in
-# docs/guides/development.md, under "Watching performance".
+# The measurement instruments are deliberately not in this list: they report
+# numbers and never fail on one. They have a single entry, `benchmark`, below.
 # -----------------------------------------------------------------------------
 test: native
 	$(RUFF) check src reference tests scripts
@@ -146,3 +146,21 @@ wasm-build:
 
 clean:
 	$(PY) scripts/clean.py
+
+# -----------------------------------------------------------------------------
+# The one measurement entry, and not a check.
+#
+# It reports numbers over several runs, takes minutes, and its exit status says
+# only whether the run completed. No threshold and no recorded baseline live
+# here, because a number compared against a recorded one hides a change behind a
+# re-record step (docs/reference/standards.md). `test` never runs it.
+#
+# This is a name invented for a tool invocation, which the header above says
+# this file does not do. It earns the exception because the two scripts are read
+# together -- encode and decode, one machine, one load -- and because their
+# paths, flags and the release build they need are not worth remembering.
+# -----------------------------------------------------------------------------
+benchmark:
+	cd crates && cargo build --release -p wem-core
+	$(PY) scripts/measure_encode_perf.py
+	$(PY) scripts/measure_decode_perf.py
