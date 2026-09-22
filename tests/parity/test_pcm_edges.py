@@ -48,7 +48,7 @@ class _Case(TypedDict):
 
 
 class PcmLengthEncodeTests(unittest.TestCase):
-    # NOTE (the round, 2026): ``nAvgBytesPerSec`` is derived, not carried from the
+    # NOTE: ``nAvgBytesPerSec`` is derived, not carried from the
     # profile -- ``floor(data_payload_bytes * nSamplesPerSec /
     # dwTotalPCMFrames)`` (see ``container.packets.recompute_vorbis_fmt_sizes``).
     # The profile constant 34381 is only correct for the 139398-frame reference

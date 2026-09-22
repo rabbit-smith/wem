@@ -31,8 +31,8 @@ Two synthesis paths:
 
 Usage:
     python3 scripts/decode_wem.py --self-check
-    python3 scripts/decode_wem.py --segments [--stats out.json]
-    python3 scripts/decode_wem.py --segments --libvorbis-exact
+    python3 scripts/decode_wem.py --wem <file.wem> --segments [--stats out.json]
+    python3 scripts/decode_wem.py --wem <file.wem> --segments --libvorbis-exact
 """
 from __future__ import annotations
 
@@ -92,7 +92,6 @@ T97_END = T97_COUNT
 T219_END = T97_END + T219_COUNT
 T282_END = T219_END + T282_COUNT
 
-DEFAULT_CORPUS = _REPO_ROOT / "corpus" / "paired-build" / "the long paired input"
 DEFAULT_OUT_DIR = _REPO_ROOT / "corpus" / "paired-build" / "out"
 SAMPLE_RATE = 48000
 
@@ -1783,7 +1782,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Reference ground-truth WEM decoder (2ch/48k paired-build probe)."
     )
-    parser.add_argument("--wem", type=Path, default=DEFAULT_CORPUS)
+    parser.add_argument(
+        "--wem",
+        type=Path,
+        default=None,
+        help="WEM file to decode (required unless --self-check)",
+    )
     parser.add_argument("--self-check", action="store_true")
     parser.add_argument("--segments", action="store_true")
     parser.add_argument(
@@ -1795,11 +1799,13 @@ def main() -> int:
     parser.add_argument("--segment-seconds", type=float, default=32.0)
     args = parser.parse_args()
 
-    global _LIBVORBIS_EXACT
-    _LIBVORBIS_EXACT = args.libvorbis_exact
-
     if args.self_check:
         return run_self_check()
+    if args.wem is None:
+        parser.error("--wem is required for a decode run (or pass --self-check)")
+
+    global _LIBVORBIS_EXACT
+    _LIBVORBIS_EXACT = args.libvorbis_exact
 
     started = time.time()
     from wwise_wem import WwiseProfile, WwiseVersion
@@ -1828,7 +1834,7 @@ def main() -> int:
     # NOTE: cache key reflects the decode version AND the synthesis path, so
     # the deterministic numpy default and the opt-in libvorbis byte-exact
     # mode never read or overwrite each other's results. Delete stale caches
-    # after changing decode logic (see corpus/paired-build/out/FINDINGS_R2B.md §D).
+    # after changing decode logic.
     cache_tag = (
         "v6_libvf32"
         if _LIBVORBIS_EXACT

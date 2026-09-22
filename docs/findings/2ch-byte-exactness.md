@@ -177,7 +177,7 @@ calls matches aoTuV beta6.03's `_vp_couple_quantize_normalize`.
 Three observations are decisive:
 
 1. Audiokinetic's Wwise 2011.2.2 release notes record that the Vorbis encoder was
-   updated to aoTuV beta6.03, and the 2013.2 the paired build still presents that
+   updated to aoTuV beta6.03, and the 2013.2 paired build still presents that
    function's parameters, structure fields and branch constants.
 2. Runtime observation gives a short block `n=128, normal_partition=8` and a long
    block `n=1024, normal_partition=32`; the point limits are 42/341, the encoding

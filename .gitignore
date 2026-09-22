@@ -28,14 +28,17 @@ native-wheel/
 js/pkg/
 js/pkg-node/
 
-# Unverified extraction/derived data (the analysis tool dumps, corpus candidates).
+# Unverified extraction/derived data (binary-analysis dumps, corpus candidates).
 # Nothing under corpus/ is a trusted reference asset until verified and moved.
 corpus/
+
+# Local-only working material: never published and never a packaged asset.
+local/
 
 # macOS Finder metadata (generated noise, never an intentional artifact).
 .DS_Store
 
-# the round paired-corpus tooling outputs (scratch templates; not versioned assets).
+# Paired-corpus tooling outputs (scratch templates; not versioned assets).
 rs_corpus_*.xml
 .claude/settings.local.json
 
