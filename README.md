@@ -1,10 +1,16 @@
-# Wwise WEM encoder
+# Wwise WEM encoder and decoder
 
-Standalone, bit-exact implementation of Wwise 2013.2 Vorbis WAV→WEM encoding: a
-Rust kernel behind a Python package, with the C ABI declared in
-[`include/wem.h`](include/wem.h). Correctness means the exact bytes of a paired
-Wwise build, never behavioural similarity; what is established, and the test that
-establishes it, is in [`docs/reference/standards.md`](docs/reference/standards.md).
+Standalone, bit-exact implementation of Wwise 2013.2 Vorbis WAV→WEM encoding,
+and a deterministic decoder for the containers it reads: a Rust kernel behind a
+Python package, with the C ABI declared in [`include/wem.h`](include/wem.h).
+
+The two directions are held to different claims, deliberately. On the encode
+side correctness means the exact bytes of a paired Wwise build, never behavioural
+similarity. The decoder claims no such thing and could not: no external decoder
+is reproducible across environments, so its contract is determinism plus a round
+trip against this repository's own encoder. What each side establishes, and the
+test that establishes it, is in
+[`docs/reference/standards.md`](docs/reference/standards.md).
 
 Two configurations are installed — Wwise 2013.2 at 6 channels/44.1 kHz and
 2 channels/48 kHz — and both are byte-exact against their paired builds. How a
@@ -48,10 +54,30 @@ environment and running the same command takes about three seconds in total
 (`make build` writes one into `dist/`). The wheel is a version-stable abi3
 build, so one wheel serves every Python 3.10+ on its platform.
 
+## Decode a file
+
+The decoder is in the Python API (the CLI encodes only, for now). It opens on no
+selection at all — the container describes itself — and hands back f32 samples at
+±1.0 full scale, in bounded blocks:
+
+```python
+import wwise_wem
+
+result = wwise_wem.decode("output.wem")   # a path, bytes, bytearray or memoryview
+print(result.channels, result.sample_rate, result.total_frames)
+for block in result:                      # interleaved f32, up to 1024 frames each
+    ...                                   # consume incrementally, or let it go
+```
+
+The geometry is readable before the first block, so a decode that expands to
+gigabytes streams through bounded memory rather than buffering. What the surface
+refuses and with which class, and the streaming property itself, are in
+[`docs/reference/decoding.md`](docs/reference/decoding.md).
+
 ## What else is here
 
-- **CLI and Python API.** Installing, encoding, the flags, the accepted input
-  forms and the error behaviour are in
+- **CLI and Python API.** Installing, encoding, decoding, the flags, the accepted
+  input forms and the error behaviour are in
   [`docs/guides/usage.md`](docs/guides/usage.md); the exact interface is in
   [`docs/reference/public-interface.md`](docs/reference/public-interface.md).
 - **C ABI.** [`include/wem.h`](include/wem.h), implemented by `crates/wem-capi` —
