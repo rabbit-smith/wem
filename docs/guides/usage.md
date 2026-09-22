@@ -23,9 +23,9 @@ pip install -e .
 ```
 
 `make native` (a one-line `maturin develop`) does the same thing inside an
-active virtual environment. Every byte-producing call goes through the
-in-package native extension `wwise_wem._core`; there is no pure-Python
-fallback and no profile directory to point at.
+active virtual environment. The install surface is the facade plus the embedded
+kernel; the single execution path it follows is in
+[`../reference/public-interface.md`](../reference/public-interface.md#execution-path).
 
 ## Encode
 
@@ -74,9 +74,10 @@ input needs at least 4096 frames.
 | `Wwise2013, 6, 44100` | 2013.2 | signed 16-bit | 6 (5.1) | 44100 | 256/2048 |
 | `Wwise2013, 2, 48000` | 2013.2 | signed 16-bit | 2 | 48000 | 256/2048 |
 
-Both installed configurations are byte-exact against their paired builds; see
-[`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md) and
-[`../roadmap.md`](../roadmap.md) for the evidence and its limits.
+Both installed configurations are byte-exact against their paired builds; the
+evidence and its limits are in
+[`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md), and the
+profile table with its status is in [`../reference/profiles.md`](../reference/profiles.md).
 
 A selection is one Wwise generation plus the PCM geometry, and it is the only
 explicit form — profile names, profile directories, and geometry-only lookups
@@ -128,12 +129,18 @@ python -m wwise_wem INPUT.wav --output OUTPUT.wem [OPTIONS]
 values, unsupported geometry, profile mismatch, or kernel configuration errors;
 standard `OSError` subclasses such as `FileNotFoundError` for file access.
 
+A rejection made by the kernel arrives as `WwiseWemError`, a `ValueError`
+subclass whose `.code` is the kernel's stable error class
+(`PROFILE_NOT_FOUND`, `GEOMETRY_MISMATCH`, `INPUT_TOO_SHORT`,
+`FORMAT_UNSUPPORTED`, `STATE_ERROR`, `INTERNAL`) and whose `.message` — also
+`str(error)` — is the kernel's diagnostic text. `except ValueError` callers are
+unaffected; the original kernel error stays reachable as `__cause__`.
+
 ## Other languages
 
-The Rust kernel is the single integration point. Its C ABI core surface
-(`include/wem.h`) is the interface every shell mirrors — `Init` → `chunk*` →
-`Finish`, reply frame `seq 0` carrying the setup packet, then audio packets — and
-every binding is a thin parallel shell over it that owns no numerics.
+Every binding is a thin shell over the same kernel through the C ABI surface
+(`include/wem.h`); what that relationship requires is in
+[`../reference/standards.md`](../reference/standards.md#integration-topology).
 
 | Language | Entry point | Guide |
 | --- | --- | --- |
@@ -143,11 +150,12 @@ every binding is a thin parallel shell over it that owns no numerics.
 | Go | cgo over the C ABI | [`../../examples/go-cgo/`](../../examples/go-cgo/) |
 | Node / browser | wasm-bindgen shell | [`../../js/README.md`](../../js/README.md), [`../../examples/wasm-demo/`](../../examples/wasm-demo/) |
 
-Profiles are compiled into every native library, so no binding takes a profile
-name, a profile directory, or an environment variable. The lower-level
-bindings take one structured selection (Wwise generation plus PCM channel count
-and sample rate) alongside signed-16 PCM, because their inputs carry no
-self-describing header.
+Profiles are compiled into every native library: no binding takes a profile
+name, a profile directory, or an environment variable. The lower-level bindings
+take the structured selection (Wwise generation plus PCM channel count and
+sample rate) alongside signed-16 PCM, because their inputs carry no
+self-describing header. The selection rules are in
+[`../reference/profiles.md`](../reference/profiles.md).
 See [`../../examples/README.md`](../../examples/README.md) for the runnable set.
 
 ## Check an install

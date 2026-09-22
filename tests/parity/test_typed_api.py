@@ -124,6 +124,7 @@ class TypedApiTests(unittest.TestCase):
                 "RawPcm",
                 "WwiseProfile",
                 "WwiseVersion",
+                "WwiseWemError",
                 "encode",
             ],
         )

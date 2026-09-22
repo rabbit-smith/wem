@@ -109,10 +109,18 @@ pub fn parse_pcm16(raw: &[u8]) -> Result<Wav16, EncoderError> {
         let id: &[u8] = &raw[offset..offset + 4];
         let size = read_u32(raw, offset + 4) as usize;
         let body = offset + 8;
-        if body + size > raw.len() {
+        // The size field is caller-chosen, so the chunk end is computed with
+        // a checked add: on a 32-bit target (wasm32) a declared size near
+        // u32::MAX wraps `body + size`, which would turn the bound check into
+        // a slice panic instead of the typed rejection below.
+        let end = match body.checked_add(size) {
+            Some(end) => end,
+            None => return Err(format_error()),
+        };
+        if end > raw.len() {
             return Err(format_error());
         }
-        let payload = &raw[body..body + size];
+        let payload = &raw[body..end];
         if &id == b"fmt " {
             if payload.len() < 16 {
                 return Err(format_error());
@@ -129,7 +137,9 @@ pub fn parse_pcm16(raw: &[u8]) -> Result<Wav16, EncoderError> {
         } else if &id == b"data" && data.is_none() {
             data = Some(payload);
         }
-        offset = body + size + (size & 1);
+        // `end` is at most `raw.len()`, so the word-alignment step cannot
+        // overflow either.
+        offset = end + (size & 1);
     }
 
     let data = match data {

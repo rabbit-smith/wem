@@ -71,7 +71,7 @@ impl std::fmt::Display for InternalError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             InternalError::Profile(e) => write!(f, "profile: {e}"),
-            InternalError::Analysis(e) => write!(f, "analysis: {e:?}"),
+            InternalError::Analysis(e) => write!(f, "analysis: {e}"),
             InternalError::Packet(e) => write!(f, "packet: {e}"),
             InternalError::Container(e) => write!(f, "container: {e}"),
             InternalError::Invariant { message } => write!(f, "invariant violated: {message}"),
@@ -80,9 +80,34 @@ impl std::fmt::Display for InternalError {
     }
 }
 
-impl std::error::Error for EncoderError {}
+impl std::error::Error for EncoderError {
+    /// The wrapped kernel-stage failure: without this the underlying cause
+    /// ("why is this an INTERNAL?") is unreachable from the error value.
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            EncoderError::Internal(inner) => Some(inner),
+            EncoderError::ProfileNotFound { .. }
+            | EncoderError::StateError { .. }
+            | EncoderError::GeometryMismatch { .. }
+            | EncoderError::InputTooShort { .. }
+            | EncoderError::FormatUnsupported { .. } => None,
+        }
+    }
+}
 
-impl std::error::Error for InternalError {}
+impl std::error::Error for InternalError {
+    /// The stage error this fault wraps; `Invariant` and `Io` carry their
+    /// diagnostic inline and have no nested cause.
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            InternalError::Profile(e) => Some(e),
+            InternalError::Analysis(e) => Some(e),
+            InternalError::Packet(e) => Some(e),
+            InternalError::Container(e) => Some(e),
+            InternalError::Invariant { .. } | InternalError::Io { .. } => None,
+        }
+    }
+}
 
 impl From<ProfileError> for EncoderError {
     fn from(error: ProfileError) -> Self {

@@ -6,48 +6,22 @@ implementation domains live in the development-tree reference package
 (`reference/wwise_wem_reference`, see `reference/AGENTS.md`); the kernel is
 checked against that tree's byte-for-byte output, never the reverse.
 
-## Hard rules
-
-1. **Byte-for-byte output.** `make wem-bytes` and the
-   core-oracle parity suite compare this tree's bytes against the committed
-   reference. A failure names the value or the byte range that differs; the fix
-   is either in the code or in the expected bytes, and which one is a decision
-   about the work, not a re-record.
-2. **No direct transcendentals.** `math.sin/cos/log/log10/pow/exp` outside
-   `wwise_wem_reference._tmath` is prohibited in encoder paths; all such
-   calls go through the named site entries and, for exact-profile paths,
-   through `FrozenMathTables` injection. New runtime transcendental inputs
-   require the record → freeze workflow first (see `docs/reference/profiles.md`).
-3. **One-call rule: the single execution path is `wwise_wem._core`.**
-   Byte-producing code imports the in-package native extension directly
-   (a plain top-level `from .. import _core` in
-   `application/encoder.py`) and calls it unconditionally. No engine
-   probing, no availability checks, no fallback, no switch, no
-   environment variable: a missing extension surfaces as the ordinary
-   `ImportError` that the Python import machinery raises, and no code
-   invents a second way for it to fail. The extension's module name is
-   owned by the packaging surface (`distribution_allowlist.json`, root
-   `pyproject.toml`, the `wem-python` Cargo lib name, locked by the
-   distribution tests); facade code never restates it.
-   The reference oracle is test-only: production code in this package
-   never imports `wwise_wem_reference`.
-4. **Layer boundaries.** Follow `docs/reference/architecture.md` import rules; `analysis`,
-   `vorbis`, `container` never read package resources; `profiles` is the only
-   loader. Receiving typed tables is the only configuration mechanism.
-5. **Fail loudly.** Input/boundary errors are explicit `ValueError`s at the
-   point of validation (mirror existing style). No silent defaults, no
-   `try/except: pass`, no `assert` for invariants that `-O` would erase.
+The norms this package is held to — byte-for-byte output, the single execution
+path `wwise_wem._core`, transcendentals and float rounding sites, the layer
+boundaries, and what "fail loudly" means — are in
+[`../../docs/reference/standards.md`](../../docs/reference/standards.md).
 
 ## Public surfaces
 
-- Package root exports (`docs/reference/public-interface.md`) are asserted by
-  `tests/parity/test_public_api.py` and the distribution tests; internal
-  module paths are not part of that surface.
-- `_f32` call sites mark the float32 assignment points the Rust port must match —
-  when touching a numeric function, keep every rounding site where it is unless a
-  parity run shows the output bytes identical.
-- Immutable DTOs: frozen dataclasses + `MappingProxyType` per existing pattern;
-  no mutable state escaping one `AnalysisSession`.
+- Package root exports: listed in
+  [`../../docs/reference/public-interface.md`](../../docs/reference/public-interface.md),
+  asserted by `tests/parity/test_public_api.py` and the distribution tests.
+  Internal module paths are not part of that surface, and the extension's module
+  name is owned by the packaging surface, not restated here.
+- DTO immutability and the `_f32` rounding sites follow
+  [`../../docs/reference/standards.md`](../../docs/reference/standards.md)
+  ([Source rules](../../docs/reference/standards.md#source-rules),
+  [Determinism](../../docs/reference/standards.md#determinism)).
 
 ## Registration duties
 

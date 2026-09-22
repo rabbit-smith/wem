@@ -28,6 +28,8 @@ pub enum ContainerError {
     PacketWalkFailed { position: usize, size: u16 },
     /// Unknown endianness marker.
     BadEndian { marker: [u8; 4] },
+    /// Terminal overlap excess exceeds the u16 the fmt field stores.
+    TerminalExcessTooLarge { excess: u64 },
 }
 
 impl std::fmt::Display for ContainerError {
@@ -58,6 +60,9 @@ impl std::fmt::Display for ContainerError {
             }
             ContainerError::BadEndian { marker } => {
                 write!(f, "unknown endianness marker {marker:?}")
+            }
+            ContainerError::TerminalExcessTooLarge { excess } => {
+                write!(f, "terminal overlap excess {excess} exceeds u16")
             }
         }
     }

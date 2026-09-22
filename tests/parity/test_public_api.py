@@ -14,7 +14,7 @@ import unittest
 import wave
 from pathlib import Path
 
-from wwise_wem import WwiseProfile, WwiseVersion, encode
+from wwise_wem import WwiseProfile, WwiseVersion, WwiseWemError, encode
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -65,8 +65,14 @@ class PublicEncodeTests(unittest.TestCase):
                 target.setsampwidth(2)
                 target.setframerate(44100)
                 target.writeframes(b"\0" * (4096 * 2 * 2))
-            with self.assertRaisesRegex(ValueError, "2ch/44100Hz"):
+            with self.assertRaisesRegex(ValueError, "2ch/44100Hz") as caught:
                 encode(path)
+        # The rejection is a kernel one, so it arrives with the kernel's
+        # stable code; the ValueError subclass keeps `except ValueError`
+        # callers working.
+        self.assertIsInstance(caught.exception, WwiseWemError)
+        self.assertEqual(caught.exception.code, "PROFILE_NOT_FOUND")
+        self.assertIn("2ch/44100Hz", caught.exception.message)
 
     def test_unsupported_eight_bit_wav_is_an_error(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -115,7 +115,16 @@ print(json.dumps({
 /// Run the Python capture helper and parse its JSON output.
 fn capture_packet_stream() -> Value {
     let root = repo_root();
-    let script = root.join("crates/wem-container/.capture_packets.py");
+    // The helper is a run-time artifact, so it lives in the system temp
+    // directory: a crashed test must not leave it inside the checkout. The
+    // name is unique per process and per call, so parallel tests cannot
+    // overwrite each other's script.
+    static SEQUENCE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let script = std::env::temp_dir().join(format!(
+        "wem-capture-packets-{}-{sequence}.py",
+        std::process::id()
+    ));
     std::fs::write(&script, CAPTURE_SCRIPT).expect("write capture script");
     #[cfg(unix)]
     let list_separator = ":";

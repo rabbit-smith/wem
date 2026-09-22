@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import pickle
 import tempfile
 import unittest
 from dataclasses import FrozenInstanceError
@@ -11,6 +12,7 @@ from wwise_wem.model import (
     ContainerMetadata,
     PcmBuffer,
     RawPcm,
+    WwiseWemError,
 )
 from wwise_wem import WwiseProfile, WwiseVersion
 from wwise_wem.profiles.registry import resolve_selection
@@ -123,6 +125,29 @@ class EncodeResultTests(unittest.TestCase):
         stats = EncodeStats(1, 1, 1, 1, 0, 4, "profile:test")
         with self.assertRaisesRegex(ValueError, "byte count"):
             EncodeResult(b"bad", stats)
+
+
+class WwiseWemErrorTests(unittest.TestCase):
+    def test_carries_the_kernel_code_and_the_kernel_message(self):
+        error = WwiseWemError("GEOMETRY_MISMATCH", "PCM geometry differs")
+
+        self.assertEqual(error.code, "GEOMETRY_MISMATCH")
+        self.assertEqual(error.message, "PCM geometry differs")
+        self.assertEqual(
+            str(error),
+            "PCM geometry differs",
+            "str() must stay the kernel's diagnostic text",
+        )
+        self.assertIsInstance(error, ValueError)
+
+    def test_error_values_survive_a_pickle_round_trip(self):
+        error = WwiseWemError("INTERNAL", "encoder fault: analysis: bad curve")
+        restored = pickle.loads(pickle.dumps(error))
+
+        self.assertEqual(
+            (restored.code, restored.message, str(restored)),
+            (error.code, error.message, str(error)),
+        )
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ from typing import Any
 
 from .api import encode
 from .application.models import EncodeResult, EncodeStats
-from .model import PcmBuffer, RawPcm
+from .model import PcmBuffer, RawPcm, WwiseWemError
 
 
 __all__ = [
@@ -14,6 +14,7 @@ __all__ = [
     "RawPcm",
     "WwiseProfile",
     "WwiseVersion",
+    "WwiseWemError",
     "encode",
 ]
 

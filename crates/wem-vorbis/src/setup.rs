@@ -4,6 +4,8 @@
 //! `parse_setup` decodes one setup packet into typed structs; the `pack_*`
 //! functions serialize them back to the identical byte stream.
 
+use std::fmt;
+
 use crate::bitio::{BitError, BitReader, OggPack};
 
 /// Bits needed to store values in `[0, n]` inclusive when n >= 0
@@ -279,41 +281,86 @@ fn parse_mode(br: &mut BitReader) -> Result<ModeSetup, BitError> {
     })
 }
 
-pub fn pack_floor1(op: &mut OggPack, fl: &Floor1Setup) {
-    let mut w = |value: u64, bits: u32| op.write(value, bits).expect("pack bits <= 32");
-    w(fl.partitions, 5);
-    for &c in &fl.partition_classes {
-        w(c, 4);
-    }
-    for i in 0..fl.max_class + 1 {
-        w(fl.class_dims[i as usize] - 1, 3);
-        let subs = fl.class_subs[i as usize];
-        w(subs, 2);
-        if subs != 0 {
-            w(
-                fl.class_masterbooks[i as usize].expect("master present when subs > 0"),
-                8,
-            );
+/// Setup packet packing errors (Python: the `IndexError`/`TypeError` family a
+/// malformed setup dict raises, plus the `bitio` write refusals).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SetupError {
+    /// A field the writer must read is absent: a list shorter than the count
+    /// that indexes it, or a `None` where the bitstream requires a value.
+    FieldMissing { field: &'static str },
+    /// The underlying bit writer refused the write (Python `ValueError`).
+    Bit(BitError),
+}
+
+impl fmt::Display for SetupError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SetupError::FieldMissing { field } => write!(f, "setup field {field} is missing"),
+            SetupError::Bit(err) => write!(f, "{err}"),
         }
-        for &b in &fl.subclass_books[i as usize] {
-            w((b as u64).wrapping_add(1), 8);
-        }
-    }
-    w(fl.multiplier - 1, 2);
-    w(fl.rangebits, 4);
-    for &x in &fl.x_list {
-        w(x, fl.rangebits as u32);
     }
 }
 
-pub fn pack_residue(op: &mut OggPack, rs: &ResidueSetup) {
-    let mut w = |value: u64, bits: u32| op.write(value, bits).expect("pack bits <= 32");
-    w(rs.residue_type, 2);
-    w(rs.begin, 24);
-    w(rs.end, 24);
-    w(rs.partition_size - 1, 24);
-    w(rs.classifications - 1, 6);
-    w(rs.classbook, 8);
+impl std::error::Error for SetupError {}
+
+impl From<BitError> for SetupError {
+    fn from(err: BitError) -> Self {
+        SetupError::Bit(err)
+    }
+}
+
+/// Pack one floor-1 setup record (Python `pack_floor1`).
+pub fn pack_floor1(op: &mut OggPack, fl: &Floor1Setup) -> Result<(), SetupError> {
+    op.write(fl.partitions, 5)?;
+    for &c in &fl.partition_classes {
+        op.write(c, 4)?;
+    }
+    for i in 0..fl.max_class + 1 {
+        let i = i as usize;
+        // The oracle masks every `value - 1` write, so a zero or negative
+        // field wraps instead of underflowing.
+        let dim = *fl.class_dims.get(i).ok_or(SetupError::FieldMissing {
+            field: "class_dims",
+        })?;
+        op.write(dim.wrapping_sub(1), 3)?;
+        let subs = *fl.class_subs.get(i).ok_or(SetupError::FieldMissing {
+            field: "class_subs",
+        })?;
+        op.write(subs, 2)?;
+        if subs != 0 {
+            let master =
+                fl.class_masterbooks
+                    .get(i)
+                    .copied()
+                    .flatten()
+                    .ok_or(SetupError::FieldMissing {
+                        field: "class_masterbooks",
+                    })?;
+            op.write(master, 8)?;
+        }
+        let books = fl.subclass_books.get(i).ok_or(SetupError::FieldMissing {
+            field: "subclass_books",
+        })?;
+        for &b in books {
+            op.write((b as u64).wrapping_add(1), 8)?;
+        }
+    }
+    op.write(fl.multiplier.wrapping_sub(1), 2)?;
+    op.write(fl.rangebits, 4)?;
+    for &x in &fl.x_list {
+        op.write(x, fl.rangebits as u32)?;
+    }
+    Ok(())
+}
+
+/// Pack one residue setup record (Python `pack_residue`).
+pub fn pack_residue(op: &mut OggPack, rs: &ResidueSetup) -> Result<(), SetupError> {
+    op.write(rs.residue_type, 2)?;
+    op.write(rs.begin, 24)?;
+    op.write(rs.end, 24)?;
+    op.write(rs.partition_size.wrapping_sub(1), 24)?;
+    op.write(rs.classifications.wrapping_sub(1), 6)?;
+    op.write(rs.classbook, 8)?;
     for &cascade in &rs.cascades {
         let mut bitlen = 0u32;
         let mut v = cascade;
@@ -322,85 +369,101 @@ pub fn pack_residue(op: &mut OggPack, rs: &ResidueSetup) {
             v >>= 1;
         }
         if bitlen > 3 {
-            w(cascade & 7, 3);
-            w(1, 1);
-            w(cascade >> 3, 5);
+            op.write(cascade & 7, 3)?;
+            op.write(1, 1)?;
+            op.write(cascade >> 3, 5)?;
         } else {
-            w(cascade, 4);
+            op.write(cascade, 4)?;
         }
     }
     for (row, &cascade) in rs.books.iter().zip(rs.cascades.iter()) {
         for (k, &value) in row.iter().enumerate().take(8) {
             if cascade & (1 << k) != 0 {
-                w(value as u64, 8);
+                op.write(value as u64, 8)?;
             }
         }
     }
+    Ok(())
 }
 
-pub fn pack_mapping0(op: &mut OggPack, mp: &Mapping0Setup, channels: i64) {
-    let mut w = |value: u64, bits: u32| op.write(value, bits).expect("pack bits <= 32");
+/// Pack one mapping-0 setup record (Python `pack_mapping0`).
+pub fn pack_mapping0(
+    op: &mut OggPack,
+    mp: &Mapping0Setup,
+    channels: i64,
+) -> Result<(), SetupError> {
     if mp.submaps <= 1 {
-        w(0, 1);
+        op.write(0, 1)?;
     } else {
-        w(1, 1);
-        w(mp.submaps - 1, 4);
+        op.write(1, 1)?;
+        op.write(mp.submaps - 1, 4)?;
     }
     if mp.coupling.is_empty() {
-        w(0, 1);
+        op.write(0, 1)?;
     } else {
-        w(1, 1);
-        w(mp.coupling.len() as u64 - 1, 8);
+        op.write(1, 1)?;
+        op.write(mp.coupling.len() as u64 - 1, 8)?;
         let chbits = ilog(channels.saturating_sub(1) as u64);
         for step in &mp.coupling {
-            w(step.mag, chbits);
-            w(step.ang, chbits);
+            op.write(step.mag, chbits)?;
+            op.write(step.ang, chbits)?;
         }
     }
-    w(mp.reserved, 2);
+    op.write(mp.reserved, 2)?;
     if mp.submaps > 1 {
         for &m in &mp.chmux {
-            w(m, 4);
+            op.write(m, 4)?;
         }
     }
-    for i in 0..mp.submaps {
-        w(0, 8);
-        w(mp.floors[i as usize], 8);
-        w(mp.residues[i as usize], 8);
+    let submaps =
+        usize::try_from(mp.submaps).map_err(|_| SetupError::FieldMissing { field: "floors" })?;
+    if mp.floors.len() < submaps {
+        return Err(SetupError::FieldMissing { field: "floors" });
     }
+    if mp.residues.len() < submaps {
+        return Err(SetupError::FieldMissing { field: "residues" });
+    }
+    for i in 0..submaps {
+        op.write(0, 8)?;
+        op.write(mp.floors[i], 8)?;
+        op.write(mp.residues[i], 8)?;
+    }
+    Ok(())
 }
 
-pub fn pack_mode(op: &mut OggPack, md: &ModeSetup) {
-    let _ = op.write(md.blockflag, 1);
-    let _ = op.write(md.mapping, 8);
+/// Pack one mode setup record (Python `pack_mode`).
+pub fn pack_mode(op: &mut OggPack, md: &ModeSetup) -> Result<(), SetupError> {
+    op.write(md.blockflag, 1)?;
+    op.write(md.mapping, 8)?;
+    Ok(())
 }
 
 /// Repack a parse_setup() result to Wwise setup packet bytes.
-pub fn pack_setup(info: &SetupInfo) -> Vec<u8> {
+pub fn pack_setup(info: &SetupInfo) -> Result<Vec<u8>, SetupError> {
     let mut op = OggPack::new(std::cmp::max(256, info.setup_size + 16));
     let channels = info.channels;
-    let _ = op.write(info.nbooks - 1, 8);
+    op.write(info.nbooks.wrapping_sub(1), 8)?;
     for &bid in &info.book_ids {
-        let _ = op.write(bid, 10);
+        op.write(bid, 10)?;
     }
-    let _ = op.write(info.nfloors - 1, 6);
+    op.write(info.nfloors.wrapping_sub(1), 6)?;
     for fl in &info.floors {
-        pack_floor1(&mut op, fl);
+        pack_floor1(&mut op, fl)?;
     }
-    let _ = op.write(info.nresidues - 1, 6);
+    op.write(info.nresidues.wrapping_sub(1), 6)?;
     for rs in &info.residues {
-        pack_residue(&mut op, rs);
+        pack_residue(&mut op, rs)?;
     }
-    let _ = op.write(info.nmaps - 1, 6);
+    op.write(info.nmaps.wrapping_sub(1), 6)?;
     for mp in &info.maps {
-        pack_mapping0(&mut op, mp, channels);
+        pack_mapping0(&mut op, mp, channels)?;
     }
-    let _ = op.write(info.nmodes - 1, 6);
+    op.write(info.nmodes.wrapping_sub(1), 6)?;
     for md in &info.modes {
-        pack_mode(&mut op, md);
+        pack_mode(&mut op, md)?;
     }
     // trailing zero bits already in buffer; round up to byte
-    op.into_buffer()
+    Ok(op.into_buffer())
 }
 
 /// Parse a Wwise Vorbis setup packet (Python `parse_setup`).

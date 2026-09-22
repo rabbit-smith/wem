@@ -467,4 +467,15 @@ impl std::fmt::Display for ProfileError {
     }
 }
 
-impl std::error::Error for ProfileError {}
+impl std::error::Error for ProfileError {
+    /// The wrapped analysis/codebook/bitstream failure; a data error with an
+    /// inline message has no nested cause of its own.
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ProfileError::Analysis(e) => Some(e),
+            ProfileError::Codebook(e) => Some(e),
+            ProfileError::Bit(e) => Some(e),
+            _ => None,
+        }
+    }
+}

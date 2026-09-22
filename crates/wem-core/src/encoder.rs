@@ -715,7 +715,14 @@ pub fn draft_pending_message(profile: &EncoderProfile) -> String {
 /// A selection that names no installed profile, or more than one, is a
 /// caller-facing resolution failure (`WEM_ERR_PROFILE_NOT_FOUND`), not an
 /// internal fault; an unrecognized generation code violates this revision's
-/// selection rules (`WEM_ERR_FORMAT_UNSUPPORTED`); anything else stays internal.
+/// selection rules (`WEM_ERR_FORMAT_UNSUPPORTED`); a value the caller supplied
+/// that this surface rejects (a non-positive geometry, a non-finite quality) is
+/// a malformed argument (`WEM_ERR_STATE_ERROR`); anything else stays internal.
+///
+/// The split matters beyond tidiness: the shells document `WEM_ERR_INTERNAL`
+/// as a defect in this library, never as a rejection of the caller's input
+/// (include/wem.h, "Panics"), so a caller-supplied value must not be reported
+/// through it.
 fn selection_error(error: &ProfileError, selection: WwiseProfile) -> EncoderError {
     match error {
         ProfileError::NoProfileForSelection { .. }
@@ -726,9 +733,11 @@ fn selection_error(error: &ProfileError, selection: WwiseProfile) -> EncoderErro
         | ProfileError::UnsupportedWwiseGeneration { .. } => EncoderError::FormatUnsupported {
             message: error.to_string(),
         },
-        ProfileError::SelectionGeometryNonPositive => EncoderError::StateError {
-            message: error.to_string(),
-        },
+        ProfileError::SelectionGeometryNonPositive | ProfileError::QualityValueNonFinite => {
+            EncoderError::StateError {
+                message: error.to_string(),
+            }
+        }
         other => EncoderError::Internal(InternalError::Profile(other.clone())),
     }
 }

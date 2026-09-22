@@ -113,6 +113,10 @@ typedef struct WemProfile {
  *     byte. An empty chunk is a no-op.
  *   - finish() is terminal regardless of its outcome: after it (success
  *     or error) the session must be freed, not reused.
+ *   - A handle can also be killed by a defect inside the library: a call
+ *     that reports WEM_ERR_INTERNAL is terminal for the handle it ran in,
+ *     and every later call on that handle fails with WEM_ERR_STATE_ERROR
+ *     ("Panics" in section 2 is the authority on which calls those are).
  *   - The PCM input is interleaved little-endian signed 16-bit; a stream
  *     shorter than the 4096-frame minimum is rejected at finish.
  *
@@ -134,17 +138,20 @@ typedef struct WemSession WemSession;
  *   WEM_OK                      — success
  *   WEM_ERR_PROFILE_NOT_FOUND   — no compiled profile satisfies the
  *                                 WemProfile selection
- *   WEM_ERR_STATE_ERROR         — lifecycle violation, or a malformed
+ *   WEM_ERR_STATE_ERROR         — lifecycle violation, a malformed
  *                                 argument (NULL where a value is
- *                                 required)
+ *                                 required), or any call on a handle a
+ *                                 defect has killed
  *   WEM_ERR_GEOMETRY_MISMATCH   — PCM geometry disagrees with the
  *                                 selection
  *   WEM_ERR_INPUT_TOO_SHORT     — fewer than 4096 PCM frames
  *   WEM_ERR_FORMAT_UNSUPPORTED  — sample layout, or a WemVersion code,
  *                                 not supported by this revision
- *   WEM_ERR_INTERNAL            — internal fault (a kernel panic can
+ *   WEM_ERR_INTERNAL            — internal fault: a defect in this
+ *                                 library, never a rejection of the
+ *                                 caller's input (a kernel panic can
  *                                 never unwind across this boundary; it
- *                                 surfaces as this code)
+ *                                 surfaces as this code — see "Panics")
  */
 typedef enum WemError {
   WEM_OK = 0,
@@ -172,6 +179,42 @@ typedef WemError (*WemWriteCb)(const uint8_t *data, size_t len,
                                void *user_data);
 typedef WemError (*WemPacketCb)(uint32_t seq, const uint8_t *data,
                                 size_t len, void *user_data);
+
+/*
+ * Panics.
+ *
+ * A kernel panic means this library broke an invariant. It never means the
+ * caller passed something bad: a malformed argument, an unsupported layout
+ * or an unsatisfiable selection has its own code in the table above. A
+ * panic never unwinds across this boundary — every entry catches it and
+ * reports WEM_ERR_INTERNAL.
+ *
+ * What that costs the caller is decided by the entry, not by the fault:
+ *
+ *   - One-shot entries carry no state across calls. A caught panic in
+ *     wem_encode_pcm16_interleaved, wem_encoder_new or wem_session_new
+ *     rejects that call and hands out no handle: nothing else changed, so
+ *     calling again is allowed.
+ *   - A handle carries state across calls, so a defect that runs through
+ *     one is terminal. A caught panic in wem_encoder_encode,
+ *     wem_session_push or wem_session_finish reports WEM_ERR_INTERNAL for
+ *     that call and marks the handle dead: every later call on it returns
+ *     WEM_ERR_STATE_ERROR, whatever it asks for. A dead handle is released
+ *     with the matching *_free like any other (NULL is a no-op).
+ *     A rejection carrying any other code is not terminal: it refuses that
+ *     call and leaves the handle usable.
+ *
+ * Two outcomes are terminal by their own rule rather than by a panic:
+ * wem_session_finish ends its session whatever it returns, and a callback
+ * returning anything other than WEM_OK aborts the work it was delivering
+ * (a packet callback's abort marks its session failed).
+ *
+ * Catching a panic is what turns it into a WEM_ERR_INTERNAL return value,
+ * and catching only works while panics unwind: the library must not be
+ * built with `panic = "abort"`, where every caught panic would become a
+ * process abort instead. (wem-capi refuses to compile in that
+ * configuration.)
+ */
 
 /* Terminal container summary: byte length + lowercase-hex SHA-256
  * (exactly 64 characters, no NUL). */

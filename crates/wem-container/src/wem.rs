@@ -43,7 +43,7 @@ pub fn build_vorbis_wem(
             &mut fields,
             &packets.iter().map(|p| p.as_slice()).collect::<Vec<_>>(),
             seek_table,
-        );
+        )?;
     }
     let mut fmt_payload = match fmt_raw {
         Some(raw) => raw.to_vec(),
@@ -123,7 +123,12 @@ pub fn load_wem_parts_bytes(raw: &[u8]) -> Result<WemParts, ContainerError> {
         .ok_or(ContainerError::MissingChunk { id: "data" })?;
 
     let fmt_payload = &fmt_chunk.payload;
-    let tag = u16::from_le_bytes(fmt_payload[0..2].try_into().unwrap());
+    if fmt_payload.len() < 2 {
+        return Err(ContainerError::FmtTooShort {
+            got: fmt_payload.len(),
+        });
+    }
+    let tag = u16::from_le_bytes([fmt_payload[0], fmt_payload[1]]);
     let mut is_wwise_vorbis = false;
     let mut seek_table = Vec::new();
     let mut setup_packet = None;
