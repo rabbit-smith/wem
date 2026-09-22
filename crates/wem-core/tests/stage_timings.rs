@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 
 use wem_analysis::config::f32_of;
 use wem_analysis::dsp::spectrum::wwise_log_curve;
-use wem_analysis::dsp::transform::{mdct_forward, vorbis_window};
+use wem_analysis::dsp::transform::mdct_forward;
 use wem_analysis::preprocessing::detector_input::detector_pcm_streams;
 use wem_analysis::session::AnalysisSession;
 use wem_analysis::transient::detector::TransientDetector;
@@ -388,7 +388,14 @@ fn attribution(
                     .expect("profile carries the window half");
                 let start = Instant::now();
                 let widened: Vec<f64> = half.iter().map(|value| *value as f64).collect();
-                let rebuilt = vorbis_window(size, Some(&widened))?;
+                // The rebuild `apply_vorbis_window` used to pay, inlined: it is
+                // `half ++ reverse(half)`. The public `vorbis_window` that did
+                // this was deleted as unreachable on the encode path, and this
+                // harness is a cost model for work the in-place window avoids,
+                // not a caller of production code — so the rebuild lives here
+                // rather than keeping a dead public item alive for a timing.
+                let mut rebuilt = widened.clone();
+                rebuilt.extend(widened.iter().rev().copied());
                 window_rebuild += start.elapsed();
                 window_rebuild_calls += 1;
                 sink += rebuilt[0];
