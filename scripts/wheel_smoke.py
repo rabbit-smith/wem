@@ -126,35 +126,30 @@ def _verify_wheel_contents(wheel: Path, allowlist: dict[str, object]) -> None:
 def _facade_metadata_smoke(allowlist: dict[str, object]) -> str:
     """Metadata-path smoke shared by the zip and installed import paths.
 
-    The profile is resolved by key (generation, channels, sample rate) over
-    the bundle inventory the index declares, never by a profile name; the
-    digest chain (payload -> manifest SHA -> index SHA) is verified by
-    ``load_profile_bundle`` plus ``verify_all``.  The native selector types
-    are deliberately out of reach here: an abi3 extension cannot be imported
-    from inside a zip, so this smoke never touches ``wwise_wem._core``.
+    The wheel is a facade plus its native engine: profile data is compiled
+    into the engine, so the pure-Python subset must carry the public surface
+    and *no* profile resource tree — no index, no manifest, no payload, and
+    no packaged ``data/`` directory. The identity type stays importable
+    without the extension (it is a facade DTO the reference tree reads by
+    absolute name). The native selector types are deliberately out of reach
+    here: an abi3 extension cannot be imported from inside a zip, so this
+    smoke never touches ``wwise_wem._core``.
     """
+    zeros = "0" * 64
     return (
         "import wwise_wem; "
         f"assert wwise_wem.__all__=={allowlist['root_exports']!r}; "
-        "from wwise_wem.profiles.bundle import installed_profile_names, "
-        "load_profile_bundle; "
-        "installed=[load_profile_bundle(profile=n, verify_all=False) "
-        "for n in installed_profile_names()]; "
-        "matches=[b for b in installed "
-        "if (b.key.generation,b.key.channels,b.key.sample_rate)"
-        "==('2013.2',6,44100)]; "
-        "assert len(matches)==1, matches; "
-        "b=matches[0]; b.verify_all(); "
-        "assert b.runtime_manifest.resource('vorbis.setup')==b.setup; "
-        "assert set(b.runtime_manifest.resources)=={"
-        "'vorbis.setup','vorbis.codebooks.t97','vorbis.codebooks.t219',"
-        "'transform.mdct','analysis.transient',"
-        "'psychoacoustics.short-profiles','psychoacoustics.short-seed',"
-        "'psychoacoustics.long-base','psychoacoustics.long-modes',"
-        "'analysis.frozen-tables'}; "
-        "assert len(b.setup_packet())==201; "
-        "print(b.key.generation, b.key.channels, b.key.sample_rate, "
-        "len(b.setup_packet()), len(b.runtime_manifest.resources))"
+        "from wwise_wem.profiles.key import ProfileKey, profile_label; "
+        f"k=ProfileKey(6,44100,'2013.2','5.1','sha256:{zeros}'); "
+        "assert k.label()=='6ch/44100Hz/2013.2', k.label(); "
+        "assert profile_label(2,48000,'2013.2')=='2ch/48000Hz/2013.2'; "
+        "import importlib.util as u; "
+        "assert u.find_spec('wwise_wem.data') is None, 'packaged data tree'; "
+        "assert u.find_spec('wwise_wem.profiles.bundle') is None; "
+        "assert u.find_spec('wwise_wem.profiles.registry') is None; "
+        "assert u.find_spec('wwise_wem.profiles.resources') is None; "
+        "assert u.find_spec('wwise_wem.profiles.model') is None; "
+        "print('facade-metadata-ok', k.label())"
     )
 
 

@@ -1,20 +1,20 @@
-"""Zip-safe package-resource regressions for fixed DSP tables."""
+"""Regressions for the fixed DSP tables the compiled carrier holds."""
 
 from __future__ import annotations
 
 import unittest
 from unittest.mock import patch
 
+import wwise_wem_reference.profiles.artifact as artifact
 import wwise_wem_reference.profiles.psychoacoustics.config as psy_profiles
-from wwise_wem.profiles.bundle import load_profile_bundle
+from tests.analysis_resource_support import installed_profile
+from wwise_wem_reference.profiles.psychoacoustics.short_tables import load_short_psy_profiles
 from wwise_wem_reference.profiles.transform import load_mdct_looks
 from wwise_wem_reference.profiles.transient import load_transient_tables
-from wwise_wem_reference.profiles.psychoacoustics.short_tables import load_short_psy_profiles
-from wwise_wem.profiles.resources import ResourceRef
 
 
 class FixedDspResourceTests(unittest.TestCase):
-    manifest = load_profile_bundle(verify_all=False).runtime_manifest
+    profile = installed_profile(6, 44100)
 
     def tearDown(self) -> None:
         load_mdct_looks.cache_clear()
@@ -22,55 +22,36 @@ class FixedDspResourceTests(unittest.TestCase):
         load_transient_tables.cache_clear()
         load_short_psy_profiles.cache_clear()
 
-    def test_mdct_trig_resource_preserves_all_checked_banks(self):
-        tables = load_mdct_looks(self.manifest.resource("transform.mdct"))
+    def test_mdct_trig_tables_preserve_all_recorded_banks(self):
+        tables = load_mdct_looks(self.profile)
         self.assertEqual(set(tables), {128, 256, 512, 1024, 2048})
         for n, look in tables.items():
             self.assertEqual(len(look.trig), n + n // 4)
 
-    def test_short_seed_and_tone_resources_preserve_geometry(self):
-        seed = psy_profiles.load_short_seed_surface(
-            self.manifest.resource("psychoacoustics.short-seed")
-        )
+    def test_short_seed_and_tone_tables_preserve_geometry(self):
+        seed = psy_profiles.load_short_seed_surface(self.profile)
         self.assertEqual((seed.sample_rate, seed.n), (44100, 128))
         self.assertEqual(len(seed.tone_curves), 17)
         self.assertEqual(len(seed.mask_curve), 128)
         self.assertEqual(len(seed.interval_table), 128)
 
-    def test_resource_payloads_do_not_declare_digests(self):
-        resource_names = (
-            "transform.mdct",
-            "analysis.transient",
-            "psychoacoustics.short-profiles",
-            "psychoacoustics.short-seed",
+    def test_carrier_tables_declare_no_digest_or_path(self):
+        # The identity travels once, in the stream header. A resource tree
+        # needed a path and a digest per payload; the carrier has neither, and
+        # this pins that no block grows one back.
+        import wwise_wem._core as core
+
+        names = set(artifact.decode(bytes(core.profile_tables()))[0].tables)
+        offenders = sorted(
+            name
+            for name in names
+            if any(marker in name.casefold() for marker in ("sha", "digest", "path"))
         )
+        self.assertEqual(offenders, [])
 
-        def digest_keys(value: object) -> list[str]:
-            if isinstance(value, dict):
-                found = [
-                    key
-                    for key in value
-                    if str(key).casefold() in {"sha256", "digest"}
-                ]
-                return found + [
-                    key
-                    for child in value.values()
-                    for key in digest_keys(child)
-                ]
-            if isinstance(value, list):
-                return [key for child in value for key in digest_keys(child)]
-            return []
-
-        for name in resource_names:
-            with self.subTest(resource=name):
-                payload = self.manifest.resource(name).read_json()
-                self.assertEqual(digest_keys(payload), [])
-
-    def test_c5_and_short_profile_resources_preserve_geometry(self):
-        transient = load_transient_tables(self.manifest.resource("analysis.transient"))
-        short = load_short_psy_profiles(
-            self.manifest.resource("psychoacoustics.short-profiles")
-        )
+    def test_c5_and_short_profile_tables_preserve_geometry(self):
+        transient = load_transient_tables(self.profile)
+        short = load_short_psy_profiles(self.profile)
         self.assertEqual((transient.n, len(transient.window), len(transient.bands)), (128, 128, 12))
         self.assertEqual(
             tuple(profile.key for profile in short),
@@ -78,32 +59,29 @@ class FixedDspResourceTests(unittest.TestCase):
         )
         self.assertTrue(all(len(profile.mask_curves) == 3 for profile in short))
 
-    def test_each_lru_loader_reads_its_resource_once(self):
+    def test_the_kernel_dump_is_decoded_once_per_process(self):
+        # Every loader caches on the resolved profile, and the profile dump
+        # itself is decoded once: the whole analysis surface costs one read of
+        # the kernel's tables, however many loaders ask for it.
         loaders = (
             load_mdct_looks,
             psy_profiles.load_short_seed_surface,
             load_transient_tables,
             load_short_psy_profiles,
         )
-        original = ResourceRef.read_json
-        with patch.object(ResourceRef, "read_json", autospec=True) as read_json:
-            read_json.side_effect = lambda resource: original(resource)
-            refs = {
-                load_mdct_looks: self.manifest.resource("transform.mdct"),
-                load_transient_tables: self.manifest.resource("analysis.transient"),
-                psy_profiles.load_short_seed_surface: self.manifest.resource(
-                    "psychoacoustics.short-seed"
-                ),
-                load_short_psy_profiles: self.manifest.resource(
-                    "psychoacoustics.short-profiles"
-                ),
-            }
-            for loader in loaders:
-                loader.cache_clear()
-                args = (refs[loader],)
-                first = loader(*args)
-                self.assertIs(loader(*args), first)
-        self.assertEqual(read_json.call_count, len(loaders))
+        decode = artifact.decode
+        artifact.compiled_profiles.cache_clear()
+        try:
+            with patch.object(artifact, "decode", side_effect=decode) as counted:
+                first = {loader: loader(self.profile) for loader in loaders}
+                for loader in loaders:
+                    loader.cache_clear()
+                    self.assertEqual(loader(self.profile), first[loader])
+                artifact.compiled_profiles()
+                artifact.compiled_profiles()
+            self.assertEqual(counted.call_count, 1)
+        finally:
+            artifact.compiled_profiles.cache_clear()
 
 
 if __name__ == "__main__":

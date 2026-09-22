@@ -3,7 +3,7 @@
 Static page: drag a `.wav` → streamed encode in WebAssembly → download the `.wem`.
 
 The page loads one artifact — the wasm module — plus the WAV you pick. The
-profile bundle (Vorbis setup, codebooks, psychoacoustic tables) is compiled
+profile data (Vorbis setup, codebooks, psychoacoustic tables) is compiled
 into that module, so there is no profile index, manifest, resource file,
 profile name or data directory to fetch or cache: the encode configuration is
 selected by the structured profile selection of `include/wem.h` (Wwise

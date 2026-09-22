@@ -2,7 +2,7 @@
 //! WEM the batch encoder and the streaming session must produce.
 //!
 //! The profile bundle that drives both paths is resolved with
-//! `wem_profiles::bundle_for_selection` — a structured selection against the
+//! `wem_profiles::compiled_profile_for_selection` — a structured selection against the
 //! compiled-in profile bundle, never a profile name or a profile tree. The
 //! profile name and the setup digest are properties read off that tree; the
 //! bytes compared below are the claim.
@@ -19,11 +19,11 @@ use common::{two_channel_dir, two_channel_selection};
 #[test]
 fn two_channel_selection_encodes_the_committed_two_channel_wem() {
     let encoder = Encoder::new(two_channel_selection()).expect("2ch selection resolves");
-    // The profile name is a property read off the tree the selection
-    // resolves to, never a literal: the encoder and the free resolver must
-    // name the same profile.
+    // The profile label is derived from the identity the selection resolves
+    // to, never a literal: the encoder and the free resolver must label the
+    // same profile.
     let resolved = resolve_wem_profile_selection(two_channel_selection()).expect("2ch resolves");
-    assert_eq!(encoder.profile().name(), resolved.name());
+    assert_eq!(encoder.profile().label(), resolved.label());
 
     let wav = read_pcm16(&two_channel_dir().join("tone_high.wav")).expect("2ch WAV reads");
     let pcm = wav.to_pcm16().expect("2ch WAV converts to Pcm16");

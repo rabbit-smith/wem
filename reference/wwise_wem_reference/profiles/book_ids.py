@@ -12,11 +12,10 @@ registry when another installed profile requires an additional table.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from functools import lru_cache
 
-from collections.abc import Mapping, Sequence
-
-from wwise_wem.profiles.resources import ResourceRef
+from .artifact import CompiledProfile
 
 T97_COUNT = 97
 T219_COUNT = 219
@@ -26,23 +25,78 @@ _BOOK_COUNTS = {"t97": T97_COUNT, "t219": T219_COUNT, "t282": T282_COUNT}
 
 
 @lru_cache(maxsize=None)
-def load_book_table(table: str, resource: ResourceRef) -> tuple[dict, ...]:
-    """Load one checked installed table, shared by mapping and VQ runtime."""
+def load_book_table(table: str, profile: CompiledProfile) -> tuple[dict, ...]:
+    """Rebuild one installed codebook table from the compiled carrier.
+
+    The carrier records the *decoded* rows: the optional fields (``i``,
+    ``quantvals``, ``lengthlist``, ``quantlist``) travel with an explicit
+    presence flag, so a row that recorded no value does not grow one here —
+    ``row.get(...)`` keeps meaning what it meant against the recorded document.
+    """
+    if not isinstance(profile, CompiledProfile):
+        raise TypeError("codebook tables require a CompiledProfile")
+    name = str(table)
     try:
-        expected_count = _BOOK_COUNTS[str(table)]
+        expected_count = _BOOK_COUNTS[name]
     except KeyError as error:
         raise FileNotFoundError(f"missing decoded codebook table {table!r}") from error
-    payload = resource.read_json()
-    if (
-        not isinstance(payload, list)
-        or len(payload) != expected_count
-        or any(not isinstance(row, dict) for row in payload)
-    ):
+    prefix = f"codebook.{name}"
+    dim = [int(value) for value in profile.table(f"{prefix}.dim")]
+    if len(dim) != expected_count:
         raise ValueError(
             f"decoded codebook table {table!r} must contain "
             f"{expected_count} object rows"
         )
-    return tuple(payload)
+    entries = [int(value) for value in profile.table(f"{prefix}.entries")]
+    maptype = [int(value) for value in profile.table(f"{prefix}.maptype")]
+    q_min = [int(value) for value in profile.table(f"{prefix}.q_min")]
+    q_delta = [int(value) for value in profile.table(f"{prefix}.q_delta")]
+    q_quant = [int(value) for value in profile.table(f"{prefix}.q_quant")]
+    q_sequencep = [int(value) for value in profile.table(f"{prefix}.q_sequencep")]
+    i_present = profile.table(f"{prefix}.i_present")
+    i_values = profile.table(f"{prefix}.i")
+    quantvals_present = profile.table(f"{prefix}.quantvals_present")
+    quantvals_values = profile.table(f"{prefix}.quantvals")
+    lengthlist, lengthlist_offsets, lengthlist_present = _optional_column(profile, prefix, "lengthlist")
+    quantlist, quantlist_offsets, quantlist_present = _optional_column(profile, prefix, "quantlist")
+
+    rows: list[dict] = []
+    for index in range(expected_count):
+        row: dict = {
+            "dim": dim[index],
+            "entries": entries[index],
+            "maptype": maptype[index],
+            "q_min": q_min[index],
+            "q_delta": q_delta[index],
+            "q_quant": q_quant[index],
+            "q_sequencep": q_sequencep[index],
+        }
+        if i_present[index]:
+            row["i"] = int(i_values[index])
+        if quantvals_present[index]:
+            row["quantvals"] = int(quantvals_values[index])
+        if lengthlist_present[index]:
+            row["lengthlist"] = list(
+                lengthlist[lengthlist_offsets[index] : lengthlist_offsets[index + 1]]
+            )
+        if quantlist_present[index]:
+            row["quantlist"] = list(
+                quantlist[quantlist_offsets[index] : quantlist_offsets[index + 1]]
+            )
+        rows.append(row)
+    return tuple(rows)
+
+
+def _optional_column(
+    profile: CompiledProfile,
+    prefix: str,
+    column: str,
+) -> tuple[list[int], list[int], list[int]]:
+    """The flattened ``(values, offsets, present)`` triple of one optional column."""
+    values = [int(value) for value in profile.table(f"{prefix}.{column}")]
+    offsets = [int(value) for value in profile.table(f"{prefix}.{column}_offsets")]
+    present = [int(value) for value in profile.table(f"{prefix}.{column}_present")]
+    return values, offsets, present
 
 
 def resolve_book_id(

@@ -2,15 +2,13 @@
 //! registered from the paired build together with its psychoacoustic
 //! calibration. The setup and encoder resources are complete.
 //!
-//! The bundle comes from `wem_profiles::bundle_for_selection` — a structured
-//! selection resolved against the compiled-in profile bundle, never a profile
-//! name or a profile tree. The setup packet is pinned by comparing its bytes
-//! against the seq-0 reply packet of the committed two-channel reference
+//! The profile comes from `wem_profiles::compiled_profile_for_selection` — a
+//! structured selection resolved against the compiled profile carrier, never a
+//! profile name or a profile tree. The setup packet is pinned by comparing its
+//! bytes against the seq-0 reply packet of the committed two-channel reference
 //! container, never by re-typing its digest.
 
-use wem_profiles::{
-    bundle_for_selection, embedded_registry, load_quality_curves, normalize_quality_factor,
-};
+use wem_profiles::{compiled_profile_for_selection, embedded_registry, normalize_quality_factor};
 
 mod common;
 
@@ -32,26 +30,23 @@ fn committed_two_channel_setup_packet() -> Vec<u8> {
 #[test]
 fn two_channel_profile_exposes_its_quality_curves() {
     // The 2ch/48000 profile ships its quality curves and setup packet.
-    let bundle = bundle_for_selection(two_channel_selection()).expect("2ch bundle resolves");
-    assert!(bundle.setup_available());
-    assert!(bundle.pending_reason().is_none());
+    let compiled =
+        compiled_profile_for_selection(two_channel_selection()).expect("2ch profile resolves");
+    let model = compiled.encoder_profile().expect("encoder profile");
+    assert!(model.setup_available());
+    assert!(model.pending_reason().is_none());
     // The setup bytes are the committed container's setup bytes: identity is
     // proven against the artifact, not against a hand-written digest.
     assert_eq!(
-        bundle.setup_packet().expect("setup packet"),
+        compiled.setup_packet().expect("setup packet"),
         committed_two_channel_setup_packet(),
         "the profile's setup packet must be the committed container's seq-0 packet"
     );
 
-    let curves_ref = bundle
-        .runtime_manifest()
-        .resources()
-        .iter()
-        .find(|(name, _)| name == "analysis.quality-curves")
-        .expect("profile registers the curves resource")
-        .1
-        .clone();
-    let curves = load_quality_curves(&curves_ref).expect("curves load");
+    let curves = compiled
+        .quality_curves()
+        .expect("curves read")
+        .expect("profile registers the curves table");
     assert_eq!(curves.breakpoints().len(), 13);
     assert_eq!(curves.breakpoints()[0], -0.2);
     assert_eq!(curves.breakpoints()[12], 1.0);
@@ -72,12 +67,13 @@ fn two_channel_profile_lists_in_the_registry_as_setup_available() {
     let profile = registry
         .resolve_selection(two_channel_selection())
         .expect("2ch selection resolves");
-    // The name is what the registry resolves for the selection, never a literal.
+    // The label is derived from the identity the registry resolves for the
+    // selection, never a literal.
     assert_eq!(
-        profile.name(),
-        bundle_for_selection(two_channel_selection())
-            .expect("2ch bundle resolves")
-            .name()
+        profile.label(),
+        compiled_profile_for_selection(two_channel_selection())
+            .expect("2ch profile resolves")
+            .label()
     );
     assert!(profile.setup_available());
     // The setup bytes the registry's profile hands back are the committed

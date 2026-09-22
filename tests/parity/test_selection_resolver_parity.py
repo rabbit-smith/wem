@@ -1,25 +1,18 @@
-"""One selection, two resolvers, one answer.
+"""One selection, two readers of one carrier, one answer.
 
-The kernel resolves a ``WwiseProfile`` against the bundle compiled into the
-native extension, and it is the only authority on what a selection denotes.
-The development-tree oracle cannot ask it: the oracle and the tooling must
-also run where the extension is absent (the zip-import path of ``wheel_smoke``
-is exactly that), so the package carries a mirror —
-``wwise_wem.profiles.registry.resolve_selection`` — which matches the packaged
-manifest key ``(generation, channels, sample_rate)`` itself.
+The kernel resolves a ``WwiseProfile`` against the profile tables compiled
+into the native extension, and it is the only authority on what a selection
+denotes. The oracle reads the same carrier *through* that authority — the
+extension's own ``profile_tables()`` stream — so this suite pins that the two
+agree rather than that two independent registries do:
 
-Two implementations of one rule drift silently unless something pins them
-together, and an encode test cannot do it alone: the fixture geometry is all
-such a test would ever exercise. This module pins every installed profile:
-
-* the mirror and the kernel resolve the same selection to the same setup
-  packet digest, compared through the kernel's own seq-0 packet;
-* the installed profiles are distinct, so the comparison has teeth;
+* the resolved identity and the recorded setup digest are the kernel's own
+  seq-0 packet for the same selection;
+* every installed profile is distinct, so the comparison has teeth;
 * an unsatisfiable selection is rejected on both sides.
 
-The profiles are enumerated from the packaged index, which is the mirror's own
-input; that enumeration is deliberately here rather than in the package's
-public surface.
+The profiles are enumerated from the carrier itself; that enumeration is
+deliberately here rather than in the package's public surface.
 """
 
 from __future__ import annotations
@@ -29,20 +22,18 @@ import unittest
 
 from wwise_wem import WwiseProfile, WwiseVersion
 from wwise_wem import _core
-from wwise_wem.profiles.bundle import installed_profile_names, load_profile_bundle
-from wwise_wem.profiles.registry import resolve_selection
+from wwise_wem_reference.profiles.artifact import compiled_profiles, resolve_selection
 
 MIN_FRAMES = 4096
 
 
 def _installed() -> list[tuple[str, WwiseProfile]]:
-    """Every installed profile as ``(index key, selection)``."""
+    """Every installed profile as ``(label, selection)``."""
     selections = []
-    for key in installed_profile_names():
-        profile = load_profile_bundle(profile=key, verify_all=False)
+    for profile in compiled_profiles():
         selections.append(
             (
-                key,
+                profile.label(),
                 WwiseProfile(
                     WwiseVersion.from_generation(profile.key.generation),
                     profile.key.channels,
@@ -82,13 +73,13 @@ class SelectionResolverParityTests(unittest.TestCase):
                         selection.channels,
                         selection.sample_rate,
                     ),
-                    "the mirror resolved a different identity than the selection",
+                    "the carrier resolved a different identity than the selection",
                 )
                 kernel = _kernel_setup_digest(selection)
                 self.assertEqual(
                     resolved.setup_sha256,
                     kernel,
-                    "the mirror's setup digest differs from the kernel's "
+                    "the carrier's setup digest differs from the kernel's "
                     "seq-0 packet for the same selection",
                 )
                 digests[key] = kernel

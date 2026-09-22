@@ -65,7 +65,7 @@ import wwise_wem
 import wwise_wem_reference.python_engine as python_engine
 from wwise_wem_reference.container.model import ContainerPlan
 from wwise_wem.adapters.wav import read_pcm_wav
-from wwise_wem.profiles.registry import resolve_selection
+from wwise_wem_reference.profiles.artifact import resolve_selection
 
 captured = {}
 original_build = python_engine.build_vorbis_wem

@@ -36,14 +36,22 @@ An installed profile owns its complete calibration set:
 
 Changing RIFF header values is insufficient to add a geometry. A new
 channel/rate pair is registered only after its complete setup and analysis tables
-pass packet-level and whole-file regression.
+pass packet-level and whole-file regression — and registering it means
+generating a new table set into the carrier
+(`scripts/generate_profile_code.py`), not shipping a payload.
 
 ## Installed profiles
 
-| Selection | Name | Status |
+| Selection | Label | Status |
 | --- | --- | --- |
-| `Wwise2013, 6, 44100` | `wwise2013-6ch-44100` | Byte-exact for the paired build; checked by the whole-file, per-frame and per-stage suites |
-| `Wwise2013, 2, 48000` | `wwise2013-2ch-48000` | Byte-exact for the paired input and both real-build corpora; evidence and limits in [`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md) |
+| `Wwise2013, 6, 44100` | `6ch/44100Hz/2013.2` | Byte-exact for the paired build; checked by the whole-file, per-frame and per-stage suites |
+| `Wwise2013, 2, 48000` | `2ch/48000Hz/2013.2` | Byte-exact for the paired input and both real-build corpora; evidence and limits in [`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md) |
+
+The label is derived from the identity (`ProfileKey::label`), never stored: a
+profile has no name, no directory and no index entry left to carry one. The
+recorded profile tree still exists as untracked development material under
+`corpus/profiles/`, which is what the table generator and
+`scripts/generate_frozen_tables.py` read.
 
 ### 2ch/48 kHz provenance
 
@@ -69,43 +77,43 @@ No profile value is fitted to an output; the provenance rule is in
 
 ## Exact setup identity
 
-A profile selection resolves to exactly one installed `EncoderProfile`. The
-packaged setup packet is checked against its declared SHA-256 whenever it is
-loaded; missing geometry, an unsatisfiable or ambiguous selection, or a
-checksum mismatch is an error. The built-in path is self-contained: it reads
-packaged profile resources and never reads a reference WEM. Expected outputs
-are test assets, not runtime inputs.
+A profile selection resolves to exactly one compiled profile. The setup packet
+is a Rust constant in the same artifact as its recorded SHA-256, and the value
+model re-checks the pair when it builds an identity from the carrier; an
+unsatisfiable or ambiguous selection is an error, and so is a setup digest that
+does not describe the packet. The built-in path is self-contained: it reads the
+compiled carrier and never reads a reference WEM. Expected outputs are test
+assets, not runtime inputs.
 
 ## Access boundary
 
-The intake is crate-private in the Rust kernel. `load_profile_bundle`,
-`load_profile_bundle_from_bytes`, the `DataDir`, the `ResourceBackend` and the
-name-keyed entry addressing are all `pub(crate)`: a library user cannot name a
-profile, point at a profile tree, or hand over index/manifest bytes at all.
+There is no intake. Profile data is Rust source in the kernel
+(`crates/wem-profiles/src/generated/`), compiled into every artifact; no
+library user can name a profile, point at a profile tree, or hand over
+index/manifest bytes, because those concepts do not exist.
 
-The one public way to obtain a bundle is selection-keyed —
-`bundle_for_selection(WwiseProfile) -> Result<ProfileBundle, ProfileError>` —
-which resolves against the bundle compiled into the library under the same
+The one public way to obtain a profile is selection-keyed —
+`compiled_profile_for_selection(WwiseProfile) -> Result<CompiledProfile, ProfileError>`
+— which resolves against the tables compiled into the library under the same
 exactly-one rule as the encoder. It exists because the stage and analysis
 parity suites need a profile's *materials*, not its bytes, and they test layers
 outside this crate.
 
-The development-tree loader therefore keeps its coverage through unit tests
-inside the crate, where `pub(crate)` is reachable; the filesystem loader and
-the digest-chain rejection cases are exercised there, not from an external
-integration test. The Python package carries its own loader
-(`wwise_wem.profiles.bundle`), because the wheel's zip-import digest-chain test
-must run where the native extension is absent.
+The Python side has no loader either: the reference reads the same carrier
+through the kernel's data hand-off
+(`wwise_wem._core.profile_tables()` → `wwise_wem_reference.profiles.artifact`),
+so there is no second copy to drift from it and no resource reader anywhere.
+See [`../findings/profile-as-code.md`](../findings/profile-as-code.md) for the
+change that removed the serialized layer.
 
 ## Frozen transcendental tables
 
-Each profile freezes its complete runtime transcendental domain into
-`analysis/frozen-tables.json` (schema `wem.frozen-math.v1`), checksum-addressed
-through the manifest. Four enumerable libm sites are table-backed: the 128
-short-psy coordinate frequencies, the FFT stage twiddles for lengths 2..2048, and
-the patched 256/2048 Vorbis window halves. Assembly injects them as typed
-`FrozenMathTables`; a construction path that requests an input outside the frozen
-domain fails loudly instead of consulting the host libm.
+Each profile freezes its complete runtime transcendental domain into the
+carrier's `frozen.*` tables. Four enumerable libm sites are table-backed: the
+128 short-psy coordinate frequencies, the FFT stage twiddles for lengths
+2..2048, and the patched 256/2048 Vorbis window halves. Assembly injects them as
+typed `FrozenMathTables`; a construction path that requests an input outside
+the frozen domain fails loudly instead of consulting the host libm.
 
 Two named entries (`floor_fit` dB quantization and the `residue` classification
 fallback) do not fire for the installed exact profiles. Should a future geometry
@@ -113,7 +121,9 @@ activate them, ports must pin a reference double `log`/`log10` implementation an
 verify bit equality against the per-site records under
 `tests/data/stage-records/transcendental/`.
 
-Regenerate the payload with `scripts/generate_frozen_tables.py`, which
-cross-checks the live domain recorded by `scripts/record_tmath.py`. Run
-`make wem-bytes` and the per-frame parity suites afterwards: the reference WEM bytes
-and every per-frame value must come out unchanged.
+Regenerate the recorded payload with `scripts/generate_frozen_tables.py` (it
+writes into the untracked `corpus/profiles/` tree), which cross-checks the live
+domain recorded by `scripts/record_tmath.py`, then recompile it into the
+carrier with `scripts/generate_profile_code.py`. Run `make wem-bytes` and the
+per-frame parity suites afterwards: the reference WEM bytes and every per-frame
+value must come out unchanged.

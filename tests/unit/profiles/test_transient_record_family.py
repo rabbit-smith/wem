@@ -12,15 +12,10 @@ value selects the adjudicated default record index 3.0 (record #3).
 """
 from __future__ import annotations
 
-import json
 import struct
 import unittest
-from pathlib import Path
 
-from tests.analysis_resource_support import installed_profile_bundle
-from wwise_wem import WwiseProfile, WwiseVersion
-from wwise_wem.profiles.bundle import load_profile_bundle
-from wwise_wem.profiles.registry import resolve_selection
+from tests.analysis_resource_support import installed_profile
 from wwise_wem_reference.profiles.quality import (
     _linear_frac,
     normalize_quality_factor,
@@ -32,21 +27,8 @@ from wwise_wem_reference.profiles.transient import (
     materialize_transient_tables,
 )
 
-#: The 2ch/48000 profile's packaged directory name, read off its selection.
-_PROFILE = resolve_selection(
-    WwiseProfile(WwiseVersion.WWISE2013, 2, 48000)
-).name
-_ROOT = Path(__file__).resolve().parents[3]
-_RESOURCE = (
-    _ROOT
-    / "src"
-    / "wwise_wem"
-    / "data"
-    / "profiles"
-    / _PROFILE
-    / "analysis"
-    / "transient.json"
-)
+#: The 2ch/48000 compiled profile: the one whose carrier records the family.
+_PROFILE = installed_profile(2, 48000)
 
 
 def _bits(value: float) -> int:
@@ -54,38 +36,34 @@ def _bits(value: float) -> int:
 
 
 def _family():
-    ref = (
-        load_profile_bundle(profile=_PROFILE, verify_all=False)
-        .runtime_manifest.resources["analysis.transient"]
-    )
-    return load_transient_record_family(ref)
+    return load_transient_record_family(_PROFILE)
 
 
 class RecordFamilyStructureTests(unittest.TestCase):
-    def test_resource_is_the_record_family(self):
-        data = json.loads(_RESOURCE.read_text(encoding="utf-8"))
-        self.assertEqual(data["schema"], TRANSIENT_RECORD_FAMILY_SCHEMA)
-        self.assertEqual(data["record_family"]["count"], 6)
-        self.assertEqual(len(data["record_family"]["records"]), 6)
-        self.assertEqual(len(data["record_index_curve"]["values"]), 13)
-        self.assertEqual(len(data["quality_axis_breakpoints"]["values"]), 13)
-        self.assertEqual(data["default_record_index"], 3.0)
-        self.assertEqual(len(data["window_u32"]), 128)
-        self.assertEqual(len(data["bands"]), 12)
+    def test_the_carrier_records_the_record_family(self):
+        self.assertEqual(_PROFILE.table("transient.kind"), "record-family")
+        self.assertEqual(_PROFILE.int("transient.n"), 128)
+        self.assertEqual(_PROFILE.int("transient.sample_rate"), 48000)
+        self.assertEqual(len(_PROFILE.table("transient.record_index_curve")), 13)
+        self.assertEqual(len(_PROFILE.table("transient.quality_axis_breakpoints")), 13)
+        self.assertEqual(_PROFILE.table("transient.default_record_index")[0], 3.0)
+        self.assertEqual(len(_PROFILE.table("transient.window")), 128)
+        self.assertEqual(_PROFILE.table("transient.bands.count")[0], 12)
 
-    def test_family_loads_from_the_manifest_resource(self):
+    def test_family_loads_from_the_carrier(self):
         fam = _family()
+        self.assertEqual(fam.schema, TRANSIENT_RECORD_FAMILY_SCHEMA)
         self.assertEqual(len(fam.records), 6)
         self.assertEqual(fam.default_record_index, 3.0)
         self.assertEqual(len(fam.window_u32), 128)
         self.assertEqual(len(fam.bands), 12)
-        # Records agree with the raw JSON words.
-        data = json.loads(_RESOURCE.read_text(encoding="utf-8"))
-        for raw, rec in zip(data["record_family"]["records"], fam.records):
-            self.assertEqual(list(rec.upper_u32), raw["upper_u32"])
-            self.assertEqual(list(rec.lower_u32), raw["lower_u32"])
-            self.assertEqual(list(rec.config_u32), raw["config_u32"])
-            self.assertEqual(rec.bias_u32, raw["bias_u32"])
+        # Every record agrees with the stored words it was rebuilt from.
+        for index, rec in enumerate(fam.records):
+            prefix = f"transient.record.{index}"
+            self.assertEqual(list(rec.upper_u32), _PROFILE.table(f"{prefix}.upper_u32"))
+            self.assertEqual(list(rec.lower_u32), _PROFILE.table(f"{prefix}.lower_u32"))
+            self.assertEqual(list(rec.config_u32), _PROFILE.table(f"{prefix}.config_u32"))
+            self.assertEqual(rec.bias_u32, _PROFILE.table(f"{prefix}.bias_u32")[0])
             self.assertEqual(rec.marker_u32, 8)
             # Provenance words outside the 26-word config block must stay
             # byte-faithful to the static extraction (m = f32 -6.0, tail = 99).
@@ -193,44 +171,37 @@ class MaterializationBitPinTests(unittest.TestCase):
 
 
 class DispatchAndRegressionTests(unittest.TestCase):
-    def test_resource_dispatch_on_schema(self):
-        ref = (
-            load_profile_bundle(profile=_PROFILE, verify_all=False)
-            .runtime_manifest.resources["analysis.transient"]
-        )
-        tables = load_transient_resource(ref, None)
+    def test_carrier_dispatch_on_mechanism(self):
+        tables = load_transient_resource(_PROFILE, None)
         self.assertEqual(_bits(tables.bias), _family().records[3].bias_u32)
         # An explicit quality flows through the same kernel as materialize.
         fam = _family()
-        q4 = load_transient_resource(ref, 4.0)
+        q4 = load_transient_resource(_PROFILE, 4.0)
         pin = materialize_transient_tables(fam, 4.0)
         self.assertEqual(
             [_bits(w) for w in q4.config], [_bits(w) for w in pin.config]
         )
 
     def test_six_ch_profile_keeps_the_static_table_path(self):
-        # The 6ch profile still registers wem.transient-detector-table.v1;
-        # loading it must return the registered bytes unchanged, including at
-        # a quality value (quality is ignored by the pre-materialized path —
-        # 6ch registers no quality-curves resource, so the dispatch cannot
-        # receive quality from a real assembly; the direct loader call proves
-        # the schema branch is quality-independent).
+        # The 6ch profile records a pre-materialized detector table; reading
+        # it must return the recorded words unchanged, including at a quality
+        # value (quality is ignored by that path — 6ch records no
+        # quality-curves table, so a real assembly cannot hand it one; the
+        # direct reader call proves the branch is quality-independent).
         from wwise_wem_reference.profiles.transient import load_transient_tables
 
-        bundle = installed_profile_bundle(6, 44100)
-        ref = bundle.runtime_manifest.resources["analysis.transient"]
-        # Read through the checksum-addressed resource: the payload digest is
-        # verified rather than assumed.
-        data = ref.read_json()
-        self.assertEqual(data["schema"], "wem.transient-detector-table.v1")
-        tables = load_transient_tables(ref)
+        profile = installed_profile(6, 44100)
+        self.assertEqual(profile.table("transient.kind"), "detector")
+        tables = load_transient_tables(profile)
         self.assertEqual(
-            [_bits(w) for w in tables.window], data["window_u32"]
+            [_bits(w) for w in tables.window],
+            [_bits(w) for w in profile.table("transient.window")],
         )
         self.assertEqual(
-            [_bits(w) for w in tables.config], data["config_u32"]
+            [_bits(w) for w in tables.config],
+            [_bits(w) for w in profile.table("transient.config")],
         )
-        self.assertEqual(_bits(tables.bias), data["bias_u32"])
+        self.assertEqual(_bits(tables.bias), _bits(profile.table("transient.bias")[0]))
 
 
 if __name__ == "__main__":

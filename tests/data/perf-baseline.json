@@ -1,7 +1,7 @@
 {
   "schema": "wwise-wem.perf-baseline.v1",
   "fixture": "tests/fixtures/input.wav",
-  "profile": "wwise2013-6ch-44100",
+  "profile": "6ch/44100Hz/2013.2",
   "measurement": "release build of crates/wem-core; wwise-wem --time 'encode' stage median over 7 runs (warm)",
   "runs": 7,
   "median_encode_ms": 127.15,

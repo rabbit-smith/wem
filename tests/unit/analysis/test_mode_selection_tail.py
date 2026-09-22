@@ -13,9 +13,8 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from tests.analysis_resource_support import installed_profile_bundle
 from wwise_wem import WwiseProfile, WwiseVersion
-from wwise_wem.profiles.registry import resolve_selection
+from wwise_wem_reference.profiles.artifact import resolve_selection
 from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem_reference.analysis.session import AnalysisSession
 from wwise_wem_reference.profiles.assembly import assemble_encoder_profile_resources
@@ -31,11 +30,8 @@ DISCRIMINATING_FRAMES = 7425
 
 def _session(selection: WwiseProfile) -> tuple[int, AnalysisSession]:
     profile = resolve_selection(selection)
-    bundle = installed_profile_bundle(
-        profile.channels, profile.sample_rate, profile.key.generation
-    )
     resources = assemble_encoder_profile_resources(
-        bundle, setup_packet=profile.setup_packet(), quality=profile.quality
+        profile, setup_packet=profile.setup_packet, quality=profile.quality
     )
     session = AnalysisSession(
         profile.channels,

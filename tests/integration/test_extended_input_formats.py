@@ -29,7 +29,7 @@ from wwise_wem import WwiseProfile, WwiseVersion, _core as core_mod
 from wwise_wem.adapters.raw import read_raw_pcm
 from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem.application.models import EncodeResult
-from wwise_wem.profiles.registry import resolve_selection
+from wwise_wem_reference.profiles.artifact import resolve_selection
 from wwise_wem_reference import python_engine
 from wwise_wem_reference.container.model import ContainerPlan
 

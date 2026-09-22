@@ -13,7 +13,7 @@ from wwise_wem import EncodeResult, WwiseProfile, WwiseVersion, encode
 from wwise_wem_reference.container.wem import load_wem_parts_bytes
 from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem.model import PcmBuffer
-from wwise_wem.profiles.registry import resolve_selection
+from wwise_wem_reference.profiles.artifact import resolve_selection
 from wwise_wem_reference.python_engine import ContainerPlan, encode_pcm_python
 from tests.parity.wem_byte_compare import assert_wem_equal
 

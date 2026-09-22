@@ -1,61 +1,41 @@
+"""The compiled carrier's tables: identity, geometry and loader agreement."""
+
 import hashlib
-import json
 import unittest
-from pathlib import Path
 
-import wwise_wem
-
-from wwise_wem import WwiseProfile, WwiseVersion
-from wwise_wem.profiles.registry import resolve_selection
-from wwise_wem_reference.profiles.transient import load_transient_tables
+from tests.analysis_resource_support import installed_profile
 from wwise_wem_reference.profiles.psychoacoustics.long_tables import load_long_psy_tables
 from wwise_wem_reference.profiles.psychoacoustics.long_variants import load_long_variant
 from wwise_wem_reference.profiles.psychoacoustics.short_tables import load_short_psy_profiles
-from wwise_wem.profiles.bundle import load_profile_bundle
 from wwise_wem_reference.profiles.transform import load_mdct_looks
+from wwise_wem_reference.profiles.transient import load_transient_tables
 
 
-SIX_CHANNEL_SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
+class CarrierTableTests(unittest.TestCase):
+    profile = installed_profile(6, 44100)
 
-
-class PackagedTableTests(unittest.TestCase):
-    def test_runtime_manifest_hashes(self):
-        # The 6ch/44100 profile's directory is the packaged name its selection
-        # resolves to, never a literal restated by the test.
-        profile = (
-            Path(wwise_wem.__file__).parent
-            / "data" / "profiles" / resolve_selection(SIX_CHANNEL_SELECTION).name
+    def test_recorded_setup_digest_matches_the_carried_packet(self):
+        # The one digest the carrier records is the setup identity: it is the
+        # payload half of the chain the manifest used to walk, and it still
+        # has to describe the bytes the carrier hands out.
+        self.assertEqual(
+            hashlib.sha256(self.profile.setup_packet).hexdigest(),
+            self.profile.setup_sha256,
         )
-        manifest = json.loads((profile / "manifest.json").read_text())
-        for logical_name, resource in manifest["resources"].items():
-            self.assertEqual(
-                hashlib.sha256((profile / resource["path"]).read_bytes()).hexdigest(),
-                resource["sha256"],
-                logical_name,
-            )
+        self.assertEqual(
+            self.profile.key.quality_setup_identity, f"sha256:{self.profile.setup_sha256}"
+        )
 
     def test_analysis_tables_load_and_validate(self):
-        manifest = load_profile_bundle(verify_all=False).runtime_manifest
-        self.assertEqual(load_transient_tables(manifest.resource("analysis.transient")).n, 128)
-        base = load_long_psy_tables(
-            manifest.resource("psychoacoustics.long-base")
-        )
-        modes = manifest.resource("psychoacoustics.long-modes")
+        self.assertEqual(load_transient_tables(self.profile).n, 128)
+        base = load_long_psy_tables(self.profile)
         self.assertEqual(base.n, 1024)
-        self.assertEqual(load_long_variant(2, modes, base).n, 1024)
-        self.assertEqual(load_long_variant(3, modes, base).n, 1024)
-        self.assertEqual(
-            len(
-                load_short_psy_profiles(
-                    manifest.resource("psychoacoustics.short-profiles")
-                )
-            ),
-            2,
-        )
+        self.assertEqual(load_long_variant(2, self.profile, base).n, 1024)
+        self.assertEqual(load_long_variant(3, self.profile, base).n, 1024)
+        self.assertEqual(len(load_short_psy_profiles(self.profile)), 2)
 
     def test_static_mdct_trig_banks(self):
-        manifest = load_profile_bundle(verify_all=False).runtime_manifest
-        looks = load_mdct_looks(manifest.resource("transform.mdct"))
+        looks = load_mdct_looks(self.profile)
         self.assertEqual(looks[128].n, 128)
         self.assertEqual(looks[1024].n, 1024)
 

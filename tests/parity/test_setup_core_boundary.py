@@ -111,7 +111,7 @@ packet = setup.pack_setup(info)
 parsed = setup.parse_setup(packet, channels=1)
 banned = [name for name in (
     "wwise_wem_reference.profiles.book_ids",
-    "wwise_wem.profiles.resources",
+    "wwise_wem_reference.profiles.artifact",
     "wwise_wem_reference.profiles.codebooks",
 ) if name in sys.modules]
 print(json.dumps({

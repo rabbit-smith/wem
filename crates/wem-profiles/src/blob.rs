@@ -26,7 +26,11 @@ use crate::tables::{ProfileTables, ResourceTables, TransientTable};
 /// Stream magic (`WEMPROF\0`).
 pub const BLOB_MAGIC: &[u8; 8] = b"WEMPROF\0";
 /// Stream format version.
-pub const BLOB_VERSION: u32 = 1;
+///
+/// Version 2 dropped the stored profile name: the human label is derived from
+/// the identity (`ProfileKey::label`), so the stream carries identity and
+/// values only.
+pub const BLOB_VERSION: u32 = 2;
 
 const KIND_U32: u8 = 0;
 const KIND_I64: u8 = 1;
@@ -138,7 +142,6 @@ pub fn profile_tables_blob() -> Vec<u8> {
 }
 
 fn write_profile(out: &mut Blob, tables: &ProfileTables) {
-    out.text(tables.name);
     out.text(tables.key.generation);
     out.text(tables.key.channel_layout);
     out.text(tables.key.quality_setup_identity);

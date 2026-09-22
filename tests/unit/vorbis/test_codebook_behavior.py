@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 import unittest
-from pathlib import Path
 
 from wwise_wem_reference.vorbis.bitio import BitReader
 from wwise_wem_reference.profiles.book_ids import resolve_book_id
@@ -12,7 +10,7 @@ from wwise_wem_reference.vorbis.bitio import OggPack
 from wwise_wem_reference.vorbis.setup import parse_setup
 from wwise_wem_reference.vorbis.codebook import StaticCodebook, make_codewords
 from wwise_wem import WwiseProfile, WwiseVersion
-from wwise_wem.profiles.registry import resolve_selection
+from wwise_wem_reference.profiles.artifact import resolve_selection
 
 
 SIX_CHANNEL_SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
@@ -62,7 +60,7 @@ class CodebookBehaviorTests(unittest.TestCase):
 
     def test_setup_books_encode_decode_and_vq(self) -> None:
         profile = resolve_selection(SIX_CHANNEL_SELECTION)
-        setup = parse_setup(profile.setup_packet(), channels=6)
+        setup = parse_setup(profile.setup_packet, channels=6)
         tables = installed_codebook_tables()
         books = load_setup_codebooks(setup["book_ids"], tables)
         self.assertEqual(len(books), setup["nbooks"])
@@ -86,18 +84,20 @@ class CodebookBehaviorTests(unittest.TestCase):
         self.assertEqual(make_codewords([1, 1]), [0, 1])
 
     def test_published_tables_and_resolver_have_no_pointer_provenance(self) -> None:
-        root = Path(__file__).resolve().parents[3]
-        # The directory is the packaged name of the selection, read off the
-        # resolved profile rather than re-typed here.
-        profile_name = resolve_selection(SIX_CHANNEL_SELECTION).name
-        table_dir = (
-            root / "src" / "wwise_wem" / "data" / "profiles" / profile_name
-            / "vorbis" / "codebooks"
-        )
+        # The carrier holds decoded rows only: no recorded document and no
+        # table block grows a pointer field back.
+        profile = resolve_selection(SIX_CHANNEL_SELECTION)
         forbidden = {"ptr", "lengthlist_ptr", "quantlist_ptr"}
-        for path in sorted(table_dir.glob("*_decoded.json")):
-            for row in json.loads(path.read_text(encoding="utf-8")):
-                self.assertTrue(forbidden.isdisjoint(row), path.name)
+        names = [name for name in profile.tables if name.startswith("codebook.")]
+        self.assertTrue(names)
+        for name in names:
+            self.assertTrue(
+                forbidden.isdisjoint({part for part in name.split(".")}), name
+            )
+        rows = installed_codebook_tables()["t97"]
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertTrue(forbidden.isdisjoint(row))
         tables = installed_codebook_tables()
         self.assertTrue(forbidden.isdisjoint(resolve_book_id(0, tables)))
         self.assertTrue(forbidden.isdisjoint(resolve_book_id(214, tables)))

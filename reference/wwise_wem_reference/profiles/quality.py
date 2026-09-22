@@ -36,14 +36,10 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from wwise_wem.profiles.resources import ResourceRef
+from .artifact import CompiledProfile, named_blocks
 
 QUALITY_CURVES_SCHEMA = "wem.quality-curves.v2"
 QUALITY_CURVES_INTERPOLATION = "linear-frac"
-# Manifest logical name for the optional quality-curves resource. A profile
-# that does not register this resource has no quality interpolation.
-QUALITY_CURVES_RESOURCE = "analysis.quality-curves"
-
 # Per-curve semantic forms (v2). The first two are the mechanism-level
 # constants; the ``short.<field>`` form names a short psychoacoustic surface
 # override target (validated against the supported field set in the assembly
@@ -70,7 +66,9 @@ def _finite_float(value: Any, label: str) -> float:
 
 
 def _float_tuple(value: Any, expected_len: int, label: str) -> tuple[float, ...]:
-    if not isinstance(value, list):
+    # A sequence: the carrier hands a curve over as a tuple, a recorded
+    # document handed it over as a list, and the value object is the same.
+    if not isinstance(value, (list, tuple)):
         raise ValueError(f"{label} must be an array")
     if len(value) != expected_len:
         raise ValueError(
@@ -207,48 +205,37 @@ def normalize_quality_factor(quality: float) -> float:
     return QUALITY_NORMALIZE_CLAMP if normalized >= 1.0 else normalized
 
 
-def load_quality_curves(ref: ResourceRef | None) -> QualityCurves | None:
-    """Load the optional quality-curves resource.
+def load_quality_curves(profile: CompiledProfile) -> QualityCurves | None:
+    """Rebuild the optional quality-curves table from the compiled artifact.
 
-    ``None`` in, ``None`` out: a profile without the resource keeps the
-    historical behavior exactly. A present resource is checksum-verified by
-    the manifest and fully validated here, including the v2 per-curve
-    semantics map.
+    A profile with no curves records an empty breakpoint block, and that is
+    ``None`` here: the historical behavior (no interpolation at all) is kept
+    exactly, and a quality request against such a profile is a configuration
+    error rather than a silent fallback.
     """
-    if ref is None:
+    if not isinstance(profile, CompiledProfile):
+        raise TypeError("quality curves require a CompiledProfile")
+    breakpoints = tuple(float(value) for value in profile.table("quality_curves.breakpoints"))
+    if not breakpoints:
         return None
-    if not isinstance(ref, ResourceRef):
-        raise TypeError("quality curves resource must be ResourceRef")
-    payload = ref.read_json()
-    if not isinstance(payload, dict) or payload.get("schema") != QUALITY_CURVES_SCHEMA:
-        raise ValueError("unexpected quality-curves schema")
-    if payload.get("interpolation") != QUALITY_CURVES_INTERPOLATION:
-        raise ValueError("unsupported quality-curves interpolation")
-    breakpoints_raw = payload.get("breakpoints")
-    if not isinstance(breakpoints_raw, list):
-        raise ValueError("quality-curves breakpoints must be an array")
-    breakpoints = _float_tuple(
-        breakpoints_raw,
-        len(breakpoints_raw),
-        "quality-curves breakpoints",
-    )
-    raw_curves = payload.get("curves")
-    if not isinstance(raw_curves, dict) or not raw_curves:
-        raise ValueError("quality-curves must define a non-empty curves object")
-    raw_semantics = payload.get("semantics")
-    if not isinstance(raw_semantics, dict) or not raw_semantics:
-        raise ValueError("quality-curves must define a non-empty semantics object")
+    curves: dict[str, tuple[float, ...]] = {
+        name: tuple(float(value) for value in profile.table(f"quality_curves.curve.{name}"))
+        for name in named_blocks(profile, "quality_curves.curve.", "")
+    }
+    semantics = {
+        name: str(profile.table(f"quality_curves.semantic.{name}"))
+        for name in named_blocks(profile, "quality_curves.semantic.", "")
+    }
     return QualityCurves(
         schema=QUALITY_CURVES_SCHEMA,
         breakpoints=breakpoints,
-        curves=raw_curves,
-        semantics=raw_semantics,
+        curves=curves,
+        semantics=semantics,
     )
 
 
 __all__ = [
     "QUALITY_CURVES_INTERPOLATION",
-    "QUALITY_CURVES_RESOURCE",
     "QUALITY_CURVES_SCHEMA",
     "QUALITY_NORMALIZE_ADDEND",
     "QUALITY_NORMALIZE_CLAMP",

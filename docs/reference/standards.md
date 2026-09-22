@@ -39,8 +39,8 @@ stage is not done until it comes back zero.
 | The reference WEM for `tests/fixtures/input.wav`, byte for byte — SHA-256 `17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247` | `make wem-bytes` (`tests/whole_file/test_whole_file.py`); `crates/wem-core/tests/complete_wem_bytes.rs` |
 | Per-frame values, and per-frame × per-stage hashes with the raw dumps of the 28 representative frames | `tests/parity/test_frame_pipeline_parity.py`, `tests/parity/test_stage_pipeline.py`, `cargo test -p wem-core` |
 | The package-root public exports and the wheel inventory | `tests/parity/test_public_api.py`, `tests/parity/test_distribution.py`, `make wheel-smoke`; the export list is in [`public-interface.md`](public-interface.md) |
-| Geometry-materializer parity: the ported builder == the registered profile bytes == the kernel's `psy_geom*` surfaces | `tests/parity/test_geometry_materializer_parity.py`; `cargo test -p wem-analysis` |
-| The profile resource digest chain: payload → manifest SHA-256 → index SHA-256 | `bundle.verify_all`, `make wheel-smoke` |
+| Geometry-materializer parity: the ported builder == the carrier's registered words == the kernel's `psy_geom*` surfaces | `tests/parity/test_geometry_materializer_parity.py`; `cargo test -p wem-analysis` |
+| The compiled profile carrier: the kernel's tables equal the recorded material, table by table | `crates/wem-profiles/src/carrier_tests.rs` (stage 1, retired with the recorded tree), `tests/parity/test_geometry_materializer_parity.py`, `cargo test -p wem-profiles` |
 | The 2ch/48 kHz result, its corpora, and the limits of that evidence | `tests/parity/test_2ch_reference_corpus.py`, `tests/parity/test_2ch_stress_corpus.py`, [`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md) |
 
 Running those suites is what establishes each claim. The local targets that run
@@ -94,9 +94,8 @@ little-endian numeric with the endianness in the file suffix (`.f32le`, `.u16le`
 The import graph is one-directional and acyclic, and the same split holds for
 Python (oracle) and Rust (kernel). `scheduling` imports nothing downstream;
 `analysis`, `vorbis` and `container` never open package resources; `profiles` is
-the sole owner of packaged calibration resources, checksum verification and
-calibrated table loaders; one application layer alone assembles the WAV-to-WEM
-use case. [`architecture.md`](architecture.md) holds the complete rule list;
+the sole owner of the compiled calibration carrier and its readers; one
+application layer alone assembles the WAV-to-WEM use case. [`architecture.md`](architecture.md) holds the complete rule list;
 `tests/parity/test_runtime_boundary.py` checks the graph for the oracle tree —
 acyclicity, and that `scheduling`, `analysis` and the DSP modules import no
 downstream domain.
@@ -120,8 +119,8 @@ the crate manifests and by review, not by a runtime check.
 
 `analysis` receives typed configuration and never selects a file path or a
 default. The reference package may import facade DTOs and profile-metadata types
-by absolute name (`wwise_wem.model`, `wwise_wem.profiles.*`); everything else in
-it resolves by in-package relative imports, and the facade never imports the
+by absolute name (`wwise_wem.model`, `wwise_wem.profiles.key`); everything else
+in it resolves by in-package relative imports, and the facade never imports the
 reference tree.
 
 ## Errors
@@ -158,7 +157,10 @@ that the kernel error stays reachable as `__cause__`.
 
 **Error types are exhaustively matchable.** A public error enum carries no
 `#[non_exhaustive]`, on purpose: adding a variant is a breaking change, and the
-compiler must tell every caller that a new failure mode exists. Adding an error
+compiler must tell every caller that a new failure mode exists.
+`crates/wem-core/tests/error_variants.rs` matches every public error enum with
+no `_` arm, from a caller's position, so the rule is compiler-enforced: a new
+variant fails that build until the caller's arm is written. Adding an error
 *code* on the C ABI, or a code string in Python, is not a breaking change —
 those surfaces have no exhaustive matching, which is why
 [`include/wem.h`](../../include/wem.h) can promise that `WemError` values are
@@ -189,8 +191,8 @@ state behind the caller's back. Output leaves through the caller's callback — 
 C ABI write and packet callbacks — or as a returned value; the library prints
 nothing of its own. No environment variable, working directory, clock or locale
 decides what gets encoded: a configuration is named by a structured profile
-selection, never by a variable or a path, and the native runtime carries the
-profile bundle compiled into the library rather than locating one at run time.
+selection, never by a variable or a path, and the native runtime carries its
+profile data compiled into the library rather than locating any at run time.
 The caller-facing consequences are in [`public-interface.md`](public-interface.md)
 (execution path) and [`profiles.md`](profiles.md) (access boundary).
 
@@ -210,14 +212,15 @@ provenance classification of the 2ch/48 kHz resource set, the crate-private
 resource intake and the frozen transcendental tables are in
 [`profiles.md`](profiles.md).
 
-A resource is verified against its declared SHA-256 whenever it is loaded, and
-`bundle.verify_all` walks the chain — payload → manifest → index — in both
-implementations; `make wheel-smoke` runs it against the installed wheel and the
-ZIP import. A construction path that requests a value outside the frozen domain
-fails loudly instead of consulting the host libm. The directory and manifest
-layout is in [`architecture.md`](architecture.md#profile-ownership), and
-provenance — no profile value is fitted to an output — is in
-[`profiles.md`](profiles.md).
+A profile's values are Rust constants in the same artifact as the setup packet
+they belong to, so there is nothing to locate, address or verify at run time:
+the recorded setup SHA-256 is re-checked against the packet when the value model
+is built from the carrier (`crates/wem-profiles/src/model.rs`), and the carrier
+itself is proved value-for-value against the recorded material. A construction
+path that requests a value outside the frozen domain fails loudly instead of
+consulting the host libm. The carrier layout is in
+[`architecture.md`](architecture.md#profile-ownership), and provenance — no
+profile value is fitted to an output — is in [`profiles.md`](profiles.md).
 
 ## Integration topology
 
@@ -260,11 +263,11 @@ inside `wem-analysis` — is default-on for native builds and can be dropped by 
 threadless consumer, which is how `crates/wem-wasm` builds it; the scalar path
 is the one the parity comparisons read.
 
-Profile bytes are consumable without filesystem I/O: the bundle is compiled into
-the library and resolved by selection
-(`bundle_for_selection(WwiseProfile) -> Result<ProfileBundle, ProfileError>`),
-so no data directory, profile name or manifest bytes appear on the runtime
-surface.
+Profile bytes are consumable without filesystem I/O: the tables are compiled
+into the library and resolved by selection
+(`compiled_profile_for_selection(WwiseProfile) -> Result<CompiledProfile, ProfileError>`),
+so no data directory, profile name or manifest bytes exist to appear on the
+runtime surface.
 
 ## Source rules
 

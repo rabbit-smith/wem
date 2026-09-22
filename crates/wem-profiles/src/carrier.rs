@@ -27,7 +27,6 @@ use crate::key::ProfileKey;
 use crate::model::EncoderProfile;
 use crate::quality::{QualityCurves, QUALITY_CURVES_SCHEMA};
 use crate::selection::WwiseProfile;
-use crate::source::ProfileSource;
 use crate::tables::{
     CodebookRowTable, LongTable, ProfileTables, ShortProfileTable, ShortSeedTable, TransientTable,
 };
@@ -75,7 +74,6 @@ impl CompiledProfile {
     /// The identity as the public value model spells it.
     pub fn encoder_profile(&self) -> Result<EncoderProfile, ProfileError> {
         EncoderProfile::new(
-            self.tables.name.to_string(),
             self.key.clone(),
             Some(self.tables.setup_packet.to_vec()),
             self.tables.setup_sha256.to_string(),
@@ -86,22 +84,30 @@ impl CompiledProfile {
             None,
         )
     }
-}
 
-impl ProfileSource for CompiledProfile {
-    fn name(&self) -> &str {
-        self.tables.name
-    }
-
-    fn key(&self) -> &ProfileKey {
+    /// The profile's exact identity.
+    pub fn key(&self) -> &ProfileKey {
         &self.key
     }
 
-    fn setup_packet(&self) -> Result<Vec<u8>, ProfileError> {
+    /// The human label for this profile, derived from its key: a profile
+    /// carries no stored name.
+    pub fn label(&self) -> String {
+        self.key.label()
+    }
+
+    /// The recorded setup-packet SHA-256 (lowercase hex).
+    pub fn setup_sha256(&self) -> &'static str {
+        self.tables.setup_sha256
+    }
+
+    /// The verified setup packet bytes.
+    pub fn setup_packet(&self) -> Result<Vec<u8>, ProfileError> {
         Ok(self.tables.setup_packet.to_vec())
     }
 
-    fn mdct_looks(&self) -> Result<BTreeMap<i64, MdctLook>, ProfileError> {
+    /// Every static MDCT trig bank, keyed by transform size.
+    pub fn mdct_looks(&self) -> Result<BTreeMap<i64, MdctLook>, ProfileError> {
         let mut looks = BTreeMap::new();
         for bank in self.tables.resources.mdct_banks {
             let look = make_mdct_look(bank.n, Some(bank.trig)).map_err(ProfileError::Analysis)?;
@@ -110,7 +116,7 @@ impl ProfileSource for CompiledProfile {
         Ok(looks)
     }
 
-    fn book_tables(&self) -> Result<BookTables, ProfileError> {
+    pub fn book_tables(&self) -> Result<BookTables, ProfileError> {
         let find = |name: &str| {
             self.tables
                 .resources
@@ -135,7 +141,7 @@ impl ProfileSource for CompiledProfile {
         Ok(BookTables::new(t97, optional("t219")?, optional("t282")?))
     }
 
-    fn frozen_tables(&self) -> Result<Option<FrozenMathTables>, ProfileError> {
+    pub fn frozen_tables(&self) -> Result<Option<FrozenMathTables>, ProfileError> {
         let table = self.tables.resources.frozen;
         let mut coordinate_ln = std::collections::HashMap::with_capacity(table.coordinate_ln.len());
         for &(in_bits, out_bits) in table.coordinate_ln {
@@ -156,11 +162,49 @@ impl ProfileSource for CompiledProfile {
         }))
     }
 
-    fn transient_tables(
+    /// The static record family this profile records, when its transient
+    /// mechanism is the record family (materialization input; Python
+    /// `TransientRecordFamily`). A profile that registers a pre-materialized
+    /// detector table has none.
+    pub fn transient_record_family(&self) -> Option<TransientRecordFamily> {
+        match &self.tables.resources.transient {
+            TransientTable::Detector(_) => None,
+            TransientTable::RecordFamily(family) => Some(TransientRecordFamily {
+                schema: TRANSIENT_RECORD_FAMILY_SCHEMA,
+                n: family.n as u64,
+                sample_rate: family.sample_rate,
+                default_record_index: family.default_record_index,
+                records: family
+                    .records
+                    .iter()
+                    .map(|record| TransientRecord {
+                        file_off: record.file_off.to_string(),
+                        marker_u32: record.marker_u32,
+                        upper_u32: record.upper_u32,
+                        lower_u32: record.lower_u32,
+                        carry_u32: record.carry_u32,
+                        bias_u32: record.bias_u32,
+                        m_u32: record.m_u32,
+                        tail_u32: record.tail_u32,
+                        config_u32: record.config_u32,
+                    })
+                    .collect(),
+                index_curve: family.index_curve.to_vec(),
+                breakpoints: family.breakpoints.to_vec(),
+                window_u32: family.window.iter().map(|word| word.to_bits()).collect(),
+                bands: bands(family.bands),
+            }),
+        }
+    }
+
+    /// The transient detector table for one quality value: either the
+    /// pre-materialized detector the profile registers, or the record family
+    /// materialized at that quality.
+    pub fn transient_tables(
         &self,
         quality: Option<f64>,
     ) -> Result<TransientDetectorTables, ProfileError> {
-        match &self.tables.resources.transient {
+        match self.tables.resources.transient {
             TransientTable::Detector(detector) => Ok(TransientDetectorTables {
                 n: detector.n,
                 bias: detector.bias,
@@ -168,42 +212,20 @@ impl ProfileSource for CompiledProfile {
                 config: detector.config.to_vec(),
                 bands: bands(detector.bands),
             }),
-            TransientTable::RecordFamily(family) => {
-                let materialized = TransientRecordFamily {
-                    schema: TRANSIENT_RECORD_FAMILY_SCHEMA,
-                    n: family.n as u64,
-                    sample_rate: family.sample_rate,
-                    default_record_index: family.default_record_index,
-                    records: family
-                        .records
-                        .iter()
-                        .map(|record| TransientRecord {
-                            file_off: record.file_off.to_string(),
-                            marker_u32: record.marker_u32,
-                            upper_u32: record.upper_u32,
-                            lower_u32: record.lower_u32,
-                            carry_u32: record.carry_u32,
-                            bias_u32: record.bias_u32,
-                            m_u32: record.m_u32,
-                            tail_u32: record.tail_u32,
-                            config_u32: record.config_u32,
-                        })
-                        .collect(),
-                    index_curve: family.index_curve.to_vec(),
-                    breakpoints: family.breakpoints.to_vec(),
-                    window_u32: family.window.iter().map(|word| word.to_bits()).collect(),
-                    bands: bands(family.bands),
-                };
-                materialize_transient_tables(&materialized, quality)
+            TransientTable::RecordFamily(_) => {
+                let family = self
+                    .transient_record_family()
+                    .expect("the record-family arm produced this value");
+                materialize_transient_tables(&family, quality)
             }
         }
     }
 
-    fn short_seed(&self) -> Result<WwisePsySeedSurface, ProfileError> {
+    pub fn short_seed(&self) -> Result<WwisePsySeedSurface, ProfileError> {
         Ok(short_seed(self.tables.resources.short_seed))
     }
 
-    fn short_profiles(&self) -> Result<Vec<ShortPsyProfile>, ProfileError> {
+    pub fn short_profiles(&self) -> Result<Vec<ShortPsyProfile>, ProfileError> {
         Ok(self
             .tables
             .resources
@@ -213,11 +235,11 @@ impl ProfileSource for CompiledProfile {
             .collect())
     }
 
-    fn long_base(&self) -> Result<WwisePsyLongTables, ProfileError> {
+    pub fn long_base(&self) -> Result<WwisePsyLongTables, ProfileError> {
         Ok(long_table(self.tables.resources.long_base))
     }
 
-    fn long_variant(&self, mode: i64) -> Result<WwisePsyLongTables, ProfileError> {
+    pub fn long_variant(&self, mode: i64) -> Result<WwisePsyLongTables, ProfileError> {
         let base = self.long_base()?;
         let Some(variant) = self
             .tables
@@ -244,7 +266,7 @@ impl ProfileSource for CompiledProfile {
         })
     }
 
-    fn quality_curves(&self) -> Result<Option<QualityCurves>, ProfileError> {
+    pub fn quality_curves(&self) -> Result<Option<QualityCurves>, ProfileError> {
         let Some(table) = self.tables.resources.quality_curves else {
             return Ok(None);
         };
@@ -266,7 +288,7 @@ impl ProfileSource for CompiledProfile {
         )?))
     }
 
-    fn input_conditioner(&self) -> Result<Option<InputConditionerConfig>, ProfileError> {
+    pub fn input_conditioner(&self) -> Result<Option<InputConditionerConfig>, ProfileError> {
         match self.tables.resources.input_conditioner {
             Some(bits) => Ok(Some(
                 InputConditionerConfig::new(f32::from_bits(bits))
@@ -306,7 +328,15 @@ pub fn compiled_profile_for_selection(
     if matches.len() != 1 {
         let names = matches
             .iter()
-            .map(|tables| tables.name)
+            .map(|tables| {
+                crate::key::profile_description(
+                    tables.key.channels,
+                    tables.key.sample_rate,
+                    tables.key.generation,
+                    tables.key.channel_layout,
+                    tables.key.quality_setup_identity,
+                )
+            })
             .collect::<Vec<_>>()
             .join(", ");
         return Err(ProfileError::AmbiguousProfileSelection {
@@ -331,9 +361,10 @@ fn describe_installed() -> String {
     let mut described: Vec<String> = generated::PROFILES
         .iter()
         .map(|tables| {
-            format!(
-                "{}ch/{}Hz/{}",
-                tables.key.channels, tables.key.sample_rate, tables.key.generation
+            crate::key::profile_label(
+                tables.key.channels,
+                tables.key.sample_rate,
+                tables.key.generation,
             )
         })
         .collect();

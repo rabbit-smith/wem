@@ -111,14 +111,21 @@ def verify_or_write_inputs(
 def corpus_selection(profile_key: str) -> WwiseProfile:
     """The structured selection one corpus manifest pins.
 
-    A manifest stores the installed profile's index key; the selection is
+    A manifest stores the installed profile's identity key; the selection is
     derived from that key's generation and geometry, so the corpora never
-    pick a profile by name.
+    pick a profile by label.
     """
     from wwise_wem import WwiseProfile, WwiseVersion
-    from wwise_wem.profiles.bundle import load_profile_bundle
+    from wwise_wem_reference.profiles.artifact import compiled_profiles
 
-    key = load_profile_bundle(profile=profile_key, verify_all=False).key
+    matches = [
+        profile
+        for profile in compiled_profiles()
+        if profile.key.describe() == profile_key or profile.label() == profile_key
+    ]
+    if len(matches) != 1:
+        raise ValueError(f"no single installed profile for {profile_key!r}")
+    key = matches[0].key
     return WwiseProfile(
         WwiseVersion.from_generation(key.generation),
         key.channels,

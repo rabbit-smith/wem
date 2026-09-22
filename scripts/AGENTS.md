@@ -16,9 +16,11 @@ idempotent, and offline. What their outputs must satisfy is in
   `Path(__file__)`; env overrides must be declared in `--help`.
 - **Write only to declared destinations**: e.g. `record_tmath.py` →
   `tests/data/stage-records/transcendental/`, `generate_frozen_tables.py` →
-  the payload + manifest + index trio (and it refuses when the index already
-  matches), `emit_stage_records.py` → `tests/data/stage-records/stages/`.
-  Never write outside these trees as a side effect.
+  `corpus/profiles/*/analysis/frozen-tables.json` (the untracked recorded
+  material), `generate_profile_code.py` →
+  `crates/wem-profiles/src/generated/`, `emit_stage_records.py` →
+  `tests/data/stage-records/stages/`. Never write outside these trees as a
+  side effect.
 - **Cross-check before emit**: generators assert their output against the
   existing versioned assets (frozen table generation proves domain agreement with
   the recorded site pairs; the reference digest is verified after, not assumed).

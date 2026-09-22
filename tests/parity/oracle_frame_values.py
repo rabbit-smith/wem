@@ -46,8 +46,7 @@ from typing import Any, Collection, Iterator, Sequence
 
 from wwise_wem import WwiseProfile, WwiseVersion
 from wwise_wem.adapters.wav import read_pcm_wav
-from wwise_wem.profiles.bundle import load_profile_bundle
-from wwise_wem.profiles.registry import resolve_selection
+from wwise_wem_reference.profiles.artifact import resolve_selection
 from wwise_wem_reference.analysis.session import AnalysisSession
 from wwise_wem_reference.profiles.assembly import assemble_encoder_profile_resources
 from wwise_wem_reference.vorbis.packet_encoder import pack_analysis_frame
@@ -113,9 +112,8 @@ def frame_records(
     profile = resolve_selection(
         WwiseProfile(WwiseVersion.DEFAULT, pcm.channel_count, pcm.sample_rate)
     )
-    bundle = load_profile_bundle(profile=profile.name, verify_all=False)
     resources = assemble_encoder_profile_resources(
-        bundle, setup_packet=profile.setup_packet()
+        profile, setup_packet=profile.setup_packet
     )
     session = AnalysisSession(
         pcm.channel_count,
@@ -132,7 +130,7 @@ def frame_records(
         "schema": SCHEMA,
         "wav": _display_path(wav),
         "input_sha256": hashlib.sha256(Path(wav).read_bytes()).hexdigest(),
-        "profile": profile.name,
+        "profile": profile.label(),
         "channels": pcm.channel_count,
         "sample_rate": pcm.sample_rate,
         "pcm_frames": pcm.frame_count,

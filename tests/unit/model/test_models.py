@@ -15,7 +15,7 @@ from wwise_wem.model import (
     WwiseWemError,
 )
 from wwise_wem import WwiseProfile, WwiseVersion
-from wwise_wem.profiles.registry import resolve_selection
+from wwise_wem_reference.profiles.artifact import resolve_selection
 
 
 SIX_CHANNEL_PROFILE = resolve_selection(

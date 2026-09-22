@@ -38,7 +38,7 @@ from wwise_wem_reference.container.model import ContainerPlan
 from wwise_wem_reference.container.wem import load_wem_parts_bytes
 from wwise_wem import WwiseProfile, WwiseVersion
 from wwise_wem.adapters.wav import read_pcm_wav
-from wwise_wem.profiles.registry import resolve_selection
+from wwise_wem_reference.profiles.artifact import resolve_selection
 
 
 SCHEMA = "wwise-wem.stage-records.v1"
@@ -212,7 +212,7 @@ class _StageCapture:
     # -- observing wrappers -------------------------------------------------
 
     def record_encode_inputs(self, profile, pcm) -> None:
-        self.profile_name = profile.name
+        self.profile_name = profile.label()
         self.pcm_geometry = {
             "sample_rate": pcm.sample_rate,
             "channels": pcm.channel_count,

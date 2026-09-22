@@ -12,7 +12,6 @@ use crate::tables::{
     MdctBankTable, ProfileKeyParts, ProfileTables, ResourceTables, ShortProfileTable,
     ShortSeedTable, TransientTable,
 };
-pub const NAME: &str = "wwise2013-6ch-44100";
 pub const SETUP_SHA256: &str = "3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3";
 
 #[rustfmt::skip]
@@ -13716,7 +13715,6 @@ pub static LONG_VARIANTS: [LongVariantTable; 2] = [
 
 #[rustfmt::skip]
 pub static TABLES: ProfileTables = ProfileTables {
-    name: NAME,
     key: KEY,
     setup_packet: &SETUP_PACKET,
     setup_sha256: SETUP_SHA256,

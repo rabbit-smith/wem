@@ -148,7 +148,7 @@ def _reference_case(native) -> None:
     artifact, so no digest of it is re-typed here.
     """
     from wwise_wem.adapters.wav import read_pcm_wav
-    from wwise_wem.profiles.registry import resolve_selection
+    from wwise_wem_reference.profiles.artifact import resolve_selection
 
     from wwise_wem_reference import python_engine
     from wwise_wem_reference.container.model import ContainerPlan
@@ -323,7 +323,7 @@ def main() -> int:
     # below are read from the installed package for comparison only. Both
     # sides select with the same structured selection: the oracle through the
     # package resolver, the native side through the kernel.
-    from wwise_wem.profiles.registry import resolve_selection
+    from wwise_wem_reference.profiles.artifact import resolve_selection
 
     selection = _selection(CHANNELS, SAMPLE_RATE)
     profile = resolve_selection(selection)

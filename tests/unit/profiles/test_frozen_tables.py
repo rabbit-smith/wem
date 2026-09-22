@@ -13,8 +13,8 @@ from pathlib import Path
 
 from wwise_wem_reference.analysis.config import FrozenMathTables, make_wwise_psy_look
 from wwise_wem_reference._tmath import math_bits
+from tests.analysis_resource_support import installed_profile
 from wwise_wem_reference.profiles.assembly import assemble_encoder_profile_resources
-from wwise_wem.profiles.bundle import load_profile_bundle
 from wwise_wem_reference.profiles.frozen import load_frozen_tables
 
 def _ulp_ordered(value: float) -> int:
@@ -60,26 +60,23 @@ def _write_small_wav(path: str, frames: int = 4200) -> None:
 
 
 class FrozenTableRegistrationTests(unittest.TestCase):
-    def test_manifest_registers_frozen_tables_and_loader_round_trips(self) -> None:
-        bundle = load_profile_bundle()
-        manifest = bundle.runtime_manifest
-        self.assertIn("analysis.frozen-tables", manifest.resources)
-        tables = load_frozen_tables(manifest.resource("analysis.frozen-tables"))
+    def test_carrier_records_frozen_tables_and_the_reader_restores_them(self) -> None:
+        profile = installed_profile(6, 44100)
+        self.assertIsNotNone(profile.optional_table("frozen.coordinate_ln.in_bits"))
+        tables = load_frozen_tables(profile)
         self.assertIsInstance(tables, FrozenMathTables)
         self.assertEqual(set(tables.window_halves), {256, 2048})
         self.assertEqual(len(tables.coordinate_ln), 128)
         self.assertEqual(set(tables.fft_twiddles), {2 << k for k in range(11)})
 
     def test_assembled_analysis_resources_carry_frozen_tables(self) -> None:
-        resources = assemble_encoder_profile_resources(load_profile_bundle())
+        resources = assemble_encoder_profile_resources(installed_profile(6, 44100))
         self.assertIsInstance(resources.analysis.frozen, FrozenMathTables)
 
 
 class FrozenTableEqualityTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.tables = load_frozen_tables(
-            load_profile_bundle().runtime_manifest.resource("analysis.frozen-tables")
-        )
+        self.tables = load_frozen_tables(installed_profile(6, 44100))
 
     def test_windows_reproduce_reference_synthesis(self) -> None:
         from wwise_wem_reference.analysis.dsp.transform import vorbis_window
@@ -112,9 +109,9 @@ class FrozenTableEqualityTests(unittest.TestCase):
             )
 
     def test_psy_look_construction_uses_only_frozen_domain(self) -> None:
-        surface = (
-            assemble_encoder_profile_resources(load_profile_bundle()).analysis.short_surface
-        )
+        surface = assemble_encoder_profile_resources(
+            installed_profile(6, 44100)
+        ).analysis.short_surface
         look = make_wwise_psy_look(surface, frozen_ln=self.tables.coordinate_ln)
         baseline = make_wwise_psy_look(surface)
         self.assertEqual(look, baseline)

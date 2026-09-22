@@ -39,15 +39,15 @@ fn read_index() -> Value {
 }
 
 /// Analysis resources of the installed Wwise 2013 6ch/44100 configuration,
-/// resolved from a structured selection against the compiled-in profile
-/// bundle (never a profile name or a profile tree).
+/// resolved from a structured selection against the compiled profile carrier
+/// (never a profile name or a profile tree).
 fn encoder_analysis_resources() -> wem_analysis::config::AnalysisProfileResources {
     let selection =
         wem_profiles::WwiseProfile::new(wem_profiles::WwiseVersion::Wwise2013, 6, 44_100)
             .expect("6ch/44100 selection");
-    let bundle =
-        wem_profiles::bundle_for_selection(selection).expect("installed 6ch profile resolves");
-    wem_profiles::assemble_analysis_resources(&bundle, None).expect("analysis resources assemble")
+    let compiled = wem_profiles::carrier::compiled_profile_for_selection(selection)
+        .expect("installed 6ch profile resolves");
+    wem_profiles::assemble_analysis_resources(&compiled, None).expect("analysis resources assemble")
 }
 
 fn int_field(v: &Value, field: &str) -> i64 {

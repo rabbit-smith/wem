@@ -84,7 +84,7 @@ native-absent environments — a missing kernel fails the suite, on purpose.
 ## Modifying tests
 
 The cleanliness and distribution suites also read the `tests/parity/*.json`
-allowlists; when you add package files or change profile resource counts, the
-same commit must update: `distribution_allowlist.json`, `wheel_smoke.py`'s
-expected resource set, and any hardcoded counts (e.g. manifest resource count
-in `test_profile_bundle.py`).
+allowlists; when you add package files or change the profile inventory, the same
+commit must update `distribution_allowlist.json` and anything that reads it
+(`scripts/wheel_smoke.py`). Profile values are compiled into the kernel, so the
+allowlist's `resources` list stays empty and no packaged data exists to count.

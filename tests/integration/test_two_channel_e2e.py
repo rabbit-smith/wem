@@ -34,11 +34,9 @@ from pathlib import Path
 
 import numpy as np
 
-from tests.analysis_resource_support import installed_profile_bundle
 from wwise_wem import WwiseProfile, WwiseVersion, encode
 from wwise_wem.adapters.wav import read_pcm_wav
-from wwise_wem.profiles.model import EncoderProfile
-from wwise_wem.profiles.registry import resolve_selection
+from wwise_wem_reference.profiles.artifact import CompiledProfile, resolve_selection
 from wwise_wem_reference.analysis.preprocessing.conditioner import InputConditioner
 from wwise_wem_reference.profiles.assembly import assemble_analysis_resources
 
@@ -50,12 +48,6 @@ SELECTION = WwiseProfile(WwiseVersion.WWISE2013, CHANNELS, SAMPLE_RATE)
 PROFILE = resolve_selection(SELECTION)
 
 
-TWO_CHANNEL_BUNDLE = installed_profile_bundle(
-    CHANNELS, SAMPLE_RATE, PROFILE.key.generation
-)
-# The reference decoder reads one profile's materials from the packaged
-# data directory; the path is derived from the resolved selection.
-PROFILE_DIR = Path(str(TWO_CHANNEL_BUNDLE.runtime_manifest.ref.traversable().parent))
 # >= 4096 frames required by the E2E comparison; 16384 keeps the native
 # encode fast while covering several short/long block-size transitions.
 FRAMES = 16384
@@ -126,7 +118,7 @@ def _write_wav(path: Path, ch0: np.ndarray, ch1: np.ndarray) -> Path:
 
 def _decode_wem_int16(wem_bytes: bytes) -> tuple[np.ndarray, dict]:
     """Reference-decode a 2ch/48k WEM to float64 PCM (libvorbis float domain)."""
-    context = DECODE.build_context(PROFILE_DIR, channels=CHANNELS, sample_rate=SAMPLE_RATE)
+    context = DECODE.build_context(PROFILE, channels=CHANNELS, sample_rate=SAMPLE_RATE)
     _data, packets, _seek, _fmt = DECODE.parse_container(wem_bytes)
     _setup, audio_packets = packets[0], packets[1:]
     result = DECODE.run_decode_2ch(context, audio_packets)
@@ -143,7 +135,7 @@ class TwoChannelResolutionTests(unittest.TestCase):
 
     def test_selection_resolution_returns_the_registered_profile(self) -> None:
         profile = resolve_selection(SELECTION)
-        self.assertIsInstance(profile, EncoderProfile)
+        self.assertIsInstance(profile, CompiledProfile)
         self.assertEqual(profile.key.channels, CHANNELS)
         self.assertEqual(profile.key.sample_rate, SAMPLE_RATE)
         self.assertEqual(profile.key.generation, "2013.2")
@@ -153,7 +145,7 @@ class TwoChannelResolutionTests(unittest.TestCase):
 
     def test_setup_packet_matches_the_profile_key_identity(self) -> None:
         profile = PROFILE
-        setup = profile.setup_packet()
+        setup = profile.setup_packet
         self.assertEqual(len(setup), 215)
         digest = hashlib.sha256(setup).hexdigest()
         self.assertEqual(profile.setup_sha256, digest)
@@ -212,7 +204,7 @@ class TwoChannelEncodeGeometryTests(unittest.TestCase):
         self.assertEqual(fmt["uBlocksize1Pow"], 11)
         # The profile's setup packet leads the audio stream.
         profile = PROFILE
-        self.assertEqual(bytes(profile.setup_packet()), packets[0])
+        self.assertEqual(bytes(profile.setup_packet), packets[0])
         # Packet stream geometry matches the encoder's reported counts.
         self.assertEqual(len(packets[1:]), self.result.stats.audio_packets)
         # Container metadata registered in the profile matches the bytes
@@ -239,7 +231,7 @@ class TwoChannelRoundTripTests(unittest.TestCase):
         rows = tuple(
             tuple(float(sample) / 32768.0 for sample in row) for row in (ch0, ch1)
         )
-        resources = assemble_analysis_resources(TWO_CHANNEL_BUNDLE)
+        resources = assemble_analysis_resources(PROFILE)
         if resources.input_conditioner is None:
             raise AssertionError("2ch profile must select input conditioning")
         cls.conditioned_streams = InputConditioner(

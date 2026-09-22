@@ -39,41 +39,43 @@ for entry in (ROOT / "src", ROOT / "reference"):
 
 from wwise_wem_reference._tmath import math_bits  # noqa: E402
 from wwise_wem_reference.analysis.dsp.transform import vorbis_window  # noqa: E402
-from wwise_wem.profiles.bundle import (  # noqa: E402
-    WWISE_GENERATION,
-    installed_profile_names,
-    load_profile_bundle,
-)
-from wwise_wem_reference.profiles.psychoacoustics.config import load_short_seed_surface  # noqa: E402
+
+# The recorded profile tree is development material now: it lives untracked
+# under `corpus/profiles/`, and this generator is one of the two consumers of
+# it (the other is `scripts/generate_profile_code.py`). Nothing here needs the
+# native extension.
+WWISE_GENERATION = "2013.2"
+PROFILE_ROOT = ROOT / "corpus/profiles"
+INDEX_PATH = PROFILE_ROOT / "index.json"
 
 
 def installed_profile_name(generation: str, channels: int, sample_rate: int) -> str:
-    """The packaged profile directory whose manifest key is this identity.
+    """The recorded profile directory whose manifest key is this identity.
 
-    A directory name is a property of the packaged tree, so read it from there
-    instead of re-typing it. Read through the index and manifests only: this is
-    a generation script, and it must run before — and without — the native
-    extension, exactly as the wheel's zip-import check does.
+    A directory name is a property of the recorded tree, so read it from there
+    instead of re-typing it.
     """
     matches = [
-        bundle.name
-        for bundle in (
-            load_profile_bundle(profile=name, verify_all=False)
-            for name in installed_profile_names()
-        )
-        if (
-            bundle.key.generation,
-            bundle.key.channels,
-            bundle.key.sample_rate,
-        )
-        == (generation, channels, sample_rate)
+        name
+        for name, entry in sorted(load_index()["profiles"].items())
+        if _manifest_key(entry["manifest"]) == (generation, channels, sample_rate)
     ]
     if len(matches) != 1:
         raise SystemExit(
-            f"expected exactly one installed profile for "
+            f"expected exactly one recorded profile for "
             f"{channels}ch/{sample_rate}Hz/{generation}, found {matches}"
         )
     return matches[0]
+
+
+def load_index() -> dict:
+    return json.loads(INDEX_PATH.read_text())
+
+
+def _manifest_key(relative: str) -> tuple:
+    manifest = json.loads((PROFILE_ROOT / relative).read_text())
+    key = manifest["key"]
+    return (key["generation"], key["channels"], key["sample_rate"])
 
 
 SIX_CHANNEL_PROFILE = installed_profile_name(WWISE_GENERATION, 6, 44100)
@@ -83,7 +85,6 @@ FROZEN_RESOURCE = "analysis.frozen-tables"
 FROZEN_SCHEMA = "wem.frozen-math.v1"
 FROZEN_RELATIVE_PATH = "analysis/frozen-tables.json"
 SHORT_SURFACE_N = 128
-INDEX_PATH = ROOT / "src/wwise_wem/data/profiles/index.json"
 RECORD_DIR_BY_PROFILE = {
     SIX_CHANNEL_PROFILE: ROOT / "tests/data/stage-records/transcendental",
     TWO_CHANNEL_PROFILE: ROOT / "tests/data/stage-records/transcendental-2ch-48000",
@@ -91,11 +92,11 @@ RECORD_DIR_BY_PROFILE = {
 
 
 def profile_manifest_path(profile: str) -> Path:
-    return ROOT / "src/wwise_wem/data/profiles" / profile / "manifest.json"
+    return PROFILE_ROOT / profile / "manifest.json"
 
 
 def profile_frozen_path(profile: str) -> Path:
-    return ROOT / "src/wwise_wem/data/profiles" / profile / "analysis" / "frozen-tables.json"
+    return PROFILE_ROOT / profile / "analysis" / "frozen-tables.json"
 
 
 def f64_hex(value: float) -> str:
@@ -130,20 +131,14 @@ def main() -> int:
     manifest_path = profile_manifest_path(profile)
     payload_path = profile_frozen_path(profile)
 
-    if profile == SIX_CHANNEL_PROFILE:
-        bundle = load_profile_bundle(profile=profile)
-        surface = load_short_seed_surface(
-            bundle.runtime_manifest.resource("psychoacoustics.short-seed")
-        )
-        n, sample_rate = surface.n, surface.sample_rate
-        window_sizes = (256, 2048)
-    else:
-        # Analytic 48k-domain: seed-surface n with the manifest's sample rate
-        # and block sizes (load_short_seed_surface must not be used here).
-        raw_manifest = json.loads(manifest_path.read_text())
-        n = SHORT_SURFACE_N
-        sample_rate = int(raw_manifest["key"]["sample_rate"])
-        window_sizes = tuple(int(size) for size in raw_manifest["block_sizes"])
+    # Both profiles take their geometry from the recorded manifest: the seed
+    # surface is n=128 at the profile's own rate, and the block sizes are the
+    # manifest's. The frozen payload is generated *before* the kernel carries
+    # it, so nothing here may read the compiled artifact.
+    raw_manifest = json.loads(manifest_path.read_text())
+    n = SHORT_SURFACE_N
+    sample_rate = int(raw_manifest["key"]["sample_rate"])
+    window_sizes = tuple(int(size) for size in raw_manifest["block_sizes"])
 
     record_dir = (
         Path(args.record_dir) if args.record_dir else RECORD_DIR_BY_PROFILE[profile]

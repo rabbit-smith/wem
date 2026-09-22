@@ -1,51 +1,50 @@
-"""Load the checksum-addressed frozen transcendental tables of one exact profile."""
+"""Frozen transcendental tables, read from the compiled profile artifact.
+
+All floating-point content is restored from stored IEEE bit patterns; no float
+string parsing anywhere. The tables are Rust constants in the kernel and reach
+this module through the compiled artifact, so nothing here validates a
+document shape any more: the carrier was checked when it was generated.
+"""
 from __future__ import annotations
 
 import struct
+from functools import lru_cache
 
 from ..analysis.config import FrozenMathTables
-from ..analysis.dsp.transform import _u32_f32
-from wwise_wem.profiles.resources import ResourceRef
+from .artifact import CompiledProfile
 
 
-def _bits_to_f64(hex_bits: str) -> float:
-    return struct.unpack("<d", bytes.fromhex(hex_bits))[0]
+def _bits_to_f64(bits: int) -> float:
+    return struct.unpack("<d", struct.pack("<Q", int(bits) & 0xFFFFFFFFFFFFFFFF))[0]
 
 
-def _hex_to_u32(hex_bits: str) -> int:
-    return int.from_bytes(bytes.fromhex(hex_bits), "little")
-
-
-def _hex_to_u64(hex_bits: str) -> int:
-    return int.from_bytes(bytes.fromhex(hex_bits), "little")
-
-
-def load_frozen_tables(ref: ResourceRef) -> FrozenMathTables:
-    """Validate the frozen-math payload shape and return typed bit-mapped tables."""
-    if not isinstance(ref, ResourceRef):
-        raise TypeError("frozen tables resource must be ResourceRef")
-    payload = ref.read_json()
-    if not isinstance(payload, dict) or payload.get("schema") != "wem.frozen-math.v1":
-        raise ValueError("unexpected frozen-math schema")
+@lru_cache(maxsize=None)
+def load_frozen_tables(profile: CompiledProfile) -> FrozenMathTables:
+    """Rebuild the frozen-math tables the profile carries."""
+    if not isinstance(profile, CompiledProfile):
+        raise TypeError("frozen tables require a CompiledProfile")
     coordinate_ln = {
-        _hex_to_u64(in_bits): _bits_to_f64(out_bits)
-        for in_bits, out_bits in payload.get("coordinate_ln", [])
+        int(in_bits): _bits_to_f64(out_bits)
+        for in_bits, out_bits in zip(
+            profile.table("frozen.coordinate_ln.in_bits"),
+            profile.table("frozen.coordinate_ln.out_bits"),
+        )
     }
     fft_twiddles = {
-        int(length): (
-            _bits_to_f64(cos_bits),
-            _bits_to_f64(sin_bits),
+        int(length): (_bits_to_f64(cos_bits), _bits_to_f64(sin_bits))
+        for length, cos_bits, sin_bits in zip(
+            profile.table("frozen.fft_twiddles.length"),
+            profile.table("frozen.fft_twiddles.cos_bits"),
+            profile.table("frozen.fft_twiddles.sin_bits"),
         )
-        for length, cos_bits, sin_bits in payload.get("fft_twiddles", [])
     }
-    window_halves: dict[int, tuple[float, ...]] = {}
-    for key, values in payload.get("window_halves", {}).items():
-        size = int(key)
-        if size < 2 or size & 1 or len(values) != size // 2:
-            raise ValueError("frozen window halves disagree with their block size")
-        window_halves[size] = tuple(_u32_f32(_hex_to_u32(word)) for word in values)
-    if not coordinate_ln or not fft_twiddles or not window_halves:
-        raise ValueError("frozen-math payload is missing a section")
+    sizes = profile.table("frozen.window_halves.size")
+    words = profile.table("frozen.window_halves.words")
+    offsets = profile.table("frozen.window_halves.offsets")
+    window_halves = {
+        int(size): tuple(float(value) for value in words[offsets[index] : offsets[index + 1]])
+        for index, size in enumerate(sizes)
+    }
     return FrozenMathTables(
         coordinate_ln=coordinate_ln,
         fft_twiddles=fft_twiddles,

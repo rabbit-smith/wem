@@ -1,7 +1,7 @@
 # src/wwise_wem/ — distribution facade
 
 This package is the thin distribution facade: root API shell, CLI, WAV
-adapters, DTOs, and the installed-profile metadata path. The bit-exact
+adapters, DTOs, and the profile identity type. The bit-exact
 implementation domains live in the development-tree reference package
 (`reference/wwise_wem_reference`, see `reference/AGENTS.md`); the kernel is
 checked against that tree's byte-for-byte output, never the reverse.
@@ -27,9 +27,13 @@ boundaries, and what "fail loudly" means — are in
 
 Every new module or packaged data file requires, in the same commit:
 1. `tests/parity/distribution_allowlist.json` (modules/resources lists),
-2. `pyproject.toml` package-data glob when under `data/`,
-3. profile data: manifest `resources` entry + SHA-256 + `index.json` re-hash
-   (`scripts/generate_frozen_tables.py` shows the canonical update path),
+2. `pyproject.toml` package-data glob when under `data/` — there is no `data/`:
+   profile values are Rust constants compiled into the extension, so the
+   resource list stays empty,
+3. profile data: generated into the carrier by
+   `scripts/generate_profile_code.py` from `corpus/profiles/` (untracked
+   development material); `scripts/generate_frozen_tables.py` writes that
+   material, it does not touch the package,
 4. the wheel packaging test (`make wheel-smoke`) passing for the installed and
    the zip import path.
 
@@ -44,7 +48,9 @@ docstrings, comments, env var names, and file paths:
 `capture`, `fixture`, `the probe`, `research`, `experimental` — plus regex hits
 like bare `hook`, `DLL`, `RVA`, hex-backtick addresses, and `/tmp` paths.
 Use: `recording/record`, `representative`, `sample`, `site`, `reference`.
-This applies to strings inside profile JSON payloads as well.
+This applies to strings inside the recorded profile material under
+`corpus/profiles/` as well — it is the source the carrier is generated from,
+even though it does not ship.
 
 ## Style checks
 

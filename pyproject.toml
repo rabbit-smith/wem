@@ -20,9 +20,10 @@ wwise-wem = "wwise_wem.cli:main"
 # Single-wheel distribution: `pip install .` (or `pip wheel .`) builds the
 # abi3 extension from the wem-python binding crate and ships it inside the
 # `wwise_wem` package next to the pure-Python facade, so one wheel carries
-# both the facade and its native engine. Pure-Python sources and profile
-# data are picked up from `python-source`; the Rust workspace root stays
-# `crates/Cargo.toml` (maturin points at the child manifest, no second
+# both the facade and its native engine. Pure-Python sources are picked up
+# from `python-source`; there is no package-data glob because no data ships —
+# the profile values are compiled into the extension. The Rust workspace root
+# stays `crates/Cargo.toml` (maturin points at the child manifest, no second
 # workspace).
 [tool.maturin]
 python-source = "src"

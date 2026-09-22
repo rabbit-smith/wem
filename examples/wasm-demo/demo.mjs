@@ -5,7 +5,7 @@
  * streams a dropped .wav through WemSession in frame-aligned chunks and offers
  * the result for download.
  *
- * Nothing else is fetched: the profile bundle is compiled into the wasm module,
+ * Nothing else is fetched: the profile data is compiled into the wasm module,
  * and the profile selection (Wwise generation + PCM geometry, include/wem.h
  * "PROFILE SELECTION") is auto-selected from the WAV's own geometry — no
  * index, manifest, resource file, profile name or data directory is involved.

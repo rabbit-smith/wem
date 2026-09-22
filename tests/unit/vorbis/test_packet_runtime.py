@@ -7,9 +7,8 @@ from wwise_wem_reference.profiles.assembly import assemble_encoder_profile_resou
 from tests.codebook_resource_support import installed_codebook_tables
 from wwise_wem_reference.vorbis.floor_fit import floor1_fit_simple
 from wwise_wem_reference.vorbis.setup import parse_setup
-from tests.analysis_resource_support import installed_profile_bundle
 from wwise_wem import WwiseProfile, WwiseVersion
-from wwise_wem.profiles.registry import resolve_selection
+from wwise_wem_reference.profiles.artifact import resolve_selection
 
 
 class PacketRuntimeTests(unittest.TestCase):
@@ -19,7 +18,7 @@ class PacketRuntimeTests(unittest.TestCase):
             WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
         )
         cls.setup = parse_setup(
-            profile.setup_packet(), channels=6
+            profile.setup_packet, channels=6
         )
         cls.books = load_setup_codebooks(
             cls.setup["book_ids"], installed_codebook_tables()
@@ -27,10 +26,10 @@ class PacketRuntimeTests(unittest.TestCase):
         stereo = resolve_selection(
             WwiseProfile(WwiseVersion.WWISE2013, 2, 48000)
         )
-        cls.stereo_setup = parse_setup(stereo.setup_packet(), channels=2)
+        cls.stereo_setup = parse_setup(stereo.setup_packet, channels=2)
         cls.stereo_books = assemble_encoder_profile_resources(
-            installed_profile_bundle(stereo.channels, stereo.sample_rate),
-            setup_packet=stereo.setup_packet(),
+            stereo,
+            setup_packet=stereo.setup_packet,
             quality=stereo.quality,
         )
         cls.stereo_books = cls.stereo_books.codebooks

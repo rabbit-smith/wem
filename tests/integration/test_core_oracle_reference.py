@@ -23,7 +23,7 @@ from pathlib import Path
 
 from wwise_wem import WwiseProfile, WwiseVersion
 from wwise_wem.application.encoder import Encoder
-from wwise_wem.profiles.registry import resolve_selection
+from wwise_wem_reference.profiles.artifact import resolve_selection
 from wwise_wem import _core as core_module
 from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem.model import PcmBuffer

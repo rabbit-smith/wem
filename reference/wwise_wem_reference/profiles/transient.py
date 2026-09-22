@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """Immutable window and band configuration for transient detection.
 
-Two resource schemas are served from the same logical manifest entry
-(``analysis.transient``):
+The kernel's carrier records one of two transient mechanisms per profile, and
+this module rebuilds whichever it finds from the compiled artifact:
 
-* ``wem.transient-detector-table.v1`` — a pre-materialized static detector
-  table (the historical shape, still used by profiles that register one);
-* ``wem.transient-record-family.v1`` — the static bias/threshold record
-  family from the paired encoder build. The assembly layer materializes one
-  detector table from it per quality value: the record-index curve on the
-  shared quality axis picks a (possibly fractional) record index, the floor
-  record supplies every field verbatim, and only upper[0..3]/lower[0..3] are
-  linearly interpolated between the adjacent records at the fractional part.
+* a pre-materialized static detector table (the historical shape, used by
+  profiles that register one);
+* the static bias/threshold record family from the paired encoder build. The
+  assembly layer materializes one detector table from it per quality value:
+  the record-index curve on the shared quality axis picks a (possibly
+  fractional) record index, the floor record supplies every field verbatim,
+  and only upper[0..3]/lower[0..3] are linearly interpolated between the
+  adjacent records at the fractional part.
+
+There is no document decoding here any more: the carrier holds the decoded
+words, so the only remaining work is the selection/interpolation the reference
+owns.
 """
 from __future__ import annotations
 
@@ -21,65 +25,42 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 from ..analysis.config import (
-    CALIBRATION_SAMPLE_RATES,
     SHORT_PSYCH_ACOUSTIC_N,
     TransientBandConfig,
     TransientDetectorTables,
 )
+from .artifact import CompiledProfile, named_blocks
 from .quality import _linear_frac, normalize_quality_factor
-from wwise_wem.profiles.resources import ResourceRef
 
 
 def _u32_f32(value: int) -> float:
     return struct.unpack("<f", struct.pack("<I", int(value) & 0xFFFFFFFF))[0]
 
 
+def _bands(profile: CompiledProfile, prefix: str = "transient.bands") -> tuple[TransientBandConfig, ...]:
+    """Rebuild one f32 band descriptor table from the carrier."""
+    count = int(profile.table(f"{prefix}.count")[0])
+    return tuple(
+        TransientBandConfig(
+            offset=int(profile.table(f"{prefix}.{index}.offset")[0]),
+            weights=tuple(float(v) for v in profile.table(f"{prefix}.{index}.weights")),
+            scale=float(profile.table(f"{prefix}.{index}.scale")[0]),
+        )
+        for index in range(count)
+    )
+
+
 @lru_cache(maxsize=None)
-def load_transient_tables(ref: ResourceRef) -> TransientDetectorTables:
-    """Load the checked n=128 static detector table."""
-    if not isinstance(ref, ResourceRef):
-        raise TypeError("transient resource must be ResourceRef")
-    data = ref.read_json()
-    if data.get("schema") != "wem.transient-detector-table.v1":
-        raise ValueError("transient table schema changed")
-    if (
-        data.get("sample_rate") not in CALIBRATION_SAMPLE_RATES
-        or data.get("n") != SHORT_PSYCH_ACOUSTIC_N
-    ):
-        raise ValueError("transient table geometry changed")
-    n = data.get("n")
-    window_u32 = data.get("window_u32")
-    config_u32 = data.get("config_u32")
-    rows = data.get("bands")
-    if not isinstance(window_u32, list) or len(window_u32) != n:
-        raise ValueError("transient window must contain 128 float words")
-    if not isinstance(config_u32, list) or len(config_u32) != 26:
-        raise ValueError("transient config must contain 26 float words")
-    if not isinstance(rows, list) or len(rows) != 12:
-        raise ValueError("transient descriptor table must contain twelve bands")
-    bands: list[TransientBandConfig] = []
-    for row in rows:
-        weights_u32 = row.get("weights_u32")
-        count = row.get("count")
-        if (
-            not isinstance(count, int)
-            or not isinstance(weights_u32, list)
-            or len(weights_u32) != count
-            or not isinstance(row.get("offset"), int)
-            or not isinstance(row.get("scale_u32"), int)
-        ):
-            raise ValueError("transient descriptor row is malformed")
-        bands.append(TransientBandConfig(
-            offset=int(row["offset"]),
-            weights=tuple(_u32_f32(value) for value in weights_u32),
-            scale=_u32_f32(int(row["scale_u32"])),
-        ))
+def load_transient_tables(profile: CompiledProfile) -> TransientDetectorTables:
+    """Rebuild a pre-materialized n=128 static detector table."""
+    if not isinstance(profile, CompiledProfile):
+        raise TypeError("transient tables require a CompiledProfile")
     return TransientDetectorTables(
-        n=n,
-        bias=_u32_f32(int(data["bias_u32"])),
-        window=tuple(_u32_f32(value) for value in window_u32),
-        config=tuple(_u32_f32(value) for value in config_u32),
-        bands=tuple(bands),
+        n=profile.int("transient.n"),
+        bias=float(profile.table("transient.bias")[0]),
+        window=tuple(float(v) for v in profile.table("transient.window")),
+        config=tuple(float(v) for v in profile.table("transient.config")),
+        bands=_bands(profile),
     )
 
 
@@ -160,132 +141,49 @@ class TransientRecordFamily:
         object.__setattr__(self, "bands", tuple(self.bands))
 
 
-def load_transient_record_family(ref: ResourceRef) -> TransientRecordFamily:
-    """Load and validate the record-family resource."""
-    if not isinstance(ref, ResourceRef):
-        raise TypeError("transient resource must be ResourceRef")
-    data = ref.read_json()
-    if data.get("schema") != TRANSIENT_RECORD_FAMILY_SCHEMA:
-        raise ValueError("transient record-family schema changed")
-    if (
-        data.get("sample_rate") not in CALIBRATION_SAMPLE_RATES
-        or data.get("n") != SHORT_PSYCH_ACOUSTIC_N
-    ):
-        raise ValueError("transient record-family geometry changed")
+def load_transient_record_family(profile: CompiledProfile) -> TransientRecordFamily:
+    """Rebuild the static record library from the carrier.
 
-    def strict_u32_list(container: dict, key: str, length: int) -> list[int]:
-        values = container.get(key)
-        if not isinstance(values, list) or len(values) != length or any(
-            isinstance(v, bool) or not isinstance(v, int) for v in values
-        ):
-            raise ValueError(f"transient record-family {key} is malformed")
-        return [int(v) for v in values]
-
-    def f64_list(key: str, length: int) -> list[float]:
-        block = data.get(key)
-        if not isinstance(block, dict):
-            raise ValueError(f"transient record-family {key} is malformed")
-        values = block.get("values")
-        if not isinstance(values, list) or len(values) != length or any(
-            isinstance(v, bool) or not isinstance(v, (int, float)) for v in values
-        ):
-            raise ValueError(f"transient record-family {key} is malformed")
-        result = [float(v) for v in values]
-        if not all(math.isfinite(v) for v in result):
-            raise ValueError(f"transient record-family {key} must be finite")
-        return result
-
-    family = data.get("record_family")
-    if not isinstance(family, dict) or family.get("count") != TRANSIENT_RECORD_COUNT:
-        raise ValueError("transient record-family must carry six records")
-    raw_records = family.get("records")
-    if not isinstance(raw_records, list) or len(raw_records) != TRANSIENT_RECORD_COUNT:
-        raise ValueError("transient record-family must carry six records")
-    records: list[TransientRecord] = []
-    for index, raw in enumerate(raw_records):
-        if not isinstance(raw, dict):
-            raise ValueError(f"transient record {index} is malformed")
-        try:
-            records.append(
-                TransientRecord(
-                    file_off=str(raw["file_off"]),
-                    marker_u32=int(raw["marker_u32"]),
-                    upper_u32=tuple(strict_u32_list(raw, "upper_u32", 12)),
-                    lower_u32=tuple(strict_u32_list(raw, "lower_u32", 12)),
-                    carry_u32=int(raw["carry_u32"]),
-                    bias_u32=int(raw["bias_u32"]),
-                    m_u32=int(raw["m_u32"]),
-                    tail_u32=int(raw["tail_u32"]),
-                    config_u32=tuple(strict_u32_list(raw, "config_u32", TRANSIENT_RECORD_WORDS)),
-                )
-            )
-        except (KeyError, TypeError, ValueError) as error:
-            raise ValueError(f"transient record {index} is malformed") from error
-
-    index_curve = f64_list("record_index_curve", TRANSIENT_RECORD_INDEX_POINTS)
-    breakpoints = f64_list("quality_axis_breakpoints", TRANSIENT_RECORD_INDEX_POINTS)
-    if any(
-        breakpoints[i] >= breakpoints[i + 1]
-        for i in range(len(breakpoints) - 1)
-    ):
-        raise ValueError("transient record-family breakpoints must be increasing")
-    if any(not (0.0 <= v <= float(TRANSIENT_RECORD_COUNT - 1)) for v in index_curve):
-        raise ValueError("transient record-index curve leaves the record domain")
-
-    window_u32 = strict_u32_list(data, "window_u32", TRANSIENT_WINDOW_WORDS)
-    rows = data.get("bands")
-    if not isinstance(rows, list) or len(rows) != TRANSIENT_BAND_COUNT:
-        raise ValueError("transient record-family bands are malformed")
-    bands: list[TransientBandConfig] = []
-    for index, row in enumerate(rows):
-        if not isinstance(row, dict):
-            raise ValueError(f"transient record-family band {index} is malformed")
-        weights = row.get("weights_u32")
-        count = row.get("count")
-        if (
-            isinstance(count, bool)
-            or not isinstance(count, int)
-            or not isinstance(weights, list)
-            or len(weights) != count
-            or isinstance(row.get("offset"), bool)
-            or not isinstance(row.get("offset"), int)
-            or isinstance(row.get("scale_u32"), bool)
-            or not isinstance(row.get("scale_u32"), int)
-            or any(isinstance(value, bool) or not isinstance(value, int) for value in weights)
-        ):
-            raise ValueError(f"transient record-family band {index} is malformed")
-        bands.append(
-            TransientBandConfig(
-                offset=int(row["offset"]),
-                weights=tuple(_u32_f32(value) for value in weights),
-                scale=_u32_f32(int(row["scale_u32"])),
+    The window and band surfaces travel as stored f32 words; the record words
+    travel as stored u32 bit patterns, which is what the materialization kernel
+    reads them at.
+    """
+    if not isinstance(profile, CompiledProfile):
+        raise TypeError("transient record family requires a CompiledProfile")
+    names = named_blocks(profile, "transient.record.", ".marker_u32")
+    if len(names) != TRANSIENT_RECORD_COUNT:
+        raise ValueError(
+            f"transient record-family must carry {TRANSIENT_RECORD_COUNT} records"
+        )
+    records = []
+    for index in sorted(int(name) for name in names):
+        prefix = f"transient.record.{index}"
+        records.append(
+            TransientRecord(
+                file_off=str(profile.table(f"{prefix}.file_off")),
+                marker_u32=int(profile.table(f"{prefix}.marker_u32")[0]),
+                upper_u32=tuple(int(v) for v in profile.table(f"{prefix}.upper_u32")),
+                lower_u32=tuple(int(v) for v in profile.table(f"{prefix}.lower_u32")),
+                carry_u32=int(profile.table(f"{prefix}.carry_u32")[0]),
+                bias_u32=int(profile.table(f"{prefix}.bias_u32")[0]),
+                m_u32=int(profile.table(f"{prefix}.m_u32")[0]),
+                tail_u32=int(profile.table(f"{prefix}.tail_u32")[0]),
+                config_u32=tuple(int(v) for v in profile.table(f"{prefix}.config_u32")),
             )
         )
-
-    raw_default = data.get("default_record_index")
-    if isinstance(raw_default, bool) or not isinstance(raw_default, (int, float)):
-        raise ValueError("transient record-family default_record_index is malformed")
-    default_index = float(raw_default)
-    if not math.isfinite(default_index) or not (
-        0.0 <= default_index <= float(TRANSIENT_RECORD_COUNT - 1)
-    ):
-        raise ValueError("transient record-family default_record_index is out of domain")
-
     return TransientRecordFamily(
         schema=TRANSIENT_RECORD_FAMILY_SCHEMA,
-        n=int(data["n"]),
-        sample_rate=int(data["sample_rate"]),
-        default_record_index=default_index,
+        n=profile.int("transient.n"),
+        sample_rate=profile.int("transient.sample_rate"),
+        default_record_index=float(profile.table("transient.default_record_index")[0]),
         records=tuple(records),
-        index_curve=tuple(index_curve),
-        breakpoints=tuple(breakpoints),
-        window_u32=tuple(window_u32),
-        bands=tuple(bands),
+        index_curve=tuple(float(v) for v in profile.table("transient.record_index_curve")),
+        breakpoints=tuple(
+            float(v) for v in profile.table("transient.quality_axis_breakpoints")
+        ),
+        window_u32=tuple(_f32_bits(v) for v in profile.table("transient.window")),
+        bands=_bands(profile),
     )
-
-
-def _f32(value: float) -> float:
-    return struct.unpack("<f", struct.pack("<f", float(value)))[0]
 
 
 def _f32_bits(value: float) -> int:
@@ -352,22 +250,20 @@ def materialize_transient_tables(
 
 
 def load_transient_resource(
-    ref: ResourceRef,
+    profile: CompiledProfile,
     quality: float | None = None,
 ) -> TransientDetectorTables:
-    """Dispatch on the resource schema and load/materialize the tables.
+    """Read whichever transient mechanism the profile records.
 
-    ``wem.transient-detector-table.v1`` keeps the historical path exactly
-    (profiles that register a pre-materialized table, quality ignored);
-    ``wem.transient-record-family.v1`` materializes per quality (the paired
-    build's static mechanism).
+    A pre-materialized detector table is returned as recorded (quality
+    ignored, exactly as before); the record family is materialized per quality
+    (the paired build's static mechanism).
     """
-    data = ref.read_json()
-    schema = data.get("schema")
-    if schema == "wem.transient-detector-table.v1":
-        return load_transient_tables(ref)
-    if schema == TRANSIENT_RECORD_FAMILY_SCHEMA:
-        return materialize_transient_tables(
-            load_transient_record_family(ref), quality
-        )
-    raise ValueError("unexpected transient resource schema")
+    if not isinstance(profile, CompiledProfile):
+        raise TypeError("transient tables require a CompiledProfile")
+    kind = str(profile.table("transient.kind"))
+    if kind == "detector":
+        return load_transient_tables(profile)
+    if kind == "record-family":
+        return materialize_transient_tables(load_transient_record_family(profile), quality)
+    raise ValueError(f"unexpected transient mechanism {kind!r}")

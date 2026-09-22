@@ -17,8 +17,8 @@ SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
 class ProfileRuntimeFlowTests(unittest.TestCase):
     def test_explicit_selection_reaches_the_kernel_unresolved(self):
         # Single authority: an explicit selection goes to the kernel as it
-        # is.  The package-side selection resolver is oracle/tooling only
-        # and must not be consulted on the encoding path.
+        # is.  The oracle-side selection resolver is test/tooling only and
+        # must not be consulted on the encoding path.
         payload = b"\0\0" * 6
         captured = []
 
@@ -38,7 +38,7 @@ class ProfileRuntimeFlowTests(unittest.TestCase):
                 "wwise_wem.adapters.wav._read_wav_pcm16_bytes",
                 return_value=(44100, 6, payload),
             ),
-            patch("wwise_wem.profiles.registry.resolve_selection") as resolve,
+            patch("wwise_wem_reference.profiles.artifact.resolve_selection") as resolve,
             patch("wwise_wem.application.encoder.Encoder", FakeEncoder),
         ):
             result = encode("input.wav", profile=SELECTION, quality=3.0)

@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from wwise_wem.profiles.bundle import WWISE_GENERATION_LABEL
-from wwise_wem.profiles.model import EncoderProfile
+from wwise_wem.profiles.key import WWISE_GENERATION_LABEL
+
+from ..profiles.artifact import CompiledProfile
 
 
 @dataclass(frozen=True)
@@ -38,9 +39,9 @@ class ContainerPlan:
         object.__setattr__(self, "extra_chunks", tuple(extras))
 
     @classmethod
-    def from_profile(cls, profile: EncoderProfile) -> "ContainerPlan":
+    def from_profile(cls, profile: CompiledProfile) -> "ContainerPlan":
         # The provenance label names the selected configuration, not the
-        # bundle it happens to live in: it mirrors the kernel's
+        # carrier it happens to come from: it mirrors the kernel's
         # `ContainerPlan::from_profile`, so the oracle and the kernel report
         # the same `metadata_source` for the same selection.
         return cls(

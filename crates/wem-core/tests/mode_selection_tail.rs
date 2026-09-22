@@ -10,16 +10,17 @@
 use wem_analysis::config::AnalysisError;
 use wem_analysis::preprocessing::windowing::WindowedFrame;
 use wem_analysis::session::AnalysisSession;
-use wem_profiles::{bundle_for_selection, WwiseProfile, WwiseVersion};
+use wem_profiles::{compiled_profile_for_selection, WwiseProfile, WwiseVersion};
 use wem_scheduling::FramePlan;
 
 /// Analysis resources of the installed 2ch/48000 configuration, resolved from
-/// a structured selection against the compiled-in profile bundle.
+/// a structured selection against the compiled profile carrier.
 fn two_channel_resources() -> wem_analysis::config::AnalysisProfileResources {
     let selection =
         WwiseProfile::new(WwiseVersion::Wwise2013, 2, 48_000).expect("2ch/48000 selection");
-    let bundle = bundle_for_selection(selection).expect("installed 2ch profile resolves");
-    wem_profiles::assemble_analysis_resources(&bundle, None).expect("resources assemble")
+    let compiled =
+        compiled_profile_for_selection(selection).expect("installed 2ch profile resolves");
+    wem_profiles::assemble_analysis_resources(&compiled, None).expect("resources assemble")
 }
 
 fn synthetic(frames: usize, channels: usize) -> Vec<Vec<f64>> {

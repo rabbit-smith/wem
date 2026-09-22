@@ -10,7 +10,7 @@ use wem_profiles::error::ProfileError;
 use wem_profiles::key::ProfileKey;
 use wem_profiles::model::EncoderProfile;
 use wem_profiles::selection::{WwiseProfile, WwiseVersion};
-use wem_profiles::ProfileRegistry;
+use wem_profiles::{compiled_profile_for_selection, ProfileRegistry};
 
 mod common;
 
@@ -74,9 +74,9 @@ fn generation_and_label_spellings_round_trip() {
     // A label that is neither spelling is rejected, never silently defaulted.
     assert!(WwiseVersion::parse("2014").is_err());
     assert!(WwiseVersion::parse("").is_err());
-    // A profile name is not a version label: this literal is the input under
+    // A profile label is not a version label: this literal is the input under
     // rejection, not a way to mean "the 6ch profile".
-    assert!(WwiseVersion::parse("wwise2013-6ch-44100").is_err());
+    assert!(WwiseVersion::parse("6ch/44100Hz/2013.2").is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -126,8 +126,9 @@ fn both_installed_selections_resolve_by_generation_and_geometry() {
     let registry = wem_profiles::embedded_registry().expect("embedded registry");
     assert_eq!(registry.len(), 2);
 
-    // Every name compared below is read off the tree the selection resolves
-    // to — with two entry points that must agree on it, never a literal.
+    // Every label compared below is derived from the identity the selection
+    // resolves to — with two entry points that must agree on it, never a
+    // literal.
     let six_channel = registry
         .resolve_selection(six_selection())
         .expect("6ch resolves");
@@ -138,34 +139,34 @@ fn both_installed_selections_resolve_by_generation_and_geometry() {
     assert!(two_channel.setup_available());
 
     assert_eq!(
-        six_channel.name(),
+        six_channel.label(),
         wem_profiles::resolve_wem_profile_selection(six_selection())
             .expect("6ch resolves")
-            .name()
+            .label()
     );
     assert_eq!(
-        two_channel.name(),
+        two_channel.label(),
         wem_profiles::resolve_wem_profile_selection(two_channel_selection())
             .expect("2ch resolves")
-            .name()
+            .label()
     );
-    assert_ne!(six_channel.name(), two_channel.name());
+    assert_ne!(six_channel.label(), two_channel.label());
 }
 
 #[test]
 fn the_free_resolvers_agree_with_the_registry() {
     for selection in [six_selection(), two_channel_selection()] {
         let resolved = wem_profiles::resolve_wem_profile_selection(selection).expect("resolves");
-        let bundle = wem_profiles::bundle_for_selection(selection).expect("bundle resolves");
-        // The name is the one the tree resolves for this selection; the two
-        // intake paths must not disagree on it.
-        assert_eq!(resolved.name(), bundle.name());
+        let compiled = compiled_profile_for_selection(selection).expect("compiled profile");
+        // The label is derived from the identity the selection resolves to;
+        // the two resolution paths must not disagree on it.
+        assert_eq!(resolved.label(), compiled.label());
         assert_eq!(resolved.quality(), None);
 
         // The quality-bound form is an additive copy, never a mutation.
         let bound = wem_profiles::resolve_wem_profile_selection_quality(selection, Some(4.0))
             .expect("quality copy");
-        assert_eq!(bound.name(), resolved.name());
+        assert_eq!(bound.label(), resolved.label());
         assert_eq!(bound.quality(), Some(4.0));
         assert_eq!(
             wem_profiles::resolve_wem_profile_selection(selection)
@@ -180,33 +181,37 @@ fn the_free_resolvers_agree_with_the_registry() {
 }
 
 #[test]
-fn the_bundle_intake_resolves_what_the_registry_resolves() {
-    // The one public way to a bundle takes a structured selection and no
-    // name, path or bytes; it must agree with the registry's own exactly-one
-    // resolution for every installed configuration.
+fn the_carrier_intake_resolves_what_the_registry_resolves() {
+    // The one public way to a compiled profile takes a structured selection
+    // and no name, path or bytes; it must agree with the registry's own
+    // exactly-one resolution for every installed configuration.
     let registry = wem_profiles::embedded_registry().expect("embedded registry");
     for selection in [six_selection(), two_channel_selection()] {
         let resolved = registry
             .resolve_selection(selection)
             .expect("selection resolves");
-        let bundle = wem_profiles::bundle_for_selection(selection).expect("bundle resolves");
-        assert_eq!(bundle.key(), resolved.key());
-        assert_eq!(bundle.name(), resolved.name());
+        let compiled = compiled_profile_for_selection(selection).expect("compiled profile");
+        assert_eq!(compiled.key(), resolved.key());
+        assert_eq!(compiled.label(), resolved.label());
+        assert_eq!(compiled.setup_sha256(), resolved.setup_sha256());
+        assert_eq!(compiled.container_metadata(), resolved.container_metadata());
+        // The setup packet the carrier hands back is the recorded one: 201
+        // bytes for 6ch/44100, 215 for 2ch/48000.
+        let expected_setup_len = if selection.channels() == 6 { 201 } else { 215 };
         assert_eq!(
-            bundle.setup().expect("setup ref").sha256(),
-            resolved.setup_sha256()
+            compiled.setup_packet().expect("setup packet").len(),
+            expected_setup_len
         );
-        assert_eq!(bundle.container_metadata(), resolved.container_metadata());
     }
 }
 
 #[test]
-fn an_unsatisfiable_selection_has_no_bundle_either() {
-    // The bundle intake is the same exactly-one rule: an unsatisfiable
+fn an_unsatisfiable_selection_has_no_compiled_profile_either() {
+    // The carrier intake is the same exactly-one rule: an unsatisfiable
     // selection is an error, never a first-match pick.
     let selection =
         WwiseProfile::new(WwiseVersion::Wwise2013, 3, 44_100).expect("positive geometry");
-    match wem_profiles::bundle_for_selection(selection).unwrap_err() {
+    match compiled_profile_for_selection(selection).unwrap_err() {
         ProfileError::NoProfileForSelection { channels, .. } => assert_eq!(channels, 3),
         other => panic!("expected NoProfileForSelection, got {other:?}"),
     }
@@ -248,10 +253,11 @@ fn an_ambiguous_selection_is_rejected_rather_than_picked() {
         .resolve_selection(six_selection())
         .expect("6ch installs")
         .clone();
-    // The twin is a synthetic profile derived from the installed one: its name
-    // is the installed name plus a suffix, so no profile name is typed here.
-    let installed_name = base.name().to_string();
-    let twin_name = format!("{installed_name}-twin");
+    // The twin is a synthetic profile derived from the installed one: only
+    // its channel layout differs, so the two share generation and geometry —
+    // which is exactly the collision a selection cannot resolve.
+    let installed_key = base.key().clone();
+    let installed_description = installed_key.describe();
     let twin_key = ProfileKey::new(
         base.channels(),
         base.sample_rate(),
@@ -261,7 +267,6 @@ fn an_ambiguous_selection_is_rejected_rather_than_picked() {
     )
     .expect("twin key");
     let twin = EncoderProfile::new(
-        twin_name.clone(),
         twin_key,
         base.setup_bytes().map(<[u8]>::to_vec),
         base.setup_sha256().to_string(),
@@ -278,8 +283,11 @@ fn an_ambiguous_selection_is_rejected_rather_than_picked() {
     assert_eq!(registry.len(), 2);
     match registry.resolve_selection(six_selection()).unwrap_err() {
         ProfileError::AmbiguousProfileSelection { names, .. } => {
-            assert!(names.contains(&installed_name), "{names}");
-            assert!(names.contains(&twin_name), "{names}");
+            // The derived label alone would print both candidates
+            // identically; the ambiguity diagnostic carries the full
+            // identity so the collision is readable.
+            assert!(names.contains(&installed_description), "{names}");
+            assert!(names.contains("5.1-twin"), "{names}");
         }
         other => panic!("expected AmbiguousProfileSelection, got {other:?}"),
     }

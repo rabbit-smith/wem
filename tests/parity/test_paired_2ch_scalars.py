@@ -24,25 +24,16 @@ content-derived ones (``dwDataPayloadSize``, ``nAvgBytesPerSec``,
 
 from __future__ import annotations
 
-import json
 import unittest
-from pathlib import Path
 from typing import Any, ClassVar
 
 from wwise_wem import WwiseProfile, WwiseVersion
-from wwise_wem.profiles.registry import resolve_selection
+from wwise_wem_reference.profiles.artifact import resolve_selection
 
 
-#: The packaged 2ch/48000 profile directory: the name its selection resolves
-#: to, read off the registry instead of being re-typed here.
-PROFILE = (
-    Path(__file__).resolve().parents[2]
-    / "src"
-    / "wwise_wem"
-    / "data"
-    / "profiles"
-    / resolve_selection(WwiseProfile(WwiseVersion.WWISE2013, 2, 48000)).name
-)
+#: The compiled 2ch/48000 profile: every value below is read off the carrier
+#: its selection resolves to, never re-typed here.
+PROFILE = resolve_selection(WwiseProfile(WwiseVersion.WWISE2013, 2, 48000))
 
 AUX_FIELDS = {
     "dwUnknown_0x24": 0,
@@ -76,12 +67,8 @@ class Paired2chScalarParityTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.container_metadata = json.loads((PROFILE / "manifest.json").read_text())[
-            "container_metadata"
-        ]
-        cls.outer_u32 = json.loads(
-            (PROFILE / "psychoacoustics/long-base.json").read_text()
-        )["seed"]["outer_u32"]
+        cls.container_metadata = PROFILE.container_metadata.to_fmt_dict()
+        cls.outer_u32 = list(PROFILE.table("long_base.seed_outer_u32"))
 
     def test_aux_container_fields_are_the_paired_layout_constants(self) -> None:
         for field, expected in AUX_FIELDS.items():

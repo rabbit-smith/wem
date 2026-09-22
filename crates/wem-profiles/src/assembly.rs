@@ -10,10 +10,10 @@ use wem_analysis::config::{
 use wem_vorbis::codebook::Codebook;
 use wem_vorbis::setup::{parse_setup, SetupInfo};
 
+use crate::carrier::CompiledProfile;
 use crate::codebooks::load_setup_codebooks;
 use crate::error::ProfileError;
 use crate::quality::{normalize_quality_factor, QualityCurves, QUALITY_SEMANTIC_SHORT_PREFIX};
-use crate::source::ProfileSource;
 
 /// Complete immutable codec inputs assembled from one profile manifest
 /// (Python `EncoderProfileResources`).
@@ -77,7 +77,7 @@ impl ResolvedQuality {
 /// configuration error, not a silent fallback. The quality is normalized
 /// onto the breakpoint axis before evaluation (spec profile-select entry).
 fn resolve_quality_curves(
-    source: &impl ProfileSource,
+    source: &CompiledProfile,
     quality: Option<f64>,
 ) -> Result<ResolvedQuality, ProfileError> {
     let Some(quality) = quality else {
@@ -85,7 +85,7 @@ fn resolve_quality_curves(
     };
     let Some(curves) = source.quality_curves()? else {
         return Err(ProfileError::QualityCurvesResourceMissing {
-            profile: source.name().to_string(),
+            profile: source.label(),
         });
     };
     let normalized = normalize_quality_factor(quality);
@@ -180,7 +180,7 @@ fn apply_short_quality_overrides(
 /// `quality` is the optional quality factor (0-10 Wwise convention).
 /// `None` reproduces the historical assembly byte for byte.
 pub fn assemble_analysis_resources(
-    source: &impl ProfileSource,
+    source: &CompiledProfile,
     quality: Option<f64>,
 ) -> Result<AnalysisProfileResources, ProfileError> {
     let short_surface = source.short_seed()?;
@@ -250,7 +250,7 @@ pub fn assemble_analysis_resources(
 /// `quality` is forwarded to the analysis-resource assembly; `None` keeps
 /// the historical behavior exactly.
 pub fn assemble_encoder_profile_resources(
-    source: &impl ProfileSource,
+    source: &CompiledProfile,
     setup_packet: Option<&[u8]>,
     quality: Option<f64>,
 ) -> Result<EncoderProfileResources, ProfileError> {

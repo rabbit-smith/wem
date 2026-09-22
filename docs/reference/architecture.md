@@ -17,7 +17,7 @@ wwise_wem/                      # distribution facade (wheel)
 ├── model.py                     # root DTOs and the public error type
 ├── adapters/                    # external PCM/WAV inputs (facade duty)
 ├── application/                 # native-core orchestration and result DTOs
-├── profiles/                    # profile identity, registry, and resource loaders
+├── profiles/                    # profile identity (ProfileKey)
 └── _core.abi3.so                # in-package native extension (built artifact)
 
 wwise_wem_reference/            # development-tree reference oracle (not in wheel, test-time only)
@@ -26,7 +26,7 @@ wwise_wem_reference/            # development-tree reference oracle (not in whee
 ├── vorbis/                      # bitstream, setup, floor, residue and packet codecs
 ├── container/                   # RIFF/WEM models and codecs
 ├── scheduling/                  # immutable frame plans and mode-selection policy
-└── profiles/                    # table loaders, codebook assembly, resource assembly
+└── profiles/                    # carrier reader (artifact.py), typed assembly
 ```
 
 The package root exports one `encode` function plus its input/result value
@@ -59,8 +59,8 @@ Mandatory rules:
 - `analysis` receives typed configuration; it does not open package resources.
 - `vorbis` primitives do not import `application`, `profiles`, or `container`.
 - `container` does not import `application`, `profiles`, or `analysis`.
-- `profiles` is the only owner of packaged calibration resources, checksum verification, codebook assembly, and calibrated table loaders.
-- The complete immutable `EncoderProfileResources` aggregate is assembled once from manifest logical names at encoder construction. Its nested analysis resources are injected into each analysis session, while its verified setup packet, parsed setup, and codebooks are injected into Vorbis packet encoding. Resource-loader cache keys include their explicit `ResourceRef` identities.
+- `profiles` is the only owner of the compiled profile carrier, codebook assembly, and calibrated table readers.
+- The complete immutable `EncoderProfileResources` aggregate is assembled once from the compiled profile at encoder construction. Its nested analysis resources are injected into each analysis session, while its setup packet, parsed setup, and codebooks are injected into Vorbis packet encoding. Reader caches key on the resolved profile (its identity and the shapes of the blocks it carries).
 - `application` is the only layer allowed to assemble profiles, analysis, packet encoding, and containers into the complete WAV-to-WEM use case.
 - The internal import graph is acyclic.
 
@@ -68,7 +68,7 @@ Mandatory rules:
 
 `application.encoder` owns one deterministic conversion:
 
-1. Resolve the installed profile bundle for the selected `EncoderProfile` identity.
+1. Resolve the compiled profile for the selected `WwiseProfile` identity.
 2. Plan short/long frames and materialize PCM windows.
 3. Run transforms, transient detection, and psychoacoustic analysis.
 4. Fit floor1 and encode residue into Vorbis packets.
@@ -80,30 +80,37 @@ Mutable cross-frame state is owned by one analysis session. A `FramePlan` is the
 
 A profile owns its complete calibration set: setup, codebooks, transforms, transient tables, psychoacoustic tables, block geometry, and container defaults. Algorithms receive already validated typed tables. They never select a default file path.
 
-Each installed profile is a self-contained directory:
+Profile data is Rust source, generated once per installed configuration:
 
 ```text
-data/profiles/
-├── index.json
-└── wwise2013-6ch-44100/
-    ├── manifest.json
-    ├── vorbis/{setup.bin,codebooks/}
-    ├── transform/mdct.json
-    ├── analysis/transient.json
-    └── psychoacoustics/{short-profiles.json,short-seed.json,long-base.json,long-modes.json}
+crates/wem-profiles/src/
+├── generated/
+│   ├── mod.rs                     # PROFILES: every compiled profile
+│   ├── codebooks/{t97,t219,t282}.rs
+│   └── wwise2013_{2ch_48000,6ch_44100}.rs
+└── tables.rs                      # the shape of the carrier
 ```
 
-The profile manifest is the single source for identity, geometry, logical resource names, paths, schemas, and SHA-256 values. Payload files contain data and shape metadata, not resource-selection policy.
+Each generated module is the profile's identity (`ProfileKeyParts`: generation,
+channels, sample rate, channel layout, setup identity), its container geometry,
+its setup packet bytes and SHA-256, and every typed table — MDCT banks, codebook
+rows, frozen twiddles, transient mechanism, quality curves, short/long
+psychoacoustic surfaces. Floats are stored as their IEEE bit patterns, never as
+decimal literals, so the carrier cannot move a value.
 
-`data/profiles/index.json` selects the default profile and checksum-addresses its
-manifest. The loader resolves both files with package traversables, so the same
-profile inventory works from a source tree, an installed wheel, or a ZIP import.
-The manifest's `resources` object maps stable logical names (for example
-`vorbis.setup` and `transform.mdct`) to paths relative to that profile directory.
+There is no index, no manifest, no resource path and no digest chain: the
+identity is the addressing, and the only way to reach a profile is a
+`WwiseProfile` selection. The recorded JSON tree still exists as untracked
+development material under `corpus/profiles/`; `scripts/generate_profile_code.py`
+is the only path from it into the repository, and the generated source is what
+ships.
 
-`EncoderProfile` is the internal identity value (name, key, setup digest,
-container defaults). Runtime tables are loaded only through that profile's installed
-bundle; there is no separate global runtime-manifest step.
+`EncoderProfile` is the internal identity value (key, setup digest, container
+defaults). The human label is derived from the key, never stored. Another
+language reads the same tables through the kernel's data hand-off
+(`wem_profiles::blob::profile_tables_blob`, exposed as
+`wwise_wem._core.profile_tables()`), which is a transfer of the carrier's words,
+not a second source.
 
 ## Geometry materializer parity
 
@@ -113,18 +120,19 @@ build (2013.2 conversion plug-in, geometry materializer at module offset
 
 - reference builder: `reference/wwise_wem_reference/geometry_materializer/`
   (per-instruction port; development/test asset, never a runtime path);
-- profile data: `src/wwise_wem/data/profiles/*/psychoacoustics/*` (registered
-  bytes on the manifest/index digest chain);
+- profile data: the compiled carrier's `short_seed.*` / `short_profiles.*` /
+  `long_base.*` / `long_variants.*` blocks
+  (`crates/wem-profiles/src/generated/*_*.rs`);
 - kernel: `wem-analysis::dsp::{x87, crt90, psy_geom, psy_geom_long}`.
 
 Checked by `tests/parity/test_geometry_materializer_parity.py`, which
-asserts builder == registered bytes on the 6ch profile, and by the generated
+asserts builder == the carrier's words on the 6ch profile, and by the generated
 Rust suites (`crates/wem-analysis/tests/*_parity.rs`), which assert kernel ==
 builder bit for bit on both geometries. On 2ch the five short surfaces are
 registered from that mechanism, with the geometry read from the paired build
 running at 48000 Hz; the twelve long surfaces are likewise registered from the
 mechanism and read-verified. Any change to either set means regenerating the
-registered bytes and re-running both suites.
+carrier (from `corpus/profiles/`) and re-running both suites.
 Per-field provenance is in [`profiles.md`](profiles.md).
 
 ## Acceptance

@@ -64,7 +64,7 @@
   ],
   "channels": 2,
   "frames_per_case": 48000,
-  "profile": "wwise2013-2ch-48000",
+  "profile": "2ch/48000Hz/2013.2",
   "sample_rate": 48000,
   "schema": "wem.2ch-reference-corpus.v1"
 }

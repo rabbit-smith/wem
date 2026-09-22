@@ -8,11 +8,11 @@ other language reads; nothing ships a resource tree.
 
 What it needs
 -------------
-The profile tree (``index.json`` plus one directory per profile, exactly the
-layout the package used to ship under ``data/profiles/``).  It is development
-material now and lives in the untracked tree ``corpus/profiles/`` at the
-repository root; ``--profiles-dir`` overrides that and is the only input.
-The default is printed by ``--help``.
+The profile tree (``index.json`` plus one directory per profile).  It is
+development material and lives in the untracked tree ``corpus/profiles/`` at
+the repository root — the layout the package shipped under ``data/profiles/``
+until the serialized layer was deleted; ``--profiles-dir`` overrides the
+location and is the only input.  The default is printed by ``--help``.
 
 Exactness
 ---------
@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_PROFILES_DIR = REPO_ROOT / "src" / "wwise_wem" / "data" / "profiles"
+DEFAULT_PROFILES_DIR = REPO_ROOT / "corpus" / "profiles"
 DEFAULT_OUT_DIR = REPO_ROOT / "crates" / "wem-profiles" / "src" / "generated"
 
 GENERATED_BY = "scripts/generate_profile_code.py"
@@ -533,7 +533,6 @@ def _int_array(name: str, values: Sequence[int]) -> list[str]:
 
 
 def profile_module(
-    name: str,
     manifest: dict[str, Any],
     resources: dict[str, Any],
     codebook_modules: dict[str, str],
@@ -542,7 +541,8 @@ def profile_module(
     lines: list[str] = []
 
     key = manifest["key"]
-    lines.append(f'pub const NAME: &str = "{name}";')
+    # No stored profile name: the human label is derived from the key
+    # (`ProfileKey::label`), so the carrier holds identity and values only.
     lines.append(f'pub const SETUP_SHA256: &str = "{key["quality_setup_identity"].removeprefix("sha256:")}";')
     lines.append("")
     lines.append("#[rustfmt::skip]")
@@ -906,7 +906,6 @@ def profile_module(
     # Aggregate.
     lines.append("#[rustfmt::skip]")
     lines.append("pub static TABLES: ProfileTables = ProfileTables {")
-    lines.append("    name: NAME,")
     lines.append("    key: KEY,")
     lines.append("    setup_packet: &SETUP_PACKET,")
     lines.append("    setup_sha256: SETUP_SHA256,")
@@ -1219,7 +1218,7 @@ def build(profiles_dir: Path, out_dir: Path) -> dict[Path, str]:
 
         module = name.replace("-", "_").replace(".", "_")
         modules.append(module)
-        body, _ = profile_module(name, manifest, resources, codebooks_seen, header)
+        body, _ = profile_module(manifest, resources, codebooks_seen, header)
         profile_sources[module] = body
 
     # Codebook modules are shared: emit one per table, deduplicated by content.

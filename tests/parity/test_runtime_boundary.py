@@ -254,7 +254,9 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertNotIn("scheduling.selector", targets)
         self.assertNotIn("analysis.session", targets)
 
-    def test_mdct_and_transient_analysis_are_resource_io_free(self):
+    def test_mdct_and_transient_analysis_are_profile_data_free(self):
+        # The DSP analysis modules consume typed tables and never reach the
+        # profile carrier (which owns them) or any resource reader.
         graph = _internal_import_graph(REFERENCE)
         for module in ("analysis.dsp.transform", "analysis.transient.detector"):
             self.assertFalse(
@@ -262,7 +264,13 @@ class RuntimeBoundaryTests(unittest.TestCase):
                 module,
             )
             source = _module_files(REFERENCE)[module].read_text(encoding="utf-8")
-            for marker in ("ResourceRef", "importlib.resources", "read_json(", "read_bytes("):
+            for marker in (
+                "ResourceRef",
+                "importlib.resources",
+                "read_json(",
+                "read_bytes(",
+                "CompiledProfile",
+            ):
                 self.assertNotIn(marker, source, f"{module}: {marker}")
 
     def test_transient_implementation_has_one_module_owner(self):

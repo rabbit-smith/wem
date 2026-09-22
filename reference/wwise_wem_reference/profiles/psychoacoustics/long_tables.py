@@ -1,23 +1,19 @@
 #!/usr/bin/env python3
-"""Strict loader for the fixed 1024-bin Wwise psychoacoustic tables.
+"""The fixed 1024-bin Wwise psychoacoustic tables, read from the artifact.
 
-Runtime encoder code imports only the checked static JSON table.
+The tables are Rust constants in the kernel carrier; this module only reshapes
+the stored words into the typed value objects: f32 curves as their exact
+float32 values, u32 words as unsigned integers, and the flattened analysis
+curves and seed tone banks nested back into their ``(row, bin)`` and
+``(band, level, record)`` shapes.
 """
 
 from __future__ import annotations
 
-import hashlib
-import math
-import struct
-from typing import Any
+from functools import lru_cache
 
-from ...analysis.config import (
-    CALIBRATION_SAMPLE_RATES,
-    LONG_PSYCH_ACOUSTIC_N,
-    WwisePsyLongTables,
-)
-from wwise_wem.profiles.resources import ResourceRef
-
+from ...analysis.config import LONG_PSYCH_ACOUSTIC_N, WwisePsyLongTables
+from ..artifact import CompiledProfile
 
 SCHEMA = "wem.psy-long-static.v1"
 N = LONG_PSYCH_ACOUSTIC_N
@@ -26,93 +22,46 @@ LOOK_WORDS = 192
 TONE_BANDS = 17
 TONE_LEVELS = 8
 TONE_RECORD_FLOATS = 58
+_CURVE_ROWS = 3
 
 
-def _f32(value: Any, label: str) -> float:
-    if not isinstance(value, (int, float)) or isinstance(value, bool):
-        raise ValueError(f"{label} must contain floats")
-    value = float(value)
-    if not math.isfinite(value):
-        raise ValueError(f"{label} contains a non-finite float")
-    return struct.unpack("<f", struct.pack("<f", value))[0]
-
-
-def _u32(value: Any, label: str) -> int:
-    if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 0xFFFFFFFF:
-        raise ValueError(f"{label} must contain uint32 values")
-    return value
-
-
-def _floats(value: Any, count: int, label: str) -> tuple[float, ...]:
-    if not isinstance(value, list) or len(value) != count:
-        raise ValueError(f"{label} must contain {count} floats")
-    return tuple(_f32(item, label) for item in value)
-
-
-def _u32s(value: Any, count: int, label: str) -> tuple[int, ...]:
-    if not isinstance(value, list) or len(value) != count:
-        raise ValueError(f"{label} must contain {count} uint32 values")
-    return tuple(_u32(item, label) for item in value)
-
-
-def load_long_psy_tables(
-    ref: ResourceRef,
-) -> WwisePsyLongTables:
-    """Load one validated static table."""
-    if not isinstance(ref, ResourceRef):
-        raise TypeError("long psychoacoustic resource must be ResourceRef")
-    payload = ref.read_json()
-    if not isinstance(payload, dict) or payload.get("schema") != SCHEMA:
-        raise ValueError("unexpected long psychoacoustic-table schema")
-    if payload.get("n") != N or payload.get("sample_rate") not in CALIBRATION_SAMPLE_RATES:
-        raise ValueError("long psychoacoustic table has unexpected geometry")
-    profile_key = payload.get("profile_key")
-    if not isinstance(profile_key, str) or not profile_key:
-        raise ValueError("long psychoacoustic table has no profile key")
-    analysis, seed = payload.get("analysis"), payload.get("seed")
-    if not isinstance(analysis, dict) or not isinstance(seed, dict):
-        raise ValueError("long psychoacoustic table lacks analysis/seed sections")
-
-    curves_raw = analysis.get("curves")
-    if not isinstance(curves_raw, list) or len(curves_raw) != 3:
-        raise ValueError("analysis.curves must contain three rows")
-    curves = tuple(
-        _floats(row, N, f"analysis.curves[{index}]")
-        for index, row in enumerate(curves_raw)
+def _nest(values: list, rows: int, width: int) -> tuple[tuple, ...]:
+    return tuple(
+        tuple(values[row * width : (row + 1) * width]) for row in range(rows)
     )
 
-    banks_raw = seed.get("tone_banks")
-    if not isinstance(banks_raw, list) or len(banks_raw) != TONE_BANDS:
-        raise ValueError("seed.tone_banks must contain 17 bands")
-    banks: list[tuple[tuple[float, ...], ...]] = []
-    for band, levels in enumerate(banks_raw):
-        if not isinstance(levels, list) or len(levels) != TONE_LEVELS:
-            raise ValueError(f"seed.tone_banks[{band}] must contain 8 levels")
-        banks.append(
-            tuple(
-                _floats(record, TONE_RECORD_FLOATS, f"seed.tone_banks[{band}][{level}]")
-                for level, record in enumerate(levels)
-            )
-        )
 
+@lru_cache(maxsize=None)
+def load_long_psy_tables(profile: CompiledProfile) -> WwisePsyLongTables:
+    """Rebuild the fixed 1024-bin long tables the profile carries."""
+    if not isinstance(profile, CompiledProfile):
+        raise TypeError("long psychoacoustic tables require a CompiledProfile")
+
+    def block(name: str) -> list:
+        return profile.table(f"long_base.{name}")
+
+    bands = _nest(
+        [float(value) for value in block("seed_tone_banks")],
+        TONE_BANDS * TONE_LEVELS,
+        TONE_RECORD_FLOATS,
+    )
     return WwisePsyLongTables(
-        sample_rate=int(payload["sample_rate"]),
-        n=N,
-        profile_key=profile_key,
-        analysis_profile_u32=_u32s(analysis.get("profile_u32"), PROFILE_WORDS, "analysis.profile_u32"),
-        analysis_interval_u32=_u32s(analysis.get("interval_u32"), N, "analysis.interval_u32"),
-        analysis_curves=curves,
-        analysis_field_19_curve=_floats(analysis.get("field_19_curve"), N, "analysis.field_19_curve"),
-        seed_outer_u32=_u32s(seed.get("outer_u32"), LOOK_WORDS, "seed.outer_u32"),
-        seed_profile_u32=_u32s(seed.get("profile_u32"), PROFILE_WORDS, "seed.profile_u32"),
-        seed_base_curve=_floats(seed.get("base_curve"), N, "seed.base_curve"),
-        seed_group_labels_u32=_u32s(seed.get("group_labels_u32"), N, "seed.group_labels_u32"),
-        seed_tone_banks=tuple(banks),
+        sample_rate=int(block("sample_rate")[0]),
+        n=int(block("n")[0]),
+        profile_key=str(block("profile_key")),
+        analysis_profile_u32=tuple(int(v) for v in block("analysis_profile_u32")),
+        analysis_interval_u32=tuple(int(v) for v in block("analysis_interval_u32")),
+        analysis_curves=_nest([float(v) for v in block("analysis_curves")], _CURVE_ROWS, N),
+        analysis_field_19_curve=tuple(float(v) for v in block("analysis_field_19_curve")),
+        seed_outer_u32=tuple(int(v) for v in block("seed_outer_u32")),
+        seed_profile_u32=tuple(int(v) for v in block("seed_profile_u32")),
+        seed_base_curve=tuple(float(v) for v in block("seed_base_curve")),
+        seed_group_labels_u32=tuple(int(v) for v in block("seed_group_labels_u32")),
+        seed_tone_banks=tuple(
+            tuple(bands[band * TONE_LEVELS + level] for level in range(TONE_LEVELS))
+            for band in range(TONE_BANDS)
+        ),
     )
 
 
-def table_sha256(ref: ResourceRef) -> str:
-    if not isinstance(ref, ResourceRef):
-        raise TypeError("long psychoacoustic resource must be ResourceRef")
-    payload = ref.read_bytes()
-    return hashlib.sha256(payload).hexdigest()
+__all__ = ["SCHEMA", "load_long_psy_tables"]

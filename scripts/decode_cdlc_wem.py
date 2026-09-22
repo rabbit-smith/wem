@@ -36,6 +36,11 @@ Usage:
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # the carrier type is import-time-free: this script runs without the kernel
+    from wwise_wem_reference.profiles.artifact import CompiledProfile
+
 import argparse
 import ctypes
 import json
@@ -95,22 +100,6 @@ SAMPLE_RATE = 48000
 # below need no extra parameter; the decode script reads no environment
 # variable, so which synthesis path ran is always visible in the command line.
 _LIBVORBIS_EXACT = False
-
-
-def profile_name(channels: int, sample_rate: int) -> str:
-    """Directory name of the installed profile one selection denotes.
-
-    The name is a property of the packaged tree, so it is read off the
-    selection instead of being re-typed here. The imports stay local because
-    resolving a selection needs the native kernel, which the decode path
-    itself never uses.
-    """
-    from wwise_wem import WwiseProfile, WwiseVersion
-    from wwise_wem.profiles.registry import resolve_selection
-
-    return resolve_selection(
-        WwiseProfile(WwiseVersion.WWISE2013, channels, sample_rate)
-    ).name
 
 
 class ResidueEOP(Exception):
@@ -341,9 +330,11 @@ def decode_residue_coeffs(
 
 
 def load_profile_codebooks(
-    setup: dict, profile_dir: Path
+    setup: dict, profile: "CompiledProfile"
 ) -> tuple[list[Codebook], dict[str, list[dict]]]:
-    """Load the installed book tables and build setup-order codebooks."""
+    """Read the profile's book tables from the compiled carrier."""
+    from wwise_wem_reference.profiles.book_ids import load_book_table
+
     needed: set[str] = set()
     for bid in setup["book_ids"]:
         if bid < T97_END:
@@ -354,10 +345,9 @@ def load_profile_codebooks(
             needed.add("t282")
     tables: dict[str, list[dict]] = {}
     for name in sorted(needed):
-        path = profile_dir / "vorbis" / "codebooks" / f"{name}.json"
-        if not path.exists():
-            raise FileNotFoundError(f"missing codebook table {path}")
-        tables[name] = json.loads(path.read_text())
+        if profile.optional_table(f"codebook.{name}.name") is None:
+            raise FileNotFoundError(f"profile carries no codebook table {name}")
+        tables[name] = list(load_book_table(name, profile))
     books: list[Codebook] = []
     for bid in setup["book_ids"]:
         if bid < T97_END:
@@ -455,11 +445,11 @@ class DecodeContext:
 
 
 def build_context(
-    profile_dir: Path, channels: int, sample_rate: int
+    profile: "CompiledProfile", channels: int, sample_rate: int
 ) -> DecodeContext:
-    setup_bin = (profile_dir / "vorbis" / "setup.bin").read_bytes()
-    setup = parse_setup(setup_bin, channels=channels)
-    books, _tables = load_profile_codebooks(setup, profile_dir)
+    """Build the decoder context from the compiled carrier of one profile."""
+    setup = parse_setup(profile.setup_packet, channels=channels)
+    books, _tables = load_profile_codebooks(setup, profile)
     kernel_map = {256: compute_kernel(256), 2048: compute_kernel(2048)}
     # The mapping coupling (used for stereo reconstruction).
     map0 = setup["maps"][0]
@@ -1796,7 +1786,6 @@ def main() -> int:
         description="Reference ground-truth WEM decoder (2ch/48k paired-build probe)."
     )
     parser.add_argument("--wem", type=Path, default=DEFAULT_CORPUS)
-    parser.add_argument("--profile", default=profile_name(2, SAMPLE_RATE))
     parser.add_argument("--self-check", action="store_true")
     parser.add_argument("--segments", action="store_true")
     parser.add_argument(
@@ -1815,10 +1804,13 @@ def main() -> int:
         return run_self_check()
 
     started = time.time()
-    profile_dir = (
-        _REPO_ROOT / "src" / "wwise_wem" / "data" / "profiles" / args.profile
+    from wwise_wem import WwiseProfile, WwiseVersion
+    from wwise_wem_reference.profiles.artifact import resolve_selection
+
+    profile = resolve_selection(
+        WwiseProfile(WwiseVersion.WWISE2013, 2, SAMPLE_RATE)
     )
-    ctx = build_context(profile_dir, channels=2, sample_rate=SAMPLE_RATE)
+    ctx = build_context(profile, channels=2, sample_rate=SAMPLE_RATE)
     raw = args.wem.read_bytes()
     data_payload, packets, seek_table_size, fmt = parse_container(raw)
     if not packets:
@@ -1929,7 +1921,7 @@ def main() -> int:
 
     stats = {
         "file": str(args.wem),
-        "profile": args.profile,
+        "profile": profile.label(),
         "sample_rate": SAMPLE_RATE,
         "channels": ctx.channels,
         "seek_table": {
@@ -2083,16 +2075,12 @@ def run_self_check() -> int:
     from wwise_wem_reference import python_engine  # type: ignore
     from wwise_wem_reference.container.model import ContainerPlan  # type: ignore
     from wwise_wem import WwiseProfile, WwiseVersion  # type: ignore
-    from wwise_wem.profiles.registry import resolve_selection  # type: ignore
+    from wwise_wem_reference.profiles.artifact import resolve_selection  # type: ignore
     from wwise_wem.adapters.wav import read_pcm_wav  # type: ignore
 
     pcm = read_pcm_wav(fixture_pcm)
     profile = resolve_selection(
         WwiseProfile(WwiseVersion.DEFAULT, pcm.channel_count, pcm.sample_rate)
-    )
-    # The profile directory is the packaged name of that same selection.
-    profile_dir = (
-        _REPO_ROOT / "src" / "wwise_wem" / "data" / "profiles" / profile.name
     )
     result = python_engine.encode_pcm_python(
         profile=profile,
@@ -2101,7 +2089,7 @@ def run_self_check() -> int:
     )
     wem_bytes = bytes(result.data)
     # Decode.
-    ctx = build_context(profile_dir, channels=6, sample_rate=44100)
+    ctx = build_context(profile, channels=6, sample_rate=44100)
     raw = wem_bytes
     data_payload, packets, _seek, _fmt = parse_container(raw)
     _setup, audio_packets = packets[0], packets[1:]

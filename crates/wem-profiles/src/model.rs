@@ -1,11 +1,8 @@
-//! Immutable encoder profile value model (Python: `profiles/model.py` +
-//! root `model.py::ContainerMetadata`).
-
-use serde_json::{Map, Value};
+//! Immutable encoder profile value model (Python: `wwise_wem.model` +
+//! `wwise_wem.profiles.key`).
 
 use crate::error::ProfileError;
 use crate::key::ProfileKey;
-use crate::resources::hex;
 
 /// Typed representation of the fixed 66-byte Wwise Vorbis fmt fields
 /// (Python `ContainerMetadata`).
@@ -38,145 +35,28 @@ pub struct ContainerMetadata {
     pub u_blocksize1_pow: i64,
 }
 
-impl ContainerMetadata {
-    const FIELDS: &'static [&'static str] = &[
-        "wFormatTag",
-        "nChannels",
-        "nSamplesPerSec",
-        "nAvgBytesPerSec",
-        "nBlockAlign",
-        "wBitsPerSample",
-        "cbSize",
-        "wReserved0",
-        "dwChannelMask",
-        "dwTotalPCMFrames",
-        "dwFirstAudioPacketOffset",
-        "dwDataPayloadSize",
-        "dwUnknown_0x24",
-        "dwSeekTableSize",
-        "dwVorbisDataOffset",
-        "uMaxPacketSize",
-        "uUnknown_0x32",
-        "dwUnknown_0x34",
-        "dwUnknown_0x38",
-        "dwUnknown_0x3C",
-        "uBlocksize0Pow",
-        "uBlocksize1Pow",
-    ];
-
-    /// Build from a manifest `container_metadata` object
-    /// (Python `from_fmt_dict`). All 22 fields must be integers;
-    /// nChannels/nSamplesPerSec must be positive, all values non-negative.
-    pub fn from_fmt_map(values: &Map<String, Value>) -> Result<Self, ProfileError> {
-        let get = |field: &'static str| -> Result<i64, ProfileError> {
-            match values.get(field) {
-                Some(Value::Number(n)) if n.is_i64() || n.is_u64() => Ok(n
-                    .as_i64()
-                    .unwrap_or_else(|| n.as_u64().map_or(i64::MAX, |v| v as i64))),
-                Some(_) => Err(ProfileError::ContainerFieldNotInteger { field }),
-                None => Err(ProfileError::ContainerFieldMissing { field }),
-            }
-        };
-        let w_format_tag = get(Self::FIELDS[0])?;
-        let n_channels = get(Self::FIELDS[1])?;
-        let n_samples_per_sec = get(Self::FIELDS[2])?;
-        let n_avg_bytes_per_sec = get(Self::FIELDS[3])?;
-        let n_block_align = get(Self::FIELDS[4])?;
-        let w_bits_per_sample = get(Self::FIELDS[5])?;
-        let cb_size = get(Self::FIELDS[6])?;
-        let w_reserved0 = get(Self::FIELDS[7])?;
-        let dw_channel_mask = get(Self::FIELDS[8])?;
-        let dw_total_pcm_frames = get(Self::FIELDS[9])?;
-        let dw_first_audio_packet_offset = get(Self::FIELDS[10])?;
-        let dw_data_payload_size = get(Self::FIELDS[11])?;
-        let dw_unknown_0x24 = get(Self::FIELDS[12])?;
-        let dw_seek_table_size = get(Self::FIELDS[13])?;
-        let dw_vorbis_data_offset = get(Self::FIELDS[14])?;
-        let u_max_packet_size = get(Self::FIELDS[15])?;
-        let u_unknown_0x32 = get(Self::FIELDS[16])?;
-        let dw_unknown_0x34 = get(Self::FIELDS[17])?;
-        let dw_unknown_0x38 = get(Self::FIELDS[18])?;
-        let dw_unknown_0x3c = get(Self::FIELDS[19])?;
-        let u_blocksize0_pow = get(Self::FIELDS[20])?;
-        let u_blocksize1_pow = get(Self::FIELDS[21])?;
-
-        if n_channels <= 0 || n_samples_per_sec <= 0 {
-            return Err(ProfileError::ContainerGeometryNonPositive);
-        }
-        if let Some((field, _)) = Self::FIELDS
-            .iter()
-            .zip([
-                w_format_tag,
-                n_channels,
-                n_samples_per_sec,
-                n_avg_bytes_per_sec,
-                n_block_align,
-                w_bits_per_sample,
-                cb_size,
-                w_reserved0,
-                dw_channel_mask,
-                dw_total_pcm_frames,
-                dw_first_audio_packet_offset,
-                dw_data_payload_size,
-                dw_unknown_0x24,
-                dw_seek_table_size,
-                dw_vorbis_data_offset,
-                u_max_packet_size,
-                u_unknown_0x32,
-                dw_unknown_0x34,
-                dw_unknown_0x38,
-                dw_unknown_0x3c,
-                u_blocksize0_pow,
-                u_blocksize1_pow,
-            ])
-            .find(|(_, value)| *value < 0)
-        {
-            return Err(ProfileError::ContainerFieldNegative { field });
-        }
-
-        Ok(Self {
-            w_format_tag,
-            n_channels,
-            n_samples_per_sec,
-            n_avg_bytes_per_sec,
-            n_block_align,
-            w_bits_per_sample,
-            cb_size,
-            w_reserved0,
-            dw_channel_mask,
-            dw_total_pcm_frames,
-            dw_first_audio_packet_offset,
-            dw_data_payload_size,
-            dw_unknown_0x24,
-            dw_seek_table_size,
-            dw_vorbis_data_offset,
-            u_max_packet_size,
-            u_unknown_0x32,
-            dw_unknown_0x34,
-            dw_unknown_0x38,
-            dw_unknown_0x3c,
-            u_blocksize0_pow,
-            u_blocksize1_pow,
-        })
-    }
-}
-
 /// Complete immutable identity, setup and container defaults for encoding
 /// (Python `EncoderProfile`).
 ///
 /// Two construction shapes coexist, both additive:
 /// * complete profiles: the setup packet bytes plus their SHA-256 identity;
-/// * draft profiles (setup pending corpus): no setup packet; the profile
-///   is listed by the registry with `setup_available == false` and a
-///   `pending_reason`, and every encode attempt on it fails with a clear
-///   pending error instead of silently forging a setup.
+/// * draft profiles (setup pending corpus): no setup packet, with
+///   `setup_available == false` and a `pending_reason`, so every encode
+///   attempt on one fails with a clear pending error instead of silently
+///   forging a setup.
+///
+/// Only the first shape has a producer: the compiled carrier always carries a
+/// setup packet, and the manifest-declared draft state went with the resource
+/// intake. The draft branch is kept because the value model's readers
+/// (`wem-core`'s pending-profile error path) still ask for it, and a future
+/// carrier that registers a configuration without a setup would need it; it is
+/// reachable from no installed profile today.
 ///
 /// The setup packet is carried as bytes, not as a resource reference: the
 /// packet is a compiled profile fact, and a reference would make the value
 /// model depend on where a tree happens to live.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EncoderProfile {
-    name: String,
     key: ProfileKey,
     setup_packet: Option<Vec<u8>>,
     setup_sha256: String,
@@ -202,7 +82,6 @@ impl EncoderProfile {
     /// draft profiles, whose `setup_sha256` must be empty.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        name: String,
         key: ProfileKey,
         setup_packet: Option<Vec<u8>>,
         setup_sha256: String,
@@ -212,9 +91,6 @@ impl EncoderProfile {
         setup_available: bool,
         pending_reason: Option<String>,
     ) -> Result<Self, ProfileError> {
-        if name.is_empty() {
-            return Err(ProfileError::ProfileNameEmpty);
-        }
         if let Some(quality) = quality {
             if !quality.is_finite() {
                 return Err(ProfileError::QualityValueNonFinite);
@@ -257,7 +133,6 @@ impl EncoderProfile {
             return Err(ProfileError::ProfileBlockSizesMismatch);
         }
         Ok(Self {
-            name,
             key,
             setup_packet,
             setup_sha256,
@@ -283,8 +158,9 @@ impl EncoderProfile {
         Ok(self)
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
+    /// The human label for this profile, derived from its identity.
+    pub fn label(&self) -> String {
+        self.key.label()
     }
 
     pub fn key(&self) -> &ProfileKey {
@@ -352,6 +228,17 @@ impl EncoderProfile {
             .clone()
             .ok_or(ProfileError::BundleMissingVorbisSetup)
     }
+}
+
+/// Lowercase hex of a 32-byte digest (Python `hex()` over the digest bytes).
+fn hex(digest: [u8; 32]) -> String {
+    use std::fmt::Write;
+    digest
+        .iter()
+        .fold(String::with_capacity(64), |mut out, byte| {
+            let _ = write!(out, "{byte:02x}");
+            out
+        })
 }
 
 fn sha256_hex(payload: &[u8]) -> [u8; 32] {

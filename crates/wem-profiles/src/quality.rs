@@ -39,15 +39,11 @@
 use std::collections::BTreeMap;
 
 use crate::error::ProfileError;
-use crate::resources::ResourceRef;
 
 /// Quality-curves resource schema (Python `QUALITY_CURVES_SCHEMA`).
 pub const QUALITY_CURVES_SCHEMA: &str = "wem.quality-curves.v2";
 /// Quality-curves interpolation marker (Python `QUALITY_CURVES_INTERPOLATION`).
 pub const QUALITY_CURVES_INTERPOLATION: &str = "linear-frac";
-/// Manifest logical name for the optional quality-curves resource
-/// (Python `QUALITY_CURVES_RESOURCE`).
-pub const QUALITY_CURVES_RESOURCE: &str = "analysis.quality-curves";
 /// Per-curve semantic form: no runtime consumer (Python `QUALITY_SEMANTIC_NO_OP`).
 pub const QUALITY_SEMANTIC_NO_OP: &str = "no-op";
 /// Per-curve semantic form: the transient record-index axis, owned by the
@@ -225,100 +221,6 @@ pub fn normalize_quality_factor(quality: f64) -> f64 {
         QUALITY_NORMALIZE_CLAMP
     } else {
         normalized
-    }
-}
-
-/// Load the optional quality-curves resource (Python `load_quality_curves`).
-///
-/// A missing reference (profile without the resource) is handled by the
-/// caller; a present resource is checksum-verified by the manifest and
-/// fully validated here.
-pub fn load_quality_curves(ref_: &ResourceRef) -> Result<QualityCurves, ProfileError> {
-    let payload = ref_.read_json()?;
-    let payload = match payload {
-        serde_json::Value::Object(map) => map,
-        _ => {
-            return Err(ProfileError::QualityCurvesSchemaUnexpected {
-                schema: String::new(),
-            })
-        }
-    };
-    let schema = payload
-        .get("schema")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("");
-    if schema != QUALITY_CURVES_SCHEMA {
-        return Err(ProfileError::QualityCurvesSchemaUnexpected {
-            schema: schema.to_string(),
-        });
-    }
-    let interpolation = payload
-        .get("interpolation")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("");
-    if interpolation != QUALITY_CURVES_INTERPOLATION {
-        return Err(ProfileError::QualityCurvesInterpolationUnsupported {
-            interpolation: interpolation.to_string(),
-        });
-    }
-    let breakpoints_value = payload
-        .get("breakpoints")
-        .and_then(serde_json::Value::as_array)
-        .ok_or(ProfileError::QualityCurvesBreakpointsNotArray)?;
-    let breakpoints = breakpoints_value
-        .iter()
-        .map(finite_f64)
-        .collect::<Result<Vec<f64>, _>>()?;
-    let raw_curves = payload
-        .get("curves")
-        .and_then(serde_json::Value::as_object)
-        .ok_or(ProfileError::QualityCurvesCurvesNotObject)?;
-    let mut curves = BTreeMap::new();
-    for (name, values) in raw_curves {
-        let samples = values
-            .as_array()
-            .ok_or_else(|| ProfileError::QualityCurvesCurveLengthMismatch {
-                name: name.clone(),
-                want: breakpoints.len(),
-                got: 0,
-            })?
-            .iter()
-            .map(finite_f64)
-            .collect::<Result<Vec<f64>, _>>()
-            .map_err(|_| ProfileError::QualityCurvesValueNonFinite { name: name.clone() })?;
-        curves.insert(name.clone(), samples);
-    }
-    let semantics_raw = payload
-        .get("semantics")
-        .and_then(serde_json::Value::as_object)
-        .ok_or(ProfileError::QualityCurvesSemanticsNotObject)?;
-    let mut semantics = BTreeMap::new();
-    for (name, semantic) in semantics_raw {
-        let semantic = semantic
-            .as_str()
-            .ok_or(ProfileError::QualityCurvesSemanticsNotObject)?;
-        semantics.insert(name.clone(), semantic.to_string());
-    }
-    QualityCurves::new(
-        QUALITY_CURVES_SCHEMA.to_string(),
-        breakpoints,
-        curves,
-        semantics,
-    )
-}
-
-fn finite_f64(value: &serde_json::Value) -> Result<f64, ProfileError> {
-    let number = value
-        .as_f64()
-        .ok_or_else(|| ProfileError::QualityCurvesValueNonFinite {
-            name: String::new(),
-        })?;
-    if number.is_finite() {
-        Ok(number)
-    } else {
-        Err(ProfileError::QualityCurvesValueNonFinite {
-            name: String::new(),
-        })
     }
 }
 

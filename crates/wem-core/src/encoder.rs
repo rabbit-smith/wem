@@ -27,7 +27,6 @@ use wem_profiles::error::ProfileError;
 use wem_profiles::model::ContainerMetadata;
 use wem_profiles::model::EncoderProfile;
 use wem_profiles::selection::{WwiseProfile, WwiseVersion};
-use wem_profiles::source::ProfileSource;
 use wem_vorbis::codebook::Codebook;
 use wem_vorbis::setup::SetupInfo;
 
@@ -438,7 +437,7 @@ impl EncodeResult {
     /// (Python `EncodeResult.sha256`).
     pub fn sha256(&self) -> String {
         let digest = Sha256::digest(&self.data);
-        wem_profiles::resources::hex(digest.as_slice())
+        hex(digest.as_slice())
     }
 
     /// Byte length of the assembled container.
@@ -567,7 +566,7 @@ impl Encoder {
             return Err(EncoderError::StateError {
                 message: format!(
                     "selected profile {} differs from installed profile setup",
-                    profile.name()
+                    profile.label()
                 ),
             });
         }
@@ -698,16 +697,27 @@ impl Encoder {
     }
 }
 
+/// Lowercase hex of a digest (Python `hex()` over the digest bytes).
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut out, byte| {
+            let _ = write!(out, "{byte:02x}");
+            out
+        })
+}
+
 /// The clear pending-corpus error for a draft profile encode attempt.
 pub fn draft_pending_message(profile: &EncoderProfile) -> String {
     match profile.pending_reason() {
         Some(reason) => format!(
             "profile '{}': setup packet pending ({reason}); requires paired Wwise export; encoding unavailable",
-            profile.name()
+            profile.label()
         ),
         None => format!(
             "profile '{}': setup packet missing; requires paired Wwise export; encoding unavailable",
-            profile.name()
+            profile.label()
         ),
     }
 }

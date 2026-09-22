@@ -184,9 +184,9 @@ buffer and the selection to `encode`.
 ## Execution path
 
 Every byte-producing Python call uses the in-package native extension
-`wwise_wem._core`, which carries the complete checksummed profile bundle at
-compile time. Callers never provide a profile name, a profile directory, or an
-environment variable. The package manifests remain metadata for inspection and
-for the development-tree resolution used by the oracle and the tooling; the
-native runtime does not assemble a profile from fragments. The pure-Python
-implementation under `reference/` is a development-time oracle only.
+`wwise_wem._core`, which carries the complete profile calibration set compiled
+in as Rust constants. Callers never provide a profile name, a profile directory,
+or an environment variable, and there is no packaged profile data to point at:
+the reference oracle reads the same carrier through the extension's
+`profile_tables()` hand-off. The pure-Python implementation under `reference/`
+is a development-time oracle only.

@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use wem_profiles::{assemble_encoder_profile_resources, bundle_for_selection};
+use wem_profiles::{assemble_encoder_profile_resources, compiled_profile_for_selection};
 use wem_vorbis::floor_fit::floor1_fit_wwise;
 use wem_vorbis::packet_encoder::pack_block_packet_details;
 
@@ -29,11 +29,12 @@ use common::{fixture_selection, repo_root};
 const SCHEMA: &str = "wwise-wem.stage-records.v1";
 
 /// Encoder resources of the installed Wwise 2013 6ch/44100 configuration,
-/// resolved from a structured selection against the compiled-in profile
-/// bundle (never a profile name or a profile tree).
+/// resolved from a structured selection against the compiled profile carrier
+/// (never a profile name or a profile tree).
 fn encoder_resources() -> wem_profiles::EncoderProfileResources {
-    let bundle = bundle_for_selection(fixture_selection()).expect("installed 6ch profile resolves");
-    assemble_encoder_profile_resources(&bundle, None, None).expect("assembly succeeds")
+    let compiled = compiled_profile_for_selection(fixture_selection())
+        .expect("installed 6ch profile resolves");
+    assemble_encoder_profile_resources(&compiled, None, None).expect("assembly succeeds")
 }
 
 fn stages_dir() -> PathBuf {
@@ -189,16 +190,11 @@ fn index_schema_is_current() {
         serde_json::from_str(&raw).expect("index parses")
     };
     assert_eq!(index["schema"].as_str(), Some(SCHEMA));
-    // The recorded profile name is the name the fixture selection resolves
-    // to: read off the tree, never typed into the test.
-    assert_eq!(
-        index["profile"].as_str(),
-        Some(
-            bundle_for_selection(fixture_selection())
-                .expect("installed 6ch profile resolves")
-                .name()
-        )
-    );
+    // The recorded profile label is the label the fixture selection resolves
+    // to: derived from the identity, never typed into the test.
+    let resolved = wem_profiles::resolve_wem_profile_selection(fixture_selection())
+        .expect("installed 6ch profile resolves");
+    assert_eq!(index["profile"].as_str(), Some(resolved.label().as_str()));
     assert_eq!(index["audio_packets"].as_u64(), Some(205));
 }
 

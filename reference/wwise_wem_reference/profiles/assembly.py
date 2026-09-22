@@ -1,4 +1,8 @@
-"""Build typed runtime aggregates from a profile's logical manifest."""
+"""Build typed runtime aggregates from the compiled profile carrier.
+
+The carrier is the kernel's artifact (:mod:`wwise_wem_reference.profiles.artifact`);
+every value below is read from it and reshaped, never decoded from a document.
+"""
 from __future__ import annotations
 
 import dataclasses
@@ -16,12 +20,11 @@ from ..analysis.config import (
 )
 from ..vorbis.codebook import Codebook
 from ..vorbis.setup import parse_setup
+from .artifact import CompiledProfile
 from .book_ids import load_book_table
-from wwise_wem.profiles.bundle import ProfileBundle
 from .codebooks import load_setup_codebooks
 from .frozen import load_frozen_tables
 from .quality import (
-    QUALITY_CURVES_RESOURCE,
     QUALITY_SEMANTIC_SHORT_PREFIX,
     QualityCurves,
     load_quality_curves,
@@ -37,7 +40,7 @@ from .psychoacoustics.short_tables import load_short_psy_profiles
 
 @dataclass(frozen=True)
 class EncoderProfileResources:
-    """Complete immutable codec inputs assembled from one profile manifest."""
+    """Complete immutable codec inputs assembled from one compiled profile."""
 
     analysis: AnalysisProfileResources
     setup_packet: bytes
@@ -74,27 +77,24 @@ _SHORT_QUALITY_FIELDS = frozenset(
 
 
 def _resolve_quality_curves(
-    bundle: ProfileBundle, quality: float | None
+    profile: CompiledProfile, quality: float | None
 ) -> tuple[QualityCurves | None, Mapping[str, float] | None, bool]:
-    """Load and evaluate the profile's quality curves for one quality value.
+    """Read and evaluate the profile's quality curves for one quality value.
 
-    ``quality`` of ``None`` keeps the historical behavior exactly: no resource
+    ``quality`` of ``None`` keeps the historical behavior exactly: no curve
     lookup, no overrides. A quality value requires the profile to carry the
-    optional resource; asking for it from a profile without curves is a
+    optional table; asking for it from a profile without curves is a
     configuration error, not a silent fallback. The quality is normalized
     onto the breakpoint axis before evaluation (spec profile-select entry).
     """
     if quality is None:
         return None, None, False
-    curves_ref = bundle.runtime_manifest.resources.get(QUALITY_CURVES_RESOURCE)
-    if curves_ref is None:
+    curves = load_quality_curves(profile)
+    if curves is None:
         raise ValueError(
-            f"profile {bundle.name!r} has no quality-curves resource; "
+            f"profile {profile.label()!r} has no quality-curves table; "
             "quality interpolation is unavailable for this profile"
         )
-    curves = load_quality_curves(curves_ref)
-    if curves is None:
-        raise ValueError(f"profile {bundle.name!r} quality-curves failed to load")
     normalized = normalize_quality_factor(quality)
     values, extrapolated = curves.evaluate_result(normalized)
     return curves, values, extrapolated
@@ -145,51 +145,32 @@ def _f32_override(value: float) -> float:
     return struct.unpack("<f", struct.pack("<f", float(value)))[0]
 
 
-def _load_input_conditioner(bundle: ProfileBundle) -> InputConditionerConfig | None:
-    ref = bundle.runtime_manifest.resources.get("analysis.input-conditioner")
-    if ref is None:
+def _load_input_conditioner(profile: CompiledProfile) -> InputConditionerConfig | None:
+    """The optional DC-filter configuration, as the carrier records it."""
+    bits = profile.optional_table("input_conditioner.bits")
+    if not bits:
         return None
-    payload = ref.read_json()
-    if not isinstance(payload, dict):
-        raise ValueError("input conditioner resource must be an object")
-    if payload.get("schema") != "wem.input-conditioner.v1":
-        raise ValueError("unsupported input conditioner schema")
-    bits = payload.get("dc_filter_coefficient_f32_bits")
-    if not isinstance(bits, int) or isinstance(bits, bool) or not 0 <= bits <= 0xFFFFFFFF:
-        raise ValueError("input conditioner coefficient bits must be a u32")
-    return InputConditionerConfig.from_bits(bits)
+    return InputConditionerConfig.from_bits(int(bits[0]))
 
 
 def assemble_analysis_resources(
-    bundle: ProfileBundle,
+    profile: CompiledProfile,
     *,
     quality: float | None = None,
 ) -> AnalysisProfileResources:
-    """Resolve MDCT/transient inputs through stable manifest logical names."""
-    if not isinstance(bundle, ProfileBundle):
-        raise TypeError("analysis resource assembly requires ProfileBundle")
-    manifest = bundle.runtime_manifest
-    short_surface = load_short_seed_surface(
-        manifest.resource("psychoacoustics.short-seed")
-    )
-    long_base = load_long_psy_tables(
-        manifest.resource("psychoacoustics.long-base")
-    )
-    long_modes_ref = manifest.resource("psychoacoustics.long-modes")
+    """Resolve every analysis input from the compiled carrier."""
+    if not isinstance(profile, CompiledProfile):
+        raise TypeError("analysis resource assembly requires CompiledProfile")
+    short_surface = load_short_seed_surface(profile)
+    long_base = load_long_psy_tables(profile)
     long_variants = {
-        mode: load_long_variant(mode, long_modes_ref, long_base)
-        for mode in (2, 3)
+        mode: load_long_variant(mode, profile, long_base) for mode in (2, 3)
     }
-    frozen_ref = (
-        manifest.resource("analysis.frozen-tables")
-        if "analysis.frozen-tables" in manifest.resources
-        else None
-    )
-    frozen = load_frozen_tables(frozen_ref) if frozen_ref is not None else None
+    frozen = load_frozen_tables(profile)
 
     quality_normalized = None if quality is None else float(quality)
     quality_curves, quality_values, quality_extrapolated = _resolve_quality_curves(
-        bundle, quality_normalized
+        profile, quality_normalized
     )
     if quality_values is not None:
         short_surface = _apply_short_quality_overrides(
@@ -199,13 +180,9 @@ def assemble_analysis_resources(
         )
 
     return AnalysisProfileResources(
-        mdct_looks=load_mdct_looks(manifest.resource("transform.mdct")),
-        transient=load_transient_resource(
-            manifest.resource("analysis.transient"), quality_normalized
-        ),
-        short_profiles=load_short_psy_profiles(
-            manifest.resource("psychoacoustics.short-profiles")
-        ),
+        mdct_looks=load_mdct_looks(profile),
+        transient=load_transient_resource(profile, quality_normalized),
+        short_profiles=load_short_psy_profiles(profile),
         short_surface=short_surface,
         short_look=make_wwise_psy_look(
             short_surface,
@@ -217,7 +194,7 @@ def assemble_analysis_resources(
             mode: make_long_floor_envelope_look(table)
             for mode, table in long_variants.items()
         },
-        input_conditioner=_load_input_conditioner(bundle),
+        input_conditioner=_load_input_conditioner(profile),
         frozen=frozen,
         quality_value=quality_normalized,
         quality_extrapolated=quality_extrapolated,
@@ -225,32 +202,26 @@ def assemble_analysis_resources(
 
 
 def assemble_encoder_profile_resources(
-    bundle: ProfileBundle,
+    profile: CompiledProfile,
     *,
     setup_packet: bytes | None = None,
     quality: float | None = None,
 ) -> EncoderProfileResources:
-    """Resolve every analysis and Vorbis input from one profile identity."""
-    if not isinstance(bundle, ProfileBundle):
-        raise TypeError("encoder resource assembly requires ProfileBundle")
-    packet = bundle.setup_packet() if setup_packet is None else bytes(setup_packet)
-    setup = parse_setup(packet, channels=bundle.key.channels)
-    manifest = bundle.runtime_manifest
-    t97 = load_book_table(
-        "t97", manifest.resource("vorbis.codebooks.t97")
-    )
+    """Resolve every analysis and Vorbis input from one compiled profile."""
+    if not isinstance(profile, CompiledProfile):
+        raise TypeError("encoder resource assembly requires CompiledProfile")
+    packet = profile.setup_packet if setup_packet is None else bytes(setup_packet)
+    setup = parse_setup(packet, channels=profile.key.channels)
     # A profile carries only the residue tables its setup references: t219
-    # (6ch) and/or t282 (2ch/48k). Load whichever are installed rather than
-    # assuming the historical t97+t219 pair (mirrors the Rust assembly).
-    tables = {"t97": t97}
-    for name in ("vorbis.codebooks.t219", "vorbis.codebooks.t282"):
-        try:
-            ref = manifest.resource(name)
-        except ValueError:
+    # (6ch) and/or t282 (2ch/48k). Take whichever the carrier records rather
+    # than assuming the historical t97+t219 pair (mirrors the Rust assembly).
+    tables = {"t97": load_book_table("t97", profile)}
+    for name in ("t219", "t282"):
+        if profile.optional_table(f"codebook.{name}.name") is None:
             continue
-        tables[name.rsplit(".", 1)[1]] = load_book_table(name.rsplit(".", 1)[1], ref)
+        tables[name] = load_book_table(name, profile)
     return EncoderProfileResources(
-        analysis=assemble_analysis_resources(bundle, quality=quality),
+        analysis=assemble_analysis_resources(profile, quality=quality),
         setup_packet=packet,
         setup=setup,
         codebooks=load_setup_codebooks(setup["book_ids"], tables),

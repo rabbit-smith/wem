@@ -1,13 +1,10 @@
 [package]
 name = "wem-profiles"
-description = "WEM encoder profile identity, registry, and packaged-resource loading/verification."
+description = "WEM encoder profile identity, selection and the compiled profile carrier."
 version.workspace = true
 edition.workspace = true
-build = "build.rs"
 
 [dependencies]
 sha2 = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
 wem-analysis = { workspace = true }
 wem-vorbis = { workspace = true }

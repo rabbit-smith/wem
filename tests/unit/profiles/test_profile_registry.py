@@ -1,23 +1,14 @@
 from __future__ import annotations
 
 import dataclasses
-import json
 import unittest
 from unittest.mock import patch
 
 from wwise_wem import WwiseProfile, WwiseVersion
 from wwise_wem.model import ContainerMetadata
-from wwise_wem.profiles.bundle import (
-    DEFAULT_INDEX,
-    PACKAGE,
-    ProfileKey,
-    installed_profile_names,
-    load_profile_bundle,
-)
-from wwise_wem.profiles.model import EncoderProfile
-from wwise_wem.profiles.registry import resolve_selection
-from wwise_wem.profiles.resources import ResourceRef, resource_traversable
-import wwise_wem.profiles.registry as registry_module
+from wwise_wem.profiles.key import ProfileKey
+import wwise_wem_reference.profiles.artifact as artifact
+from wwise_wem_reference.profiles.artifact import CompiledProfile, resolve_selection
 
 
 SELECTION = WwiseProfile(WwiseVersion.WWISE2013, 6, 44100)
@@ -31,31 +22,26 @@ class InstalledProfileTests(unittest.TestCase):
         self.assertEqual((key.channels, key.sample_rate), (6, 44100))
         self.assertEqual(key.generation, "2013.2")
         self.assertEqual(key.channel_layout, "5.1")
+        self.assertEqual(key.label(), "6ch/44100Hz/2013.2")
+        self.assertEqual(key.describe(), "6ch/44100Hz/2013.2/5.1(sha256:example)")
         with self.assertRaises(dataclasses.FrozenInstanceError):
             key.channels = 2  # type: ignore[misc]
         with self.assertRaises(TypeError):
             ProfileKey(2, 48000)  # type: ignore[call-arg]
 
-    def test_every_index_profile_resolves_by_its_manifest_key(self) -> None:
-        index = json.loads(
-            resource_traversable(PACKAGE, DEFAULT_INDEX).read_text(encoding="utf-8")
-        )
-        self.assertEqual(
-            set(installed_profile_names()), set(index["profiles"])
-        )
-        for name in installed_profile_names():
-            bundle = load_profile_bundle(profile=name, verify_all=False)
-            selection = WwiseProfile(
-                WwiseVersion.from_generation(bundle.key.generation),
-                bundle.key.channels,
-                bundle.key.sample_rate,
-            )
-            profile = resolve_selection(selection)
-            self.assertIsInstance(profile, EncoderProfile)
-            self.assertIsInstance(profile.container_metadata, ContainerMetadata)
-            self.assertIsInstance(profile.setup_path, ResourceRef)
-            self.assertEqual(profile.key, bundle.key)
-            self.assertEqual(profile.setup_sha256, bundle.setup.sha256)
+    def test_every_installed_profile_resolves_by_its_own_identity(self) -> None:
+        for installed in artifact.compiled_profiles():
+            with self.subTest(profile=installed.label()):
+                selection = WwiseProfile(
+                    WwiseVersion.from_generation(installed.generation),
+                    installed.channels,
+                    installed.sample_rate,
+                )
+                profile = resolve_selection(selection)
+                self.assertIsInstance(profile, CompiledProfile)
+                self.assertIsInstance(profile.container_metadata, ContainerMetadata)
+                self.assertIs(profile, installed)
+                self.assertEqual(profile.key, installed.key)
 
     def test_resolution_is_cached_and_geometry_independent(self) -> None:
         self.assertIs(resolve_selection(SELECTION), resolve_selection(SELECTION))
@@ -77,14 +63,17 @@ class InstalledProfileTests(unittest.TestCase):
 
     def test_ambiguous_selection_is_never_resolved_by_first_match(self) -> None:
         base = resolve_selection(TWO_CHANNEL_SELECTION)
-        duplicate = dataclasses.replace(base, name="duplicate-2ch-profile")
+        # Two profiles that share generation and geometry are two identities a
+        # selection cannot tell apart, whatever their layout says.
+        duplicate = dataclasses.replace(base, channel_layout="stereo-twin")
         with patch.object(
-            registry_module,
-            "_installed_profiles",
+            artifact,
+            "compiled_profiles",
             return_value=(base, duplicate),
         ):
-            with self.assertRaisesRegex(ValueError, "ambiguous"):
+            with self.assertRaisesRegex(ValueError, "ambiguous") as caught:
                 resolve_selection(TWO_CHANNEL_SELECTION)
+        self.assertIn("stereo-twin", str(caught.exception))
 
     def test_quality_binding_is_pure_and_finite(self) -> None:
         base = resolve_selection(SELECTION)
@@ -92,6 +81,8 @@ class InstalledProfileTests(unittest.TestCase):
         self.assertIsNot(base, bound)
         self.assertEqual(bound.quality, 4.0)
         self.assertIsNone(base.quality)
+        # The carrier is never mutated by a binding.
+        self.assertIsNone(resolve_selection(SELECTION).quality)
         for value in (float("nan"), float("inf")):
             with self.assertRaisesRegex(ValueError, "finite"):
                 resolve_selection(SELECTION, quality=value)

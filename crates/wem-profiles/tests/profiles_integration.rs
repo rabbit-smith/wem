@@ -1,25 +1,18 @@
-//! Integration tests for `wem-profiles`: real-asset loading through the public
-//! intake, bit-exact oracles from the Python reference, and resolution rules.
+//! Integration tests for `wem-profiles`: the compiled carrier, the bit-exact
+//! oracles from the Python reference, and the resolution rules.
 //!
-//! The bundle every one of these tests wants is obtained with
-//! [`wem_profiles::bundle_for_selection`] — the one public, name/path/bytes-free
-//! entry: it resolves a structured [`WwiseProfile`] against the bundle compiled
-//! into the library and hands back the fully verified bundle. Nothing here
-//! names a profile, a profile directory or index bytes.
-//!
-//! The rejection-condition parity suite that drives the loader *directly*
-//! (synthetic trees, tampered payloads, unsafe resource paths, index schema
-//! errors) is crate-private now and lives in `src/loader_tests.rs` and
-//! `src/bytes_loader_tests.rs`.
+//! The profile every one of these tests wants is obtained with
+//! [`wem_profiles::compiled_profile_for_selection`] — the one public,
+//! name/path/bytes-free entry: it resolves a structured [`WwiseProfile`]
+//! against the profile tables compiled into the library. Nothing here names a
+//! profile, a profile directory or index bytes, and there is no second source
+//! to compare against: the values below are the oracles, pinned as bit
+//! patterns.
 
-use wem_profiles::psychoacoustics::{
-    config::load_short_seed_surface, long_tables::load_long_psy_tables,
-    long_variants::load_long_variant, short_tables::load_short_psy_profiles,
-};
+use wem_profiles::carrier::CompiledProfile;
 use wem_profiles::{
-    assemble_encoder_profile_resources, bundle_for_selection, load_book_table, load_frozen_tables,
-    load_mdct_looks, load_transient_tables, resolve_book_id, resolve_wem_profile_selection,
-    ProfileKey, T219_COUNT, T282_COUNT, T97_COUNT,
+    assemble_encoder_profile_resources, compiled_profile_for_selection, resolve_book_id,
+    resolve_wem_profile_selection, ProfileKey, T219_COUNT, T282_COUNT, T97_COUNT,
 };
 use wem_vorbis::setup::{pack_setup, parse_setup};
 
@@ -27,43 +20,43 @@ mod common;
 
 use common::{six_selection, two_channel_selection};
 
-fn bundle() -> wem_profiles::ProfileBundle {
-    bundle_for_selection(six_selection()).expect("installed profile resolves")
+fn profile() -> CompiledProfile {
+    compiled_profile_for_selection(six_selection()).expect("installed profile resolves")
 }
 
 // ---------------------------------------------------------------------------
-// Real-asset loading and verification
+// Resolution against the compiled carrier
 // ---------------------------------------------------------------------------
 
 #[test]
-fn verify_all_on_real_assets() {
-    let bundle = bundle_for_selection(six_selection()).expect("verify_all passes");
-    // The bundle's name and key are what the registry resolves for the same
-    // selection: the identity is cross-checked between the two intake paths,
-    // never re-typed as a profile name literal.
+fn the_carrier_agrees_with_the_registry_resolution() {
+    let compiled = profile();
+    // The identity is cross-checked between the two resolution paths, never
+    // re-typed as a profile name literal.
     let installed = resolve_wem_profile_selection(six_selection()).expect("6ch/44100 resolves");
-    assert_eq!(bundle.name(), installed.name());
-    assert_eq!(bundle.key(), installed.key());
+    assert_eq!(compiled.label(), installed.label());
+    assert_eq!(compiled.key(), installed.key());
     assert_eq!(
-        (bundle.key().channels(), bundle.key().sample_rate()),
+        (compiled.key().channels(), compiled.key().sample_rate()),
         (6, 44100)
     );
-    assert_eq!(bundle.block_sizes(), [256, 2048]);
-    let setup_ref = bundle.setup().expect("vorbis.setup");
+    assert_eq!(compiled.block_sizes(), [256, 2048]);
     assert_eq!(
-        setup_ref.sha256(),
+        compiled.setup_sha256(),
         wem_profiles::WWISE2013_6CH_44100_SETUP_IDENTITY
             .strip_prefix("sha256:")
-            .unwrap()
+            .expect("the installed setup identity is recorded as a sha256 digest")
     );
-    // All ten logical resources verify.
-    assert_eq!(bundle.runtime_manifest().resources().len(), 10);
-    bundle.verify_all().expect("every resource digest verifies");
+    // The carrier never produces a draft profile: every compiled profile
+    // carries its setup packet.
+    let model = compiled.encoder_profile().expect("encoder profile");
+    assert!(model.setup_available());
+    assert!(model.pending_reason().is_none());
 }
 
 #[test]
 fn setup_parse_and_roundtrip() {
-    let packet = bundle().setup_packet().expect("setup packet");
+    let packet = profile().setup_packet().expect("setup packet");
     assert_eq!(packet.len(), 201);
     let info = parse_setup(&packet, 6).expect("setup parses");
     assert_eq!(info.nbooks, 39);
@@ -82,15 +75,11 @@ fn setup_parse_and_roundtrip() {
 
 #[test]
 fn book_id_resolution_oracle() {
-    let b = bundle();
-    let manifest = b.runtime_manifest();
-    let t97 = load_book_table("t97", manifest.resource("vorbis.codebooks.t97").unwrap())
-        .expect("t97 loads");
-    let t219 = load_book_table("t219", manifest.resource("vorbis.codebooks.t219").unwrap())
-        .expect("t219 loads");
+    let tables = profile().book_tables().expect("book tables");
+    let t97 = tables.get("t97").expect("t97 installed");
+    let t219 = tables.get("t219").expect("t219 installed");
     assert_eq!(t97.rows().len(), T97_COUNT);
     assert_eq!(t219.rows().len(), T219_COUNT);
-    let tables = wem_profiles::BookTables::new(t97, Some(t219), None);
 
     assert_eq!(resolve_book_id(38, &tables).unwrap().table, "t97");
     assert_eq!(resolve_book_id(38, &tables).unwrap().index, 38);
@@ -106,16 +95,14 @@ fn book_id_resolution_oracle() {
 #[test]
 fn two_channel_profile_resolves_t282_books() {
     // The 2ch/48k profile's setup references t97 floor books plus t282
-    // residue books (IDs 316..597); the registry must attribute them to the
+    // residue books (IDs 316..597); resolution must attribute them to the
     // t282 table rather than reject them as out-of-range.
-    let b = bundle_for_selection(two_channel_selection()).expect("2ch profile bundle resolves");
-    let manifest = b.runtime_manifest();
-    let t97 = load_book_table("t97", manifest.resource("vorbis.codebooks.t97").unwrap())
-        .expect("t97 loads");
-    let t282 = load_book_table("t282", manifest.resource("vorbis.codebooks.t282").unwrap())
-        .expect("t282 loads");
+    let compiled =
+        compiled_profile_for_selection(two_channel_selection()).expect("2ch profile resolves");
+    let tables = compiled.book_tables().expect("book tables");
+    let t282 = tables.get("t282").expect("t282 installed");
     assert_eq!(t282.rows().len(), T282_COUNT);
-    let tables = wem_profiles::BookTables::new(t97, None, Some(t282));
+    assert!(tables.get("t219").is_none());
     // Floor book 42 -> t97[42]; residue book 416 -> t282[100]; book 597 ->
     // t282[281]; the t219 range (97..315) is absent and must be rejected.
     assert_eq!(resolve_book_id(42, &tables).unwrap().table, "t97");
@@ -125,7 +112,7 @@ fn two_channel_profile_resolves_t282_books() {
     assert_eq!(resolve_book_id(597, &tables).unwrap().index, 281);
     assert!(resolve_book_id(100, &tables).is_err());
     // Every book the setup references must attribute to an installed table.
-    let setup = parse_setup(&b.setup_packet().unwrap(), 2).unwrap();
+    let setup = parse_setup(&compiled.setup_packet().unwrap(), 2).unwrap();
     for &book_id in setup.book_ids.iter() {
         assert!(
             resolve_book_id(book_id as i64, &tables).is_ok(),
@@ -136,16 +123,13 @@ fn two_channel_profile_resolves_t282_books() {
 
 #[test]
 fn codebook_oracle_values() {
-    let b = bundle();
-    let manifest = b.runtime_manifest();
-    let t97 = load_book_table("t97", manifest.resource("vorbis.codebooks.t97").unwrap()).unwrap();
-    let t219 =
-        load_book_table("t219", manifest.resource("vorbis.codebooks.t219").unwrap()).unwrap();
-    let tables = wem_profiles::BookTables::new(t97, Some(t219), None);
+    let tables = profile().book_tables().expect("book tables");
+    let t97 = tables.get("t97").expect("t97 installed");
+    let t219 = tables.get("t219").expect("t219 installed");
 
     // Book 38 (t97[38]): dim=1, entries=8, maptype 0; oracle codewords.
     let resolved = resolve_book_id(38, &tables).unwrap();
-    let row = tables.get("t97").unwrap().rows()[38].clone();
+    let row = t97.rows()[38].clone();
     assert_eq!(row.dim, 1);
     assert_eq!(row.entries, 8);
     assert_eq!(row.maptype, 0);
@@ -154,7 +138,7 @@ fn codebook_oracle_values() {
 
     // Book 214 (t219[117]): dim=4, entries=81, maptype 1, quantvals 3.
     let resolved = resolve_book_id(214, &tables).unwrap();
-    let row = tables.get("t219").unwrap().rows()[117].clone();
+    let row = t219.rows()[117].clone();
     assert_eq!(row.dim, 4);
     assert_eq!(row.entries, 81);
     assert_eq!(row.maptype, 1);
@@ -175,18 +159,12 @@ fn codebook_oracle_values() {
 }
 
 // ---------------------------------------------------------------------------
-// MDCT looks (static trig banks from the profile payload)
+// MDCT looks (static trig banks from the compiled carrier)
 // ---------------------------------------------------------------------------
 
 #[test]
 fn mdct_look_oracle_values() {
-    let looks = load_mdct_looks(
-        bundle()
-            .runtime_manifest()
-            .resource("transform.mdct")
-            .unwrap(),
-    )
-    .expect("mdct looks load");
+    let looks = profile().mdct_looks().expect("mdct looks");
     let trig4 = |look: &wem_analysis::config::MdctLook| -> [u32; 4] {
         [
             look.trig[0].to_bits(),
@@ -241,13 +219,10 @@ fn mdct_look_oracle_values() {
 
 #[test]
 fn frozen_tables_oracle_values() {
-    let frozen = load_frozen_tables(
-        bundle()
-            .runtime_manifest()
-            .resource("analysis.frozen-tables")
-            .unwrap(),
-    )
-    .expect("frozen tables load");
+    let frozen = profile()
+        .frozen_tables()
+        .expect("frozen tables read")
+        .expect("the 6ch profile carries frozen tables");
 
     // coordinate_ln: 128 entries keyed by frequency f64 bits.
     assert_eq!(frozen.coordinate_ln.len(), 128);
@@ -324,13 +299,9 @@ fn frozen_tables_oracle_values() {
 
 #[test]
 fn transient_tables_oracle_values() {
-    let tt = load_transient_tables(
-        bundle()
-            .runtime_manifest()
-            .resource("analysis.transient")
-            .unwrap(),
-    )
-    .expect("transient tables load");
+    let tt = profile()
+        .transient_tables(None)
+        .expect("transient tables read");
     assert_eq!(tt.n, 128);
     assert_eq!(tt.bias.to_bits(), 0xC2A0_0000);
     assert_eq!(tt.window[0].to_bits(), 0x0000_0000);
@@ -338,6 +309,9 @@ fn transient_tables_oracle_values() {
     assert_eq!(tt.bands[0].offset, 2);
     assert_eq!(tt.bands[0].weights[0].to_bits(), 0x3EC3_EF16);
     assert_eq!(tt.bands[0].scale.to_bits(), 0x3EC3_EF16);
+    // The 6ch profile registers a pre-materialized detector, so it has no
+    // record family to materialize from.
+    assert!(profile().transient_record_family().is_none());
 }
 
 // ---------------------------------------------------------------------------
@@ -346,10 +320,7 @@ fn transient_tables_oracle_values() {
 
 #[test]
 fn short_seed_oracle_values() {
-    let b = bundle();
-    let manifest = b.runtime_manifest();
-    let ss = load_short_seed_surface(manifest.resource("psychoacoustics.short-seed").unwrap())
-        .expect("short seed loads");
+    let ss = profile().short_seed().expect("short seed reads");
     assert_eq!(ss.ath_offset.to_bits(), 0xC2C8_0001);
     assert_eq!(&ss.octave[..3], [-33, 114, 168]);
     assert_eq!(ss.row[0].to_bits(), 0x4100_0000);
@@ -360,7 +331,10 @@ fn short_seed_oracle_values() {
     assert_eq!(ss.tone_curves.len() * 8 * 58, 7888);
 
     // Short look built through the frozen ln domain (bit-exact seam).
-    let frozen = load_frozen_tables(manifest.resource("analysis.frozen-tables").unwrap()).unwrap();
+    let frozen = profile()
+        .frozen_tables()
+        .expect("frozen reads")
+        .expect("frozen tables present");
     let look = wem_analysis::config::make_wwise_psy_look(&ss, None, Some(&frozen.coordinate_ln))
         .expect("short look builds from frozen ln");
     assert_eq!(look.envelope.len(), 128);
@@ -376,13 +350,7 @@ fn short_seed_oracle_values() {
 
 #[test]
 fn short_profiles_oracle_values() {
-    let sps = load_short_psy_profiles(
-        bundle()
-            .runtime_manifest()
-            .resource("psychoacoustics.short-profiles")
-            .unwrap(),
-    )
-    .expect("short profiles load");
+    let sps = profile().short_profiles().expect("short profiles read");
     assert_eq!(sps.len(), 2);
     assert_eq!(sps[0].key, "short_look_0");
     assert_eq!(
@@ -400,13 +368,7 @@ fn short_profiles_oracle_values() {
 
 #[test]
 fn long_tables_oracle_values() {
-    let lt = load_long_psy_tables(
-        bundle()
-            .runtime_manifest()
-            .resource("psychoacoustics.long-base")
-            .unwrap(),
-    )
-    .expect("long tables load");
+    let lt = profile().long_base().expect("long tables read");
     assert_eq!(
         &lt.analysis_profile_u32[..4],
         [1, 3267887105, 3272343552, 1101004800]
@@ -448,13 +410,9 @@ fn long_tables_oracle_values() {
     assert_eq!(seed.group_labels[1], -77);
 
     // Long variants 2 and 3.
-    let b = bundle();
-    let modes_ref = b
-        .runtime_manifest()
-        .resource("psychoacoustics.long-modes")
-        .unwrap();
-    let lm2 = load_long_variant(2, modes_ref, &lt).expect("mode 2");
-    let lm3 = load_long_variant(3, modes_ref, &lt).expect("mode 3");
+    let compiled = profile();
+    let lm2 = compiled.long_variant(2).expect("mode 2");
+    let lm3 = compiled.long_variant(3).expect("mode 3");
     assert_eq!(lm2.analysis_profile_u32[0], 1);
     assert_eq!(lm3.analysis_profile_u32[0], 1);
     assert_eq!(lm2.analysis_curves[0][0].to_bits(), 0xC160_0004);
@@ -462,7 +420,7 @@ fn long_tables_oracle_values() {
     assert_eq!(lm3.profile_key, "1024:3");
     // Variant floor-seed surface is inherited, not duplicated.
     assert_eq!(lm2.seed_outer_u32, lt.seed_outer_u32);
-    assert!(load_long_variant(4, modes_ref, &lt).is_err());
+    assert!(compiled.long_variant(4).is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -471,8 +429,7 @@ fn long_tables_oracle_values() {
 
 #[test]
 fn container_metadata_matches_profile() {
-    let b = bundle();
-    let cm = b.container_metadata();
+    let cm = profile().container_metadata();
     assert_eq!(cm.w_format_tag, 65535);
     assert_eq!(cm.n_channels, 6);
     assert_eq!(cm.n_samples_per_sec, 44100);
@@ -500,6 +457,8 @@ fn profile_key_requires_complete_identity() {
         key.quality_setup_identity(),
         wem_profiles::WWISE2013_6CH_44100_SETUP_IDENTITY
     );
+    // The human label is derived from the identity, never stored.
+    assert_eq!(key.label(), "6ch/44100Hz/2013.2");
     // Non-positive geometry rejected.
     assert!(ProfileKey::new(0, 44100, "2013.2".into(), "5.1".into(), "sha256:x".into(),).is_err());
 }
@@ -510,7 +469,8 @@ fn profile_key_requires_complete_identity() {
 
 #[test]
 fn assembly_end_to_end() {
-    let res = assemble_encoder_profile_resources(&bundle(), None, None).expect("assembly succeeds");
+    let res =
+        assemble_encoder_profile_resources(&profile(), None, None).expect("assembly succeeds");
     assert_eq!(res.setup_packet.len(), 201);
     assert_eq!(res.setup.nbooks, 39);
     assert_eq!(res.codebooks.len(), 39);
@@ -526,12 +486,11 @@ fn assembly_end_to_end() {
 
 #[test]
 fn encoder_profile_model_checks() {
-    let b = bundle();
-    let profile = b.to_encoder_profile().expect("encoder profile");
+    let compiled = profile();
+    let profile = compiled.encoder_profile().expect("encoder profile");
     assert_eq!(profile.block_sizes(), [256, 2048]);
     assert_eq!(profile.channels(), 6);
     assert_eq!(profile.sample_rate(), 44100);
     assert_eq!(profile.setup_packet().expect("packet").len(), 201);
-    assert_eq!(b.runtime_manifest().resources().len(), 10);
-    assert!(b.runtime_manifest().resource("vorbis.setup").is_ok());
+    assert_eq!(compiled.key(), profile.key());
 }

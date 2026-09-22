@@ -25,9 +25,9 @@ Two consequences follow and are the whole of the change:
 
 | Claim | Evidence |
 |---|---|
-| The generated tables equal the recorded documents, table by table, bit by bit | `crates/wem-profiles/src/carrier_tests.rs` (`every_compiled_profile_matches_the_recorded_tree`, `assembled_resources_are_identical_from_both_sources`) |
+| The generated tables equal the recorded documents, table by table, bit by bit | `crates/wem-profiles/src/carrier_tests.rs` (`every_compiled_profile_matches_the_recorded_tree`, `assembled_resources_are_identical_from_both_sources`) — retired in stage 2 together with the recorded tree it compared against; the generation-time digest and the parity suites are what hold the carrier now |
 | The assembled codec inputs are identical from either source | same file, `assembled_resources_are_identical_from_both_sources` |
-| The kernel's dump equals the recorded documents | `tests/parity/test_profile_artifact_bridge.py` |
+| The kernel's dump equals the recorded documents | `tests/parity/test_profile_artifact_bridge.py` — retired in stage 2 for the same reason; the reader itself is covered by `tests/unit/profiles/test_profile_artifact.py` |
 | Whole-file output is unchanged | `make wem-bytes`, `cargo test -p wem-core --test complete_wem_bytes` |
 | Every stage and frame is unchanged | `frame_pipeline_parity`, `stage_parity`, `vorbis_oracle_values`, `tests/parity/` |
 | Regeneration is byte-stable | `python3 scripts/generate_profile_code.py` twice, empty diff; `--check` exits 0 |
@@ -61,7 +61,9 @@ sorted `path\0sha256` pairs) is recorded in the header of every generated module
 
 It was taken from revision 9c73bd4 on `main`. `scripts/generate_profile_code.py
 --help` names the location, and `--profiles-dir` overrides it; the generator is
-offline and resolves its paths from `Path(__file__)`.
+offline and resolves its paths from `Path(__file__)`. (Stage 2 moved the tree
+there and pointed the generator's default at it; before that the default still
+resolved the package path the tree was about to leave.)
 
 ## How the reference oracle reads the values
 
@@ -127,6 +129,16 @@ that buys and what it costs:
   development material; the generator says so in `--help`, and the content digest
   in each generated header says which revision of the material produced it.
 ## What has landed, and what the deletion step still owns
+
+> The section below is the stage-1 hand-off, kept as written: it states the tree
+> as it stood when stage 1 landed and names the paths, modules and functions the
+> deletion would touch. **Stage 2 has since landed and deleted that surface.**
+> The spellings below are therefore historical — `src/wwise_wem/data/profiles/`,
+> the four `src/wwise_wem/profiles/*` modules, `load_profile_bundle`,
+> `ProfileBundle`, `bundle.verify_all` and `DataDir` no longer exist, and the
+> profile label is derived from the identity (`ProfileKey::label`) rather than
+> stored. What replaced each one is recorded in the code and in
+> [`../reference/profiles.md`](../reference/profiles.md).
 
 Landed and verified: the carrier, the generator, the kernel reading its profile
 data from the carrier, the oracle-access mechanism (dump + binding accessor +

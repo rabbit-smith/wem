@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import unittest
-from pathlib import PurePosixPath
 from unittest.mock import patch
 
+from tests.analysis_resource_support import installed_profile
 from tests.codebook_resource_support import installed_codebook_tables
-from wwise_wem_reference.vorbis.bitio import BitReader
 from wwise_wem_reference.profiles.book_ids import (
     T219_COUNT,
     T97_COUNT,
@@ -15,9 +14,7 @@ from wwise_wem_reference.profiles.book_ids import (
     resolve_book_id,
 )
 from wwise_wem_reference.profiles.codebooks import load_codebook
-from wwise_wem.profiles.bundle import load_profile_bundle
-from wwise_wem_reference.vorbis.bitio import OggPack
-from wwise_wem.profiles.resources import ResourceRef
+from wwise_wem_reference.vorbis.bitio import BitReader, OggPack
 
 
 class CodebookResourceTests(unittest.TestCase):
@@ -31,24 +28,25 @@ class CodebookResourceTests(unittest.TestCase):
         self.assertEqual(len(self.tables["t219"]), T219_COUNT)
 
     def test_mapping_and_runtime_share_one_cached_table_load(self):
+        profile = installed_profile(6, 44100)
         load_book_table.cache_clear()
-        original = ResourceRef.read_json
-        with patch.object(ResourceRef, "read_json", autospec=True) as read_json:
-            read_json.side_effect = lambda resource: original(resource)
-            ref = next(
-                resource
-                for resource in load_profile_bundle(verify_all=False)
-                .runtime_manifest.resources.values()
-                if resource.path.name == "t97.json"
-            )
+        read = profile.table
+        calls: list[str] = []
+
+        def counted(key: str):
+            calls.append(key)
+            return read(key)
+
+        with patch.object(type(profile), "table", lambda _self, key: counted(key)):
             first = resolve_book_id(0, self.tables)
             same_table = resolve_book_id(1, self.tables)
-            runtime_table = load_book_table("t97", ref)
+            runtime_table = load_book_table("t97", profile)
+            self.assertIs(runtime_table, load_book_table("t97", profile))
 
-        self.assertEqual(read_json.call_count, 1)
         self.assertEqual((first["table"], same_table["table"]), ("t97", "t97"))
-        self.assertIs(runtime_table, load_book_table("t97", ref))
         self.assertEqual(load_book_table.cache_info().misses, 1)
+        # The cached call reads every column once, never twice.
+        self.assertEqual(len(calls), len(set(calls)))
 
     def test_book_mapping_boundaries_and_errors_are_preserved(self):
         self.assertEqual(resolve_book_id(0, self.tables)["index"], 0)
@@ -63,7 +61,7 @@ class CodebookResourceTests(unittest.TestCase):
             "outside", resolve_book_id(T97_COUNT + T219_COUNT, self.tables)["error"]
         )
         with self.assertRaises(FileNotFoundError):
-            load_book_table("unknown", ResourceRef("wwise_wem", PurePosixPath("x"), "0" * 64))
+            load_book_table("unknown", installed_profile(6, 44100))
 
     def test_inline_resolved_book_remains_filesystem_independent(self):
         book = load_codebook(

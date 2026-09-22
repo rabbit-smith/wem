@@ -10,11 +10,11 @@ rules for an agent, together with where to start and what to register.
 
 | Path | Role |
 | --- | --- |
-| `src/wwise_wem/` | Distribution facade: root API, CLI, adapters, profile registry, and the embedded native extension |
+| `src/wwise_wem/` | Distribution facade: root API, CLI, adapters, profile identity, and the embedded native extension |
 | `crates/` | Rust kernel workspace: `scheduling`, `analysis`, `vorbis`, `container`, `profiles`, `core`, plus the C ABI (`wem-capi`) and the language shells (`wem-python`, `wem-wasm`) |
 | `include/wem.h` | C ABI interface the shells mirror 1:1, implemented by `crates/wem-capi` |
 | `reference/wwise_wem_reference/` | Bit-exact pure-Python oracle, development tree only, never shipped |
-| `src/wwise_wem/data/profiles/` | Immutable packaged profile bundles (setup, codebooks, transforms, analysis, psychoacoustics) |
+| `crates/wem-profiles/src/generated/` | The compiled profile carrier: setup, codebooks, transforms, analysis and psychoacoustic tables as Rust constants (`corpus/profiles/` is the untracked material they are generated from) |
 | `tests/` | `unit/`, `integration/`, `parity/`, `whole_file/`, and the `data/` regression assets |
 | `scripts/` | Regeneration, decoding, fuzz, and packaging tools |
 | `examples/`, `js/` | Runnable bindings: Python, Rust, C, Go via cgo, Node and browser via wasm |
@@ -22,7 +22,7 @@ rules for an agent, together with where to start and what to register.
 
 Dependency direction is one-directional and acyclic: `scheduling` imports
 nothing downstream, `analysis`/`vorbis`/`container` never open package
-resources, `profiles` is the sole resource owner, and one application layer
+resources, `profiles` is the sole carrier owner, and one application layer
 assembles the use case. The rules are in
 [`../reference/standards.md`](../reference/standards.md#layers-and-dependency-direction)
 and [`../reference/architecture.md`](../reference/architecture.md).
@@ -71,7 +71,7 @@ to fix the code or the test rather than to re-record the expectation.
 | `make 2ch-stress`, `make 2ch-long` | The 2ch stress corpus and the long-run cross-implementation comparison |
 | `make fuzz-parity` | Native vs oracle parity under randomized chunking and quality; Python unit, integration and cross-implementation suites run in `make test-fast` |
 | `cargo test --workspace` | Rust kernel, C ABI and shell suites, including the geometry-materializer parity suites |
-| `make wheel-smoke` | Installed-wheel profile digest chain (payload → manifest → index) and one real encode |
+| `make wheel-smoke` | Installed-wheel inventory (facade + native engine, no profile data) and one real encode |
 | `make check` | All of the above plus `ruff`, `mypy` and `clippy` |
 
 The same targets from the test tree's point of view — layer, command and run

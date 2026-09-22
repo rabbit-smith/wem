@@ -2,7 +2,7 @@
 
 Browser encoding for the WEM encoder kernel — the wasm-bindgen shell
 (`crates/wem-wasm`) plus a typed JS wrapper. WAV/PCM in, WEM bytes out. The
-profile bundle is **compiled into the wasm module**: nothing is fetched,
+profile data is **compiled into the wasm module**: nothing is fetched,
 indexed, or passed in, and no entry touches the filesystem. One-shot and
 streaming APIs mirror the C ABI (`include/wem.h`, ABI revision 2):
 same lifecycle, same error codes, same bytes, selected by the structured

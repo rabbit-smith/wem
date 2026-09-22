@@ -12,7 +12,7 @@ from tests.parity.wem_byte_compare import assert_wem_equal
 from tests.two_channel_corpus_support import corpus_selection, render_wav
 from wwise_wem import _core
 from wwise_wem.application.encoder import Encoder
-from wwise_wem.profiles.registry import resolve_selection
+from wwise_wem_reference.profiles.artifact import resolve_selection
 from wwise_wem.adapters.wav import read_pcm_wav
 from wwise_wem_reference.container.wem import load_wem_parts_bytes
 from wwise_wem_reference.python_engine import ContainerPlan, encode_pcm_python

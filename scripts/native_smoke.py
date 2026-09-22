@@ -134,15 +134,15 @@ def main() -> int:
         "seq 0 packet is embedded in the reference container",
         setup != b"" and setup in reference,
     )
-    # The setup packet is a recorded artifact twice over: the installed
-    # profile ships it as `vorbis/setup`, and the reference container carries
-    # it as its first length-prefixed packet. Compare bytes against both; the
-    # profile manifest's SHA-256 chain pins the resource (no re-typed digest).
-    from wwise_wem.profiles.registry import resolve_selection
+    # The setup packet is a recorded artifact twice over: the compiled
+    # profile carries it, and the reference container carries it as its first
+    # length-prefixed packet. Compare bytes against both; the carrier's
+    # recorded SHA-256 pins the value (no re-typed digest).
+    from wwise_wem_reference.profiles.artifact import resolve_selection
 
     check(
         "seq 0 packet reproduces the selected profile's setup resource",
-        setup == resolve_selection(SELECTION).setup_packet(),
+        setup == resolve_selection(SELECTION).setup_packet,
     )
     check(
         "seq 0 packet is the reference container's first packet",

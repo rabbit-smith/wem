@@ -14,31 +14,31 @@ from __future__ import annotations
 
 from wwise_wem.application.models import EncodeResult, EncodeStats
 from wwise_wem.model import PcmBuffer
-from wwise_wem.profiles.bundle import load_profile_bundle
-from wwise_wem.profiles.model import EncoderProfile
 
 from .analysis.session import AnalysisSession
 from .container.model import ContainerPlan
 from .container.wem import build_vorbis_wem
+from .profiles.artifact import CompiledProfile
 from .profiles.assembly import assemble_encoder_profile_resources
 from .vorbis.packet_encoder import pack_analysis_frame
 
 
 def encode_pcm_python(
     *,
-    profile: EncoderProfile,
+    profile: CompiledProfile,
     container: ContainerPlan,
     pcm: PcmBuffer,
 ) -> EncodeResult:
     """Run one complete pure-Python reference encode.
 
+    ``profile`` is the compiled carrier of one structured selection
+    (:func:`wwise_wem_reference.profiles.artifact.resolve_selection`), and
     ``container`` is the per-output container plan (:class:`ContainerPlan`);
-    it carries container metadata only, never codec state.
+    the plan carries container metadata only, never codec state.
     """
-    bundle = load_profile_bundle(profile=profile.name, verify_all=False)
-    setup_packet = profile.setup_packet()
+    setup_packet = profile.setup_packet
     resources = assemble_encoder_profile_resources(
-        bundle,
+        profile,
         setup_packet=setup_packet,
         quality=profile.quality,
     )

@@ -5868,7 +5868,7 @@
     "sample_rate": 44100
   },
   "pcm_frames": 139398,
-  "profile": "wwise2013-6ch-44100",
+  "profile": "6ch/44100Hz/2013.2",
   "representative_frames": [
     0,
     1,

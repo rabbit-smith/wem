@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import unittest
 
+from tests.analysis_resource_support import installed_profile
 from wwise_wem_reference.profiles.quality import (
     QUALITY_CURVES_INTERPOLATION,
-    QUALITY_CURVES_RESOURCE,
     QUALITY_CURVES_SCHEMA,
     QUALITY_NORMALIZE_ADDEND,
     QUALITY_NORMALIZE_CLAMP,
@@ -139,7 +139,6 @@ class QualityCurvesValidationTests(unittest.TestCase):
     def test_schema_constants_are_stable(self):
         self.assertEqual(QUALITY_CURVES_SCHEMA, "wem.quality-curves.v2")
         self.assertEqual(QUALITY_CURVES_INTERPOLATION, "linear-frac")
-        self.assertEqual(QUALITY_CURVES_RESOURCE, "analysis.quality-curves")
         self.assertEqual(QUALITY_SEMANTIC_NO_OP, "no-op")
         self.assertEqual(QUALITY_SEMANTIC_SHORT_PREFIX, "short.")
         self.assertEqual(
@@ -239,8 +238,12 @@ class QualityCurvesValidationTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             qc.curves["short.ath_offset"] = (1.0, 2.0, 3.0)  # type: ignore[index]
 
-    def test_load_quality_curves_none_in_none_out(self):
-        self.assertIsNone(load_quality_curves(None))
+    def test_a_profile_without_curves_reads_as_none(self):
+        # The 6ch carrier records an empty breakpoint block, which is how
+        # "this profile has no quality interpolation" travels now.
+        profile = installed_profile(6, 44100)
+        self.assertEqual(profile.table("quality_curves.breakpoints"), [])
+        self.assertIsNone(load_quality_curves(profile))
 
 
 if __name__ == "__main__":

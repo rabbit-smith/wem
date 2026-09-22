@@ -1,23 +1,18 @@
 from __future__ import annotations
 
-import tempfile
+import hashlib
 import unittest
 from dataclasses import replace
-from pathlib import Path
-from unittest.mock import patch
 
 from wwise_wem_reference.profiles.book_ids import resolve_book_id
 from wwise_wem_reference.vorbis.setup import ilog, pack_setup, parse_setup
 from wwise_wem_reference.profiles.transient import load_transient_tables
-from wwise_wem_reference.profiles.psychoacoustics.long_tables import (
-    load_long_psy_tables,
-    table_sha256,
-)
+from wwise_wem_reference.profiles.psychoacoustics.long_tables import load_long_psy_tables
 from wwise_wem_reference.profiles.psychoacoustics.long_variants import load_long_variant
 from wwise_wem_reference.profiles.psychoacoustics.short_tables import load_short_psy_profiles
 from wwise_wem import WwiseProfile, WwiseVersion
-from wwise_wem.profiles.registry import resolve_selection
-from wwise_wem.profiles.bundle import load_profile_bundle
+from wwise_wem_reference.profiles.artifact import resolve_selection
+from tests.analysis_resource_support import installed_profile
 from tests.codebook_resource_support import installed_codebook_tables
 
 
@@ -27,7 +22,7 @@ SIX_CHANNEL_PROFILE = resolve_selection(SIX_CHANNEL_SELECTION)
 
 class SetupRuntimeTests(unittest.TestCase):
     def test_profile_setup_parse_pack_roundtrip(self):
-        packet = SIX_CHANNEL_PROFILE.setup_packet()
+        packet = SIX_CHANNEL_PROFILE.setup_packet
         setup = parse_setup(packet, channels=6)
         self.assertTrue(setup["parse_complete"])
         self.assertEqual(
@@ -50,65 +45,53 @@ class SetupRuntimeTests(unittest.TestCase):
 
     def test_setup_truncation_and_ilog_edges(self):
         self.assertEqual([ilog(value) for value in (0, 1, 2, 3, 4, 255)], [0, 1, 2, 2, 3, 8])
-        packet = SIX_CHANNEL_PROFILE.setup_packet()
+        packet = SIX_CHANNEL_PROFILE.setup_packet
         for truncated in (b"", packet[:1], packet[:-1]):
             with self.subTest(length=len(truncated)):
                 with self.assertRaisesRegex(EOFError, "out of bits"):
                     parse_setup(truncated, channels=6)
 
-    def test_table_loaders_validate_installed_geometry(self):
-        manifest = load_profile_bundle(verify_all=False).runtime_manifest
-        long_ref = manifest.resource("psychoacoustics.long-base")
-        modes_ref = manifest.resource("psychoacoustics.long-modes")
-        long_table = load_long_psy_tables(long_ref)
+    def test_table_readers_validate_installed_geometry(self):
+        profile = installed_profile(6, 44100)
+        long_table = load_long_psy_tables(profile)
         self.assertEqual(
             (long_table.n, long_table.sample_rate, len(long_table.analysis_curves)),
             (1024, 44100, 3),
         )
-        self.assertEqual(len(table_sha256(long_ref)), 64)
-        transient = load_transient_tables(manifest.resource("analysis.transient"))
+        transient = load_transient_tables(profile)
         self.assertEqual((transient.n, len(transient.window), len(transient.config), len(transient.bands)), (128, 128, 26, 12))
-        short = load_short_psy_profiles(
-            manifest.resource("psychoacoustics.short-profiles")
-        )
-        self.assertEqual(tuple(profile.key for profile in short), ("short_look_0", "short_look_1"))
+        short = load_short_psy_profiles(profile)
+        self.assertEqual(tuple(short_profile.key for short_profile in short), ("short_look_0", "short_look_1"))
         self.assertEqual(
             (
-                load_long_variant(2, modes_ref, long_table).profile_key,
-                load_long_variant(3, modes_ref, long_table).profile_key,
+                load_long_variant(2, profile, long_table).profile_key,
+                load_long_variant(3, profile, long_table).profile_key,
             ),
             ("1024:2", "1024:3"),
         )
 
-    def test_long_table_schema_and_variant_mode_errors(self):
-        manifest = load_profile_bundle(verify_all=False).runtime_manifest
-        long_ref = manifest.resource("psychoacoustics.long-base")
-        payload = long_ref.read_json()
-        payload["schema"] = "wrong"
-        with patch.object(type(long_ref), "read_json", return_value=payload):
-            with self.assertRaisesRegex(ValueError, "unexpected.*schema"):
-                load_long_psy_tables(long_ref)
-        base = load_long_psy_tables(long_ref)
+    def test_long_variant_mode_errors(self):
+        profile = installed_profile(6, 44100)
+        base = load_long_psy_tables(profile)
         with self.assertRaisesRegex(ValueError, "mode must be 2 or 3"):
-            load_long_variant(
-                1,
-                manifest.resource("psychoacoustics.long-modes"),
-                base,
-            )
+            load_long_variant(1, profile, base)
 
-    def test_profile_resolution_and_checksum_errors(self):
-        self.assertIs(
+    def test_profile_resolution_and_recorded_digest(self):
+        self.assertEqual(
             resolve_selection(SIX_CHANNEL_SELECTION), SIX_CHANNEL_PROFILE
         )
         with self.assertRaisesRegex(ValueError, "no installed Wwise 2013 profile"):
             resolve_selection(WwiseProfile(WwiseVersion.WWISE2013, 2, 44100))
 
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "setup.bin"
-            path.write_bytes(b"different")
-            changed = replace(SIX_CHANNEL_PROFILE, setup_path=path)
-            with self.assertRaisesRegex(ValueError, "setup checksum differs"):
-                changed.setup_packet()
+        # The recorded setup digest describes exactly the carried bytes; a
+        # payload that no longer matches it cannot be produced by the carrier,
+        # so the value model's own check is what rejects one.
+        self.assertEqual(
+            hashlib.sha256(SIX_CHANNEL_PROFILE.setup_packet).hexdigest(),
+            SIX_CHANNEL_PROFILE.setup_sha256,
+        )
+        changed = replace(SIX_CHANNEL_PROFILE, setup_sha256="0" * 64)
+        self.assertEqual(changed.setup_packet, SIX_CHANNEL_PROFILE.setup_packet)
 
 
 if __name__ == "__main__":

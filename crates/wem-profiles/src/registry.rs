@@ -1,13 +1,11 @@
 //! Installed Wwise Vorbis encoder profiles and exact profile registry
-//! (Python: `profiles/registry.py`).
+//! (Python: `wwise_wem_reference.profiles.artifact`).
 //!
 //! The caller-facing selector is one [`WwiseProfile`], resolved against the
-//! registry compiled into this library; the crate-internal development tree
-//! is a loader-suite seam, never a caller input.
+//! profile tables compiled into this library. There is no second registry to
+//! load: [`embedded_registry`] is the compiled carrier, viewed as identities.
 
-use crate::bundle::{load_profile_bundle, ProfileBundle};
-use crate::data::DataDir;
-use crate::embedded::{embedded_profile_names, load_embedded_profile_bundle};
+use crate::carrier::{compiled_profiles, CompiledProfile};
 use crate::error::ProfileError;
 use crate::key::ProfileKey;
 use crate::model::EncoderProfile;
@@ -15,35 +13,27 @@ use crate::selection::WwiseProfile;
 
 /// Read-only exact lookup by full profile key.
 ///
-/// Profile names stay an internal addressing detail (manifests, index
-/// entries, diagnostics): the caller-facing selector is one
+/// Profile names stay out of every caller-facing surface: the selector is one
 /// [`WwiseProfile`], resolved with [`resolve_selection`](Self::resolve_selection).
 #[derive(Debug, Clone, Default)]
 pub struct ProfileRegistry {
     by_key: Vec<(ProfileKey, EncoderProfile)>,
-    by_name: Vec<(String, EncoderProfile)>,
 }
 
 impl ProfileRegistry {
-    /// Build a registry, rejecting duplicate keys or names.
+    /// Build a registry, rejecting duplicate keys.
     pub fn new(profiles: Vec<EncoderProfile>) -> Result<Self, ProfileError> {
         let mut by_key: Vec<(ProfileKey, EncoderProfile)> = Vec::new();
-        let mut by_name: Vec<(String, EncoderProfile)> = Vec::new();
         for profile in profiles {
             let key = profile.key().clone();
-            let name = profile.name().to_string();
             if by_key.iter().any(|(k, _)| k == &key) {
                 return Err(ProfileError::RegistryDuplicateKey {
                     key: key.describe(),
                 });
             }
-            if by_name.iter().any(|(n, _)| n == &name) {
-                return Err(ProfileError::RegistryDuplicateName { name: name.clone() });
-            }
-            by_key.push((key, profile.clone()));
-            by_name.push((name, profile));
+            by_key.push((key, profile));
         }
-        Ok(Self { by_key, by_name })
+        Ok(Self { by_key })
     }
 
     /// Lookup by exact key (Python `__getitem__`).
@@ -86,7 +76,7 @@ impl ProfileRegistry {
         if matches.len() != 1 {
             let names = matches
                 .iter()
-                .map(|profile| profile.name().to_string())
+                .map(|profile| profile.key().describe())
                 .collect::<Vec<_>>()
                 .join(", ");
             return Err(ProfileError::AmbiguousProfileSelection {
@@ -118,11 +108,11 @@ impl ProfileRegistry {
         described.join(", ")
     }
 
-    /// All profiles sorted by name (Python `list`).
+    /// All profiles in stable (key) order (Python `list`).
     pub fn list(&self) -> Vec<EncoderProfile> {
         let mut profiles: Vec<EncoderProfile> =
-            self.by_name.iter().map(|(_, p)| p.clone()).collect();
-        profiles.sort_by(|a, b| a.name().cmp(b.name()));
+            self.by_key.iter().map(|(_, p)| p.clone()).collect();
+        profiles.sort_by(|a, b| a.key().cmp(b.key()));
         profiles
     }
 
@@ -135,79 +125,13 @@ impl ProfileRegistry {
     }
 }
 
-/// Build the registry from every profile registered in the package index.
-///
-/// Complete profiles and draft profiles (setup pending corpus export) are
-/// both listed; draft entries carry `setup_available == false` plus the
-/// manifest-declared `pending_reason`, and never match a setup digest.
-///
-/// Crate-internal: it takes a profile tree. The in-crate loader suite is its
-/// consumer; callers resolve against the compiled-in registry. Unused in a
-/// non-test build (known and intended), required live in a test build.
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn installed_registry(data: &DataDir) -> Result<ProfileRegistry, ProfileError> {
-    let names = index_profile_names(data)?;
-    let mut profiles = Vec::with_capacity(names.len());
-    for name in names {
-        let bundle = load_profile_bundle(data, Some(&name), false)?;
-        profiles.push(bundle.to_encoder_profile()?);
-    }
-    ProfileRegistry::new(profiles)
-}
-
-/// The verified profile bundle for one structured selection, resolved against
-/// the bundle compiled into this library.
-///
-/// Resolution is exactly [`ProfileRegistry::resolve_selection`]: generation,
-/// channels and sample rate all participate, and a selection that no installed
-/// profile satisfies, or that more than one satisfies, is an error — never a
-/// first-match pick. The returned bundle is fully verified: every logical
-/// resource digest is checked on the way in, so a caller that has a bundle has
-/// already proven the payload → manifest SHA → index SHA chain.
-///
-/// This is the only way a caller outside this crate obtains a
-/// [`ProfileBundle`]; its signature carries no profile name, no path and no
-/// index or manifest bytes.
-pub fn bundle_for_selection(selection: WwiseProfile) -> Result<ProfileBundle, ProfileError> {
-    let registry = embedded_registry()?;
-    let resolved = registry.resolve_selection(selection)?;
-    // Name-keyed index addressing stays crate-internal: the name is the one
-    // the registry just resolved for this selection, never a caller input.
-    let bundle = load_embedded_profile_bundle(Some(resolved.name()))?;
-    if bundle.key() != resolved.key() {
-        return Err(ProfileError::InstalledBundleMismatch {
-            profile: resolved.name().to_string(),
-        });
-    }
-    Ok(bundle)
-}
-
-/// Build the registry from profiles compiled into this library.
+/// Build the registry from the profiles compiled into this library.
 pub fn embedded_registry() -> Result<ProfileRegistry, ProfileError> {
-    let names = embedded_profile_names()?;
-    let mut profiles = Vec::with_capacity(names.len());
-    for name in names {
-        let bundle = load_embedded_profile_bundle(Some(&name))?;
-        profiles.push(bundle.to_encoder_profile()?);
-    }
+    let profiles = compiled_profiles()?
+        .iter()
+        .map(CompiledProfile::encoder_profile)
+        .collect::<Result<Vec<_>, _>>()?;
     ProfileRegistry::new(profiles)
-}
-
-/// The profile names registered in the package index, in deterministic
-/// (sorted) order.
-fn index_profile_names(data: &DataDir) -> Result<Vec<String>, ProfileError> {
-    let raw = std::fs::read(data.index_path()).map_err(|_| ProfileError::MissingResource {
-        path: "index.json".to_string(),
-    })?;
-    let index: serde_json::Value =
-        serde_json::from_slice(&raw).map_err(|_| ProfileError::InvalidJson {
-            path: "index.json".to_string(),
-        })?;
-    let profiles = index
-        .get("profiles")
-        .and_then(serde_json::Value::as_object)
-        .ok_or(ProfileError::IndexProfilesNotObject)?;
-    Ok(profiles.keys().cloned().collect())
 }
 
 /// Resolve an installed exact profile from a structured selection — the

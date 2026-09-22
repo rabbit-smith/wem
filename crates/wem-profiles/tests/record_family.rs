@@ -13,27 +13,24 @@
 
 #![allow(clippy::excessive_precision)]
 
+use wem_profiles::carrier::CompiledProfile;
 use wem_profiles::selection::{WwiseProfile, WwiseVersion};
-use wem_profiles::transient::{load_transient, load_transient_record_family};
-use wem_profiles::{bundle_for_selection, linear_frac, normalize_quality_factor};
+use wem_profiles::{compiled_profile_for_selection, linear_frac, normalize_quality_factor};
 
 fn selection(version: WwiseVersion, channels: i64, sample_rate: i64) -> WwiseProfile {
     WwiseProfile::new(version, channels, sample_rate).expect("positive selection geometry")
 }
 
-/// The verified bundle for one selection: the public, name-free intake.
-fn bundle_for(channels: i64, sample_rate: i64) -> wem_profiles::ProfileBundle {
-    bundle_for_selection(selection(WwiseVersion::Wwise2013, channels, sample_rate))
+/// The compiled carrier for one selection: the public, name-free intake.
+fn profile_for(channels: i64, sample_rate: i64) -> CompiledProfile {
+    compiled_profile_for_selection(selection(WwiseVersion::Wwise2013, channels, sample_rate))
         .expect("installed selection resolves")
 }
 
 fn family() -> wem_profiles::transient::TransientRecordFamily {
-    let bundle = bundle_for(2, 48_000);
-    let ref_ = bundle
-        .runtime_manifest()
-        .resource("analysis.transient")
-        .expect("transient resource");
-    load_transient_record_family(ref_).expect("record family loads")
+    profile_for(2, 48_000)
+        .transient_record_family()
+        .expect("the 2ch profile registers the record family")
 }
 
 fn f32_bits(v: &f32) -> u32 {
@@ -178,12 +175,9 @@ fn materialized_window_matches_the_six_ch_registered_window() {
     let fam = family();
     let t2 = load_transient_tables_from(&fam, None).expect("2ch materialize");
 
-    let b6 = bundle_for(6, 44_100);
-    let ref6 = b6
-        .runtime_manifest()
-        .resource("analysis.transient")
-        .expect("6ch transient resource");
-    let t6 = load_transient(ref6, None).expect("6ch load");
+    let t6 = profile_for(6, 44_100)
+        .transient_tables(None)
+        .expect("6ch detector table reads");
 
     assert_eq!(t2.window.len(), 128);
     let same = t2
@@ -212,8 +206,8 @@ fn band_weights_pins_match_the_python_reference() {
     }
 }
 
-/// Materialize from a loaded family (keeps the tests off the manifest path
-/// while still exercising the pinned kernel).
+/// Materialize from a carrier-read family (keeps the tests on the pinned
+/// kernel rather than on any intake path).
 fn load_transient_tables_from(
     fam: &wem_profiles::transient::TransientRecordFamily,
     quality: Option<f64>,
