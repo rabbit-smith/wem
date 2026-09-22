@@ -464,8 +464,7 @@ pub fn shape_short_floor_envelope(
 
         // The intermediate envelope value, used by both the group-work update
         // and the side attenuation (not the final post value).
-        let value;
-        if peak {
+        let value = if peak {
             peak_bins += 1;
             if kernel.update_history != 0 {
                 history_out[index] = f32_of(raw[index]);
@@ -537,11 +536,11 @@ pub fn shape_short_floor_envelope(
                     value_local = f32_of(value_local - (separation - 20.0) * F64_0_2);
                 }
             }
-            value = value_local;
+            value_local
         } else {
             // Inactive bins use the cap directly.
-            value = cap;
-        }
+            cap
+        };
 
         // Only active peaks update caller-owned group work.
         if peak {
