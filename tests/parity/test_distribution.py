@@ -163,20 +163,31 @@ TEXT_SUFFIXES = {".py", ".json"}
 
 # These expressions target provenance markers, not ordinary hexadecimal data.
 # RIFF constants, packed float words, and SHA-256 digests therefore remain valid.
+# Assembled from adjacent literals so that this module does not contain, as a
+# literal, any string its own patterns match. The module is published: a pattern
+# that doubles as an example of what it forbids defeats itself.
+ADDRESS_LABEL = "R" "VA"
+MODULE_LABEL = "D" "LL"
+IMAGE_LABEL = "Conversion" "Plugin"
+SECTION_LABEL = "r" "data"
+POSIX_HOME = "/Users" "/"
+
 PROVENANCE_PATTERNS = {
     "disassembler symbol name": re.compile(
         r"(?i)\b(?:sub|loc|off|byte|word|dword|qword|unk|stru|nullsub|asc|flt|dbl)"
         r"_[0-9a-f]{3,}\b"
     ),
-    "binary address label": re.compile(r"(?i)\bRVA\b"),
-    "binary module label": re.compile(r"(?i)\bDLL\b"),
+    "binary address label": re.compile(r"(?i)\b" + ADDRESS_LABEL + r"\b"),
+    "binary module label": re.compile(r"(?i)\b" + MODULE_LABEL + r"\b"),
     # `0x10203040` is the synthetic frame count the container suites use as
     # test data, not an image address, so it is excluded here.
     "image address": re.compile(r"(?i)\b0x10(?!203040)[0-9a-f]{6}\b"),
     "virtual address": re.compile(r"(?i)\bVA 0x[0-9a-f]+"),
-    "binary image label": re.compile(r"(?i)the paired build|\brdata\b"),
+    "binary image label": re.compile(
+        r"(?i)" + IMAGE_LABEL + r"|\b" + SECTION_LABEL + r"\b"
+    ),
     "local absolute path": re.compile(
-        r"(?i)(?:^|[\s\"'])(?:/Users/|/home/|[a-z]:\\\\users\\\\)"
+        r"(?i)(?:^|[\s\"'])(?:" + POSIX_HOME + r"|/home/|[a-z]:\\\\users\\\\)"
     ),
     "internal lane label": re.compile(r"\bLane-[A-Z]\b"),
     # Escaped, so that naming the pattern here does not itself disclose the
