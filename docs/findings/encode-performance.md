@@ -24,6 +24,21 @@ measurements live in [`duration-curves.md`](duration-curves.md),
 and a closed item stays on it (see
 [Watching performance](../guides/development.md#watching-performance)).
 
+**Ledger status — the quiet-window pass (2026-09-22).** A later pass re-took, in
+a window with no other lane running, the pair this page was missing: the two
+feature configurations paired and order-alternated on both installed geometries,
+and the five-minute memory point on both paths. It is
+[below](#the-quiet-window-pass-the-paired-feature-configurations-and-the-five-minute-point),
+and it moves today's headline: the fixture encodes in a **99.41 ms** median
+through the released CLI against the **122.38 ms** recorded here, and the
+five-minute one-shot peak is **2 444.8 MB** against the 2 445.0 MB the sibling
+record carries. The window is not why — four changes this page's own findings
+name, and the pool-sizing change its finding 2 was carried into, landed between
+the two readings. The pass also found that the per-stage table below has been
+*the scalar configuration's* since `parallel` became opt-in, which is an
+instrument finding in its own right. **Nothing on this page is rewritten**: every
+number here stays where it is, with the revision and the machine it measured.
+
 ## What was measured, and how
 
 Reproduce with:
@@ -344,6 +359,366 @@ for 3.8%; leave it alone.
   therefore could move bytes. **Reported as an observation, not a proposal**:
   it is off limits without its own byte-exactness argument.
 
+## The quiet-window pass: the paired feature configurations, and the five-minute point
+
+Date: 2026-09-22. Every number above was taken while other lanes were loading
+this machine, which is why this page carries a machine identity but no load
+average, and why its comparisons are quoted as direction rather than as results.
+This section is the pass that closes the gap the ledger was missing: one window
+with no lane running, the **two feature configurations paired and
+order-alternated** on both installed geometries, and the **five-minute point**
+on both paths. Nothing above is rewritten; what follows says which readings it
+supersedes and which it leaves standing, and why.
+
+### The window, and what "quiet" turned out to mean
+
+No other lane was running and nothing of this lane's was running either. The
+machine was nevertheless **not idle**, and saying so is part of the record. The
+1-minute load average over the 15 minutes the measurements span was
+**11.51-26.22, median 16.38**, against 16 logical cores; the resting floor,
+sampled every 10 s for 150 s with nothing of this lane's running, was
+**12-15**.
+
+That floor is not a lane. It is system processes that have been resident for
+days: a storage-management service pair that has been burning 50-75% of a core
+since well before this window, the Metal shader compiler XPC service (178% on
+its own at the floor), an OrbStack VM helper, a browser with its rendering
+helpers, the window server, and four long-lived interactive agent processes.
+Measured at the floor the process table held **674% of the machine's 1600%
+across 16 cores, with 60 runnable threads**. So the honest description of this
+window is *no lane running*, not *idle machine* — and its load sits at the low
+end of the 17-230 range the sibling records already carry, rather than outside
+it. A reader comparing this section with an earlier one should read it that way.
+
+The consequence is the one [`duration-curves.md`](duration-curves.md) already
+established, and it holds here: **the RSS and CPU columns are load-independent
+and the wall columns are not.** This is not an assumption — the five-minute
+one-shot peak below varies by 0.08% while the load around it moves by 5.4. Every
+wall column in this section was taken at load 11.5-26.2 and is its least
+portable part; the paired, order-alternated structure is what keeps a
+*comparison* valid under that drift, since both arms of a round meet the same
+machine moments apart.
+
+### Machine identity (the same machine as every record on this page and its siblings)
+
+| | |
+| --- | --- |
+| CPU | Apple M3 Max, 16 logical cores (12 P + 4 E) |
+| Memory | 64 GB |
+| OS | macOS 27.0 (26A5378j), Darwin 27.0.0, arm64 |
+| Toolchain | rustc 1.96.0 (ac68faa20), host aarch64-apple-darwin, LLVM 22.1.2 |
+| Tree | this page's tree at 5e4be10, the commit that last changed the reader |
+| Load | 1-minute 11.51-26.22, median 16.38; stated per series below |
+
+Before any of it, the tree was confirmed to be the tree it was thought to be:
+`make wem-bytes` (whole-file container against the committed reference) and the
+whole `tests/parity` layer, **139 tests, both green**. Nothing under
+`crates/*/src`, `src/`, `tests/` or `scripts/` was changed for this pass, and no
+instrument in the tree was edited; the driver that arranges the pairs is
+scratch, outside the tracked tree.
+
+### The two feature configurations, paired and order-alternated
+
+The instrument is `crates/wem-core/tests/concurrency_worker.rs` — **one program
+built twice** (`cargo test --release -p wem-core --test concurrency_worker
+--no-run`, with and without `--features parallel`), so an arm cannot differ from
+the other by its entry point or its startup. That matters here: the scalar
+configuration carries **no CLI at all**, because `wwise-wem` is a bin with
+`required-features`, so a comparison whose scalar arm were a CLI would not be a
+comparison. Each run is one child doing exactly one encode, spawned and reaped
+by the parent with `os.wait4`, so the CPU column is that child's own `ru_utime` +
+`ru_stime` and nothing else's. Rounds are paired and order-alternated: within
+one round both arms run once and the order reverses on odd rounds.
+
+20 rounds per geometry. *Wall* is the child's own `encode_ms`, bracketing
+`encode_pcm`; *child wall* (not tabulated) adds process start. CPU is per
+encode.
+
+| 10 s corpus, 6 ch/44100 — **load 13.83-16.55** | min | median | p95 | max | spread | CPU median |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| scalar — `cargo build --release -p wem-core` | 469.62 | **476.45** | 491.54 | 494.97 | 25.35 (5.3%) | **481.16** |
+| `--features parallel` | 365.26 | **373.80** | 407.06 | 490.01 | 124.75 (33.4%) | **655.99** |
+| ratio parallel / scalar | 0.778x | **0.785x** | 0.828x | 0.990x | | 1.363x |
+
+| 10 s corpus, 2 ch/48000 — **load 16.55-17.23** | min | median | p95 | max | spread | CPU median |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| scalar | 173.68 | **176.23** | 183.47 | 184.53 | 10.85 (6.2%) | **180.96** |
+| `--features parallel` | 161.26 | **163.56** | 178.86 | 180.37 | 19.10 (11.7%) | **220.57** |
+| ratio parallel / scalar | 0.928x | **0.928x** | 0.975x | 0.977x | | 1.219x |
+
+| fixture (3.161 s), 6 ch/44100 — **load 16.97-17.23** | min | median | p95 | max | spread | CPU median |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| scalar | 131.45 | **133.84** | 137.59 | 139.65 | 8.20 (6.1%) | **138.64** |
+| `--features parallel` | 97.00 | **99.39** | 105.57 | 106.53 | 9.53 (9.6%) | **195.67** |
+| ratio parallel / scalar | 0.738x | **0.743x** | 0.767x | 0.763x | | 1.411x |
+
+**What the pair says.** The opt-in configuration returns **1.27x wall for 1.36x
+CPU** at 6 ch/44100/10 s, **1.08x for 1.22x** at 2 ch/48000/10 s, and **1.35x for
+1.41x** on the fixture. The wall return tracks the channel count, and the CPU
+premium is small at six channels — which is the shape
+[`pool-sizing.md`](pool-sizing.md) chose the pool size to produce, arriving from
+the other direction. The 2 ch geometry, two jobs for whatever pool it gets,
+returns almost nothing in wall and still pays 22% more CPU: the same fact read
+from the other side.
+
+**The 6 ch parallel arm's spread is the column worth naming.** 33.4% of its own
+median against the scalar arm's 5.3%, driven by two samples of twenty (490.01
+and 402.69 ms). That is scheduling, not arithmetic: the same arm's `user` time
+spreads 4.6% while its `sys` time spreads 49.6%. It is the per-region pool
+wake-up this page's finding 2 named, still visible in the tail after the pool
+was sized to the job count. **Quote the median for this arm; a p95 from 20
+samples is not stable.**
+
+**Cross-check, in tree.** `scripts/measure_concurrency.py` already owns this
+child pattern and this pairing; run at one encode per arm
+(`--n-values 1 --repetitions 10`, load 19.3-19.7) it reports the paired ratios
+**latency 0.739x / CPU 1.400x** at 6 ch/44100 and **0.958x / 1.207x** at
+2 ch/48000 — within 1% of the fixture's CPU ratio above and within 3% on both
+other columns, from an instrument built for a different question. The 2 ch
+disagreement is the input: that script's 2 ch arm is the 1 s reference corpus,
+not the 10 s one, and at 1 s the arm's own process overhead is a fifth of its
+encode.
+
+### The released CLI, and what this page's 122.4 ms is worth today
+
+The CLI is the released `wwise-wem` built with `--features parallel`, run as
+`wwise-wem <wav> --output /dev/null --time`. Paired against the parallel worker,
+20 rounds, **load 16.28-16.56**:
+
+| fixture, 20 paired rounds | min | median | p95 | max | spread | CPU median |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| parallel worker | 96.41 | **98.99** | 101.71 | 103.49 | 7.08 (7.2%) | 194.78 |
+| released CLI | 97.86 | **99.41** | 105.17 | 117.04 | 19.18 (19.3%) | 195.22 |
+| CLI / worker | 1.015x | **1.004x** | 1.034x | 1.131x | | 1.002x |
+
+**The entry point is not a confound.** The CLI's `encode` stage and the worker's
+`encode_ms` agree to **0.4% on the median and 0.2% on CPU** — which is what
+licenses the scalar arm above to be the worker rather than a CLI, since the
+scalar configuration has no CLI to use.
+
+The same CLI through the tree's own instrument,
+`python3 scripts/measure_encode_perf.py --runs 9`, **load 20.65 before and 19.16
+after the series**:
+
+| fixture, CLI stage timers | min | median | p95 | max | spread |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `wav_load` | 0.35 | 0.36 | 0.67 | 0.84 | 0.49 |
+| `profile_assembly` | 1.46 | 1.51 | 2.53 | 3.18 | 1.72 |
+| **`encode`** | **97.35** | **99.82** | **102.51** | **103.51** | **6.16 (6.2%)** |
+| `output_write` | 0.04 | 0.07 | 0.10 | 0.11 | 0.07 |
+| total | 99.23 | 101.84 | 104.91 | 105.55 | 6.32 |
+
+**31.7x real time**, against the 25.8x this page records for the same fixture.
+
+**Superseded.** The 122.38 ms median this page's opening result states — and the
+min 119.88 / p95 126.37 / max 129.46 / spread 9.58 ms beside it — is superseded
+by the **99.41 ms** median above (and, through the tree's own instrument, by
+99.82 ms). The reading it replaces was provisional for the reason this page
+already gives: it was taken with no load average recorded, on a machine other
+lanes were loading. **But the load is not why the number moved.** Four changes
+this page's own findings name, plus the pool-sizing change finding 2 was carried
+into, landed between the two readings; the same tree measured twice at the same
+load returns the same number, and the 122.38 ms figure stays on this page as the
+record of the revision it measured. The ratio moved the same way:
+this page's 156.93 → 123.49 ms scalar-vs-parallel pair (**1.26x**) is now
+133.84 → 99.39 ms (**1.35x**) on the fixture.
+
+### The five-minute point
+
+This is the case the product is actually used for. The instrument is
+`crates/wem-core/tests/duration_curves.rs`: its `duration_curves_point` reporter
+spawns one **fresh child** per point and reaps it with `wait4`, printing the
+child's own `ru_maxrss_bytes`, `user_ms` and `sys_ms` — the same reporting
+[`duration-curves.md`](duration-curves.md) established, driven here at 300 s
+only. The inputs are that record's own generator,
+`scripts/generate_duration_curve_inputs.py`; its cross-check against
+`scripts/generate_2ch_long_program.py` passed, so the corpus is the one that
+record measured, not a new one:
+
+| input | geometry | frames | SHA-256 |
+| --- | --- | ---: | --- |
+| 300 s | 6 ch/44100 | 13 230 000 | `a6cfead72defb18d0d99a9b043837057d9f57adb113ccde968dd25eb855294ff` |
+| 300 s | 2 ch/48000 | 14 400 000 | `2b765495648534614192a1e8ff8f749025c0f6afe643e1687372480160a4f6f6` |
+
+Both paths, both configurations, paired and order-alternated, **10 rounds for
+the parallel configuration and 6 for the scalar one** across three passes;
+**load 12.22-25.69**. Peak resident of a fresh child, MB:
+
+| 300 s | n | min | median | max | spread |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 6 ch one-shot, parallel | 10 | 2 234.1 | **2 444.8** | 2 446.0 | 211.9 (8.67%) |
+| 6 ch one-shot, scalar | 6 | 2 339.2 | **2 441.1** | 2 442.0 | 102.8 (4.21%) |
+| 6 ch streaming, parallel | 10 | 124.6 | **125.9** | 127.7 | 3.1 (2.47%) |
+| 6 ch streaming, scalar | 6 | 121.1 | **122.1** | 122.8 | 1.8 (1.44%) |
+| 2 ch one-shot, parallel | 10 | 1 214.3 | **1 216.5** | 1 217.0 | 2.7 (0.22%) |
+| 2 ch one-shot, scalar | 6 | 1 213.7 | **1 214.9** | 1 216.2 | 2.5 (0.21%) |
+| 2 ch streaming, parallel | 10 | 52.8 | **55.5** | 55.7 | 2.9 (5.11%) |
+| 2 ch streaming, scalar | 6 | 53.2 | **54.6** | 55.2 | 2.0 (3.72%) |
+
+**Against the earlier record.** [`duration-curves.md`](duration-curves.md)
+records 6 ch/300 s at **2 445.0 MB** one-shot and **123.6 MB** streaming, and
+2 ch/300 s at 1 214.8 and 53.8 MB.
+
+| 6 ch/44100, 300 s | earlier record | this pass (median) | this pass (min) | change on median |
+| --- | ---: | ---: | ---: | ---: |
+| one-shot | 2 445.0 | **2 444.8** | 2 444.0 | **-0.01%** |
+| streaming | 123.6 | 125.9 | 124.6 | +1.9% |
+
+**The one-shot figure reproduces essentially exactly** — 2 444.8 MB against
+2 445.0 MB, a 0.01% difference on a point whose own agreeing samples sit within
+0.08% of each other. That is the number this pass exists to re-take, and it is
+confirmed. **The streaming figure does not contradict the record but does sit
+above it**: the record's 123.6 MB comes from that table's min/median column, and
+today's minimum is 124.6 MB (+0.8%) while today's median 125.9 MB is +1.9% above
+it. On a point whose ten samples span 2.47%, a single quoted figure for
+6 ch/300 s streaming is worth about ±3%, and the record's value is inside that.
+The 2 ch pair behaves the same way: one-shot 1 216.5 against 1 214.8 (+0.14%),
+streaming min 52.8 against 53.8 (-1.9%) with a median 3.2% above it.
+
+**Memory does not depend on the feature configuration.** One-shot ratios
+parallel/scalar are **1.00x** at both geometries and streaming **1.03x** /
+**1.02x**: the five-minute peak is a property of the path, not of whether the
+kernel runs its channel waves in a pool. The earlier record's 2 445.0 MB was
+taken with `parallel` on by default; today's scalar build reaches 2 441.1 MB,
+0.16% lower. One-shot over streaming is **19.4x** at six channels and **21.9x**
+at two.
+
+**The wall at five minutes, and what `parallel` is worth there.** From the same
+children's own `encode_ms`, minimum of the samples. The wall columns are the one
+pass that carried that field (3 rounds per arm, load 12.22-13.40); the CPU
+column is merged over all 6 rounds of the two feature-pairing passes:
+
+| 300 s, one-shot | scalar | parallel | parallel/scalar wall | parallel/scalar CPU |
+| --- | ---: | ---: | ---: | ---: |
+| 6 ch/44100 | 13.85 s (21.7x real time) | **10.63 s (28.2x)** | **0.77x** | 1.33x |
+| 2 ch/48000 | 5.08 s (59.0x real time) | **4.66 s (64.4x)** | **0.92x** | 1.22x |
+
+`duration-curves.md` measured the same comparison on the pre-pool tree and found
+at 300 s that `parallel` returned **1.19x wall for 2.32x the CPU** at 6 ch and
+**1.00x for 1.94x** at 2 ch. Today it returns **1.30x for 1.33x** and **1.09x
+for 1.22x**. The wall return went up and the CPU premium came down by about 40%
+at both geometries — which is the pool-sizing change doing at five minutes
+exactly what it claimed at ten seconds. The record's wall ratio also holds: at
+six channels the feature still pays at 300 s, and at two channels it still
+barely does.
+
+CPU per audio-second at 300 s is now **62.2 ms** at 6 ch (parallel) and 46.7 ms
+(scalar), **20.8 ms** at 2 ch (parallel) and 17.1 ms (scalar). The sibling
+record's 117.7-120.2 ms at 6 ch is therefore superseded, and the pool-sizing
+change landed between the two records is the named cause; the difference is
+**not decomposed here**, because decomposing it would mean rebuilding a
+configuration the tree no longer has.
+
+### The stage split, re-taken — and the configuration it is actually measuring
+
+Re-run at the same time as everything above, fixture, 9 runs per configuration,
+**load 20.35 / 19.81 / 22.20** at the three series boundaries:
+
+| fixture, 9 runs | this pass, scalar build | this pass, `--features parallel` | this page records |
+| --- | ---: | ---: | ---: |
+| `pcm_decode_ms` | 0.575 | 0.599 | 0.59 |
+| `select_modes_ms` | 12.046 | 12.421 | 12.14 |
+| `plan_and_windows_ms` | 16.043 | 16.655 | 17.04 |
+| `analyze_short_ms` | 10.939 | 10.786 | 11.21 |
+| **`analyze_long_ms`** | **62.956** | **23.678** | 43.05 |
+| `pack_ms` | 41.849 | 42.425 | 43.36 |
+| `container_ms` | 0.049 | 0.050 | 0.05 |
+| `staged_total_ms` | 132.596 | 93.868 | 115.00 |
+| **`encode_pcm_ms`** | **129.562** | **94.331** | 114.91 |
+| staged replay == `encode_pcm` | yes | yes | yes |
+
+The replay assertion held in every repetition of both configurations, so each
+column describes the shipped pipeline.
+
+**The finding: the split `scripts/measure_encode_perf.py` prints is the scalar
+configuration's, and the CLI beside it is the parallel one.** The script runs its
+harness as `cargo test --release -p wem-core --test stage_timings -- --ignored
+--exact stage_timings_report`, with **no `--features parallel`** — while the
+binary it measures in the same invocation requires that feature. When this page's
+split was recorded, `parallel` was on by default, so the harness was parallel and
+the two halves of the report described one build. It is opt-in now (this page's
+own note at the top says so), and the harness silently became the scalar one.
+The two configurations differ by **2.66x on `analyze_long_ms`** and **1.37x on
+`encode_pcm_ms`**, so this is not a rounding difference.
+
+**Read the recorded 43.05 ms against either of today's columns and you get a
+false result**: against the 62.96 ms the script prints you would report a 46%
+regression in long-frame analysis that does not exist, and against today's
+parallel 23.68 ms a 45% improvement, which is real but belongs to the
+pool-sizing change rather than to the window. The recorded figure was the
+parallel configuration on the pre-pool tree and is comparable only with the
+`--features parallel` column here. **This is an instrument gap, reported rather
+than edited**: `scripts/` is not this lane's to change, and closing it is a
+one-flag change to a command line the script owns.
+
+What the split does say on its own, both configurations agreeing: `pack_ms` is
+unchanged at 41.8-42.4 ms against the recorded 43.36, and it is now the largest
+single stage in the parallel configuration. The attribution block reproduced
+too — `fft_log_curve_ms` **25.44 (scalar) / 25.57 (parallel)** against the
+recorded 37.49, which is this page's finding 1 (closed by 915050b) showing up as
+an 11.9 ms saving; `fft_twiddle_recurrence_cost_model_ms` unchanged at 19.11 /
+19.31, as it must be, since it replays the recurrence standalone;
+`window_rebuild_calls` **1230** against the recorded 2460, this page's finding 4
+having removed the redundant rebuild; `window_rebuild_ms` 1.10 → 0.50;
+`mdct_ms` 4.60 → 4.46 / 4.53; `transient_ms` 3.38 → 3.18 / 3.26. The call counts
+that must not move did not: `fft_calls` 1230, `mdct_calls` 1230,
+`twiddle_steps` 9 123 840, `transient_quanta` 2289.
+
+### What this pass supersedes, what it leaves standing, and one anomaly
+
+**Superseded, with the reading that replaces it:**
+
+| this page / sibling | recorded | superseded by | why the earlier reading was provisional |
+| --- | ---: | ---: | --- |
+| fixture CLI `encode` median | 122.38 ms | **99.41 ms** (CLI, 20 paired rounds) | no load average recorded; other lanes loading the machine |
+| fixture CLI x real time | 25.8x | **31.7x** | same |
+| scalar vs parallel, fixture | 156.93 / 123.49 ms, 1.26x | **133.84 / 99.39 ms, 1.35x** | same, and the pool-sizing change landed after |
+| 6 ch/300 s one-shot peak | 2 445.0 MB | **2 444.8 MB** (median of 10) | its own agreeing samples were 3 of 4; one outlier |
+| 6 ch/300 s streaming peak | 123.6 MB | **125.9 MB** (median of 10, min 124.6) | a minimum of a point with a 2.5% spread |
+| 6 ch/300 s CPU per audio-second | 117.7-120.2 ms | **62.2 ms** (parallel) / 46.7 ms (scalar) | the pool-sizing change landed after that record |
+| stage split, `analyze_long_ms` | 43.05 ms | **23.68 ms** parallel (scalar is 62.96) | measured while `parallel` was a default; see above |
+
+**Left standing, and why:**
+
+- **The five-minute one-shot peak's order of magnitude, and the streaming
+  path's bound.** Both reproduce; the streaming ring is still bounded and the
+  one-shot peak is still output-proportional. Nothing here changes the shape
+  findings of [`duration-curves.md`](duration-curves.md).
+- **This page's findings 1-6.** No instrument here re-tests them, and the two
+  the split touches (1, the twiddle recurrence; 4, the redundant rebuilds) are
+  confirmed by their own call counts and stage times moving the way their
+  closures predicted.
+- **[`pool-sizing.md`](pool-sizing.md)'s before/after arms.** Its claim is the
+  CPU and `sys` columns, and its before arm is a pristine older tree with a
+  process-global pool that no longer exists in this one. Re-taking it would mean
+  rebuilding a deleted configuration to re-answer a question it already
+  answered; its wall columns stay provisional, as it says of itself.
+- **This page's scaling-in-stream-length table.** Re-taking it needs a 40x
+  payload corpus that is not this page's instrument and that no lane has
+  rebuilt; the claim it carries (no quadratic term) is not the pair the ledger
+  was missing, and the measurement would cost more than the number is worth.
+
+**One anomaly, re-taken and not resolved away.** `duration-curves.md` reports
+that the 6 ch/300 s one-shot point is bimodal: three samples at 2 443.7-2 445.9
+MB and one at 2 021.8 MB, 17% below, never reproduced. **This pass reproduced
+the anomaly's kind, at a smaller magnitude, and detached it from the feature
+configuration.** Across sixteen fresh-child samples of that point:
+
+- nine of the ten parallel samples lie in **2 444.0-2 446.0 MB**, a 0.08% band;
+  the tenth is **2 234.1 MB**, 8.6% below;
+- five of the six scalar samples lie in **2 439.9-2 442.0 MB**, a 0.09% band;
+  the sixth is **2 339.2 MB**, 4.2% below.
+
+So the modal value is stable to a tenth of a percent, an occasional sample
+under-measures by 4-9%, and it happens on **both** configurations — the earlier
+record saw its low sample on the then-default parallel build, this pass saw one
+on each. The 17% excursion did not recur. That is consistent with the earlier
+record's own reasoning that a one-shot peak below the `detector` phase worker's
+2 336.7 MB cannot be a lower memory requirement, and it means the point should
+be quoted as the mode with the anomaly stated beside it — which is what both
+records now do. **It is not a contradiction of any number; it is the reason a
+single sample of this point should never be quoted alone.**
+
 ## Trust boundary
 
 - These numbers are one machine (Apple M3 Max, macOS 27, rustc 1.96.0), one
@@ -370,3 +745,31 @@ for 3.8%; leave it alone.
   every series. That arrived after this measurement, so this page's numbers
   carry the machine identity and the machine's role in the investigation, not a
   load average; the readings that follow it do.
+- **The quiet-window pass is one window, not an idle machine.** Its load is
+  stated on every table it contributes (1-minute 11.51-26.22, median 16.38
+  across 15 minutes, against a measured resting floor of 12-15 on 16 cores).
+  Its wall columns are load-dependent and are the least portable part of it; its
+  RSS and CPU columns are not, and the five-minute peak's 0.08% agreement across
+  a 5.4-wide load swing is the evidence for that rather than an assumption.
+- **The paired series measures the kernel, and the CLI check licenses that.**
+  The scalar configuration has no CLI, so both arms of the feature comparison
+  are `concurrency_worker` built twice. The one place the released CLI is
+  measured against the worker (fixture, 20 paired rounds) it agrees to 0.4% on
+  the median and 0.2% on CPU, which is what makes the worker a stand-in for the
+  shipped surface rather than a substitute for it.
+- **The five-minute memory numbers come from the same `wait4` reporting as
+  [`duration-curves.md`](duration-curves.md)**, driving that record's own
+  instrument and its own generator, and are read the same way: `ru_maxrss` of a
+  fresh child, one child per point. The 6 ch one-shot point's bimodality is
+  carried forward rather than smoothed: the median quoted is the mode, and the
+  under-measuring samples are listed beside it.
+- **The quiet-window pass changed no instrument.** The driver that arranges the
+  pairs and alternates their order is scratch, outside the tracked tree, and
+  both `scripts/` instruments it drives are the committed ones, run unmodified.
+  The configuration gap it found in `scripts/measure_encode_perf.py`'s harness
+  invocation is reported here and **not fixed**, because `scripts/` was outside
+  this pass's fence.
+- **The attribution block remains a cost model**, and its `twiddle_steps` figure
+  is the same replayed recurrence it always was; its invariance across the two
+  configurations is a check that it is replayed the same way, not a measurement
+  of removed work.
