@@ -37,6 +37,7 @@ at these documents instead of restating them.
 | [`guides/usage.md`](guides/usage.md) | Installing the encoder, encoding a file, calling it from each language |
 | [`guides/development.md`](guides/development.md) | Building, running the tests, and the rules the work is held to |
 | [`findings/2ch-byte-exactness.md`](findings/2ch-byte-exactness.md) | Needing the 2ch evidence, its root causes, its retractions, or its trust boundary |
+| [`findings/browser-shell-toolchain-options.md`](findings/browser-shell-toolchain-options.md) | Asking whether the browser shell should stay Rust and what C, Zig or MoonBit would actually buy |
 | [`methodology/byte-exact-diagnosis.md`](methodology/byte-exact-diagnosis.md) | Chasing any byte difference against an external build |
 | [`roadmap.md`](roadmap.md) | Asking what is still open |
 
