@@ -49,6 +49,14 @@ responsibility.
   `test:`, `fix(profiles):`, `docs:`, `ci:`, `chore:`.
 - Stage explicit paths (`git add <file…>`); never `git add -A`. Push only when
   the maintainer asks.
+- Arm the local checks once per clone: `make hooks`, or the
+  `git config core.hooksPath .githooks` it runs. It rejects a provenance
+  coordinate, a media payload outside `tests/` and an undeclared repository-root
+  file, in the couple of seconds before a commit rather than in a later review —
+  which is why it exists at all. It is not the verdict: CI still decides, and
+  `git commit --no-verify` is legitimate when you know why you are using it.
+  [`docs/guides/hooks.md`](docs/guides/hooks.md) lists what is deliberately
+  absent from it.
 - Verification: the suites named in
   [`docs/reference/standards.md`](docs/reference/standards.md#what-is-established)
   are what establish the claims this repository makes. Run the smallest target
