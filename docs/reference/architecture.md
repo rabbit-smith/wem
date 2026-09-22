@@ -92,12 +92,12 @@ crates/wem-profiles/src/
 ```
 
 Each generated module is the profile's identity (`ProfileKeyParts`: generation,
-channels, sample rate, channel layout, setup identity), its container geometry,
-its setup packet bytes — whose digest the identity names, so the bytes are the
-only copy carried — and every typed table: MDCT banks, codebook rows, frozen
-twiddles, transient mechanism, quality curves, short/long psychoacoustic
-surfaces. Floats are stored as their IEEE bit patterns, never as decimal
-literals, so the carrier cannot move a value.
+channels, sample rate, channel layout), its container geometry, its setup packet
+bytes — carried as the packet itself, so the bytes are the only copy and
+nothing derived from them is stored — and every typed table: MDCT banks,
+codebook rows, frozen twiddles, transient mechanism, quality curves, short/long
+psychoacoustic surfaces. Floats are stored as their IEEE bit patterns, never as
+decimal literals, so the carrier cannot move a value.
 
 There is no index, no manifest, no resource path and no digest chain: the
 identity is the addressing, and the only way to reach a profile is a

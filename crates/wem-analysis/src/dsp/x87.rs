@@ -293,18 +293,6 @@ pub fn f32_bits(x: f64) -> u32 {
     (x as f32).to_bits()
 }
 
-/// Decode an f32 bit pattern ([`f32_bits`]'s inverse).
-///
-/// The reference builder names no counterpart for this direction: its
-/// `bits_f32` forwarded to a `f32_from_bits` that called itself, so the pair
-/// raised `RecursionError` and had no callers; both were deleted. Words cross
-/// as integers through [`f32_bits`], and this is how a stored word is read
-/// back.
-#[inline]
-pub fn bits_f32(b: u32) -> f64 {
-    f32::from_bits(b) as f64
-}
-
 /// wwise_float_log core (bit-trick log, NOT math.log):
 /// `f32( float(absbits(f32(x))) * LOG_L - LOG_M )`.
 #[inline]

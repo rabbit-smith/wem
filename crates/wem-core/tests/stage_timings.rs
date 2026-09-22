@@ -14,10 +14,11 @@
 //! unfalsifiable.
 //!
 //! A second, clearly separated block *attributes* the coarse stages: it
-//! re-runs `mdct_forward`, the `f32` rounding copy, the frozen-window
-//! rebuild, and the transient detector on the material the first block
-//! produced. Those are re-measurements of the same work, not disjoint
-//! stages, and are labelled `attribution_*` accordingly.
+//! re-runs `mdct_forward`, the `f32` rounding copy, the hybrid window
+//! (`apply_vorbis_window_in_place`, once per channel-frame), and the
+//! transient detector on the material the first block produced. Those are
+//! re-measurements of the same work, not disjoint stages, and are labelled
+//! `attribution_*` accordingly.
 //!
 //! It is `#[ignore]`d: `cargo test --workspace --all-targets` reports it
 //! without executing it, and `scripts/measure_encode_perf.py` runs it with
@@ -31,7 +32,7 @@ use std::time::{Duration, Instant};
 
 use wem_analysis::config::f32_of;
 use wem_analysis::dsp::spectrum::wwise_log_curve;
-use wem_analysis::dsp::transform::{mdct_forward, vorbis_window};
+use wem_analysis::dsp::transform::{apply_vorbis_window_in_place, mdct_forward};
 use wem_analysis::preprocessing::detector_input::detector_pcm_streams;
 use wem_analysis::session::AnalysisSession;
 use wem_analysis::transient::detector::TransientDetector;
@@ -131,7 +132,9 @@ fn staged_run(encoder: &Encoder, pcm: &Pcm16) -> StagedRun {
         .condition_pcm(&rows)
         .expect("conditioning runs");
     let condition = start.elapsed();
-    drop(rows);
+    // The rows are *not* dropped here: `condition_pcm` borrows them when the
+    // profile selects no input conditioner, and `encode_pcm` keeps its own
+    // `pcm_rows` binding alive across the whole loop for the same reason.
 
     // Session A: the scheduler alone.
     let mut scheduler_session = build_session();
@@ -234,7 +237,10 @@ fn staged_run(encoder: &Encoder, pcm: &Pcm16) -> StagedRun {
         bytes: built.wem_bytes.len(),
         matches_encode_pcm: built.wem_bytes == reference.data,
         windows_materialized: windows,
-        conditioned,
+        // `into_owned` is free when a conditioner rewrote the rows and one
+        // copy of the rows when it did not; either way it happens after every
+        // timing bracket above, so no measured duration includes it.
+        conditioned: conditioned.into_owned(),
     }
 }
 
@@ -354,40 +360,54 @@ fn attribution(
     std::hint::black_box(twiddle_sink);
     std::hint::black_box(twiddle_steps);
 
-    // --- Frozen-window rebuild inside apply_vorbis_window ------------------
-    // `apply_vorbis_window` calls its `get_window(size)` closure once per
-    // neighbouring size, per channel, per frame; each call rebuilds the whole
-    // symmetric window from the frozen half. Same geometry, same table, same
-    // conversion — timed here at the exact call count the encode pays.
-    let frozen = resources
-        .frozen
-        .as_ref()
-        .expect("profile carries frozen window halves");
+    // --- Frozen-window application inside the frame path -------------------
+    // `PlannedWindowSource::materialize` hands each channel's raw row to
+    // `apply_vorbis_window_in_place`, once per channel per frame; that call
+    // is the live frozen-window step, and the report keeps the
+    // `window_rebuild_*` names it has always printed. It reads the frozen
+    // half directly — the `half ++ reverse(half)` rebuild is not on this
+    // path — so what is timed is the whole call the encode pays: the span
+    // validation, the two frozen-half lookups, the zero fills and the
+    // per-sample multiplies.
+    //
+    // The row's values do not enter the cost (each span is a fixed-length
+    // multiply or a zero fill); the scratch row is refilled from the
+    // materialized frame, outside the bracket, so the call sees a row of the
+    // frame's own length.
+    let frozen_windows = Some(&resources.frozen_twiddles()?.window_halves);
+    let widest = BLOCKSIZES
+        .iter()
+        .copied()
+        .max()
+        .expect("block sizes are non-empty");
+    let mut scratch = vec![0.0f64; widest as usize];
     let mut window_rebuild = Duration::ZERO;
     let mut window_rebuild_calls = 0usize;
-    // `apply_vorbis_window` is called once per channel per frame, and each
-    // call rebuilds both neighbouring windows — so the count is
-    // frames * channels * 2, not frames * 2.
     for window in &run.windows_materialized {
         let current = window.current();
-        let (left, right) = if current == 0 {
+        // Short frames always use the short window: `materialize` fixes
+        // their modes at (0, 0, 0) whatever the plan's neighbours say.
+        let (previous, following) = if current == 0 {
             (0, 0)
         } else {
             (window.previous(), window.following())
         };
-        for _channel in &window.samples {
-            for size in [BLOCKSIZES[left as usize], BLOCKSIZES[right as usize]] {
-                let half = frozen
-                    .window_halves
-                    .get(&size)
-                    .expect("profile carries the window half");
-                let start = Instant::now();
-                let widened: Vec<f64> = half.iter().map(|value| *value as f64).collect();
-                let rebuilt = vorbis_window(size, Some(&widened))?;
-                window_rebuild += start.elapsed();
-                window_rebuild_calls += 1;
-                sink += rebuilt[0];
-            }
+        let n = BLOCKSIZES[current as usize] as usize;
+        for row in &window.samples {
+            assert_eq!(row.len(), n, "one channel row per frame, one block long");
+            scratch[..n].copy_from_slice(row);
+            let start = Instant::now();
+            apply_vorbis_window_in_place(
+                &mut scratch[..n],
+                &BLOCKSIZES,
+                previous,
+                current,
+                following,
+                frozen_windows,
+            )?;
+            window_rebuild += start.elapsed();
+            window_rebuild_calls += 1;
+            sink += scratch[0];
         }
     }
     std::hint::black_box(sink);
@@ -683,4 +703,98 @@ fn stage_timings_report() {
     measure_fixture().expect("fixture stage measurement");
     measure_two_channel().expect("2ch corpus measurement");
     measure_streaming().expect("streaming comparison");
+}
+
+// ---------------------------------------------------------------------------
+// Duration-curve driver (additive: no line above this point changed)
+// ---------------------------------------------------------------------------
+
+/// The per-stage split at the durations the duration-curve lane measures.
+///
+/// `measure_fixture` above replays the *fixture* (3.161 s / 6 ch) stage by
+/// stage. This driver replays a generated measurement WAV through exactly the
+/// same `staged_run`, with the same `staged_matches_encode_pcm` guard, so the
+/// stage *shares* can be compared across durations instead of assumed
+/// constant. It is additive: the two reporting tests above are untouched, and
+/// `scripts/measure_duration_curves.py` is the only caller that selects this
+/// name.
+///
+/// Environment (set by `scripts/measure_duration_curves.py`):
+///
+/// | variable | meaning |
+/// |---|---|
+/// | `WEM_CURVES_WAV` | the generated measurement WAV (required) |
+/// | `WEM_CURVES_SELECTION` | `fixture` (6ch/44100) or `two_channel` (2ch/48000) |
+/// | `WEM_CURVES_LABEL` | corpus name carried into the `wem_perf` lines |
+/// | `WEM_CURVES_RUNS` | repetitions (default 3) |
+/// | `WEM_CURVES_ATTRIBUTION` | `0` skips the single-threaded attribution block |
+///
+/// The attribution block re-runs work the staged pass already paid for, so it
+/// is printed for the first run only and is not additive with the split.
+#[test]
+#[ignore = "measurement harness: scripts/measure_duration_curves.py runs it with --ignored --nocapture"]
+fn stage_timings_duration_report() {
+    if cfg!(debug_assertions) {
+        eprintln!(
+            "stage_timings_duration_report: skipped in a debug build; timings require \
+             `cargo test --release -p wem-core --test stage_timings`"
+        );
+        return;
+    }
+    let wav_path = std::env::var("WEM_CURVES_WAV").expect("WEM_CURVES_WAV is set");
+    let selection = match std::env::var("WEM_CURVES_SELECTION").as_deref() {
+        Ok("fixture") => fixture_selection(),
+        Ok("two_channel") => two_channel_selection(),
+        other => panic!("WEM_CURVES_SELECTION must be `fixture` or `two_channel`, got {other:?}"),
+    };
+    let label = std::env::var("WEM_CURVES_LABEL").unwrap_or_else(|_| "curves".to_string());
+    let runs: usize = std::env::var("WEM_CURVES_RUNS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(3);
+    let with_attribution = std::env::var("WEM_CURVES_ATTRIBUTION").as_deref() != Ok("0");
+
+    let wav = read_pcm16(&PathBuf::from(&wav_path)).expect("measurement input reads");
+    let pcm = wav.to_pcm16().expect("measurement input converts to PCM");
+    let encoder = Encoder::new(selection).expect("profile loads");
+    // A comparison, not a threshold: the input must be the geometry the
+    // profile selection names, or the split would describe another encoder.
+    assert_eq!(
+        encoder.profile().channels(),
+        pcm.channel_count() as i64,
+        "input channel count does not match the selected profile"
+    );
+    assert_eq!(
+        encoder.profile().sample_rate(),
+        pcm.sample_rate(),
+        "input sample rate does not match the selected profile"
+    );
+    println!(
+        "wem_perf_input corpus={label} channels={} sample_rate={} frames={} seconds={:.3} \
+         conditioner={}",
+        pcm.channel_count(),
+        pcm.sample_rate(),
+        pcm.frame_count(),
+        pcm.frame_count() as f64 / pcm.sample_rate() as f64,
+        encoder.analysis_resources().input_conditioner.is_some(),
+    );
+
+    let mut first_mismatch: Option<bool> = None;
+    for run in 0..runs {
+        let sample = staged_run(&encoder, &pcm);
+        if run == 0 {
+            first_mismatch = Some(sample.matches_encode_pcm);
+        }
+        print_staged(&label, run, &sample);
+        if with_attribution && run == 0 {
+            let attributed = attribution(&encoder, &sample).expect("attribution runs");
+            print_attribution(&label, run, &attributed);
+        }
+    }
+    if first_mismatch == Some(false) {
+        panic!(
+            "staged replay assembled different container bytes than encode_pcm; \
+             the stage split would describe a different pipeline"
+        );
+    }
 }

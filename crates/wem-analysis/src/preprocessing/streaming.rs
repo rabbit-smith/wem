@@ -93,6 +93,30 @@ pub struct StreamingPcmFeeder {
     quanta_extracted_through: i64,
 }
 
+/// A summary, deliberately: the geometry, how far the stream has been
+/// consumed, and the sizes of the retained sample buffers.
+///
+/// The ring, prefix, primes and tail hold thousands of `f64` samples per
+/// channel — printing them would bury the diagnostic that asked for the
+/// feeder — so they are reported by count and by whether they are populated;
+/// `total` and `quanta_extracted_through` are the counters that say where the
+/// stream stands.
+impl std::fmt::Debug for StreamingPcmFeeder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StreamingPcmFeeder")
+            .field("channels", &self.channels)
+            .field("blocksizes", &self.blocksizes)
+            .field("total_samples", &self.total)
+            .field("ring_keep", &self.ring.first().map(VecDeque::len))
+            .field("prefix_samples", &self.prefix.first().map(Vec::len))
+            .field("detector_prime", &self.detector_prime.is_some())
+            .field("window_prime", &self.window_prime.is_some())
+            .field("tails", &self.tails.is_some())
+            .field("quanta_extracted_through", &self.quanta_extracted_through)
+            .finish()
+    }
+}
+
 impl StreamingPcmFeeder {
     /// Construct an empty feeder for the Wwise block geometry
     /// (mirrors the batch 256/2048 invariant).
@@ -127,11 +151,6 @@ impl StreamingPcmFeeder {
     /// Total source samples consumed so far (per channel).
     pub fn total_samples(&self) -> i64 {
         self.total
-    }
-
-    /// Whether the first-frame primes have been computed.
-    pub fn prime_ready(&self) -> bool {
-        self.detector_prime.is_some()
     }
 
     /// Whether the end-of-stream tail has been computed.
@@ -504,7 +523,6 @@ mod tests {
         }
         assert_eq!(feeder.total_samples(), 50_000);
         // The prefix head is consumed once the primes are cached.
-        assert!(feeder.prime_ready());
         for prefix in &feeder.prefix {
             assert!(prefix.is_empty());
         }

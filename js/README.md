@@ -4,7 +4,7 @@ Browser encoding for the WEM encoder kernel — the wasm-bindgen shell
 (`crates/wem-wasm`) plus a typed JS wrapper. WAV/PCM in, WEM bytes out. The
 profile data is **compiled into the wasm module**: nothing is fetched,
 indexed, or passed in, and no entry touches the filesystem. One-shot and
-streaming APIs mirror the C ABI (`include/wem.h`, ABI revision 2):
+streaming APIs mirror the C ABI (`include/wem.h`, ABI revision 3):
 same lifecycle, same error codes, same bytes, selected by the structured
 profile selection (one Wwise generation plus the PCM geometry).
 
@@ -14,23 +14,31 @@ profile selection (one Wwise generation plus the PCM geometry).
 js/
   package.json     name: wwise-wem-wasm (type: module)
   src/index.ts     the wrapper (typed entry; erasable-TS only, no build step)
-  pkg/             wasm-pack --target web      (browser/worker; .wasm fetched by URL)
-  pkg-node/        wasm-pack --target nodejs   (Node; .wasm read from disk on import)
-  test-node.mjs    Node parity test (reference sha256 + chunking consistency + selection/error codes)
+  pkg/             wasm-pack --target web      (browser/worker; .wasm fetched by URL)   — built
+  pkg-node/        wasm-pack --target nodejs   (Node; .wasm read from disk on import)   — built
+  test-node.mjs    Node parity test (reference bytes + chunking consistency + selection/error codes)
 ```
+
+`pkg/` and `pkg-node/` are `wasm-pack --out-dir` output and are not committed
+(`.gitignore`): nothing in the checkout is a wasm module, so build before
+testing or serving.
 
 Rebuilds (need wasm-pack + a wasm32 toolchain):
 
 ```sh
+make wasm-build      # repo root: builds both packages (js/pkg, js/pkg-node)
+make wasm-test       # repo root: builds both, then runs test-node.mjs
+
+cd js
 npm run build:web    # → pkg/
 npm run build:node   # → pkg-node/
-npm test             # → node test-node.mjs (requires pkg-node)
+npm test             # → node test-node.mjs (needs a built pkg-node)
 ```
 
 > **Build-tool note (wasm-pack 0.15+):** `--out-dir` is resolved relative to
 > the crate (`crates/wem-wasm`), not the current directory, so a relative
-> `--out-dir pkg` would write `crates/wem-wasm/pkg` and leave the committed
-> artifacts stale. The npm scripts therefore pass an absolute out-dir
+> `--out-dir pkg` would write `crates/wem-wasm/pkg` and leave whatever is in
+> `js/pkg` stale. The npm scripts therefore pass an absolute out-dir
 > (`--out-dir "$(pwd)/pkg"`); the equivalent from `crates/` is:
 >
 > ```sh
@@ -38,10 +46,11 @@ npm test             # → node test-node.mjs (requires pkg-node)
 > wasm-pack build wem-wasm --target nodejs --release --out-dir "$(pwd)/../js/pkg-node"
 > ```
 >
-> The committed `pkg/` and `pkg-node/` artifacts are refreshed that way and
-> must track the kernel source: the reference-sha check in `test-node.mjs` fails
-> against stale kernel bytes, and its 2ch/48k positive check fails against a
-> kernel that still refuses the 2ch configuration.
+> The built packages must track the kernel source: the reference-bytes check in
+> `test-node.mjs` fails against stale kernel bytes, and its 2ch/48k positive
+> check fails against a kernel that still refuses the 2ch configuration. The
+> test builds nothing itself: with no package present it stops and prints the
+> build command rather than reporting a comparison it did not run.
 
 ## API (sketch)
 
@@ -57,7 +66,7 @@ await listVersions();                   // [{ code: 0, label: "2013", generation
 
 // one-shot: WAV bytes → WEM. No selection → auto-selected from the WAV geometry.
 const wav = /* ArrayBuffer | Uint8Array */;
-const out = await encodeWav(wav);       // { data, totalLen, sha256Hex, stats }
+const out = await encodeWav(wav);       // { data, stats }
 
 // …or name the selection explicitly ({ version?, channels, sampleRate });
 // version: code (0 = Wwise 2013), label ("2013"), generation ("2013.2"), or omit to auto-select
@@ -75,7 +84,7 @@ const session = await createStreamSession(parsed);   // auto-selected from parse
 for (const chunk of chunksOf(parsed.pcm)) {
   session.push(chunk, (packets) => { /* seq 0 = setup packet, then audio */ });
 }
-const result = session.finish();        // { data, totalLen, sha256Hex, stats }
+const result = session.finish();        // { data, stats }
 session.destroy();
 ```
 
@@ -100,11 +109,11 @@ argument), `WEM_ERR_GEOMETRY_MISMATCH`, `WEM_ERR_INPUT_TOO_SHORT`,
 
 `test-node.mjs` pins byte-exactness: the representative 6ch/44.1kHz recording
 encoded through the wasm package must be byte-identical to the committed
-kernel reference `tests/fixtures/reference.wem` (SHA-256
-`17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247` — the
-test compares that file's bytes, so this digest documents the expected value
-rather than being restated by the test),
+kernel reference `tests/fixtures/reference.wem` — the test compares that
+file's bytes, so it restates neither a digest nor a length of it —
 across one-shot (auto-selected, explicit, and raw-PCM paths) and three
 chunking schemes; the compiled-in version table, the resolved selection of
-every constructor, and the selection/error code mapping must hold. Wired into
-CI (`.github/workflows/web.yml`).
+every constructor, and the selection/error code mapping must hold.
+`make wasm-test` builds both packages and then runs it; CI's `web` job runs that
+one target and publishes the built packages as a distribution artifact
+(`.github/workflows/web.yml`).

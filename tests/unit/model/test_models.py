@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import pickle
 import tempfile
 import unittest
@@ -85,28 +84,29 @@ class RawPcmTests(unittest.TestCase):
 
 class EncodeResultTests(unittest.TestCase):
     def test_stats_dictionary_is_an_independent_value(self):
+        # The statistics are the observations alone: no container length
+        # (that is ``len(result)``) and no label naming the selection the
+        # caller itself passed.
         expected = {
             "pcm_frames": 4096,
             "channels": 6,
             "audio_packets": 3,
             "short_packets": 2,
             "long_packets": 1,
-            "bytes": 4,
-            "metadata_source": "profile:6ch/44100Hz/2013",
         }
-        stats = EncodeStats(4096, 6, 3, 2, 1, 4, "profile:6ch/44100Hz/2013")
+        stats = EncodeStats(4096, 6, 3, 2, 1)
         self.assertEqual(stats.to_dict(), expected)
         result = EncodeResult(b"WEM!", stats)
         self.assertEqual(result.stats, stats)
-        self.assertEqual(result.sha256, hashlib.sha256(b"WEM!").hexdigest())
+        self.assertEqual(len(result), 4)
         converted = stats.to_dict()
-        converted["bytes"] = 100
-        self.assertEqual(result.stats.bytes, 4)
+        converted["pcm_frames"] = 100
+        self.assertEqual(result.stats.pcm_frames, 4096)
         with self.assertRaises(FrozenInstanceError):
             result.data = b"other"
 
     def test_result_reports_its_length_and_writes_itself(self):
-        stats = EncodeStats(2, 1, 1, 1, 0, 4, "profile:test")
+        stats = EncodeStats(2, 1, 1, 1, 0)
         result = EncodeResult(b"wem!", stats)
 
         self.assertEqual(len(result), 4)
@@ -119,12 +119,14 @@ class EncodeResultTests(unittest.TestCase):
             result.write_to(str(other))
             self.assertEqual(other.read_bytes(), result.data)
 
-    def test_rejects_inconsistent_counts_and_data_size(self):
+    def test_rejects_inconsistent_packet_counts(self):
         with self.assertRaisesRegex(ValueError, "packet counts"):
-            EncodeStats(1, 1, 2, 1, 0, 4, "profile:test")
-        stats = EncodeStats(1, 1, 1, 1, 0, 4, "profile:test")
-        with self.assertRaisesRegex(ValueError, "byte count"):
-            EncodeResult(b"bad", stats)
+            EncodeStats(1, 1, 2, 1, 0)
+        stats = EncodeStats(1, 1, 1, 1, 0)
+        self.assertEqual(stats.audio_packets, 1)
+        # No byte count is cross-checked any more: the statistics carry none,
+        # and the container's length is whatever `data` already is.
+        self.assertEqual(len(EncodeResult(b"bad", stats)), 3)
 
 
 class WwiseWemErrorTests(unittest.TestCase):

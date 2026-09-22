@@ -36,6 +36,14 @@ impl PsyFrame {
     pub fn window(&self) -> &WindowedFrame {
         &self.spectrum.window
     }
+    /// Consume the frame and hand back its source windowed frame, so a
+    /// caller that materializes one frame at a time can lend those row
+    /// buffers to the next frame instead of allocating new ones (the
+    /// scratch hand-back of
+    /// [`PlannedWindowSource::materialize`](crate::preprocessing::windowing::PlannedWindowSource::materialize)).
+    pub fn into_window(self) -> WindowedFrame {
+        self.spectrum.window
+    }
     /// The MDCT coefficients (Python `coefficients` property).
     pub fn coefficients(&self) -> &FloatRows {
         &self.spectrum.coefficients

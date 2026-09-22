@@ -33,23 +33,36 @@ places at once.
 
 | Quantity | Value | How established |
 |---|---:|---|
-| Committed wasm module | 1,651,013 B | `js/pkg/wem_wasm_bg.wasm` and `js/pkg-node/wem_wasm_bg.wasm` are byte-identical copies |
-| … of which the `data` section | 1,171,534 B (**71.0 %**) | section walk of the committed binary |
-| … of which the `code` section | 476,588 B (**28.9 %**) | same |
+| Module size, raw | 1,653,388 B | `make wasm-build` (wasm-pack 0.15.0, wasm-bindgen 0.2.128, wasm-pack's bundled `wasm-opt` 117, Rust release profile) on macOS arm64 (Apple M3 Max); `js/pkg/wem_wasm_bg.wasm` and `js/pkg-node/wem_wasm_bg.wasm` are byte-identical copies, SHA-256 `478f07af…93b17b` |
+| … what gzip gives it | 382,125 B (**23.1 %**) | `gzip -9 -n` (Apple gzip 487.0.1) over that module |
+| … what brotli gives it | 264,834 B (**16.0 %**) | `brotli -q 11` (brotli 1.2.0) over that module; `-q 9` gives 309,998 B. A serving concern, measured here, never committed: `Content-Encoding` is set by the server or CDN |
+| … of which the `data` section | 1,171,733 B (**70.9 %**) | section walk of that module |
+| … of which the `code` section | 478,764 B (**29.0 %**) | same |
 | … `import` / `export` / all other sections | 762 B / 571 B / <1 kB | same |
 | Imports | 14, all from `./wem_wasm_bg.js` (`__wbg_*`, `__wbindgen_generic_*`, `__wbindgen_init_externref_table`) | import section |
 | Exports | 26: `memory`, the `__wbindgen_externrefs` table, two globals (`__abort_handler`, `__instance_terminated`), 15 shell functions (`wem_versions`, `wem_parse_wav`, the `wemencoder_*` / `wemsession_*` entries and their `__wbg_*_free` helpers) and 7 `wasm-bindgen` runtime functions (`__wbindgen_malloc`, `__wbindgen_realloc`, `__wbindgen_free`, `__wbindgen_exn_store`, `__externref_table_alloc`, `__externref_table_dealloc`, `__wbindgen_start`) | export section |
 | Globals | 3: a mutable `i32` initialised to 1,048,576 (0x100000 — the stack pointer), and two `const` `i32`s at 0x2f7818 / 0x2f7840 (heap/data-end) | global section |
 | Data segments | 3,863 | data section |
 | Linear memory | 48 pages (3,145,728 B), no declared maximum | memory section |
-| Generated glue, web target | 18,751 B (`js/pkg/wem_wasm.js`) + 7,285 B typings | file sizes |
-| Generated glue, Node target | 15,516 B (`js/pkg-node/wem_wasm.js`) | file size |
+| Generated glue, web target | 19,468 B (`js/pkg/wem_wasm.js`) + 9,661 B typings (`wem_wasm.d.ts` 8,002, `wem_wasm_bg.wasm.d.ts` 1,659) | file sizes |
+| Generated glue, Node target | 16,233 B (`js/pkg-node/wem_wasm.js`) + 7,059 B typings (`wem_wasm.d.ts` 5,400, `wem_wasm_bg.wasm.d.ts` 1,659) | file sizes |
 | Hand-written facade | 17,227 B ([`../../js/src/index.ts`](../../js/src/index.ts), 508 lines) | file size |
-| `WebAssembly.compile` of the committed module | **1.0 ms** | `node v22.23.2`, macOS arm64 |
+| `WebAssembly.compile` of the built module | **1.0 ms** | `node v22.23.2`, macOS arm64 (Apple M3 Max) |
 | Import of the glue + instantiation | **4.5 ms** | same |
 | `parseWav` of the 6ch/44.1 kHz fixture | 0.9 ms (1,672,776 B PCM, 139,398 frames) | same |
 | `encodeWav` of that fixture | **225.9 ms ≈ 14.0× realtime**, SHA-256 `17851d26…d35247` | same; matches [`../reference/standards.md`](../reference/standards.md#what-is-established) |
 | PCM copy into wasm memory (`TypedArray.set` of 1,672,776 B) | 0.19 / 0.036 / 0.029 ms over three runs | same |
+
+The size, section, glue and compression rows were measured on the build this
+revision produces (`wasm-pack build wem-wasm --target web|nodejs --release`,
+the two commands of [`../../js/package.json`](../../js/package.json)). The same
+page previously recorded 1,651,013 B for the module, 1,171,534 B of data and
+476,588 B of code — an earlier build, whose numbers were still standing in the
+tree because wasm-pack's output was tracked rather than built. The number moves
+with the kernel: the same measurement read 1,651,463 B before three kernel
+merges landed and 1,653,388 B after them, while the counts (14 imports, 26
+exports, 3 globals, 48 pages, 3,863 data segments, 400 code functions) stayed
+fixed and the percentage split moved by 0.1 point.
 
 Two readings follow directly from that table and they decide most of what
 follows.
@@ -71,14 +84,16 @@ realtime in Node already.
 
 `crates/wem-wasm` is a `cdylib` over `wem-core` with `default-features = false`
 (threadless scalar path), compiled by wasm-pack to two targets: `--target web`
-(`js/pkg`) and `--target nodejs` (`js/pkg-node`), both committed
+(`js/pkg`) and `--target nodejs` (`js/pkg-node`), both built by
+`make wasm-build` — wasm-pack output, not committed
 ([`../../crates/wem-wasm/Cargo.toml`](../../crates/wem-wasm/Cargo.toml),
-[`../../.github/workflows/web.yml`](../../.github/workflows/web.yml)). The
+[`../../.github/workflows/web.yml`](../../.github/workflows/web.yml); CI builds
+and tests them in one run). The
 `#[wasm_bindgen]` surface maps the C ABI's lifecycle and error table 1:1 and owns
 no numerics ([`../../crates/wem-wasm/src/lib.rs`](../../crates/wem-wasm/src/lib.rs)).
 `wasm-bindgen` turns `&[u8]` parameters into `malloc` + `TypedArray.set` and
 returned `Vec<u8>` into `Uint8Array` views over wasm memory — visible in the
-committed glue at `passArray8ToWasm0` / `getArrayU8FromWasm0`
+generated glue at `passArray8ToWasm0` / `getArrayU8FromWasm0`
 (`js/pkg/wem_wasm.js`).
 
 The toolchain's governance changed in 2025 while the project was running:
@@ -138,7 +153,7 @@ names only Linux/macOS/Windows — see §9).
 This was measured here, not assumed: Apple clang 21 accepts
 `--target=wasm32-unknown-unknown -nostdlib`, `rust-lld -flavor wasm` links the
 resulting object into a working 471-byte module, and that module was wired in
-Node against the *committed* kernel instance (§3).
+Node against the *built* kernel instance (§3).
 
 ### 2.4 C, Zig or MoonBit as a second wasm module beside the kernel
 
@@ -239,7 +254,7 @@ stability, security or support, and may make breaking changes without notice.
   and says of `jco` that it is for "running in JS environments and browsers"
   ([wasi.dev](https://wasi.dev/)), i.e. a shim layer, not a host API.
 * **Plain `wasm32-unknown-unknown`** is supported by clang and lld (above), has
-  no sysroot of its own, and is the target the committed module is built for.
+  no sysroot of its own, and is the target the built module is compiled for.
 
 ## 3. The crux: can each option consume the *existing* module's exports?
 
@@ -264,14 +279,14 @@ name and an item name"
 Growth is also specified: `Memory.grow` refreshes the buffer and, for a
 fixed-length buffer, performs `DetachArrayBuffer`
 ([JS API](https://webassembly.github.io/spec/js-api/)) — which is why the
-committed glue re-creates its cached views.
+generated glue re-creates its cached views.
 
 **Measured, in this environment.** A 471-byte C module (Apple clang 21 →
 `wasm32-unknown-unknown` object → `rust-lld -flavor wasm --no-entry
 --allow-undefined --import-memory`) declaring exactly
 `env.memory` and `env.__wbindgen_malloc` was instantiated in Node with
 `{ env: { memory: kernel.memory, __wbindgen_malloc: kernel.__wbindgen_malloc } }`
-taken from an instance of the **committed** module. It called the kernel's own
+taken from an instance of the **built** module. It called the kernel's own
 allocator, wrote 16 bytes into the kernel's linear memory at the returned
 pointer (0x300008 — the call grew the memory from 48 to 65 pages, and a cached
 pre-growth view was observed `detached === true` while a fresh view worked), and
@@ -295,26 +310,26 @@ is judgement, marked as such.
 
 | Axis | Established fact | Judgement |
 |---|---|---|
-| Module size | 1,651,013 B, **71.0 % data**, 28.9 % code; ≤3 kB of it is the binding interface | No shell technology moves this. Only removing profile data from the module would, and that is excluded by [`../reference/standards.md`](../reference/standards.md#profile-data-ownership) |
-| Glue size | 18,751 B (web) / 15,516 B (Node) generated + 17,227 B hand-written facade | Replacing the generated glue by hand is a ~20 kB-sized change, not a size strategy |
+| Module size | 1,653,388 B raw — 382,125 B gzip `-9`, 264,834 B brotli `-q 11` — **70.9 % data**, 29.0 % code; ≤3 kB of it is the binding interface | No shell technology moves this. Only removing profile data from the module would, and that is excluded by [`../reference/standards.md`](../reference/standards.md#profile-data-ownership) |
+| Glue size | 19,468 B (web) / 16,233 B (Node) generated + 17,227 B hand-written facade | Replacing the generated glue by hand is a ~20 kB-sized change, not a size strategy |
 | Instantiation | compile 1.0 ms, glue import + instantiate 4.5 ms; module has no declared memory maximum, 48 initial pages | Nothing to optimize; a second module adds a second compile/instantiate of the same order |
 | Hot path | Every `&[u8]` in is copied (`passArray8ToWasm0`), results come back as views; the copy of the 1.67 MB fixture PCM costs 0.03–0.19 ms against a 225.9 ms encode | Interop friction is ~0.1 % of the work. Sharing one memory would remove the copy and buy nothing measurable |
 | Cross-module ABI | `DynamicLinking.md`: no stable ABI yet; lld: not yet finalized; JS-API-level wiring *is* stable and was measured to work | Second-module designs are buildable but rest on an unfinished ABI if they need the dynamic linker; with hand wiring they instead rest on hand-coordinated memory layout |
 | One memory, two runtimes | Measured across three modules: the kernel's one mutable global is a stack pointer at 0x100000 (1 MiB); a Zig-built module's is **also** 0x100000, because Zig's default link line is `--stack-first -z stack-size=1048576`; a clang-built module's is 64 KiB (lld's smaller default). The kernel's data begins at 1 MiB and its heap at 0x2f7818 | Sharing one memory aliases two runtimes' stacks **by construction**: the kernel's stack grows down from 1 MiB into exactly the region the Zig module reserved for its own stack. Nothing in the JS API, in `wasm-ld` or in either language's defaults coordinates the two layouts |
 | Toolchain maturity | `wasm-bindgen` 0.2.x current, steward changed in 2025; Zig 0.16.0 / 0.17.0-dev, no 1.0; MoonBit beta-preview 0.10.x, monthly, 1.0 slipped; component model Phase 1 CG; `jco` self-declared as not yet stable; `wasm-tools compose` deprecated in favour of `wac` | Every alternative here is *less* settled than the status quo, and none of them is settled in a way this project needs |
-| CI cost | One `web` job: rustup + wasm-pack action + Node 22 + two `wasm-pack build`s + `node js/test-node.mjs` ([`../../.github/workflows/web.yml`](../../.github/workflows/web.yml)) | A C shim adds clang/wasi-sdk/zig to that job; a second module adds a second build and a second committed artifact; the current job is one toolchain |
+| CI cost | One `web` job: rustup + wasm-pack action + Node 22 + `make wasm-test` (two `wasm-pack build`s, then `node js/test-node.mjs`), with the built packages published as a distribution artifact ([`../../.github/workflows/web.yml`](../../.github/workflows/web.yml)) | A C shim adds clang/wasi-sdk/zig to that job; a second module adds a second build and a second built artifact; the current job is one toolchain |
 | C-ABI/versioned surface | `include/wem.h` is revision 2, append-only error codes, callback-based output (`WemWriteCb`, `WemPacketCb`) | A same-module C shim *could* export the literal header, but the header's callback design means either real function pointers inside one module or a re-shaped surface; `crates/wem-capi` itself refuses `panic = "abort"` (`#[cfg(panic = "abort")] compile_error!`), which is what wasm-pack builds by default, so "the C ABI compiled to wasm" is a nightly-toolchain decision, not a shim decision |
 | Panic semantics | `wasm-pack`: "By default, Rust panics in WebAssembly compile with `panic=abort`, which aborts the WebAssembly instance"; wasm-bindgen's catch-unwind path needs nightly, `-Zbuild-std=std,panic_unwind`, `-Cpanic=unwind` and wasm exception handling, and Node ≥ 22.22.3 ([catch-unwind](https://wasm-bindgen.github.io/wasm-bindgen/reference/catch-unwind.html)) | The wasm shell's panic divergence from the C ABI is real and documented in [`../../crates/wem-wasm/src/lib.rs`](../../crates/wem-wasm/src/lib.rs) — and it is orthogonal to this survey: no shell language fixes it; the catch-unwind stack is the only documented route and is its own decision |
-| What must be maintained | Today: one Rust crate, two committed build outputs, one facade, one parity test | Each alternative adds a language, a toolchain, or a second artifact, and all of them still owe the same `js/test-node.mjs` parity checks |
+| What must be maintained | Today: one Rust crate, two build outputs (wasm-pack, rebuilt and tested in CI), one facade, one parity test | Each alternative adds a language, a toolchain, or a second artifact, and all of them still owe the same `js/test-node.mjs` parity checks |
 
 ## 5. What each option would change in this repository
 
 | Option | Files and workflows touched | Kernel touched? |
 |---|---|---|
 | Status quo | nothing | no |
-| Rust without wasm-bindgen | [`../../crates/wem-wasm/src/lib.rs`](../../crates/wem-wasm/src/lib.rs) (attributes → `extern "C"` + `#[unsafe(no_mangle)]`, a small `(ptr,len)`/status protocol, an exported allocator), [`../../crates/wem-wasm/Cargo.toml`](../../crates/wem-wasm/Cargo.toml) (drop `wasm-bindgen`/`js-sys`), the workspace dependency block in [`../../crates/Cargo.toml`](../../crates/Cargo.toml) and [`../../crates/Cargo.lock`](../../crates/Cargo.lock), both committed outputs `js/pkg/*` and `js/pkg-node/*` (now hand-written loaders), [`../../js/src/index.ts`](../../js/src/index.ts) (loader/init), [`../../js/test-node.mjs`](../../js/test-node.mjs) (import path/init), [`../../.github/workflows/web.yml`](../../.github/workflows/web.yml) (wasm-pack → `cargo build --target wasm32-unknown-unknown` + a copy step), [`../../js/README.md`](../../js/README.md), [`../../examples/wasm-demo/demo.mjs`](../../examples/wasm-demo/demo.mjs) (init call), [`../guides/usage.md`](../guides/usage.md) (the "wasm-bindgen shell" row) | no |
-| C shim in the same module | everything above, plus a new shim source + a link step (`clang`/`zig cc` object, `rust-lld` link), a `staticlib`-capable build of the kernel crates, `include/wem.h` gaining wasm-specific notes or a wasm section, and a decision about the panic contract | no, but `wem-core`/`wem-capi` build configuration changes |
-| Second module (C/Zig/MoonBit) | a second source tree + a second build in `web.yml`, a second committed artifact in `js/`, loader changes in `js/src/index.ts` and `js/test-node.mjs`, demo changes, and a memory-layout contract documented somewhere that neither module can enforce | no |
+| Rust without wasm-bindgen | [`../../crates/wem-wasm/src/lib.rs`](../../crates/wem-wasm/src/lib.rs) (attributes → `extern "C"` + `#[unsafe(no_mangle)]`, a small `(ptr,len)`/status protocol, an exported allocator), [`../../crates/wem-wasm/Cargo.toml`](../../crates/wem-wasm/Cargo.toml) (drop `wasm-bindgen`/`js-sys`), the workspace dependency block in [`../../crates/Cargo.toml`](../../crates/Cargo.toml) and [`../../crates/Cargo.lock`](../../crates/Cargo.lock), both built outputs `js/pkg/*` and `js/pkg-node/*` (now hand-written loaders), [`../../js/src/index.ts`](../../js/src/index.ts) (loader/init), [`../../js/test-node.mjs`](../../js/test-node.mjs) (import path/init), [`../../.github/workflows/web.yml`](../../.github/workflows/web.yml) (wasm-pack → `cargo build --target wasm32-unknown-unknown` + a copy step), [`../../js/README.md`](../../js/README.md), [`../../examples/wasm-demo/demo.mjs`](../../examples/wasm-demo/demo.mjs) (init call), [`../guides/usage.md`](../guides/usage.md) (the "wasm-bindgen shell" row) | no |
+| C shim in the same module | everything above, plus a new shim source + a link step (`clang`/`zig cc` object, `rust-lld` link), a `staticlib`-capable build of the kernel crates, `include/wem.h` gaining wasm-specific notes or a wasm section, and a decision about the panic semantics | no, but `wem-core`/`wem-capi` build configuration changes |
+| Second module (C/Zig/MoonBit) | a second source tree + a second build in `web.yml`, a second built artifact in `js/`, loader changes in `js/src/index.ts` and `js/test-node.mjs`, demo changes, and a memory layout documented somewhere that neither module can enforce | no |
 | Component model | replace `crates/wem-wasm` with a `wit-bindgen` guest crate + a WIT world, build for `wasm32-wasip2`, add `jco`/`wasm-tools` to the toolchain and to `web.yml`, replace `js/pkg*` with transpiled output, rewrite the facade's loader, keep `js/test-node.mjs`'s checks (`../../js/test-node.mjs`), and re-document [`../reference/standards.md`](../reference/standards.md#integration-topology) | no, but the shell is rewritten rather than edited |
 | `include/wem.h` | unchanged by every option above except the C-shim row, where it becomes a wasm-facing surface too | — |
 
@@ -409,7 +424,7 @@ handed the same header as the native ones. What must hold: the kernel crates
 produce a wasm `staticlib` that links with a clang/`zig cc` shim under `wasm-ld`;
 the callback model (`WemWriteCb`/`WemPacketCb`) is either implemented with real
 function pointers inside the single module or replaced by a documented
-wasm-shaped equivalent; and the panic contract is either explicitly reduced for
+wasm-shaped equivalent; and the panic semantics are either explicitly reduced for
 wasm or paired with the nightly unwind stack — because
 `crates/wem-capi/src/lib.rs` cannot compile under `panic = "abort"`, which is
 what wasm-pack builds by default.
@@ -432,8 +447,8 @@ replacement glue layer.
 
 Honest gaps, in the order they would matter to a decision:
 
-1. **How much of the 476,588-byte code section is wasm-bindgen?** Not established
-   by any primary source and not measurable from the committed artifact alone.
+1. **How much of the 478,764-byte code section is wasm-bindgen?** Not established
+   by any primary source and not measurable from the built artifact alone.
    *Spike:* build `crates/wem-wasm` with and without `wasm-bindgen` (wasm-pack and
    `cargo build --target wasm32-unknown-unknown` respectively, same profile) and
    diff module size + section sizes. This is the number that decides whether the

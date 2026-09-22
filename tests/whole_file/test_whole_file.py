@@ -10,8 +10,7 @@ FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 class WholeFileEncoderTests(unittest.TestCase):
     def test_complete_wem_is_bit_exact(self):
         # The whole-file claim is the byte comparison against the committed
-        # reference WEM; that file's SHA-256 is also recorded in
-        # tests/data/stage-records/stages/index.json.
+        # reference WEM (the paired build's output for this input).
         result = encode(FIXTURES / "input.wav")
         reference = (FIXTURES / "reference.wem").read_bytes()
         self.assertEqual(result.data, reference)
@@ -21,8 +20,10 @@ class WholeFileEncoderTests(unittest.TestCase):
         self.assertEqual(stats.audio_packets, 205)
         self.assertEqual(stats.short_packets, 77)
         self.assertEqual(stats.long_packets, 128)
-        self.assertEqual(stats.bytes, 108771)
-        self.assertEqual(stats.metadata_source, "profile:6ch/44100Hz/2013")
+        # The container length is the caller's own count of the bytes it
+        # holds; the library returns it nowhere.
+        self.assertEqual(len(result), len(reference))
+        self.assertEqual(len(result), 108771)
 
 
 if __name__ == "__main__":

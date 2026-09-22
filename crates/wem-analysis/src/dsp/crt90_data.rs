@@ -3,8 +3,6 @@
 // byte-read provenance; carrier md5 d21427e9... Wine builtin). Indices
 // are absolute VAs minus the table base, like the reference `c(va)`.
 
-pub const CIATAN_BASE: u64 = the build's code;
-pub const CIATAN_WORDS: u32 = 25;
 pub const CIATAN: &[u64] = &[
     0x3c7a2b7f222f65e2,
     0x3c81a62633145c07,
@@ -33,8 +31,6 @@ pub const CIATAN: &[u64] = &[
     0x3fc999999998ebc4,
 ];
 
-pub const CIEXP_BASE: u64 = the build's code;
-pub const CIEXP_WORDS: u32 = 276;
 pub const CIEXP: &[u64] = &[
     0x3ff0000000000000,
     0x0010000000000000,
@@ -314,8 +310,6 @@ pub const CIEXP: &[u64] = &[
     0x3feff3c22b8f71f1,
 ];
 
-pub const CILOG_BASE: u64 = the build's code;
-pub const CILOG_WORDS: u32 = 553;
 pub const CILOG: &[u64] = &[
     0x3ff0000000000000,
     0xbff0000000000000,

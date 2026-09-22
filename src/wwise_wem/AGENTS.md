@@ -15,7 +15,7 @@ boundaries, and what "fail loudly" means — are in
 
 - Package root exports: listed in
   [`../../docs/reference/public-interface.md`](../../docs/reference/public-interface.md),
-  asserted by `tests/parity/test_public_api.py` and the distribution tests.
+  asserted by `tests/parity/test_public_surface.py` and the distribution tests.
   Internal module paths are not part of that surface, and the extension's module
   name is owned by the packaging surface, not restated here.
 - DTO immutability and the `_f32` rounding sites follow

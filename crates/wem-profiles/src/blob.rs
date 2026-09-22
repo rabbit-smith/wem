@@ -29,10 +29,12 @@ pub const BLOB_MAGIC: &[u8; 8] = b"WEMPROF\0";
 ///
 /// Version 2 dropped the stored profile name: the human label is derived from
 /// the identity (`ProfileKey::label`), so the stream carries identity and
-/// values only. Version 3 dropped the stored setup digest: the key's identity
-/// names the packet and the packet's own bytes travel in the stream, so a
-/// second copy of its SHA-256 proved nothing.
-pub const BLOB_VERSION: u32 = 3;
+/// values only. Version 3 dropped the stored setup digest. Version 4 dropped
+/// the stored quality/setup identity: the key is the profile's identity
+/// (generation, channels, sample rate, channel layout), and a digest of the
+/// setup packet stored next to the packet's own bytes decided nothing the
+/// bytes do not already decide.
+pub const BLOB_VERSION: u32 = 4;
 
 const KIND_U32: u8 = 0;
 const KIND_I64: u8 = 1;
@@ -146,7 +148,6 @@ pub fn profile_tables_blob() -> Vec<u8> {
 fn write_profile(out: &mut Blob, tables: &ProfileTables) {
     out.text(tables.key.generation);
     out.text(tables.key.channel_layout);
-    out.text(tables.key.quality_setup_identity);
     out.i64(tables.key.channels);
     out.i64(tables.key.sample_rate);
     out.i64(tables.block_sizes[0]);

@@ -39,9 +39,10 @@ from wwise_wem.profiles.key import ProfileKey, profile_label
 
 MAGIC = b"WEMPROF\0"
 #: Version 2 dropped the stored profile name (the label is derived now);
-#: version 3 dropped the stored setup digest (the key's identity names the
-#: packet and the packet's own bytes travel in the stream).
-VERSION = 3
+#: version 3 dropped the stored setup digest; version 4 dropped the stored
+#: quality/setup identity (the key is the profile's identity: generation,
+#: channels, sample rate, channel layout).
+VERSION = 4
 
 KIND_U32 = 0
 KIND_I64 = 1
@@ -141,7 +142,6 @@ class CompiledProfile:
 
     generation: str
     channel_layout: str
-    quality_setup_identity: str
     channels: int
     sample_rate: int
     block_sizes: tuple[int, int]
@@ -167,7 +167,6 @@ class CompiledProfile:
         return (
             self.generation,
             self.channel_layout,
-            self.quality_setup_identity,
             self.channels,
             self.sample_rate,
             self.block_sizes,
@@ -206,7 +205,6 @@ class CompiledProfile:
             self.sample_rate,
             self.generation,
             self.channel_layout,
-            self.quality_setup_identity,
         )
 
     @property
@@ -266,7 +264,6 @@ def named_blocks(profile: "CompiledProfile", prefix: str, suffix: str) -> list[s
 def _read_profile(reader: _Reader) -> CompiledProfile:
     generation = reader.text()
     channel_layout = reader.text()
-    quality_setup_identity = reader.text()
     channels = reader.i64()
     sample_rate = reader.i64()
     block0 = reader.i64()
@@ -288,7 +285,6 @@ def _read_profile(reader: _Reader) -> CompiledProfile:
     return CompiledProfile(
         generation=generation,
         channel_layout=channel_layout,
-        quality_setup_identity=quality_setup_identity,
         channels=channels,
         sample_rate=sample_rate,
         block_sizes=(block0, block1),

@@ -19,29 +19,33 @@ the reverse.
 
 A comparison runs two implementations against each other (the oracle against the
 kernel, the C ABI against the kernel, the built wheel against its allowlist), or
-a run against a checked asset. A recorded expectation is not a comparison: when
-it disagrees with a run it hides the change behind a re-record step.
+a run against an external reference (the paired build's WEM for the fixture and
+for each corpus case). A recorded expectation is not a comparison: when it
+disagrees with a run it hides the change behind a re-record step.
 
 When a comparison reports a difference, the difference says what moved: either
 the code is wrong, or the expected bytes have changed as part of the work. Those
 are two different changes, and a case is never satisfied by re-recording it.
 
-Every stage lands with its comparison against the checked per-frame records
-(`tests/data/stage-records/`): a SHA-256 per frame and stage for all 205 frames,
-and raw little-endian dumps for the 28 representative frames. The diff names the
-first mismatching frame index, stage, channel and bin and prints both words; a
-stage is not done until it comes back zero.
+Every stage lands with its comparison against the oracle's live per-frame
+values (`crates/wem-core/tests/frame_pipeline_parity.rs` for the crate surfaces,
+`tests/parity/test_frame_pipeline_parity.py` through the shipped binding): both
+implementations run at test time over all 205 frames of the fixture, and every
+float32 word of the eight analysis stages, every floor post, every quantized
+residue integer and every packet byte is compared value against value. The diff
+names the first mismatching frame index, stage, channel and bin and prints both
+words; a stage is not done until it comes back zero.
 
 ## What is established
 
 | Claim | Established by |
 |---|---|
-| The reference WEM for `tests/fixtures/input.wav`, byte for byte — SHA-256 `17851d26c6210b85e498ae0452d2562d7b9e2c3e9e795c459656b9c9d8d35247` | `make wem-bytes` (`tests/whole_file/test_whole_file.py`); `crates/wem-core/tests/complete_wem_bytes.rs` |
-| Per-frame values, and per-frame × per-stage hashes with the raw dumps of the 28 representative frames | `tests/parity/test_frame_pipeline_parity.py`, `tests/parity/test_stage_pipeline.py`, `cargo test -p wem-core` |
-| The package-root public exports and the wheel inventory | `tests/parity/test_public_api.py`, `tests/parity/test_distribution.py`, `make wheel-smoke`; the export list is in [`public-interface.md`](public-interface.md) |
+| The reference WEM for `tests/fixtures/input.wav`, byte for byte — the committed `tests/fixtures/reference.wem`, compared as the bytes it is | `make wem-bytes` (`tests/whole_file/test_whole_file.py`); `crates/wem-core/tests/encoder.rs` |
+| Per-frame values: scheduling fields, eight analysis stages, floor posts, residue rows, packet bytes, all 205 frames | `crates/wem-core/tests/frame_pipeline_parity.rs`, `tests/parity/test_frame_pipeline_parity.py` |
+| The package-root public exports and the wheel inventory | `tests/parity/test_public_surface.py`, `tests/parity/test_distribution.py`, `make wheel-smoke`; the export list is in [`public-interface.md`](public-interface.md) |
 | Geometry-materializer parity: the ported builder == the carrier's registered words == the kernel's `psy_geom*` surfaces | `tests/parity/test_geometry_materializer_parity.py`; `cargo test -p wem-analysis` |
 | The compiled profile carrier: the kernel's tables equal the recorded material, table by table | `crates/wem-profiles/src/carrier_tests.rs` (stage 1, retired with the recorded tree), `tests/parity/test_geometry_materializer_parity.py`, `cargo test -p wem-profiles` |
-| The 2ch/48 kHz result, its corpora, and the limits of that evidence | `tests/parity/test_2ch_reference_corpus.py`, `tests/parity/test_2ch_stress_corpus.py`, [`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md) |
+| The 2ch/48 kHz result, its corpora, and the limits of that evidence | `tests/parity/test_2ch_corpus.py`, [`../findings/2ch-byte-exactness.md`](../findings/2ch-byte-exactness.md) |
 
 Running those suites is what establishes each claim. The local targets that run
 them are listed in
@@ -51,16 +55,16 @@ them are listed in
 
 - No runtime transcendental (`sin`, `cos`, `log`, `log10`, `pow`, `exp`) in an
   encoder path — in Python (`math.sin/cos/log/log10/pow/exp` outside the
-  recorder in `reference/wwise_wem_reference/_tmath.py`) or in Rust
+  site recorder in `reference/wwise_wem_reference/_tmath.py`) or in Rust
   (`f32::sin/cos/ln/log/exp/powf`). Every such value comes from profile data
   (`FrozenMathTables`, the MDCT trig bank, the static trig banks); a ported
   function that would need one is a design error, not a TODO. A new geometry
-  that needs a new transcendental input extends `scripts/record_tmath.py` →
-  `scripts/generate_frozen_tables.py` and ships it as a checksummed profile
+  that needs a new transcendental input is derived by
+  `scripts/generate_frozen_tables.py` and ships as a checksummed profile
   resource; encoder code may only table-read it.
-  `tests/unit/profiles/test_frozen_tables.py` checks the frozen domain and that
-  an encode through the installed profile fires zero live calls at the four
-  enumerable sites.
+  `tests/unit/profiles/test_frozen_tables.py` checks the frozen domain against a
+  fresh derivation and that an encode through the installed profile fires zero
+  live calls at the four enumerable sites.
 - Float semantics: values are float32 at every assignment point. The Python
   `_f32` call sites mark those points, and Rust rounds at the same statements —
   an intermediate Python keeps as float64-wrapped-float32 is not promoted or
@@ -71,23 +75,25 @@ them are listed in
   rounding.
 - Cross-frame mutable state lives in exactly one analysis session (domain model:
   *Analysis session*); everything else stays immutable.
-- Generated assets (`tests/data/stage-records/`, the frozen tables) come out
-  byte-identical when regenerated: deterministic ordering (`sort_keys`, sorted
-  file walks), explicit little-endian packing, no timestamps, absolute paths or
-  other ambient values in an artifact, and every emit/record script safe to run
-  twice with an empty diff.
+- Generated artifacts (the frozen-table payloads, the generated profile code,
+  the 2ch corpus inputs) come out byte-identical when regenerated: deterministic
+  ordering (`sort_keys`, sorted file walks), explicit little-endian packing, no
+  timestamps, absolute paths or other ambient values in an artifact, and every
+  generator script safe to run twice with an empty diff.
 
 ## Bit patterns
 
 Bit patterns travel as integers or little-endian bytes, never as decimal strings.
 A float crosses a boundary through `to_bits`/`from_bits` or its little-endian
-bytes; a digest or a word is carried as a value or as bytes, not as text to be
-re-parsed. This includes code that carries profile data.
+bytes; a word is carried as a value or as bytes, not as text to be re-parsed.
+This includes code that carries profile data.
 
-The assets follow the same rule: values are compared as 8-hex-digit words
-(`tests/parity/oracle_frame_values.py`), and byte-level dumps are raw or
-little-endian numeric with the endianness in the file suffix (`.f32le`, `.u16le`,
-`.u8`, `.u64le`) — never text floats, never `repr`.
+The live comparison follows the same rule: the oracle's value stream carries
+every row as 8-hex-digit bit-pattern words
+(`tests/parity/oracle_frame_values.py`), so a consumer compares value against
+value and can name the first differing channel and bin — never text floats,
+never `repr`. A file that has to carry raw words names the endianness in its
+suffix.
 
 ## Layers and dependency direction
 
@@ -147,18 +153,19 @@ so the cause is reachable from the value the caller holds, and the message
 carries the observed values rather than a category name. A panic means an
 invariant broke, not that the caller passed something bad.
 
-`crates/wem-core/tests/error_source_chain.rs` walks `EncoderError` →
+`crates/wem-core/tests/errors.rs` (`source_chain`) walks `EncoderError` →
 `InternalError` → the stage error (`ProfileError`, `AnalysisError`,
 `PacketError`, `ContainerError`) through `source()` and pins that the innermost
 cause is reachable. At the Python boundary,
-`tests/parity/test_error_surface.py` pins that `WwiseWemError.code` is the
+`tests/parity/test_public_surface.py` (`FacadeErrorCodeTests`) pins that
+`WwiseWemError.code` is the
 kernel's own class, that `str(error)` is the kernel's diagnostic unchanged, and
 that the kernel error stays reachable as `__cause__`.
 
 **Error types are exhaustively matchable.** A public error enum carries no
 `#[non_exhaustive]`, on purpose: adding a variant is a breaking change, and the
 compiler must tell every caller that a new failure mode exists.
-`crates/wem-core/tests/error_variants.rs` matches every public error enum with
+`crates/wem-core/tests/errors.rs` (`variants`) matches every public error enum with
 no `_` arm, from a caller's position, so the rule is compiler-enforced: a new
 variant fails that build until the caller's arm is written. Adding an error
 *code* on the C ABI, or a code string in Python, is not a breaking change —
@@ -181,7 +188,7 @@ wasm shell builds with `panic = "abort"`, where an invariant violation
 terminates the instance instead of unwinding. A handle that carries state across
 calls is terminal after a failure: `push` and `finish` on a finished or failed
 session are rejected, never silently resumed, while a one-shot call may be
-retried (`crates/wem-capi/tests/capi_e2e.rs` covers the finished-session
+retried (`crates/wem-capi/tests/capi_surface.rs` covers the finished-session
 rejection and two encodes through one shared handle).
 
 ## Caller streams and ambient state
@@ -214,14 +221,37 @@ resource intake and the frozen transcendental tables are in
 
 A profile's values are Rust constants in the same artifact as the setup packet
 they belong to, so there is nothing to locate, address or verify at run time:
-the identity the key carries is the digest of exactly the packet the carrier
-holds, recomputed from those bytes when the value model is built from the
-carrier (`crates/wem-profiles/src/model.rs`), so no stored digest copy can drift
-from them; the carrier itself is proved value-for-value against the recorded
-material. A construction path that requests a value outside the frozen domain
-fails loudly instead of consulting the host libm. The carrier layout is in
-[`architecture.md`](architecture.md#profile-ownership), and provenance — no
-profile value is fitted to an output — is in [`profiles.md`](profiles.md).
+the identity is the key, the packet travels as its own bytes and nothing derived
+from them is stored beside them, and the carrier is proved value-for-value
+against the recorded material. A construction path that requests a value outside
+the frozen domain fails loudly instead of consulting the host libm. The carrier
+layout is in [`architecture.md`](architecture.md#profile-ownership), and
+provenance — no profile value is fitted to an output — is in
+[`profiles.md`](profiles.md).
+
+**No result carries a digest.** A caller that wants one computes it from the
+bytes it received — the container the write callback delivered, or the file it
+wrote — with whatever tool and encoding it prefers, and compares it as it
+likes; the library picks no algorithm, no encoding and no buffer size for it,
+and charges no caller for one it did not ask for. A profile's identity is its
+key — generation, channels, sample rate, channel layout — so no digest names a
+packet or a table; a setup packet, a record or a fixture travels as the bytes
+themselves, so nothing is compared against a digest of what is already at hand
+and nothing is derived from bytes only to be checked against those same bytes;
+a comparison is made against the bytes it is about (the committed reference
+container, the fixture assets, the oracle's live value stream), and a failure
+prints the first differing byte and the two lengths instead of a digest of two
+whole files.
+
+**A result carries observations, not recompositions.** The library returns what
+it observed and what the caller cannot cheaply get. Anything the caller can
+compute from bytes it already holds, or compose from arguments it already
+passed, stays out of the result: a container's byte length is what the caller's
+own write callback counts, and a label naming the selected profile is the
+selection the caller itself passed. What remains is what the caller genuinely
+cannot recompose — the PCM frame count (a streaming caller may never have
+counted the frames it pushed) and the packet counts with their short/long split
+(they require parsing the assembled container).
 
 ## Integration topology
 
@@ -236,7 +266,7 @@ Shells mirror that interface 1:1, map errors 1:1 without inventing variants, and
 own no numerics and no profile logic; a new language integrates by writing a
 shim over the C ABI, never by changing the kernel for it, and a shell that needs
 something the others do not gets a new stable C ABI entry point rather than a
-kernel fork. `crates/wem-capi/tests/capi_e2e.rs` runs the C surface against the
+kernel fork. `crates/wem-capi/tests/capi_surface.rs` runs the C surface against the
 kernel — reference bytes through the FFI, error-code mapping, lifecycle
 violations, shareable handles.
 
@@ -246,8 +276,8 @@ parallel with the C ABI.
 
 Streaming chunk boundaries must not affect the output bytes: any chunking of the
 input yields the same container.
-`crates/wem-core/tests/stream_session.rs` and
-`tests/parity/test_2ch_stress_corpus.py` compare the batch, one-chunk and uneven
+`crates/wem-core/tests/streaming.rs` and
+`tests/parity/test_2ch_corpus.py` compare the batch, one-chunk and uneven
 chunking paths, and `make fuzz-parity` (`scripts/fuzz_diff_parity.py`) runs the
 oracle against the native kernel over a fixed seed set of random PCM streams and
 random frame-aligned chunk splits.
@@ -260,9 +290,11 @@ by the test suites, and never imported by runtime code.
 
 The kernel stays compilable for `wasm32-unknown-unknown` in a scalar
 configuration. `wem-core`'s `parallel` feature — per-channel rayon partitioning
-inside `wem-analysis` — is default-on for native builds and can be dropped by a
-threadless consumer, which is how `crates/wem-wasm` builds it; the scalar path
-is the one the parity comparisons read.
+inside `wem-analysis`, run in a worker pool the analysis session owns and sizes
+to its channel count rather than in rayon's process-global pool — is default-on
+for native builds and can be dropped by a threadless consumer, which is how
+`crates/wem-wasm` builds it; the scalar path is the one the parity comparisons
+read.
 
 Profile bytes are consumable without filesystem I/O: the tables are compiled
 into the library and resolved by selection

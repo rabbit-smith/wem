@@ -37,8 +37,14 @@ at these documents instead of restating them.
 | [`guides/usage.md`](guides/usage.md) | Installing the encoder, encoding a file, calling it from each language |
 | [`guides/development.md`](guides/development.md) | Building, running the tests, and the rules the work is held to |
 | [`findings/2ch-byte-exactness.md`](findings/2ch-byte-exactness.md) | Needing the 2ch evidence, its root causes, its retractions, or its trust boundary |
+| [`findings/concurrency-curves.md`](findings/concurrency-curves.md) | Asking how many encodes this machine runs at once, whether the kernel's internal parallelism pays for itself, or how to size a worker pool |
+| [`findings/duration-curves.md`](findings/duration-curves.md) | Asking how peak memory and encode time behave as the input grows from seconds to ten minutes, in both installed geometries and on both the one-shot and streaming paths |
+| [`findings/pool-sizing.md`](findings/pool-sizing.md) | Asking what the long-frame channel pool is sized to, why it is not the process-global pool, or what the parallel feature's CPU actually goes on |
+| [`findings/internal-parallelism-practice.md`](findings/internal-parallelism-practice.md) | Asking what other libraries document about owning threads — rayon, BLAS and `threadpoolctl`, OpenMP, FFTW, the codec encoders, the Rust ecosystem and the platform limits — and which of it this repository matches or conflicts with |
+| [`findings/profile-as-code.md`](findings/profile-as-code.md) | Asking where the profile values live now, or what established that the move into the kernel is exact |
 | [`findings/browser-shell-toolchain-options.md`](findings/browser-shell-toolchain-options.md) | Asking whether the browser shell should stay Rust and what C, Zig or MoonBit would actually buy |
 | [`findings/encode-performance.md`](findings/encode-performance.md) | Needing the encode's measured stage split, its scaling in stream length, or the list of what is worth optimizing and what is not |
+| [`findings/decode-transform-feasibility.md`](findings/decode-transform-feasibility.md) | Asking whether a `decode` surface is bounded work, which chain segments already exist in the kernel, and why bit-exactness against libvorbis is not a shippable claim |
 | [`methodology/byte-exact-diagnosis.md`](methodology/byte-exact-diagnosis.md) | Chasing any byte difference against an external build |
 | [`roadmap.md`](roadmap.md) | Asking what is still open |
 
@@ -55,6 +61,11 @@ at these documents instead of restating them.
   at a point in time, and it links to reference material instead of restating it.
 - **`methodology/`** holds reusable method, written only after it has actually
   decided a case.
+- **`figures/`** holds committed figures and the recorded samples behind them:
+  a generated image and the data it was rendered from, so a reader can check the
+  numbers and re-render the picture instead of trusting the picture. Each is
+  produced by a script under `scripts/` that is byte-stable, and the finding that
+  discusses it embeds it by relative link.
 
 ## Conventions
 

@@ -51,7 +51,6 @@ impl CompiledProfile {
             parts.sample_rate,
             parts.generation.to_string(),
             parts.channel_layout.to_string(),
-            parts.quality_setup_identity.to_string(),
         )?;
         Ok(Self { tables, key })
     }
@@ -328,7 +327,6 @@ pub fn compiled_profile_for_selection(
                     tables.key.sample_rate,
                     tables.key.generation,
                     tables.key.channel_layout,
-                    tables.key.quality_setup_identity,
                 )
             })
             .collect::<Vec<_>>()

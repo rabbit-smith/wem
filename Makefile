@@ -1,6 +1,7 @@
-.PHONY: test test-fast fuzz-parity 2ch-stress 2ch-long wem-bytes lint rust-fmt rust-lint rust-test rust-bench build wheel-smoke check clean native
+.PHONY: test test-fast fuzz-parity 2ch-stress 2ch-long wem-bytes lint rust-fmt rust-lint rust-test rust-bench build wheel-smoke wasm-build wasm-test check clean native
 
 PY ?= python3
+NODE ?= node
 
 test: test-fast fuzz-parity 2ch-stress 2ch-long wem-bytes
 
@@ -13,7 +14,7 @@ fuzz-parity:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) scripts/fuzz_diff_parity.py --pr
 
 2ch-stress:
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest tests.parity.test_2ch_stress_corpus -v
+	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest tests.parity.test_2ch_corpus.TwoChannelStressCorpusTests -v
 
 2ch-long:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:reference $(PY) -m unittest tests.parity.two_channel_long_run -v
@@ -54,6 +55,21 @@ rust-test:
 
 rust-bench:
 	cd crates && cargo build --release -p wem-core && target/release/wwise-wem ../tests/fixtures/input.wav --output /dev/null --time
+
+# Web/Node shell packages: wasm-pack builds both targets — js/pkg (web) and
+# js/pkg-node (nodejs). They are wasm-pack output and are not committed, so
+# build them before the Node test or the browser demo. The npm scripts carry
+# the absolute --out-dir, because wasm-pack resolves a relative one against the
+# crate directory rather than the current one.
+wasm-build:
+	cd js && npm run build
+
+# The shell's byte comparison: build both packages, then run the Node test that
+# checks the wasm encoder's bytes against tests/fixtures/reference.wem, one-shot
+# and across chunkings. Without a built package the test fails with the build
+# command; it never skips.
+wasm-test: wasm-build
+	$(NODE) js/test-node.mjs
 
 check: lint rust-fmt rust-lint test wheel-smoke
 

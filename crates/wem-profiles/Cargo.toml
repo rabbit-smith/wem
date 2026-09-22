@@ -5,6 +5,5 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-sha2 = { workspace = true }
 wem-analysis = { workspace = true }
 wem-vorbis = { workspace = true }

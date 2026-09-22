@@ -1,9 +1,8 @@
 //! Generated encoder profile tables. Do not edit; regenerate with
 //! `python3 scripts/generate_profile_code.py`.
 //!
-//! Source material: the profile tree (`--help` names the location),
-//! content digest `f5f97ba673b4b045a1b741b94bbeb8801cf3b357c086221de9bea764b137672f`. Every float is stored as its IEEE bit
-//! pattern, never as a decimal literal.
+//! Source material: the profile tree (`--help` names the location).
+//! Every float is stored as its IEEE bit pattern, never as a decimal literal.
 
 use super::codebooks;
 use crate::model::ContainerMetadata;
@@ -18,7 +17,6 @@ pub static KEY: ProfileKeyParts = ProfileKeyParts {
     sample_rate: 44100,
     generation: "2013.2",
     channel_layout: "5.1",
-    quality_setup_identity: "sha256:3ef56cbd6e6a66a5474005db05912624487faa555fb2cdfed130f606b322e4e3",
 };
 
 #[rustfmt::skip]

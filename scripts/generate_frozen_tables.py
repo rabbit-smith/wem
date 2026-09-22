@@ -2,27 +2,28 @@
 """Generate the frozen transcendental tables for one exact 2013.2 profile.
 
 The default 6ch/44100 profile derives every value from the current analysis
-path (the oracle), cross-checks the generated input domain against the
-recording produced by ``scripts/record_tmath.py``, then writes the payload,
-registers it in the profile manifest, and re-addresses index.json by the
-manifest's new SHA-256.
+path (the oracle), then writes the payload and registers it in the profile
+manifest by path: the manifest addresses the payload by its path and schema,
+so no digest of it is stored beside it.
 
 The 2ch/48000 profile derives its coordinate domain analytically (seed-
 surface n with the manifest's sample rate and block sizes; the seed-surface
 loader guards 44100 and is not used for this profile) and must ship the
-twiddle and window constants byte-identical to the 6ch payload. Its
-cross-check runs only once a 2ch-domain recording exists; it is skipped
-until then.
+twiddle and window constants byte-identical to the 6ch payload.
 
 Run `make wem-bytes` and the per-frame parity suites afterwards; the reference
-encode and every per-frame value must stay identical.
+encode and every per-frame value must stay identical. That the frozen tables
+are the ones the encoder actually reads — and that the live domain is covered
+by them — is asserted at test time by
+`tests/unit/profiles/test_frozen_tables.py`, which drives a real encode with
+the site recorder on and compares the frozen values against a fresh
+derivation. This script records nothing to compare against later.
 
-Usage: python3 scripts/generate_frozen_tables.py [--profile NAME] [--record-dir DIR]
+Usage: python3 scripts/generate_frozen_tables.py [--profile NAME]
 """
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import struct
@@ -32,12 +33,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 # Both trees are resolved from this file, so the script runs from any cwd and
 # needs no PYTHONPATH: `src` is the distribution facade, `reference` the
-# pure-Python oracle that owns the transcendental recorders.
+# pure-Python oracle that owns the transcendental call sites.
 for entry in (ROOT / "src", ROOT / "reference"):
     if str(entry) not in sys.path:
         sys.path.insert(0, str(entry))
 
-from wwise_wem_reference._tmath import math_bits  # noqa: E402
 from wwise_wem_reference.analysis.dsp.transform import vorbis_window  # noqa: E402
 
 # The recorded profile tree is development material now: it lives untracked
@@ -85,10 +85,6 @@ FROZEN_RESOURCE = "analysis.frozen-tables"
 FROZEN_SCHEMA = "wem.frozen-math.v1"
 FROZEN_RELATIVE_PATH = "analysis/frozen-tables.json"
 SHORT_SURFACE_N = 128
-RECORD_DIR_BY_PROFILE = {
-    SIX_CHANNEL_PROFILE: ROOT / "tests/data/stage-records/transcendental",
-    TWO_CHANNEL_PROFILE: ROOT / "tests/data/stage-records/transcendental-2ch-48000",
-}
 
 
 def profile_manifest_path(profile: str) -> Path:
@@ -107,24 +103,9 @@ def f32_hex(value: float) -> str:
     return struct.pack("<f", value).hex()
 
 
-def hex_to_u64(hex_bytes: str) -> int:
-    """Little-endian byte-hex to its integer bit pattern (matches math_bits)."""
-    return int.from_bytes(bytes.fromhex(hex_bytes), "little")
-
-
-def read_recording_pairs(path: Path) -> dict[int, int]:
-    data = path.read_bytes()
-    pairs = {}
-    for offset in range(0, len(data), 16):
-        in_bits, out_bits = struct.unpack_from("<QQ", data, offset)
-        pairs[in_bits] = out_bits
-    return pairs
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--profile", choices=PROFILES, default=SIX_CHANNEL_PROFILE)
-    parser.add_argument("--record-dir", default=None)
     args = parser.parse_args()
     profile = args.profile
 
@@ -139,10 +120,6 @@ def main() -> int:
     n = SHORT_SURFACE_N
     sample_rate = int(raw_manifest["key"]["sample_rate"])
     window_sizes = tuple(int(size) for size in raw_manifest["block_sizes"])
-
-    record_dir = (
-        Path(args.record_dir) if args.record_dir else RECORD_DIR_BY_PROFILE[profile]
-    )
 
     coordinate_ln = []
     for index in range(n):
@@ -168,35 +145,6 @@ def main() -> int:
         if window_halves != six_payload["window_halves"]:
             raise SystemExit("2ch window_halves drifted from the 6ch constants")
 
-    recording_checks = 0
-    coord_recording = record_dir / "config.ln.in-out.u64le.bin"
-    if coord_recording.exists():
-        generated = {hex_to_u64(a): hex_to_u64(b) for a, b in coordinate_ln}
-        assert generated == read_recording_pairs(coord_recording), "config.ln domain drift"
-        recording_checks += 1
-    for name in ("spectrum.cos", "spectrum.sin"):
-        path = record_dir / f"{name}.in-out.u64le.bin"
-        if not path.exists():
-            continue
-        idx = 1 if name.endswith("cos") else 2
-        generated = {
-            math_bits(-2.0 * math.pi / int(row[0])): hex_to_u64(row[idx]) for row in fft_twiddles
-        }
-        assert generated == read_recording_pairs(path), f"{name} domain drift"
-        recording_checks += 1
-    window_recording = record_dir / "transform.window_short.sin.in-out.u64le.bin"
-    if window_recording.exists():
-        expected = read_recording_pairs(window_recording)
-        for size in window_sizes:
-            half = size // 2
-            for i in range(half):
-                inner_in = math.pi * (i + 0.5) / size
-                inner_out = math.sin(inner_in)
-                outer_in = math.pi / 2.0 * inner_out**2
-                assert math_bits(outer_in) in expected, "window outer input outside recording"
-                assert math_bits(inner_in) in expected, "window inner input outside recording"
-        recording_checks += 1
-
     payload = {
         "schema": FROZEN_SCHEMA,
         "profile": profile,
@@ -208,26 +156,17 @@ def main() -> int:
     payload_path.parent.mkdir(parents=True, exist_ok=True)
     payload_path.write_text(json.dumps(payload, indent=2) + "\n")
 
-    digest = hashlib.sha256(payload_path.read_bytes()).hexdigest()
+    # The manifest and the index address the payload by path and schema. The
+    # bytes are the payload's own: no digest of it is stored beside it, and
+    # re-running this generator rewrites the same files.
     manifest = json.loads(manifest_path.read_text())
     manifest["resources"][FROZEN_RESOURCE] = {
         "path": FROZEN_RELATIVE_PATH,
         "schema": FROZEN_SCHEMA,
-        "sha256": digest,
     }
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 
-    manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
-    index = json.loads(INDEX_PATH.read_text())
-    entry = index["profiles"][profile]
-    if entry["sha256"] == manifest_digest:
-        raise SystemExit(f"index already addresses the {profile} manifest; nothing to do")
-    entry["sha256"] = manifest_digest
-    INDEX_PATH.write_text(json.dumps(index, indent=2) + "\n")
-
-    print(f"wrote {payload_path.relative_to(ROOT)} sha256={digest}")
-    print(f"{profile} manifest sha256={manifest_digest} (index re-addressed)")
-    print(f"recording cross-checks passed: {recording_checks}")
+    print(f"wrote {payload_path.relative_to(ROOT)}")
     return 0
 
 

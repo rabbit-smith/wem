@@ -5,7 +5,7 @@
 //! "C ABI surface"): same lifecycle, same error classes, same bytes; this
 //! shell owns no numerics and no profile logic.
 //!
-//! # Profile selection (ABI revision 2)
+//! # Profile selection (ABI revision 3)
 //!
 //! Every constructor takes the structured selection of `include/wem.h`
 //! ("PROFILE SELECTION"): one Wwise generation plus the PCM geometry. The
@@ -41,8 +41,9 @@
 //!   setup packet, then audio packets in encoding order) as a returned array
 //!   instead of a C callback — the JS wrapper can translate that into
 //!   callbacks; the kernel reply framing is unchanged. `finish` returns the
-//!   terminal container bytes plus the `WemMeta` summary (`totalLen`,
-//!   `sha256Hex`).
+//!   terminal container bytes and the statistics observed while assembling
+//!   them — a JS `Uint8Array` carries its own length, so no length and no
+//!   digest of it are handed back beside it.
 //! * **Error codes**: every fallible export throws a JS `Error` whose
 //!   `code` property (and message prefix) is the stable `WEM_ERR_*` string
 //!   of the C ABI error table — append-only, never renumbered.
@@ -314,7 +315,7 @@ fn read_session(
 /// One resolved profile selection as a JS object
 /// (`{ versionCode, version, generation, channels, sampleRate, description }`).
 ///
-/// This is the whole caller-facing profile selection of ABI revision 2: how
+/// This is the whole caller-facing profile selection of ABI revision 3: how
 /// the kernel stores and addresses the configuration behind it (profile
 /// name, resource paths, digests) is internal and stays on the kernel side.
 fn selection_object(selection: &WwiseProfile) -> JsValue {
@@ -391,27 +392,18 @@ fn stats_object(stats: &wem_core::EncodeStats) -> JsValue {
         "longPackets",
         JsValue::from_f64(stats.long_packets as f64),
     );
-    set(&obj, "bytes", JsValue::from_f64(stats.bytes as f64));
-    set(
-        &obj,
-        "metadataSource",
-        JsValue::from_str(&stats.metadata_source),
-    );
     JsValue::from(obj)
 }
 
 /// One encoded container (one-shot or terminal streaming) as a JS object:
-/// the WEM bytes plus the terminal summary.
+/// the WEM bytes and the statistics observed while assembling them.
+///
+/// Nothing derived from the bytes travels beside them: a `Uint8Array` knows
+/// its own `byteLength`, and a digest is the caller's to compute from it.
 fn encode_result_object(result: &wem_core::EncodeResult) -> JsValue {
     let obj = js_sys::Object::new();
     let data: Vec<u8> = result.data.clone();
     set(&obj, "data", JsValue::from(data));
-    set(
-        &obj,
-        "totalLen",
-        JsValue::from_f64(result.data.len() as f64),
-    );
-    set(&obj, "sha256Hex", JsValue::from_str(&result.sha256()));
     set(&obj, "stats", stats_object(&result.stats));
     JsValue::from(obj)
 }
@@ -490,7 +482,7 @@ impl WemEncoder {
 
     /// Encode one interleaved signed-16 PCM buffer (the wasm mirror of
     /// `wem_encoder_encode`; the container bytes come back inline as
-    /// `{ data, totalLen, sha256Hex, stats }` instead of via the write
+    /// `{ data, stats }` instead of via the write
     /// callback — callback-style output is the C ABI's way of dodging
     /// container size limits; a wasm memory transfer is the equivalent).
     ///
@@ -583,7 +575,7 @@ impl WemSession {
     }
 
     /// Finish the stream: complete the encode and return the terminal
-    /// container (`{ data, totalLen, sha256Hex, stats }`).
+    /// container (`{ data, stats }`).
     ///
     /// Terminal: after this call (success or error) the session must be
     /// released, not reused.
@@ -593,8 +585,20 @@ impl WemSession {
     }
 
     /// The PCM frame count accumulated so far (streaming observability).
-    pub fn pcm_frames(&self) -> i32 {
-        self.session.pcm_frames() as i32
+    ///
+    /// Returned as a JS number (`f64`), the type every other count in this
+    /// shell uses, and exact for every integer below 2^53. The count cannot
+    /// approach that: the streaming session records per-frame state (one
+    /// `i64` mode and one `FramePlan` per frame), so a wasm32 instance's
+    /// address space caps the count at a few hundred million frames — 8 bytes
+    /// per frame alone reaches 4 GiB long before 2^53.
+    ///
+    /// That cap is an argument from the session's own bookkeeping, not an
+    /// invariant this signature can enforce, which is why the surface is the
+    /// widest exactly-representable JS integer rather than a narrowing cast
+    /// that merely assumes the bound holds.
+    pub fn pcm_frames(&self) -> f64 {
+        self.session.pcm_frames() as f64
     }
 
     /// Release the session (safe before or after `finish`).
@@ -727,5 +731,31 @@ mod tests {
             open_encoder(VersionArg::Explicit(WwiseVersion::Wwise2013), 6, 44100)
                 .expect("explicit 2013 selection resolves");
         assert_eq!(selection.version().label(), "2013");
+    }
+
+    /// The frame count is a JS number, not a narrowed int: the signature is
+    /// checked here so narrowing it back to `i32` fails this build, and the
+    /// conversion it performs is checked to be lossless across the whole range
+    /// a JS number represents integers exactly.
+    #[test]
+    fn pcm_frames_is_a_js_number_and_cannot_truncate() {
+        fn returns_js_number(_: fn(&WemSession) -> f64) {}
+        returns_js_number(WemSession::pcm_frames);
+
+        // Every count below 2^53 survives the conversion exactly, including
+        // the first one an i32 could not have carried.
+        for count in [
+            0i64,
+            1,
+            4096,
+            i64::from(i32::MAX),
+            i64::from(i32::MAX) + 1,
+            (1i64 << 53) - 1,
+        ] {
+            assert_eq!(
+                count as f64 as i64, count,
+                "{count} is below 2^53 and must be exact as a JS number"
+            );
+        }
     }
 }

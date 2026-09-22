@@ -12,6 +12,18 @@ This document is the evidence record. It is a measurement, not a budget: there
 is no threshold here, and `scripts/measure_encode_perf.py` has none either
 (see [Trust boundary](#trust-boundary)).
 
+**Ledger status after landing.** The numbers below were measured on this
+branch's tree before this document landed (ee542f4; every line reference was
+re-checked at c1c8f73, the branch tip). `main` had meanwhile acted on four of
+the findings from its own lanes, so each of those is marked **closed** in place
+with the commit that closed it, and the tables below are the record of the
+measured revision rather than a description of today's tree. The later
+measurements live in [`duration-curves.md`](duration-curves.md),
+[`concurrency-curves.md`](concurrency-curves.md) and
+[`pool-sizing.md`](pool-sizing.md); this page keeps the result it started from,
+and a closed item stays on it (see
+[Watching performance](../guides/development.md#watching-performance)).
+
 ## What was measured, and how
 
 Reproduce with:
@@ -32,7 +44,8 @@ equal the one `encode_pcm` produces, so the split can never describe a
 pipeline other than the shipped one. It held for every repetition.
 
 A second, clearly separated block *attributes* the coarse stages by re-running
-`mdct_forward`, `wwise_log_curve`, the frozen-window rebuild and the transient
+`mdct_forward`, `wwise_log_curve`, the hybrid window
+(`apply_vorbis_window_in_place`, once per channel-frame) and the transient
 detector on the material the first block produced. Those are single-threaded
 re-runs of the same work, not disjoint stages, and are labelled as such.
 
@@ -48,7 +61,7 @@ re-runs of the same work, not disjoint stages, and are labelled as such.
 
 ## The measured split (fixture, release, median of 11 / 7)
 
-| Stage | Line of code | median ms | share | frames |
+| Stage | Site (at the measured revision) | median ms | share | frames |
 | --- | --- | ---: | ---: | ---: |
 | CLI: `wav_load` + `profile_assembly` + `output_write` | `crates/wem-core/src/bin/wwise-wem.rs:69-103` | 1.94 | 1.6% | — |
 | PCM decode to float rows | `crates/wem-core/src/encoder.rs:635` (`to_float_rows`) | 0.59 | 0.5% | — |
@@ -69,7 +82,7 @@ output buffer, the `--output /dev/null` write).
 
 ### Attribution (single-threaded re-runs, not additive)
 
-| Inner stage | Line of code | median ms | calls |
+| Inner stage | Site (at the measured revision) | median ms | calls |
 | --- | --- | ---: | ---: |
 | FFT + log curve | `crates/wem-analysis/src/dsp/spectrum.rs:104-119` | 37.49 | 1230 |
 | ↳ the twiddle recurrence inside it (cost model, finding 1) | `spectrum.rs:82-87` | 19.26 | 9 123 840 steps |
@@ -97,7 +110,20 @@ stream length.**
 
 ## Findings
 
-### 1. The FFT rebuilds its twiddle factor per butterfly — algorithmic, act
+### 1. The FFT rebuilds its twiddle factor per butterfly — algorithmic, act — **closed by 915050b**
+
+**Closed.** Commit 915050b (*derive the FFT twiddles once per stage instead of per
+butterfly*) landed exactly the remedy below: the sequence is built once per stage
+by the identical recurrence, through the same two `f32` rounding points, with
+the step still read from the frozen profile bank, and the butterfly body is
+unchanged. Its paired, order-alternated measurement on a busy machine (load
+50-190, which is why the load is stated): fixture encode median 117.38 →
+114.07 ms, child user CPU 223.18 → 204.82 ms, scalar build 155.52 → 142.71 ms,
+FFT log curve 51.19 → 34.88 ms. The wall-clock gain is smaller than the model
+estimate below, and the closure message gives the reason: the long-frame FFT
+runs inside the per-channel regions of finding 2, whose time is dominated by
+dispatch, so removing arithmetic inside them does not shorten them — the scalar
+build shows the full saving. The estimate and the outcome are both kept here.
 
 **Where.** `crates/wem-analysis/src/dsp/spectrum.rs:68-89`. Inside the
 per-stage loop, `wr`/`wi` are reset to `(1, 0)` for **every** `start` block
@@ -134,7 +160,23 @@ parallelized across channels, so the wall-clock share is smaller — roughly
 19.26 / 1.85 ≈ **10 ms of the 123.5 ms (~8%)**, and removing the serial
 dependency chain should beat that estimate rather than miss it.
 
-### 2. The per-channel rayon partition returns 1.26× on six channels — algorithmic, act
+### 2. The per-channel rayon partition returns 1.26× on six channels — algorithmic, act — **carried forward: 6c70b0a, 92b25cc, fafa463**
+
+**Landed, and continued elsewhere.** Three commits took this up from the other
+side: 6c70b0a announces one job per channel instead of an adaptive range
+(`analyze_long` 44.42 → 42.56 ms, and the parallel-to-scalar ratio moved only
+1.249× → 1.264×, with the measured reason being per-frame pool cold starts);
+92b25cc builds the long seed look once per encode rather than once per channel
+job (~17 ms of CPU per encode); and fafa463 gives the two waves a pool the
+session owns and sizes to the channel count, because a six-way job handed to
+sixteen workers is reached through a chain of steals (30.8% more CPU for the
+same bytes). The remedy below named a latency-oriented pool or fewer, larger
+regions; the shape that landed is the pool. Its evidence record — the sweep, the
+load-insensitivity argument and what it proves — is
+[`pool-sizing.md`](pool-sizing.md), and the duration scaling it rests on is
+[`duration-curves.md`](duration-curves.md). Whether the feature should be
+default-on at all is a separate decision with its own lanes and is not this
+page's finding.
 
 **Where.** `crates/wem-analysis/src/psychoacoustics/pipeline.rs:443-461`
 (`transform_channel_rows`) and `:480-496` (`channel_psych_map`), reached from
@@ -182,7 +224,16 @@ disjointness that argument states. Re-prove with `complete_wem_bytes`,
 the 123.5 ms. This is the largest single number in this document and the one
 with the least certain remedy.
 
-### 3. The one-shot path materializes the whole analysis input before analyzing a frame — algorithmic, small in ms, opposite of the streaming path
+### 3. The one-shot path materializes the whole analysis input before analyzing a frame — algorithmic, small in ms, opposite of the streaming path — **closed by 539194e**
+
+**Closed.** Commit 539194e (*hand out one analysis frame at a time from session
+scratch*) made the one-shot path own its PCM-derived state for one conversion and
+refill caller-owned row buffers one frame at a time (`PlannedWindowSource`), the
+batch counterpart of the streaming feeder, so peak frame storage is one frame
+instead of the 13.5 MB below. `encode_pcm` keeps that scratch and takes the rows
+back from the finished frame; `condition_pcm` borrows its rows unless a
+conditioner rewrites them. Values, rounding points and the order frames are
+analysed in are unchanged, and the streaming path was not touched.
 
 **Where.** `crates/wem-analysis/src/preprocessing/windowing.rs:43-173`:
 `iter_planned_pcm_windows` returns `Vec<WindowedFrame>`, every frame of the
@@ -205,10 +256,20 @@ with the crate's own rule ("no `Vec` returns from inner stages where a scratch
 buffer exists; keep scratch ownership at the session boundary") and with the
 streaming path. Byte-exactness is immediate — same values, same order, only
 where they live changes — and `complete_wem_bytes` plus
-`stream_giant_chunk_segmentation_parity` (`crates/wem-core/tests/stream_session.rs`)
+`stream_giant_chunk_segmentation_parity` (`crates/wem-core/tests/streaming.rs`)
 already pin the two paths against each other.
 
-### 4. Per-call scratch allocations in the inner stages — algorithmic but diffuse, ~9% ceiling
+### 4. Per-call scratch allocations in the inner stages — algorithmic but diffuse, ~9% ceiling — **the named rows closed by 539194e**
+
+**Closed for the rows this finding named as worth taking.** 539194e removed
+the three redundant ones: the per-channel-frame `raw` row (the source now
+refills a caller-owned row), `apply_vorbis_window`'s `out` copy (the hybrid
+window reads the frozen half directly and applies it in place — the
+`half ++ reverse(half)` rebuild was never read), and the whole-PCM `to_vec()`
+when the profile selects no conditioner (the rows are borrowed). 92b25cc
+removed a fourth of the same kind, the long seed look rebuilt per channel job.
+The rest of the table stays an observation: those allocations are below the
+noise floor individually, which is what the verdict below already said.
 
 **Where.** Each of these allocates once per call on the hot path:
 
@@ -274,9 +335,11 @@ for 3.8%; leave it alone.
 
 ## Trust boundary
 
-- These numbers are one machine (Apple M3 Max, macOS 27, rustc 1.96.0) and one
-  build configuration (release, `parallel` on unless stated). They are not a
-  budget and nothing in the tree compares against them.
+- These numbers are one machine (Apple M3 Max, macOS 27, rustc 1.96.0), one
+  build configuration (release, `parallel` on unless stated) and one tree (the
+  measured revision named under *Ledger status after landing*, which `main` has
+  since changed in the places findings 1-4 name). They are not a budget and
+  nothing in the tree compares against them.
 - The stage split is wall-clock around shipped calls, so it inherits the
   parallel regions: `analyze_long_ms` is a wall-clock figure over a
   per-channel rayon partition, not CPU time, and the attribution block is
@@ -285,7 +348,14 @@ for 3.8%; leave it alone.
 - The twiddle cost model replays the recurrence standalone; it prices the
   redundancy, it does not prove what removing it would save (the removed
   multiplies also shorten the dependency chain, which this model does not
-  account for).
+  account for). The closure of finding 1 is what settled that: 3.31 ms of wall
+  clock against a 19.26 ms model, with the difference attributed to the
+  dispatch-bound region around it.
 - No file under `crates/*/src/` was changed for this investigation, so every
-  number describes the tree as committed, and every byte-exactness suite ran
-  unchanged.
+  number describes the tree as committed at the time, and every byte-exactness
+  suite ran unchanged.
+- The load the machine was under is part of any *paired* reading, which is why
+  `scripts/measure_encode_perf.py` prints the load average before and after
+  every series. That arrived after this measurement, so this page's numbers
+  carry the machine identity and the machine's role in the investigation, not a
+  load average; the readings that follow it do.

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import struct
@@ -88,7 +87,12 @@ def render_wav(case: str) -> bytes:
 def verify_or_write_inputs(
     cases: Sequence[str], destination: Path, manifest_path: Path, *, check: bool
 ) -> None:
-    """Validate generated hashes against the manifest, then check or write WAVs."""
+    """Check or write the generated inputs against the manifest's file names.
+
+    The comparison is the committed input's own bytes: a rendered input that
+    differs from the file the manifest names is reported before anything is
+    written, and ``check`` additionally reports a file that is missing.
+    """
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     entries = {Path(entry["input"]).stem: entry for entry in manifest["cases"]}
     for case in cases:
@@ -96,14 +100,13 @@ def verify_or_write_inputs(
         entry = entries.get(case)
         if entry is None:
             raise ValueError(f"manifest has no input entry for {case}")
-        digest = hashlib.sha256(data).hexdigest()
-        if digest != entry["input_sha256"]:
-            raise ValueError(f"generated input hash differs from manifest for {case}")
         path = destination / entry["input"]
-        if check:
-            if not path.is_file() or path.read_bytes() != data:
+        if path.is_file():
+            if path.read_bytes() != data:
                 raise ValueError(f"committed input differs from generator: {path}")
-        else:
+        elif check:
+            raise ValueError(f"committed input is missing: {path}")
+        if not check:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
 

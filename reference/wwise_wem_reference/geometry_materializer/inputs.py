@@ -1,9 +1,8 @@
 """Vendored geometry materializer (the round promotion of the corpus builder).
 
 Source of truth: corpus/paired-build/the round (per-instruction port of
-analysis_geometry_builder on the paired build, carrier the paired build md5
-d21427e9c35271d579205bc6fda8e325). Inputs come from
-data/materializer_inputs.json (gen_r20 extracts them); 6ch outputs are
+analysis_geometry_builder on the paired build, carrier the paired build). Inputs come
+from data/materializer_inputs.json (gen_r20 extracts them); 6ch outputs are
 locked against the registered profile by tests/parity/
 test_geometry_materializer_parity.py. Keep numerics byte-identical to
 the corpus; regenerate, do not retype.

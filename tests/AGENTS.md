@@ -13,9 +13,10 @@ how a failing comparison is read is in the same document, under
 | unit | `make test-fast` (discovery) | module behavior, validation, loaders |
 | integration | in `make test-fast` | CLI/API/adapter end paths |
 | cross-implementation | in `make test-fast` (discovery) | pipeline invariants, cross-implementation parity |
-| whole-file | `make wem-bytes` | whole-file byte identity (the digest) |
+| whole-file | `make wem-bytes` | whole-file byte identity against the committed container |
 | capi | `cargo test -p wem-capi` | C ABI surface: reference byte identity via the FFI, error-code mapping, lifecycle violations |
 | wheel | `make wheel-smoke` | single-wheel (facade + native extension) inventory, clean-venv byte-exact encode |
+| wasm (Node) | `make wasm-test` | builds both wasm packages, then the shell's bytes against `tests/fixtures/reference.wem`: one-shot and three chunkings, plus the selection and error-code mapping |
 
 `tests/parity/` holds the cross-implementation suites. Each module sets two
 implementations side by side — the Python oracle against the native kernel, the
@@ -26,9 +27,34 @@ directory as an input.
 `unittest discover` runs every `test_*.py` module under `tests/unit`,
 `tests/integration`, and `tests/parity`; `cargo test --workspace --all-targets`
 runs the crate suites. Helper modules without the `test_` prefix (e.g.
-`oracle_frame_values.py`, `stage_records_support.py`, `wem_byte_compare.py`) are
-imported by those modules and are never run on their own. `test_stage_pipeline.py`
-is discovered through its `test_` prefix like every other comparison module.
+`oracle_frame_values.py`, `wem_byte_compare.py`) are imported by those modules
+and are never run on their own.
+
+## Suite layout
+
+One module per object under test, not per dataset, per artifact or per
+historical event. A suite that tests the same object from another angle lives
+in that object's module as a class named for the angle — `test_quality.py`
+holds the interpolation kernel, the assembly wiring and the record family;
+`crates/wem-core/tests/encoder.rs` holds the PCM shapes, the plan tail and the
+byte claims. Two exceptions, both because the build names the path:
+`tests/whole_file/test_whole_file.py` (`make wem-bytes`) and
+`tests/parity/two_channel_long_run.py` (`make 2ch-long`), which is also why the
+latter keeps its non-`test_` prefix.
+
+Roughly 150 lines is the floor: a module below it belongs with its neighbours in
+the same subject area. Merging never merges checks — a merged module keeps every
+test function, its name and its failure message, so one claim can still be run
+by name and still says which frame, stage, channel, bin, packet or byte
+diverged. The language's own structure does the navigating: Python classes, one
+per angle, under a banner comment naming the module each section came from; Rust
+`mod` blocks inside one test binary (`cargo test -p wem-core --test errors
+source_chain::…`).
+
+A helper that would otherwise be repeated across merged modules lives in the
+shared support module: `oracle_frame_values.py`, `wem_byte_compare.py`,
+`two_channel_corpus_support.py`, `analysis_resource_support.py`,
+`codebook_resource_support.py`, `pcm_sample_support.py`.
 
 ## Environment
 
@@ -42,30 +68,41 @@ byte-producing test: build it with `make native` (or `pip install -e .`)
 before running the suite, and no test designs skip cases for
 native-absent environments — a missing kernel fails the suite, on purpose.
 
+The wasm packages (`js/pkg`, `js/pkg-node`) are wasm-pack output and are not in
+the checkout either. `make wasm-test` builds them and then runs the Node test
+(`js/test-node.mjs`), which reads the fixture and the reference bytes and
+compares them against the freshly built package; with no package built it
+fails, printing the build command, and never skips.
+
 ## Versioned assets (`tests/data/`, `tests/fixtures/`)
 
 - `fixtures/input.wav` is the input the encoding suites read; a suite that
   needs different PCM builds it in process. `fixtures/reference.wem` is the
-  expected whole-file output of that input, compared byte for byte by
+  paired build's output for that input, compared byte for byte by
   `tests/whole_file`.
-- `data/stage-records/stages/index.json`: SHA-256 per frame × stage for all 205
-  frames; `frames/*.bin`: raw little-endian dumps for the 28 representative
-  frames (edges + every short↔long transition and its predecessor). The stage
-  parity suites in `wem-analysis`/`wem-core` read them; the live per-frame
-  comparison (`crates/wem-core/tests/frame_pipeline_parity.rs` and
-  `tests/parity/test_frame_pipeline_parity.py`) compares the oracle against
-  the kernel directly and reads none of them.
-- `data/stage-records/transcendental/`: per-site (input bits, output bits)
-  records of the live domain; regenerate via `scripts/record_tmath.py`.
+- `data/2ch-reference/`, `data/2ch-stress/`: the paired build's `.wem` for each
+  corpus case, the case's PCM input (regenerated byte-identically in process by
+  `tests/two_channel_corpus_support.render_wav`), and a `manifest.json`
+  declaring that case's input, reference, digests and packet split. Our code
+  produces neither the inputs' identity nor the references, so both sides are
+  external references.
 - There is **no performance baseline asset**. Encoding speed is measured by
   `scripts/measure_encode_perf.py` on the release build and reported with its
-  full distribution; a recorded median compared against a run is a recorded
-  expectation whose failure mode is re-recording
+  full distribution and the machine's load average; a recorded median compared
+  against a run is a recorded expectation whose failure mode is re-recording
   ([`../docs/reference/standards.md`](../docs/reference/standards.md#bit-exactness)),
-  so the suite holds no timing threshold and no memory ceiling.
-- Asset budgets: stage-records total ≤ 20 MB. Growth requires trimming the
-  representative-frame rule deliberately (document the rule change here), not
-  by silently adding full-stream dumps.
+  so no timing threshold lives in this tree. The RSS ceilings in
+  `crates/wem-core/tests/streaming.rs` are not a timing budget — how much
+  input a session accumulates is a property of the product, and that stays
+  asserted.
+- Every file here is read by a test or by a check the ladder runs, and none of
+  them is a recorded expectation: no file holds a value our own code produced
+  earlier for a later run to compare against, so no failing comparison has "run
+  the recorder again" as its remedy. The per-frame values themselves are
+  established only by the live comparison —
+  `crates/wem-core/tests/frame_pipeline_parity.rs` for the crate surfaces,
+  `tests/parity/test_frame_pipeline_parity.py` through the shipped binding —
+  which drives both implementations at test time.
 
 ## Writing pipeline tests
 
@@ -73,8 +110,9 @@ native-absent environments — a missing kernel fails the suite, on purpose.
   per frame, per stage, per channel, per bin.
 - Failures must localize: name the first differing frame index, stage, channel,
   and bin, and print both words.
-- Byte-level dumps encode endianness in the file suffix (`.f32le`, `.u16le`,
-  `.u8`, `.u64le`); the values they carry follow
+- A value crosses a boundary as its bit pattern — an integer, a word, or
+  little-endian bytes — never as a decimal string; a file that has to carry raw
+  words says the endianness in its suffix (`<type><width>le`). The values follow
   [`../docs/reference/standards.md`](../docs/reference/standards.md#bit-patterns).
 - Deviations (deliberate skips when optional dev tooling is absent) must print
   an install hint, and CI must install the extras so the suite is truly enforced

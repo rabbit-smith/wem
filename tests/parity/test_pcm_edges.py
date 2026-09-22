@@ -132,8 +132,7 @@ class PcmLengthEncodeTests(unittest.TestCase):
                 stats = result.stats
                 self.assertEqual(stats.pcm_frames, frame_count)
                 self.assertEqual(stats.channels, CHANNELS)
-                self.assertEqual(stats.metadata_source, "profile:6ch/44100Hz/2013")
-                for field in ("audio_packets", "short_packets", "long_packets", "bytes"):
+                for field in ("audio_packets", "short_packets", "long_packets"):
                     self.assertEqual(getattr(stats, field), expected[field])
                 self.assertEqual(len(result.data), expected["bytes"])
 

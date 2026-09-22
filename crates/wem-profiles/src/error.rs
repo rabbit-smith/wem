@@ -21,12 +21,10 @@ pub enum ProfileError {
     /// channels/sample_rate non-positive.
     ProfileKeyNonPositive,
     /// Non-default geometry with only a partial identity triple.
-    /// Generation / layout / identity field is empty.
+    /// Generation / layout field is empty.
     ProfileKeyFieldEmpty { field: &'static str },
     /// Profile key geometry differs from container metadata.
     ProfileGeometryMismatch,
-    /// key quality/setup identity differs from the setup packet's SHA-256.
-    ProfileSetupIdentityMismatch,
     /// Block sizes not two positive sizes.
     ProfileBlockSizesMalformed,
     /// Block sizes differ from container metadata.
@@ -116,7 +114,6 @@ impl std::fmt::Display for ProfileError {
             ProfileKeyNonPositive => write!(f, "profile channels and sample rate must be positive"),
             ProfileKeyFieldEmpty { field } => write!(f, "profile {field} must not be empty"),
             ProfileGeometryMismatch => write!(f, "profile key geometry differs from container metadata"),
-            ProfileSetupIdentityMismatch => write!(f, "profile key quality/setup identity differs from the setup packet's SHA-256"),
             ProfileBlockSizesMalformed => write!(f, "profile block sizes must contain two positive sizes"),
             ProfileBlockSizesMismatch => write!(f, "profile block sizes differ from container metadata"),
             BundleMissingVorbisSetup => write!(f, "profile manifest is missing vorbis.setup"),

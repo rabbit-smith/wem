@@ -761,18 +761,22 @@ void libv_f32_to_i16(int16_t *out, const float *x, long n) {
 
 
 def _load_libv_helper():
-    """Compile+load the tiny bit-exact helper library (cached in TMPDIR)."""
-    import hashlib
+    """Compile+load the tiny bit-exact helper library (cached in TMPDIR).
+
+    The cache key is the helper's own source text: the library is rebuilt
+    exactly when the ``.c`` file the compiler read differs from the source
+    below, byte for byte.
+    """
     import subprocess
     import tempfile
 
     so = Path(tempfile.gettempdir()) / "wem_libv_helper.so"
     src = Path(tempfile.gettempdir()) / "wem_libv_helper.c"
-    stamp = Path(tempfile.gettempdir()) / "wem_libv_helper.stamps"
-    digest = hashlib.sha256(_LIBV_HELPER_C_SOURCE.encode()).hexdigest()
-    stale = True
-    if so.exists() and stamp.exists():
-        stale = stamp.read_text().strip() != digest
+    stale = (
+        not so.exists()
+        or not src.is_file()
+        or src.read_bytes() != _LIBV_HELPER_C_SOURCE.encode("utf-8")
+    )
     if stale:
         src.write_text(_LIBV_HELPER_C_SOURCE)
         subprocess.run(
@@ -780,7 +784,6 @@ def _load_libv_helper():
             check=True,
             capture_output=True,
         )
-        stamp.write_text(digest)
     lib = ctypes.CDLL(str(so))
     lib.libv_ola_fma.argtypes = [
         ctypes.POINTER(ctypes.c_float),

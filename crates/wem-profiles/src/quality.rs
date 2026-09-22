@@ -44,11 +44,6 @@ use crate::error::ProfileError;
 pub const QUALITY_CURVES_SCHEMA: &str = "wem.quality-curves.v2";
 /// Quality-curves interpolation marker (Python `QUALITY_CURVES_INTERPOLATION`).
 pub const QUALITY_CURVES_INTERPOLATION: &str = "linear-frac";
-/// Per-curve semantic form: no runtime consumer (Python `QUALITY_SEMANTIC_NO_OP`).
-pub const QUALITY_SEMANTIC_NO_OP: &str = "no-op";
-/// Per-curve semantic form: the transient record-index axis, owned by the
-/// record family (Python `QUALITY_SEMANTIC_TRANSIENT_RECORD_INDEX_AXIS`).
-pub const QUALITY_SEMANTIC_TRANSIENT_RECORD_INDEX_AXIS: &str = "transient.record-index-axis";
 /// Prefix of the short-psy surface override semantic form
 /// (`short.<field>`, Python `QUALITY_SEMANTIC_SHORT_PREFIX`).
 pub const QUALITY_SEMANTIC_SHORT_PREFIX: &str = "short.";

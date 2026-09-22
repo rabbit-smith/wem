@@ -39,8 +39,7 @@ pub struct ContainerMetadata {
 /// (Python `EncoderProfile`).
 ///
 /// Two construction shapes coexist, both additive:
-/// * complete profiles: the setup packet bytes, whose digest the key's
-///   quality/setup identity names;
+/// * complete profiles: the setup packet bytes themselves;
 /// * draft profiles (setup pending corpus): no setup packet, with
 ///   `setup_available == false` and a `pending_reason`, so every encode
 ///   attempt on one fails with a clear pending error instead of silently
@@ -55,9 +54,9 @@ pub struct ContainerMetadata {
 ///
 /// The setup packet is carried as bytes, not as a resource reference: the
 /// packet is a compiled profile fact, and a reference would make the value
-/// model depend on where a tree happens to live. Its digest is not stored
-/// beside it — the key's identity names the packet, so the digest is computed
-/// from the bytes when a construction is validated.
+/// model depend on where a tree happens to live. Nothing derived from those
+/// bytes is stored beside them — the packet is what the codec consumes, and
+/// the profile's identity is its key.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EncoderProfile {
     key: ProfileKey,
@@ -79,8 +78,8 @@ pub struct EncoderProfile {
 impl EncoderProfile {
     /// Validate and construct (Python `__post_init__` checks).
     ///
-    /// `setup_packet` is `Some` for complete profiles — its SHA-256 must be
-    /// the setup identity the key declares — and `None` for draft profiles.
+    /// `setup_packet` is `Some` for complete profiles — the bytes the codec
+    /// consumes — and `None` for draft profiles.
     pub fn new(
         key: ProfileKey,
         setup_packet: Option<Vec<u8>>,
@@ -97,14 +96,6 @@ impl EncoderProfile {
         }
         if setup_available != setup_packet.is_some() {
             return Err(ProfileError::BundleMissingVorbisSetup);
-        }
-        if let Some(packet) = setup_packet.as_ref() {
-            // The key names the packet: its setup identity is the digest of
-            // exactly these bytes. Only the packet is stored, so the digest
-            // is computed from it here rather than carried beside it.
-            if key.quality_setup_identity() != format!("sha256:{}", hex(sha256_digest(packet))) {
-                return Err(ProfileError::ProfileSetupIdentityMismatch);
-            }
         }
         if (key.channels(), key.sample_rate())
             != (
@@ -215,25 +206,4 @@ impl EncoderProfile {
             .clone()
             .ok_or(ProfileError::BundleMissingVorbisSetup)
     }
-}
-
-/// Lowercase hex of a 32-byte digest (Python `hex()` over the digest bytes).
-fn hex(digest: [u8; 32]) -> String {
-    use std::fmt::Write;
-    digest
-        .iter()
-        .fold(String::with_capacity(64), |mut out, byte| {
-            let _ = write!(out, "{byte:02x}");
-            out
-        })
-}
-
-/// The raw 32 digest bytes. Not hex text: the four test-local `sha256_hex`
-/// helpers return the hex string, so the name says which one this is.
-fn sha256_digest(payload: &[u8]) -> [u8; 32] {
-    use sha2::{Digest, Sha256};
-    Sha256::digest(payload)
-        .as_slice()
-        .try_into()
-        .expect("sha256 digest is 32 bytes")
 }

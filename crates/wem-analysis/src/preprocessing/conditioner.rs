@@ -9,6 +9,20 @@ pub struct InputConditioner {
     previous_output: Vec<f32>,
 }
 
+/// A summary: the filter coefficient and the channel count.
+///
+/// The two per-channel vectors are one-frame filter state — one value per
+/// channel, rebuilt on every `process` call — so they are reported by length;
+/// the coefficient and the channel count are what identify the conditioner.
+impl std::fmt::Debug for InputConditioner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InputConditioner")
+            .field("coefficient", &self.coefficient)
+            .field("channels", &self.previous_input.len())
+            .finish()
+    }
+}
+
 impl InputConditioner {
     pub fn new(channels: i64, config: &InputConditionerConfig) -> Result<Self, AnalysisError> {
         if channels <= 0 {

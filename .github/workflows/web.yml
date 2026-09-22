@@ -6,10 +6,13 @@ on:
 
 jobs:
   web:
-    # Browser encoding shell: proves the wasm build compiles for
-    # wasm32-unknown-unknown and that the Node-side parity test passes —
-    # fixture PCM through the wasm package must reproduce the kernel
-    # reference sha256, one-shot and across chunkings.
+    # Browser/Node shell: one test run over a freshly built package. wasm-pack
+    # compiles the threadless kernel to wasm32-unknown-unknown, builds both
+    # targets, and the Node test then compares the shell's bytes against the
+    # kernel reference, one-shot and across chunkings. The packages are build
+    # output — nothing wasm-pack writes is committed — so the run that builds
+    # them is the run that tests them, and the same packages travel on as a
+    # distribution artifact.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,13 +30,17 @@ jobs:
         run: cd crates && cargo clippy -p wem-wasm --target wasm32-unknown-unknown -- -D warnings
       - name: unit tests (native; error-code table)
         run: cd crates && cargo test -p wem-wasm
-      - name: build nodejs target (for the parity test)
-        # Absolute out-dir: wasm-pack resolves --out-dir against the CRATE
-        # directory, not the current one, so a relative path here lands in
-        # crates/js/ and the parity test below would then validate the
-        # committed artifacts instead of the freshly built kernel.
-        run: cd crates && wasm-pack build wem-wasm --target nodejs --release --out-dir "$(pwd)/../js/pkg-node"
-      - name: build web target (npm/browser artifact)
-        run: cd crates && wasm-pack build wem-wasm --target web --release --out-dir "$(pwd)/../js/pkg"
-      - name: node parity test (reference sha256 + chunking consistency + error codes)
-        run: node js/test-node.mjs
+      - name: wasm test (build both packages, then the Node parity test)
+        # Build and test in one invocation: the target builds js/pkg (web) and
+        # js/pkg-node (nodejs) and then runs js/test-node.mjs against the bytes
+        # it just built. wasm-pack resolves --out-dir against the crate
+        # directory rather than the current one, which is why the out-dirs are
+        # absolute (js/package.json).
+        run: make wasm-test
+      - name: publish the built wasm packages (distribution artifact, not a check)
+        uses: actions/upload-artifact@v4
+        with:
+          name: wwise-wem-wasm-packages
+          path: |
+            js/pkg
+            js/pkg-node

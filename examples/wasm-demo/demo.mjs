@@ -116,8 +116,7 @@ async function encodeFile(file) {
   dlEl.download = `wem-${stamp}.wem`;
   summaryEl.textContent = [
     `input      ${file.name}: ${wav.channels}ch @ ${wav.sampleRate}Hz, ${totalFrames} frames`,
-    `output     ${result.totalLen} bytes`,
-    `sha256     ${result.sha256Hex}`,
+    `output     ${result.data.byteLength} bytes`,
     `packets    ${result.stats.audioPackets} (short ${result.stats.shortPackets} / long ${result.stats.longPackets})`,
     `selection  ${selection.description} (version code ${selection.versionCode})`,
     `time       ${(performance.now() - t0) / 1000} s (main thread)`,

@@ -4,7 +4,10 @@
 //! twice at test time and the two results are compared value by value: the
 //! scheduler's mode and transition codes, the window center, the eight float
 //! analysis stages, the floor posts, the quantized residue rows, and the packed
-//! audio packet.
+//! audio packet. The header the oracle prints is compared too — the resolved
+//! profile label and the carrier's setup packet — so the two halves of the
+//! container identity that no per-frame row carries are established here as
+//! well.
 //!
 //! Nothing is recorded, and no side is compared against a stored expectation.
 //! The kernel runs in this process — `AnalysisSession` plus
@@ -18,7 +21,7 @@
 //! posts, residue rows) are crate surfaces the PyO3 binding does not expose, so
 //! a Python-side comparison could never see more than packet bytes. The kernel
 //! crates are directly reachable from a Rust integration test, which mirrors
-//! `crates/wem-container/tests/container_parity.rs` the other way round: that
+//! `crates/wem-container/tests/container_codec.rs` the other way round: that
 //! one drives the oracle in a subprocess and compares in Rust, this one does
 //! the same with the oracle as the subprocess.
 
@@ -27,7 +30,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdout, Command, Stdio};
 
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use wem_analysis::model::PsyFrame;
 use wem_analysis::session::AnalysisSession;
 use wem_core::pack::pack_analysis_frame;
@@ -137,23 +139,23 @@ impl OracleStream {
 // Word-level comparison
 // ---------------------------------------------------------------------------
 
-fn sha256_hex(payload: &[u8]) -> String {
-    let digest = Sha256::digest(payload);
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(64);
-    for &byte in digest.as_slice() {
-        out.push(DIGITS[(byte >> 4) as usize] as char);
-        out.push(DIGITS[(byte & 0xF) as usize] as char);
-    }
-    out
-}
-
 fn hex_digit(byte: u8, context: &str) -> u32 {
     match byte {
         b'0'..=b'9' => u32::from(byte - b'0'),
         b'a'..=b'f' => u32::from(byte - b'a') + 10,
         other => panic!("{context}: '{other}' is not a lowercase hex digit"),
     }
+}
+
+/// Encode bytes as lowercase hexadecimal (the oracle stream's byte convention).
+fn hex_bytes(payload: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(payload.len() * 2);
+    for &byte in payload {
+        out.push(DIGITS[(byte >> 4) as usize] as char);
+        out.push(DIGITS[(byte & 0xF) as usize] as char);
+    }
+    out
 }
 
 /// Decode one hexadecimal row (8 digits per 32-bit word) into words.
@@ -335,7 +337,6 @@ fn float_stage<'a>(psy: &'a PsyFrame, stage: &str, window: &'a [Vec<f64>]) -> &'
 #[test]
 fn every_frame_matches_the_python_oracle() {
     let wav_path = fixtures_dir().join("input.wav");
-    let raw = std::fs::read(&wav_path).expect("fixture reads");
     let wav = wav::read_pcm16(&wav_path).expect("fixture parses as signed-16 PCM");
     let pcm = wav.to_pcm16().expect("fixture geometry");
     let encoder = Encoder::new(fixture_selection()).expect("fixture selection resolves");
@@ -349,9 +350,8 @@ fn every_frame_matches_the_python_oracle() {
         encoder.analysis_resources().clone(),
     )
     .expect("analysis session constructs");
-    let conditioned = session
-        .condition_pcm(&pcm.to_float_rows())
-        .expect("PCM conditions");
+    let pcm_rows = pcm.to_float_rows();
+    let conditioned = session.condition_pcm(&pcm_rows).expect("PCM conditions");
     let (modes, windows) = session
         .selected_windows(&conditioned)
         .expect("mode/window plan selects");
@@ -384,15 +384,40 @@ fn every_frame_matches_the_python_oracle() {
         Some(pcm.frame_count()),
         "oracle PCM frame count"
     );
+    // The oracle names the source it read; the kernel read the same path, and
+    // every frame below is compared word for word, so a different input on
+    // either side cannot pass unnoticed.
+    let expected_source = wav_path
+        .strip_prefix(repo_root())
+        .expect("the fixture lives under the repository root");
     assert_eq!(
-        header["input_sha256"].as_str(),
-        Some(sha256_hex(&raw).as_str()),
-        "both sides read the same input bytes"
+        header["wav"].as_str(),
+        Some(expected_source.to_string_lossy().as_ref()),
+        "both sides read the same source path"
     );
     assert_eq!(
         header["stages"].as_array().map(Vec::len),
         Some(FLOAT_STAGES.len()),
         "oracle emits every compared stage"
+    );
+    // The resolved profile and its setup packet: the kernel's carrier surface
+    // against the oracle's assembled resources, live. These are the two halves
+    // of the container header that no per-frame row carries.
+    let resolved = wem_profiles::resolve_wem_profile_selection(fixture_selection())
+        .expect("the fixture selection resolves in the kernel");
+    assert_eq!(
+        header["profile"].as_str(),
+        Some(resolved.label().as_str()),
+        "both sides resolve the same installed profile"
+    );
+    let compiled = wem_profiles::compiled_profile_for_selection(fixture_selection())
+        .expect("the installed 6ch profile resolves");
+    let resources = wem_profiles::assemble_encoder_profile_resources(&compiled, None, None)
+        .expect("analysis resources assemble");
+    assert_eq!(
+        header["setup_packet"].as_str(),
+        Some(hex_bytes(&resources.setup_packet).as_str()),
+        "the kernel carrier's setup packet is the oracle's"
     );
 
     for (index, window) in windows.iter().enumerate() {

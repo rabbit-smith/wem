@@ -366,6 +366,15 @@ pub enum AnalysisError {
     StreamFeederSourceShort { frames: i64 },
     /// "stream frame window references samples not yet retained"
     StreamFeederWindowNotReady { want_from: i64, want_to: i64 },
+    /// The host refused to start the analysis channel pool's workers.
+    ///
+    /// The one variant here with no counterpart in the Python reference: it
+    /// reports a host resource failure rather than a rejected input. The cause
+    /// travels as its rendered message because this enum is `PartialEq + Eq`
+    /// and exists in builds without rayon, so the host's own error value cannot
+    /// be held here; `Display` carries the observed worker count and the cause
+    /// together.
+    PoolUnavailable { workers: usize, cause: String },
 }
 
 impl std::fmt::Display for AnalysisError {
@@ -898,6 +907,10 @@ impl std::fmt::Display for AnalysisError {
             } => write!(
                 f,
                 "stream frame window references samples not yet retained: want {want_from}..{want_to}"
+            ),
+            PoolUnavailable { workers, cause } => write!(
+                f,
+                "the analysis channel pool could not start {workers} workers: {cause}"
             ),
         }
     }

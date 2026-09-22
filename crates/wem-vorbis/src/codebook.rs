@@ -525,8 +525,9 @@ pub struct Codebook {
     /// maptype1: per-entry VQ vector, or None when unused.
     pub valuallist: Option<Vec<Option<Vec<f64>>>>,
     pub quantvals: i64,
-    /// Assembly-time precompute of the used entries (length > 0), ascending.
-    /// Mirrors `used_entries()` without rebuilding it on every hot-path call.
+    /// Assembly-time precompute of the used entries (length > 0), ascending;
+    /// the `nearest_used_entry` scan reads it without rebuilding it on every
+    /// hot-path call.
     used_entries_cache: Vec<i64>,
     /// Per-entry membership flag (length > 0) for O(1) domain checks in the
     /// floor1/residue packers; same domain as the Python length-list test.
@@ -617,11 +618,6 @@ impl Codebook {
 
     pub fn lengthlist(&self) -> &[i64] {
         &self.static_codebook.lengthlist
-    }
-
-    /// Entries with a non-zero length.
-    pub fn used_entries(&self) -> Vec<i64> {
-        self.used_entries_cache.clone()
     }
 
     /// True when entry `e` has a non-zero length (hot-path domain test).

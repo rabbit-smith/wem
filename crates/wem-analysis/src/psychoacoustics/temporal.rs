@@ -192,35 +192,6 @@ pub fn compute_temporal_kernel(inputs: &TemporalKernelInputs) -> TemporalKernelR
     }
 }
 
-/// Apply the history rebase that precedes width relaxation
-/// (Python `rebase_history`).
-pub fn rebase_history(
-    inputs: &TemporalKernelInputs,
-    result: &TemporalKernelResult,
-    state: &[f64],
-    history: &[f64],
-) -> Result<Vec<f64>, AnalysisError> {
-    if state.len() as i64 != inputs.bins || history.len() as i64 != inputs.bins {
-        return Err(AnalysisError::RebaseLengthMismatch { want: inputs.bins });
-    }
-    if result.active == 0 || result.update_state == 0 {
-        return Ok(history.to_vec());
-    }
-    let delta = if inputs.bins == 128 {
-        5.0
-    } else if inputs.bins == 256 {
-        10.0
-    } else {
-        return Ok(history.to_vec());
-    };
-    let source = if inputs.previous_transition != 0 {
-        state
-    } else {
-        history
-    };
-    Ok(source.iter().map(|value| f32_of(*value - delta)).collect())
-}
-
 /// Apply sliding width-table relaxation to one history curve
 /// (Python `relax_history`).
 pub fn relax_history(
@@ -260,63 +231,6 @@ pub fn relax_history(
 /// (Python `relax_short_history`).
 pub fn relax_short_history(history: &[f64], raw: &[f64]) -> Result<Vec<f64>, AnalysisError> {
     relax_history(history, raw, &short_history_relaxation_widths(), 5.0)
-}
-
-/// Update short-block temporal history from local psychoacoustic surfaces
-/// (Python `update_short_history`).
-#[allow(clippy::too_many_arguments)]
-pub fn update_short_history(
-    inputs: &TemporalKernelInputs,
-    state: &[f64],
-    history: &[f64],
-    raw: &[f64],
-    seed: &[f64],
-    remap: &[f64],
-    mask_curve: &[f64],
-    curve_cap: f64,
-    q: f64,
-    candidate_bound: i64,
-) -> Result<Vec<f64>, AnalysisError> {
-    if inputs.bins != 128 {
-        return Err(AnalysisError::ShortTemporalBins { want: 128 });
-    }
-    let arrays = [state, history, raw, seed, remap, mask_curve];
-    if arrays.iter().any(|values| values.len() != 128) {
-        return Err(AnalysisError::ShortTemporalLength { want: 128 });
-    }
-    let result = compute_temporal_kernel(inputs);
-    let mut baseline = rebase_history(inputs, &result, state, history)?;
-    if result.active != 0 && result.update_state != 0 {
-        baseline = relax_short_history(&baseline, raw)?;
-    } else {
-        for value in baseline.iter_mut() {
-            *value = f32_of(*value);
-        }
-    }
-
-    if result.active == 0 {
-        return Ok(baseline);
-    }
-    let mut out = baseline.clone();
-    let mut subtract = 0.0;
-    if q >= 0.0 && inputs.curve_bias >= 25.0 {
-        subtract = q * (inputs.curve_bias - 25.0);
-    }
-    for index in 0..128usize {
-        let cap = f32_of(mask_curve[index] + remap[index]).min(curve_cap);
-        let mut candidate = f32_of(seed[index] + inputs.curve_bias);
-        if index as i64 <= candidate_bound {
-            candidate = f32_of(candidate - subtract);
-        }
-        if candidate < cap
-            && state[index] < cap
-            && out[index] + result.state_bias < raw[index]
-            && result.update_state != 0
-        {
-            out[index] = f32_of(raw[index]);
-        }
-    }
-    Ok(out)
 }
 
 #[cfg(test)]

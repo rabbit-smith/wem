@@ -15,8 +15,8 @@ pub fn profile_label(channels: i64, sample_rate: i64, generation: &str) -> Strin
 }
 
 /// The complete description of one profile identity, for resolution and
-/// duplicate diagnostics: the label plus the two identity fields the label
-/// does not carry (channel layout and setup identity).
+/// duplicate diagnostics: the label plus the channel layout the label does not
+/// carry.
 ///
 /// Two installed profiles that share generation and geometry are told apart
 /// here and nowhere else — the label alone would print them identically, which
@@ -26,22 +26,25 @@ pub fn profile_description(
     sample_rate: i64,
     generation: &str,
     channel_layout: &str,
-    quality_setup_identity: &str,
 ) -> String {
     format!(
-        "{}/{channel_layout}({quality_setup_identity})",
+        "{}/{channel_layout}",
         profile_label(channels, sample_rate, generation)
     )
 }
 
 /// Complete encoder profile identity (Python `ProfileKey`).
+///
+/// The identity is the key itself — generation, geometry and channel layout.
+/// Nothing derived from the profile's setup packet is part of it: the packet
+/// travels as bytes, so a digest stored beside it would only be checked
+/// against the bytes it came from.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProfileKey {
     channels: i64,
     sample_rate: i64,
     generation: String,
     channel_layout: String,
-    quality_setup_identity: String,
 }
 
 impl ProfileKey {
@@ -51,7 +54,6 @@ impl ProfileKey {
         sample_rate: i64,
         generation: String,
         channel_layout: String,
-        quality_setup_identity: String,
     ) -> Result<Self, ProfileError> {
         if channels <= 0 || sample_rate <= 0 {
             return Err(ProfileError::ProfileKeyNonPositive);
@@ -59,7 +61,6 @@ impl ProfileKey {
         for (field, value) in [
             ("generation", &generation),
             ("channel layout", &channel_layout),
-            ("quality/setup identity", &quality_setup_identity),
         ] {
             if value.is_empty() {
                 return Err(ProfileError::ProfileKeyFieldEmpty { field });
@@ -71,7 +72,6 @@ impl ProfileKey {
             sample_rate,
             generation,
             channel_layout,
-            quality_setup_identity,
         })
     }
 
@@ -91,10 +91,6 @@ impl ProfileKey {
         &self.channel_layout
     }
 
-    pub fn quality_setup_identity(&self) -> &str {
-        &self.quality_setup_identity
-    }
-
     /// Complete description used in registry diagnostics.
     pub fn describe(&self) -> String {
         profile_description(
@@ -102,7 +98,6 @@ impl ProfileKey {
             self.sample_rate,
             &self.generation,
             &self.channel_layout,
-            &self.quality_setup_identity,
         )
     }
 

@@ -40,7 +40,7 @@ use pyo3::exceptions::{PyException, PyValueError};
 use pyo3::ffi::c_str;
 use pyo3::prelude::*;
 use pyo3::type_object::PyTypeInfo;
-use pyo3::types::{PyBytes, PyDict, PyType};
+use pyo3::types::{PyBytes, PyDict, PyList, PyTuple, PyType};
 
 use wem_core::encoder::{EncodeResult as WemEncodeResult, Encoder as WemEncoder, Pcm16};
 use wem_core::error::EncoderError;
@@ -225,11 +225,27 @@ fn guard<T>(
 /// Content validation (rate/geometry/length) is left entirely to the
 /// kernel (`Pcm16::new` + `Encoder::encode_pcm`) so rejection conditions
 /// cannot drift.
+///
+/// The two forms are tried in that order, and when neither can be read the
+/// error the caller gets is the one for the form its argument was written in.
+/// A list or tuple *is* the row form — no buffer-protocol object is one — so
+/// its own extraction error, which names the element that cannot be a sample,
+/// is reported; the buffer error would describe a form the caller never used
+/// and send it looking in the wrong place.
 fn pcm_from_argument(sample_rate: i64, arg: &Bound<'_, PyAny>) -> PyResult<Pcm16> {
-    if let Ok(rows) = arg.extract::<Vec<Vec<i64>>>() {
-        return pcm_from_rows(sample_rate, rows);
+    match arg.extract::<Vec<Vec<i64>>>() {
+        Ok(rows) => pcm_from_rows(sample_rate, rows),
+        Err(row_error) => match pcm_from_memoryview(sample_rate, arg) {
+            Ok(pcm) => Ok(pcm),
+            Err(buffer_error) => {
+                if arg.is_instance_of::<PyList>() || arg.is_instance_of::<PyTuple>() {
+                    Err(row_error)
+                } else {
+                    Err(buffer_error)
+                }
+            }
+        },
     }
-    pcm_from_memoryview(sample_rate, arg)
 }
 
 fn pcm_from_rows(sample_rate: i64, rows: Vec<Vec<i64>>) -> PyResult<Pcm16> {
@@ -584,7 +600,14 @@ impl PyEncoder {
 // ---------------------------------------------------------------------------
 
 /// Immutable encode result (field set follows `wem_core::EncodeStats`
-/// plus the container bytes; `bytes_out` names the stats `bytes`).
+/// plus the container bytes).
+///
+/// Every field is an observation the caller cannot recompose: `pcm_frames`
+/// (a streaming caller may never have counted the frames it pushed) and the
+/// packet counts (they require parsing the container). The container's byte
+/// length is not among them — it is `len(result.data)` — and neither is a
+/// label naming the selected profile, which is the selection the caller
+/// itself passed to the constructor.
 #[pyclass(name = "EncodeResult", module = "wwise_wem._core")]
 #[derive(Clone)]
 struct PyEncodeResult {
@@ -601,11 +624,6 @@ impl PyEncodeResult {
     #[getter]
     fn audio_packets(&self) -> i64 {
         self.inner.stats.audio_packets
-    }
-
-    #[getter]
-    fn bytes_out(&self) -> i64 {
-        self.inner.stats.bytes
     }
 
     #[getter]
@@ -626,16 +644,6 @@ impl PyEncodeResult {
     #[getter]
     fn long_packets(&self) -> i64 {
         self.inner.stats.long_packets
-    }
-
-    #[getter]
-    fn metadata_source(&self) -> String {
-        self.inner.stats.metadata_source.clone()
-    }
-
-    /// SHA-256 of the encoded bytes, lowercase hex (kernel-computed).
-    fn sha256(&self) -> String {
-        self.inner.sha256()
     }
 }
 
@@ -746,7 +754,7 @@ impl PyStreamSession {
     }
 
     /// Mark the end of the PCM stream and assemble the container
-    /// (`Finish`); returns the container summary.
+    /// (`Finish`); returns the container bytes.
     fn finish(&mut self, py: Python<'_>) -> PyResult<PyWemComplete> {
         if self.is_dead() {
             return Err(self.unusable());
@@ -760,19 +768,7 @@ impl PyStreamSession {
             self.dead = true;
         }
         let result = guarded.outcome?;
-        let sha256 = result.sha256();
-        let total_len = result.data.len() as u64;
-        Ok(PyWemComplete {
-            bytes: result.data,
-            sha256,
-            total_len,
-        })
-    }
-
-    /// PCM frames accumulated so far (streaming observability).
-    #[getter]
-    fn pcm_frames(&self) -> i64 {
-        self.inner.pcm_frames()
+        Ok(PyWemComplete { bytes: result.data })
     }
 }
 
@@ -790,19 +786,17 @@ struct PyPacket {
     data: Vec<u8>,
 }
 
-/// Terminal container summary (the stream's completion result).
+/// Terminal container result (the stream's completion value).
+///
+/// The container bytes and nothing derived from them: its length is
+/// `len(complete.bytes)`, and a digest of it is the caller's to compute
+/// from those bytes.
 #[pyclass(name = "WemComplete", module = "wwise_wem._core")]
 #[derive(Clone)]
 struct PyWemComplete {
     /// The assembled WEM container bytes.
     #[pyo3(get)]
     bytes: Vec<u8>,
-    /// SHA-256 of the container bytes, lowercase hex (64 chars).
-    #[pyo3(get)]
-    sha256: String,
-    /// Byte length of the container.
-    #[pyo3(get)]
-    total_len: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -1117,15 +1111,12 @@ rows = [
     for c in range(channels)
 ]
 by_selection = m.Encoder(selection).encode_pcm(rate, rows)
-assert bytes(by_selection.data) == expected_bytes, by_selection.sha256()
+assert bytes(by_selection.data) == expected_bytes, "not the reference container"
 assert by_selection.audio_packets == 205, by_selection.audio_packets
 assert by_selection.pcm_frames == frames, by_selection.pcm_frames
 assert by_selection.channels == channels, by_selection.channels
-assert by_selection.metadata_source == (
-    "profile:" + str(channels) + "ch/" + str(rate) + "Hz/2013"
-), by_selection.metadata_source
 packed = m.Encoder(selection).encode_pcm16_interleaved(rate, channels, raw)
-assert bytes(packed.data) == expected_bytes, packed.sha256()
+assert bytes(packed.data) == expected_bytes, "not the reference container"
 assert bytes(packed.data) == bytes(by_selection.data)
 "#
                 ),
@@ -1160,10 +1151,8 @@ for i in range(len(cuts) - 1):
     lo, hi = cuts[i] * step, cuts[i + 1] * step
     packets.extend(session.push(raw[lo:hi]))
 complete = session.finish()
-assert bytes(complete.bytes) == expected_bytes, complete.sha256
-assert complete.total_len == len(bytes(complete.bytes))
+assert bytes(complete.bytes) == expected_bytes, "not the reference container"
 assert [p.seq for p in packets] == list(range(len(packets))), "seq must be 0..n-1"
-assert session.pcm_frames == frames, session.pcm_frames
 "#
                 ),
                 Some(&globals),
@@ -1243,16 +1232,12 @@ rows = [
     for c in range(channels)
 ]
 res = m.Encoder(selection).encode_pcm(rate, rows)
-assert bytes(res.data) == expected_bytes, res.sha256()
-assert len(bytes(res.data)) == res.bytes_out
+assert bytes(res.data) == expected_bytes, "not the reference container"
 assert res.audio_packets == 205, res.audio_packets
 assert res.short_packets == 77, res.short_packets
 assert res.long_packets == 128, res.long_packets
 assert res.pcm_frames == n // channels, res.pcm_frames
 assert res.channels == channels, res.channels
-assert res.metadata_source == (
-    "profile:" + str(channels) + "ch/" + str(rate) + "Hz/2013"
-), res.metadata_source
 "#
                 ),
                 Some(&globals),
@@ -1286,14 +1271,96 @@ rows_flat = [vals[f * channels + c]
 cm_bytes = b''.join(struct.pack('<h', v) for v in rows_flat)
 mv = memoryview(cm_bytes).cast('h', [channels, frames])
 res = m.Encoder(selection).encode_pcm(rate, mv)
-assert bytes(res.data) == expected_bytes, res.sha256()
-assert res.bytes_out == len(bytes(res.data))
+assert bytes(res.data) == expected_bytes, "not the reference container"
 "#
                 ),
                 Some(&globals),
                 None,
             )
             .expect("memoryview encode must be bit-exact");
+        });
+    }
+
+    /// The dispatch between the two documented PCM forms reports the error of
+    /// the form the argument was written in (`pcm_from_argument`).
+    ///
+    /// A list of per-channel rows with a bad element is a row-form mistake,
+    /// and the extraction error names the element. Reporting the buffer error
+    /// instead would tell the caller its argument is not a buffer — a form it
+    /// never used — and send it to fix the wrong thing.
+    #[test]
+    fn pcm_argument_failures_report_the_error_of_the_form_that_was_used() {
+        Python::with_gil(|py| {
+            // The sources vary per case, so the C strings are built here
+            // rather than through `c_str!` (which takes literals).
+            let eval = |source: &str| -> Bound<'_, PyAny> {
+                let code = std::ffi::CString::new(source).expect("source has no NUL");
+                py.eval(code.as_c_str(), None, None)
+                    .unwrap_or_else(|error| panic!("{source} evaluates: {error}"))
+            };
+
+            // Row form, bad element: the row error, naming the element.
+            for (source, element) in [
+                ("[[1, 2, 3], [4, 5, 'x']]", "'str'"),
+                ("[[1.5, 2.0, 3.0]]", "'float'"),
+                ("[[1, 2], [3, None]]", "'NoneType'"),
+            ] {
+                let argument = eval(source);
+                let error = pcm_from_argument(44_100, &argument)
+                    .expect_err("a bad element is not a sample");
+                let message = error.to_string();
+                assert!(
+                    !message.contains("memoryview") && !message.contains("bytes-like"),
+                    "{source}: the row error must reach the caller, not the buffer \
+                     error for a form it never used: {message}"
+                );
+                assert!(
+                    message.contains(element),
+                    "{source}: the error must name the offending element {element}: {message}"
+                );
+            }
+
+            // Buffer form: neither of these is a list, so the buffer
+            // diagnostics are the ones that belong to the argument.
+            let one_dimensional = eval("b'\\x00\\x00'");
+            let error = pcm_from_argument(44_100, &one_dimensional)
+                .expect_err("one-dimensional bytes is not a 2-D buffer");
+            assert!(
+                error.to_string().contains("must be 2-D"),
+                "the buffer form keeps its own diagnostic: {error}"
+            );
+
+            let not_a_buffer = eval("object()");
+            let error = pcm_from_argument(44_100, &not_a_buffer)
+                .expect_err("a plain object is neither form");
+            assert!(
+                !error.to_string().contains("must be 2-D"),
+                "a non-sequence must not be reported as a malformed buffer: {error}"
+            );
+
+            // Both accepted forms still reach the kernel: the valid row list
+            // builds, and so does the valid 2-D signed-16 buffer.
+            let rows = pcm_from_argument(44_100, &eval("[[0] * 4096] * 6"))
+                .expect("the documented row form still builds");
+            assert_eq!(rows.channel_count(), 6);
+            assert_eq!(rows.frame_count(), 4096);
+
+            let bytes = vec![0u8; 6 * 4096 * 2];
+            let globals = PyDict::new(py);
+            globals
+                .set_item("arg", pyo3::types::PyBytes::new(py, &bytes))
+                .unwrap();
+            let view = py
+                .eval(
+                    c_str!("memoryview(arg).cast('h', [6, 4096])"),
+                    None,
+                    Some(&globals),
+                )
+                .expect("the buffer form builds through memoryview");
+            let buffered =
+                pcm_from_argument(44_100, &view).expect("the documented buffer form still builds");
+            assert_eq!(buffered.channel_count(), 6);
+            assert_eq!(buffered.frame_count(), 4096);
         });
     }
 
@@ -1476,8 +1543,7 @@ for i in range(len(cuts) - 1):
     lo, hi = cuts[i] * step, cuts[i + 1] * step
     packets.extend(session.push(raw[lo:hi]))
 complete = session.finish()
-assert bytes(complete.bytes) == expected_bytes, complete.sha256
-assert complete.total_len == len(bytes(complete.bytes))
+assert bytes(complete.bytes) == expected_bytes, "not the reference container"
 assert [p.seq for p in packets] == list(range(len(packets))), "seq must be 0..n-1"
 assert len(packets) >= 1
 # The setup packet leaves first and equals the reference container's.

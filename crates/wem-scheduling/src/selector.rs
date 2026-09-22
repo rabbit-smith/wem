@@ -58,6 +58,26 @@ pub struct ModeSelector {
     pub queue: Vec<i64>,
 }
 
+/// A summary: every counter, with the queue reported by length.
+///
+/// The queue is a fixed-capacity ring of transient indices (its full contents
+/// are `capacity` values of bookkeeping, not a diagnostic), so its length is
+/// shown instead of its contents; everything else here is a scalar and is
+/// printed as it stands.
+impl std::fmt::Debug for ModeSelector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModeSelector")
+            .field("hop", &self.hop)
+            .field("capacity", &self.capacity)
+            .field("cooldown", &self.cooldown)
+            .field("generated", &self.generated)
+            .field("selected", &self.selected)
+            .field("scan_cursor", &self.scan_cursor)
+            .field("queue_len", &self.queue.len())
+            .finish()
+    }
+}
+
 impl ModeSelector {
     /// Construct and pad the queue to its capacity
     /// (Python `__post_init__`).
@@ -123,57 +143,6 @@ impl ModeSelector {
             self.cooldown = -1;
         }
         Ok(())
-    }
-
-    /// Advance history and store one precomputed transient result.
-    pub fn apply_quantum(&mut self, index: i64, flags: i64) -> Result<(), SelectorError> {
-        self.begin_quantum();
-        self.finish_quantum(index, flags)?;
-        Ok(())
-    }
-
-    /// Fill queue entries through the current buffered-PCM target.
-    ///
-    /// `flags_by_quantum` contains one already-combined integer flag word for
-    /// each quantum; the count must be exactly the number of new quanta
-    /// between `generated` and the target (Python's trailing surplus check).
-    pub fn generate(
-        &mut self,
-        filled: i64,
-        flags_by_quantum: &[i64],
-    ) -> Result<i64, SelectorError> {
-        let mut target = filled / self.hop - 4;
-        if target < 0 {
-            target = 0;
-        }
-        // Grow before writing the two-slot look-ahead and retain six spare
-        // entries for the next generation step.
-        let required_capacity = target + 6;
-        if required_capacity > self.capacity {
-            self.queue.resize(required_capacity as usize, 0);
-            self.capacity = required_capacity;
-        }
-        let mut start = self.generated.div_euclid(self.hop);
-        if start < 0 {
-            start = 0;
-        }
-        if target < start {
-            return Ok(0);
-        }
-        let needed = target - start;
-        if (flags_by_quantum.len() as i64) < needed {
-            return Err(SelectorError::MissingFlagRows);
-        }
-        if (flags_by_quantum.len() as i64) > needed {
-            return Err(SelectorError::SurplusFlagRows);
-        }
-        let mut written = 0i64;
-        for index in start..target {
-            self.apply_quantum(index, flags_by_quantum[written as usize])?;
-            written += 1;
-        }
-        self.generated = target * self.hop;
-        Ok(written)
     }
 
     /// Return the selector's native `-1/0/1` look-ahead decision.
@@ -321,34 +290,6 @@ mod tests {
         assert!(matches!(
             err,
             SelectorError::QueueSlotOutOfRange { slot: 4 }
-        ));
-    }
-
-    #[test]
-    fn generate_growth_and_rejections() {
-        let mut sel = ModeSelector::new(64, 4, 0, 0, 0, 0, vec![0; 4]).expect("ok");
-        // filled = 640 -> target = 640/64 - 4 = 6; start = 0 -> 6 rows.
-        let written = sel.generate(640, &[1, 2, 4, 1, 2, 4]).expect("ok");
-        assert_eq!(written, 6);
-        assert_eq!(sel.generated, 384);
-        assert_eq!(sel.capacity, 12); // target + 6
-                                      // filled = 1280 -> target = 16; start = 384/64 = 6 -> 10 rows.
-        let rows: Vec<i64> = (0..10).map(|i| i + 1).collect();
-        let written = sel.generate(1280, &rows).expect("ok");
-        assert_eq!(written, 10);
-        // Target behind the generated frontier writes nothing, no rows used.
-        // filled = 1215 -> target = 14 < start = 16.
-        assert_eq!(sel.generate(1215, &[]), Ok(0));
-        // filled = 1920 -> target = 26; start = 16 -> 10 rows required.
-        let few: Vec<i64> = (0..2).collect();
-        assert!(matches!(
-            sel.generate(1920, &few).unwrap_err(),
-            SelectorError::MissingFlagRows
-        ));
-        let surplus: Vec<i64> = (0..11).collect();
-        assert!(matches!(
-            sel.generate(1920, &surplus).unwrap_err(),
-            SelectorError::SurplusFlagRows
         ));
     }
 

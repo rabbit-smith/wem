@@ -5,7 +5,7 @@
  * Proves the wasm shell encodes byte-exactly against the kernel reference
  * bytes, through the package's own entry point (src/index.ts, run via
  * Node's native type stripping on >= 22.18), and that its profile selection
- * is the structured one of `include/wem.h` (ABI revision 2):
+ * is the structured one of `include/wem.h` (ABI revision 3):
  *
  *   1. ONE-SHOT: the pinned 6ch/44.1kHz recording -> WEM, byte-identical to
  *      the committed kernel reference (tests/fixtures/reference.wem) —
@@ -23,10 +23,14 @@
  *   4. ERROR MAPPING: kernel failures surface as JS Errors whose `code` is
  *      the stable WEM_ERR_* string.
  *
- * Run: node js/test-node.mjs   (requires js/pkg-node built: npm run build:node)
+ * Run: make wasm-test   (builds js/pkg-node first, then runs this file)
+ *      node js/test-node.mjs   — needs a built package: make wasm-build.
+ * The package is wasm-pack output and is not part of the checkout; with no
+ * package built there is nothing to compare, so this test fails and names the
+ * build command rather than skipping.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -49,6 +53,28 @@ const repoRoot = join(here, "..");
 const RECORDING = join(repoRoot, "tests/fixtures/input.wav");
 const REFERENCE = join(repoRoot, "tests/fixtures/reference.wem");
 const RECORDING_FRAMES = 139398;
+
+// wasm-pack writes js/pkg-node (and js/pkg) -- neither is in the checkout, so
+// the test builds nothing silently and skips nothing: it stops here and prints
+// the command that produces the package.
+const PACKAGE_FILES = ["wem_wasm.js", "wem_wasm_bg.wasm"].map((name) =>
+  join(here, "pkg-node", name),
+);
+const missingPackageFiles = PACKAGE_FILES.filter((path) => !existsSync(path));
+if (missingPackageFiles.length > 0) {
+  console.error(
+    [
+      "FAIL: the Node wasm package (js/pkg-node) is not built, so the byte",
+      "comparison against tests/fixtures/reference.wem cannot run.",
+      ...missingPackageFiles.map((path) => `  missing: ${path}`),
+      "",
+      "Build it first:",
+      "  make wasm-build               # both packages (js/pkg, js/pkg-node)",
+      "  cd js && npm run build:node   # the Node package only",
+    ].join("\n"),
+  );
+  process.exit(1);
+}
 
 let failures = 0;
 
@@ -119,14 +145,14 @@ const auto = await encodeWav(wavBytes); // no selection: auto-selected from the 
 check(
   "one-shot (auto-selected) bytes == reference.wem",
   equal(auto.data, referenceWem),
-  `sha256=${auto.sha256Hex}, bytes=${auto.totalLen}, ${Date.now() - t0}ms`,
+  `bytes=${auto.data.byteLength}, ${Date.now() - t0}ms`,
 );
 
 const explicit = await encodeWav(wavBytes, { version: 0, channels: 6, sampleRate: 44100 });
 check(
   "one-shot (explicit selection 0/6ch/44100) bytes == reference.wem",
   equal(explicit.data, referenceWem),
-  `sha256=${explicit.sha256Hex}, bytes=${explicit.totalLen}`,
+  `bytes=${explicit.data.byteLength}`,
 );
 
 const parsed = await parseWav(wavBytes);
@@ -155,7 +181,7 @@ const pcmOneShot = encoder.encodePcm16Interleaved(parsed.pcm);
 check(
   "one-shot through the raw-PCM entry bytes == reference.wem",
   equal(pcmOneShot.data, referenceWem),
-  `sha256=${pcmOneShot.sha256Hex}, bytes=${pcmOneShot.totalLen}`,
+  `bytes=${pcmOneShot.data.byteLength}`,
 );
 encoder.destroy();
 
@@ -183,7 +209,11 @@ async function streamEncode(chunks, source) {
     for (const chunk of chunks) {
       session.push(chunk);
     }
-    return { result: session.finish(), resolved };
+    // Streaming observability: the count reflects exactly the frames pushed
+    // so far, and crosses the boundary as a JS number (the shell returns it
+    // as f64, so no count a session can reach is truncated).
+    const frames = session.pcmFrames();
+    return { result: session.finish(), resolved, frames };
   } finally {
     session.destroy();
   }
@@ -218,17 +248,22 @@ for (const [label, chunks] of Object.entries(plans)) {
   // first plan: explicit geometry, generation auto-selected; the rest: the
   // parsed WAV as the geometry source
   const source = label === "single-chunk" ? { channels: 6, sampleRate: 44100 } : parsed;
-  const { result, resolved } = await streamEncode(chunks, source);
+  const { result, resolved, frames } = await streamEncode(chunks, source);
   results.push(result);
   check(
     `streaming (${label}) bytes == reference.wem`,
     equal(result.data, referenceWem),
-    `sha256=${result.sha256Hex}, packets=${result.stats.audioPackets}, chunks=${chunks.length}`,
+    `bytes=${result.data.byteLength}, packets=${result.stats.audioPackets}, chunks=${chunks.length}`,
   );
   check(
     `streaming (${label}) session selection`,
     sameSelection(resolved, SIX_CHANNEL),
     describe(resolved),
+  );
+  check(
+    `streaming (${label}) pcmFrames() reports the pushed frames exactly`,
+    Number.isSafeInteger(frames) && frames === framesPer,
+    `pcmFrames=${frames}, pushed=${framesPer}, type=${typeof frames}`,
   );
 }
 
@@ -375,7 +410,7 @@ if (twoChannelEncoder) {
       twoChannelResult.stats.audioPackets > 0 &&
       twoChannelResult.stats.shortPackets + twoChannelResult.stats.longPackets ===
         twoChannelResult.stats.audioPackets,
-    `bytes=${twoChannelResult.data.byteLength}, packets=${twoChannelResult.stats.audioPackets}, sha=${twoChannelResult.sha256Hex.slice(0, 12)}...`,
+    `bytes=${twoChannelResult.data.byteLength}, packets=${twoChannelResult.stats.audioPackets}`,
   );
   twoChannelEncoder.destroy();
 }
@@ -389,4 +424,3 @@ console.log("\nALL NODE PARITY CHECKS PASSED");
 console.log(
   `reference: ${referenceWem.byteLength} bytes identical to tests/fixtures/reference.wem`,
 );
-console.log(`reference sha256 (computed, not compared): ${auto.sha256Hex}`);

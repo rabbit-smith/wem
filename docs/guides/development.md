@@ -33,10 +33,15 @@ and [`../reference/architecture.md`](../reference/architecture.md).
 make native          # maturin develop: build the in-package kernel extension
 make build           # wheel into dist/
 make wheel-smoke     # install the wheel in a clean venv and encode once
+make wasm-build      # wasm-pack: both shell packages (js/pkg, js/pkg-node)
 ```
 
 `pip install -e .` is equivalent to `make native`. Python-only tooling:
 `make lint` (ruff + mypy), `make rust-lint` (clippy, warnings denied).
+
+The wasm packages are build output and are not committed, so `make wasm-build`
+runs before the Node test and before the browser demo
+([`../../examples/wasm-demo/`](../../examples/wasm-demo/)).
 
 ## Verification ladder
 
@@ -65,22 +70,22 @@ to fix the code or the test rather than to re-record the expectation.
 
 | Target | Checks |
 | --- | --- |
-| `make wem-bytes` | Whole-file reference WEM identity: `SHA-256 17851d26…d35247`, 205 audio packets |
+| `make wem-bytes` | Whole-file reference WEM parity: the encoder's bytes equal the committed `tests/fixtures/reference.wem`, byte for byte (205 audio packets) |
 | `tests/parity/test_frame_pipeline_parity.py`, `cargo test -p wem-core --test frame_pipeline_parity` | Per-frame values (scheduling fields, eight analysis stages, floor posts, residue rows, audio packet) against the pure-Python oracle, all 205 frames |
-| `tests/parity/test_stage_pipeline.py` | Per-frame × per-stage pipeline hashes and raw dumps |
+| `cargo test -p wem-container --test container_codec` | The native container builder against the oracle's, byte for byte, from one live packet stream, plus the degenerate payloads it must refuse with a typed error |
 | `make 2ch-stress`, `make 2ch-long` | The 2ch stress corpus and the long-run cross-implementation comparison |
 | `make fuzz-parity` | Native vs oracle parity under randomized chunking and quality; Python unit, integration and cross-implementation suites run in `make test-fast` |
 | `cargo test --workspace` | Rust kernel, C ABI and shell suites, including the geometry-materializer parity suites |
 | `make wheel-smoke` | Installed-wheel inventory (facade + native engine, no profile data) and one real encode |
-| `make check` | All of the above plus `ruff`, `mypy` and `clippy` |
+| `make wasm-build` | wasm-pack builds both shell packages: `js/pkg` (web) and `js/pkg-node` (nodejs) |
+| `make wasm-test` | Builds both packages, then runs `js/test-node.mjs`: the shell's bytes against `tests/fixtures/reference.wem` (one-shot, three chunkings) plus the selection and error-code mapping; with no package built it fails and prints the build command |
+| `make check` | `lint`, `rust-fmt`, `rust-lint`, the full Python ladder and the wheel smoke |
 
 One target is **not** a check: `python3 scripts/measure_encode_perf.py` measures
 the release build — the CLI stage timers and the kernel's per-stage split, each
-as min / median / p95 / spread with the machine identity — and never goes red.
-It has no threshold and no recorded baseline, because a number compared against
-a recorded one hides the change behind a re-record step
-([standards](../reference/standards.md#bit-exactness)). What it reported, and
-what the numbers show, is in
+as min / median / p95 / spread with the machine identity and the load it ran
+under — and never goes red ([Watching performance](#watching-performance)). What
+it reported, and what the numbers show, is in
 [`../findings/encode-performance.md`](../findings/encode-performance.md).
 
 The same targets from the test tree's point of view — layer, command and run
@@ -118,6 +123,38 @@ not a review topic: `make rust-fmt` and `make lint` decide it.
   — bytes, values, an error class — rather than restating the code path that
   produced it, so that a rewrite of the path keeps the test meaningful. Read in
   review.
+
+## Watching performance
+
+Performance is watched, not gated. A reading — a leaf or stage, its share of an
+encode, and the machine it came from — becomes an entry in the
+[encode performance finding](../findings/encode-performance.md); it never
+becomes a threshold in a test or a budget in CI. The instruments are
+`scripts/measure_encode_perf.py` (CLI stage timers, min/median/p95/spread, the
+machine identity the numbers belong to, and the load average before and after
+each series), `crates/wem-core/tests/stage_timings.rs` (the per-stage split of
+one encode, `#[ignore]`d, run with `--ignored --nocapture`), and the RSS
+reporters in `crates/wem-core/tests/streaming.rs`. The timing instruments
+**report**: an instrument that can fail a build has become a gate, and the
+ceiling it enforces belongs in the finding as a reading rather than in the suite
+as a limit. Memory is the one exception, and only because it is a different kind
+of claim: how much input a session may accumulate is a property of the product,
+so `streaming.rs` keeps its RSS ceilings as assertions and prints each reading
+beside the ceiling it is held to.
+
+A change to a hot path earns its place before it is written: the redundancy or
+invariance established from the code rather than from a percentage, then a
+bit-exactness argument for the specific change, and only then the edit. The
+measurement that accompanies it is a paired before/after with the run order
+alternated and **the machine's load stated** — a naive pair on a busy machine
+once reported a 152 ms "after" against a 116 ms "before" for a stage nobody had
+touched. No optimization that could move a byte lands until the crate's targets
+are green under both feature configurations, `--all-targets` with default
+features and with `--no-default-features`.
+
+The finding is the ledger, and it is append-only in spirit: a closed item stays
+there, marked closed with the number that closed it, because an entry deleted
+on completion destroys the only record that the work was ever measured.
 
 ## Adding and removing files
 

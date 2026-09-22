@@ -13,7 +13,10 @@ Measures the **release** build and prints what it observed:
 
 For every series it prints min / median / p95 / max and the spread, plus the
 machine identity the numbers came from (a median encode time is meaningless
-without knowing the CPU, the core count, the OS and the compiler).
+without knowing the CPU, the core count, the OS and the compiler) and the
+machine's load average at the time (two readings taken at different loads are
+not comparable, so the load is recorded next to the numbers rather than
+remembered).
 
 It has no thresholds and no recorded baseline: nothing here decides whether a
 number is acceptable, and there is no ``--record``. The exit status is 0
@@ -25,9 +28,9 @@ machine changes the numbers, never the exit status.
 test target, which needs a Rust toolchain; ``--no-stages`` measures only
 through the CLI.
 
-Ambient reads are deliberate and declared: the machine identity is part of the
-result, and the clock is what is being measured. Nothing else is read from the
-environment, and nothing is written anywhere.
+Ambient reads are deliberate and declared: the machine identity and the load
+average are part of the result, and the clock is what is being measured.
+Nothing else is read from the environment, and nothing is written anywhere.
 
 Usage:
   cargo build --release -p wem-core        # or: make rust-bench
@@ -61,6 +64,12 @@ TWO_CHANNEL_DIRS = (
 DEFAULT_RUNS = 9
 CARGO_MANIFEST = REPO / "crates" / "Cargo.toml"
 STAGE_TEST = "stage_timings"
+# The one reporting test in that file this driver consumes. Selected by name
+# (`--exact`): the file also carries the duration-curve driver
+# (`stage_timings_duration_report`), which `scripts/measure_duration_curves.py`
+# runs with its own environment and which fails without it, so running every
+# ignored test in the file is not what this measurement means.
+STAGE_REPORT = "stage_timings_report"
 
 CLI_STAGES = ("wav_load", "profile_assembly", "encode", "output_write")
 CLI_STAGE_PATTERN = re.compile(
@@ -101,32 +110,71 @@ def percentile(samples: list[float], fraction: float) -> float:
 
 @dataclass
 class Series:
-    """One named series of measurements, in milliseconds."""
+    """One named series of measurements, in milliseconds.
+
+    ``load`` is the 1-minute load average before and after the runs that
+    produced the samples; both are ``None`` on a platform without one.
+    """
 
     label: str
     unit: str
     samples: list[float]
+    load: tuple[float | None, float | None] | None = None
 
     def report(self) -> str:
         values = self.samples
         median = statistics.median(values)
         spread = max(values) - min(values)
         spread_share = (spread / median * 100.0) if median else float("nan")
-        return (
+        line = (
             f"  {self.label:<34} n={len(values):<3} "
             f"min={min(values):9.3f}  median={median:9.3f}  "
             f"p95={percentile(values, 0.95):9.3f}  max={max(values):9.3f}  "
             f"spread={spread:8.3f} {self.unit} ({spread_share:5.1f}% of median)"
         )
+        if self.load is not None:
+            before, after = self.load
+            line += f"  load(1m) {_format_load(before)}->{_format_load(after)}"
+        return line
 
 
-def series_from(label: str, samples: list[float], unit: str = "ms") -> Series:
-    return Series(label=label, unit=unit, samples=samples)
+def series_from(
+    label: str,
+    samples: list[float],
+    unit: str = "ms",
+    load: tuple[float | None, float | None] | None = None,
+) -> Series:
+    return Series(label=label, unit=unit, samples=samples, load=load)
 
 
 # ---------------------------------------------------------------------------
-# Machine identity
+# Machine identity and load
 # ---------------------------------------------------------------------------
+
+
+def load_1m() -> float | None:
+    """The 1-minute load average, or ``None`` where the platform has none.
+
+    A reading is only comparable with another taken at a similar load, so the
+    value is recorded with the samples instead of being assumed.
+    """
+    try:
+        return float(os.getloadavg()[0])
+    except (AttributeError, OSError):
+        return None
+
+
+def _format_load(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.2f}"
+
+
+def load_average_line() -> str:
+    """The 1/5/15-minute load averages, as one reported line."""
+    try:
+        one, five, fifteen = os.getloadavg()
+    except (AttributeError, OSError):
+        return "unavailable on this platform"
+    return f"{one:.2f}, {five:.2f}, {fifteen:.2f} (1, 5, 15 min)"
 
 
 def machine_identity() -> list[str]:
@@ -175,10 +223,17 @@ def _sysctl(key: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def measure_cli_stages(bin_path: Path, wav: Path, runs: int) -> dict[str, list[float]]:
-    """One `--time` run per repetition, split into the CLI's own stages."""
+def measure_cli_stages(
+    bin_path: Path, wav: Path, runs: int
+) -> tuple[dict[str, list[float]], tuple[float | None, float | None]]:
+    """One `--time` run per repetition, split into the CLI's own stages.
+
+    Returns the per-stage samples and the 1-minute load average before and
+    after the runs that produced them.
+    """
     samples: dict[str, list[float]] = {stage: [] for stage in CLI_STAGES}
     samples["total"] = []
+    load_before = load_1m()
     for _ in range(runs):
         result = subprocess.run(
             [str(bin_path), str(wav), "--output", "/dev/null", "--time"],
@@ -196,14 +251,16 @@ def measure_cli_stages(bin_path: Path, wav: Path, runs: int) -> dict[str, list[f
         for stage, value in zip(CLI_STAGES, match.groups()):
             samples[stage].append(float(value))
         samples["total"].append(sum(float(value) for value in match.groups()))
-    return samples
+    return samples, (load_before, load_1m())
 
 
-def report_cli_corpus(bin_path: Path, label: str, wav: Path, runs: int) -> dict[str, list[float]]:
-    samples = measure_cli_stages(bin_path, wav, runs)
+def report_cli_corpus(
+    bin_path: Path, label: str, wav: Path, runs: int
+) -> tuple[dict[str, list[float]], tuple[float | None, float | None]]:
+    samples, load = measure_cli_stages(bin_path, wav, runs)
     for stage in (*CLI_STAGES, "total"):
-        print(series_from(f"{label}/{stage}", samples[stage]).report())
-    return samples
+        print(series_from(f"{label}/{stage}", samples[stage], load=load).report())
+    return samples, load
 
 
 # ---------------------------------------------------------------------------
@@ -211,11 +268,16 @@ def report_cli_corpus(bin_path: Path, label: str, wav: Path, runs: int) -> dict[
 # ---------------------------------------------------------------------------
 
 
-def run_stage_harness(cargo: str, runs: int) -> list[str]:
+def run_stage_harness(cargo: str, runs: int) -> tuple[list[str], tuple[float | None, float | None]]:
     """Run the release `stage_timings` harness and return its `wem_perf` lines.
 
     The harness is `#[ignore]`d so the ordinary workspace run never executes
-    it; `--ignored --nocapture` is what makes it report.
+    it; `--ignored --exact <name> --nocapture` is what makes it report — the
+    exact name, because the other ignored test in that file belongs to the
+    duration-curve driver and needs an environment this one does not set. The
+    load average before and after the subprocess is returned with the lines,
+    because the harness runs for minutes and the load it saw is part of the
+    result.
     """
     command = [
         cargo,
@@ -228,10 +290,14 @@ def run_stage_harness(cargo: str, runs: int) -> list[str]:
         STAGE_TEST,
         "--",
         "--ignored",
+        "--exact",
+        STAGE_REPORT,
         "--nocapture",
     ]
     print(f"\n$ {' '.join(command)}", flush=True)
+    load_before = load_1m()
     result = subprocess.run(command, capture_output=True, text=True)
+    load_after = load_1m()
     if result.returncode != 0:
         raise RuntimeError(
             f"the stage harness exited {result.returncode}:\n{result.stdout[-4000:]}\n"
@@ -248,7 +314,7 @@ def run_stage_harness(cargo: str, runs: int) -> list[str]:
             "the stage harness reported no `wem_perf` lines; the test may have "
             "been filtered out"
         )
-    return lines
+    return lines, (load_before, load_after)
 
 
 def parse_harness_line(line: str) -> tuple[str, str, dict[str, float]]:
@@ -270,7 +336,7 @@ def parse_harness_line(line: str) -> tuple[str, str, dict[str, float]]:
     return kind, corpus, fields
 
 
-def report_harness(lines: list[str]) -> None:
+def report_harness(lines: list[str], load: tuple[float | None, float | None]) -> None:
     staged: dict[str, dict[str, list[float]]] = {}
     attribution: dict[str, dict[str, list[float]]] = {}
     for line in lines:
@@ -303,7 +369,7 @@ def report_harness(lines: list[str]) -> None:
         ]
         for key in order:
             if key in bucket:
-                print(series_from(f"{corpus}/{key}", bucket[key]).report())
+                print(series_from(f"{corpus}/{key}", bucket[key], load=load).report())
         if "staged_matches_encode_pcm" in bucket:
             matched = all(value == 1.0 for value in bucket["staged_matches_encode_pcm"])
             print(
@@ -325,7 +391,7 @@ def report_harness(lines: list[str]) -> None:
             "transient_ms",
         ):
             if key in bucket:
-                print(series_from(f"{corpus}/{key}", bucket[key]).report())
+                print(series_from(f"{corpus}/{key}", bucket[key], load=load).report())
         for key in (
             "fft_calls",
             "twiddle_steps",
@@ -334,7 +400,9 @@ def report_harness(lines: list[str]) -> None:
             "transient_quanta",
         ):
             if key in bucket:
-                print(series_from(f"{corpus}/{key}", bucket[key], unit="count").report())
+                print(
+                    series_from(f"{corpus}/{key}", bucket[key], unit="count", load=load).report()
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -392,13 +460,14 @@ def main() -> int:
     print("machine identity")
     for line in machine_identity():
         print(f"  {line}")
+    print(f"  {'load average':<18}: {load_average_line()}")
     print(f"\nrelease binary     : {bin_path}")
     print(f"repetitions        : {args.runs}")
 
     all_series: list[Series] = []
     try:
         print(f"\n-- fixture encode ({FIXTURE.name}), CLI stage timers")
-        fixture_samples = report_cli_corpus(bin_path, "fixture", FIXTURE, args.runs)
+        fixture_samples, fixture_load = report_cli_corpus(bin_path, "fixture", FIXTURE, args.runs)
 
         print("\n-- 2-channel corpora, CLI stage timers")
         corpora: list[Path] = []
@@ -418,11 +487,12 @@ def main() -> int:
                     "--stages needs cargo on PATH; rerun with --no-stages to "
                     "measure through the CLI only"
                 )
-            report_harness(run_stage_harness(cargo, args.runs))
+            harness_lines, harness_load = run_stage_harness(cargo, args.runs)
+            report_harness(harness_lines, harness_load)
 
         print("\nsummary (fixture, CLI stage timers)")
         for stage in (*CLI_STAGES, "total"):
-            all_series.append(series_from(stage, fixture_samples[stage]))
+            all_series.append(series_from(stage, fixture_samples[stage], load=fixture_load))
         for series in all_series:
             print(series.report())
         realtime = fixture_samples["encode"]

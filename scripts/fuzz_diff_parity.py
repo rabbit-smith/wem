@@ -20,12 +20,12 @@ Usage:
       (budget < 30 minutes including oracle cost).
 
 Exit codes: 0 pass, 1 parity failure (the first mismatch is reported with
-case id, seed, geometry, and digests), 2 usage/environment error.
+case id, seed, geometry and the first differing byte), 2 usage/environment
+error.
 """
 from __future__ import annotations
 
 import argparse
-import hashlib
 import random
 import struct
 import sys
@@ -101,8 +101,25 @@ PR_TWO_CH_QUALITY_CASES = _TWO_CH_QUALITY_CASES[:3]
 FULL_TWO_CH_QUALITY_CASES = _TWO_CH_QUALITY_CASES
 
 
-def _sha256_hex(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+def _first_difference(left: bytes, right: bytes) -> str:
+    """Where two byte strings part company: lengths, and the first byte pair."""
+    if left == right:
+        return "identical"
+    shared = min(len(left), len(right))
+    offset = next(
+        (index for index in range(shared) if left[index] != right[index]),
+        shared,
+    )
+    if offset == shared:
+        return (
+            f"lengths differ: {len(left)} vs {len(right)} bytes "
+            f"(identical through byte {shared})"
+        )
+    return (
+        f"first difference at byte {offset}: "
+        f"0x{left[offset]:02x} vs 0x{right[offset]:02x} "
+        f"(lengths {len(left)} vs {len(right)})"
+    )
 
 
 def _random_stream(
@@ -173,10 +190,10 @@ def _reference_case(native) -> None:
 
     if not (oracle_bytes == reference == native_bytes):
         raise RuntimeError(
-            "reference parity failed: oracle={o} native={n} reference={r}".format(
-                o=_sha256_hex(oracle_bytes),
-                n=_sha256_hex(native_bytes),
-                r=_sha256_hex(reference),
+            "reference parity failed: oracle vs reference: {o}; "
+            "native vs reference: {n}".format(
+                o=_first_difference(oracle_bytes, reference),
+                n=_first_difference(native_bytes, reference),
             )
         )
     print("reference: oracle == native == reference.wem (byte-identical)")
@@ -237,8 +254,7 @@ def _differential_case(
         raise RuntimeError(
             "differential parity failed: case={case} seed={seed} geometry="
             "{channels}ch/{rate}Hz frames={frames} chunks={chunks} "
-            "quality={quality} oracle={o} "
-            "native={n}".format(
+            "quality={quality} {difference}".format(
                 case=case_id,
                 seed=seed,
                 channels=channels,
@@ -246,8 +262,7 @@ def _differential_case(
                 frames=frames,
                 chunks=len(chunks),
                 quality=quality,
-                o=_sha256_hex(oracle_bytes),
-                n=_sha256_hex(native_bytes),
+                difference=_first_difference(oracle_bytes, native_bytes),
             )
         )
 
